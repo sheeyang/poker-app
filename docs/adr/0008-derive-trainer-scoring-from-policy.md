@@ -1,0 +1,3 @@
+# Derive Trainer Scoring from the Reference Policy
+
+The Trainer will use one human-selected Reference Strategy Policy for recommendations, counterfactual comparison, Decision Score, and Action Rank Score rather than introducing a separate decision evaluator. An unsized action's Decision Score is its Choice probability; a sized action takes the maximum same-type `ChoiceProbability × SizingSimilarity`, where similarity is the smaller additional commitment divided by the larger. This deliberately scores low-frequency mixed actions lower and represents per-decision Policy alignment—not EV, regret, accuracy, strategic quality, or long-run frequency calibration.

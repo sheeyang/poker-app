@@ -1,0 +1,131 @@
+# Poker Platform
+
+This project models Texas Hold'em play and analysis. It provides a reusable rules foundation for interactive training and strategy research.
+
+## Language
+
+**Poker Engine**:
+The reusable domain component that governs a poker game according to a selected rules configuration.
+_Avoid_: Game backend, table UI
+
+**Cash Game**:
+A continuing no-limit Texas Hold'em game governed by one Game Configuration, with participant stacks and seats persisting across Hands.
+_Avoid_: Tournament, individual Hand
+
+**Trainer**:
+The interactive experience in which a human plays hands against strategy-controlled participants and reviews their decisions.
+_Avoid_: Poker game, practice mode
+
+**Research Lab**:
+The analysis experience for comparing strategies and running automated strategy-versus-strategy simulations.
+_Avoid_: Trainer, simulator
+
+**Burn Card**:
+A card removed face-down from the top of the deck before a community-card deal. Its identity is unavailable to every participant and strategy during the hand.
+_Avoid_: Discard, exposed burn
+
+**Game Configuration**:
+The complete authoritative choices that govern a Cash Game, comprising an Observable Game Configuration and a Hidden Game Configuration. Behavior without a configurable alternative follows the Poker Engine's documented default.
+_Avoid_: Rules profile, house rules
+
+**Observable Game Configuration**:
+The Game Configuration values participants may legally know, including seats, blinds, ante, buy-in limits, and seat-change policy.
+_Avoid_: Game Configuration, when hidden values could be exposed
+
+**Hidden Game Configuration**:
+Authoritative Game Configuration values unavailable through participant-facing views, including the master random seed.
+_Avoid_: Observable Game Configuration
+
+**Table Session**:
+A continuing cash game whose seats, participant stacks, button position, and completed hands persist between hands until the session is reset.
+_Avoid_: Match, tournament
+
+**Table Session Record**:
+The private durable representation from which an authoritative Table Session can be reconstructed and researched. It retains versioned deterministic inputs and accepted game commands, while participant-facing consumers receive only explicit observable projections.
+_Avoid_: Observable Session History, live Cash Game object, event log
+
+**Participant**:
+A human or Bot identified throughout a Table Session independently of the Seat they currently occupy.
+_Avoid_: Seat, Strategy
+
+**Seat**:
+A numbered table position that may be occupied by at most one Participant and may change between Hands.
+_Avoid_: Participant, position name
+
+**Hand**:
+One complete deal of Hold'em, from its initial forced bets through award of its pots.
+_Avoid_: Round, game
+
+## Strategy and Analysis
+
+**Strategy**:
+A Policy together with an Action Selector. The Policy defines the Strategy's intended action distribution, while the Action Selector chooses one concrete action from that distribution without changing it.
+_Avoid_: Bot, solver, policy alone
+
+**Policy**:
+The logically stateless strategic reasoning that produces a normalized probability distribution over a finite set of Concrete Choices from declared inputs, including the Observable Game Configuration, Observable Cash Game State, and Observable Session History.
+_Avoid_: Action Selector, Bot
+
+**Action Selector**:
+The mechanism that selects one Concrete Choice from an already-computed Policy distribution without adding strategic reasoning or changing its probabilities.
+_Avoid_: Policy, Strategy
+
+**Playing Strategy**:
+The Strategy assigned to control a Bot's decisions.
+_Avoid_: Reference Strategy
+
+**Reference Strategy**:
+The human-selected Strategy whose Policy supplies recommendation overlays, alignment scores, and counterfactual comparison independently of every Bot's Playing Strategy.
+_Avoid_: Playing Strategy
+
+**Observable Session History**:
+The immutable participant-specific projection of prior Table Session information that was legally observable to a Participant at each point after they joined. Strategies may derive adaptive information from it but do not own persistent cross-hand memory.
+_Avoid_: Strategy Memory, unrestricted session history
+
+**Bot**:
+An automated participant controller that selects actions from a Strategy's distributions.
+_Avoid_: Strategy, solver
+
+**Solver**:
+A computational system that produces a policy for a declared poker model together with the available evidence about its solution quality. A Solver's output may supply a Strategy, but the Solver is not itself a participant controller.
+_Avoid_: Strategy, bot
+
+**Solver-Derived Strategy**:
+A Strategy backed by a Solver result whose modeled game, assumptions, abstractions, computation, and available solution-quality measurements are retained with it.
+_Avoid_: GTO Strategy, unless the stronger claim is justified
+
+**Observable Cash Game State**:
+The canonical immutable representation of current Cash Game information legally visible to one Participant, including their available actions when they must act.
+_Avoid_: Decision State, authoritative game state
+
+**Observable Game View**:
+The complete participant-safe view formed from Observable Game Configuration, Observable Cash Game State, and Observable Session History.
+_Avoid_: Authoritative game state, research reveal
+
+**Concrete Choice**:
+A legal Fold, Check, Call, Bet-to, or Raise-to option paired with its probability in a Strategy policy. Bet-to and Raise-to amounts are exact integer total commitments for the current betting street.
+_Avoid_: Action bucket, sizing abstraction
+
+**Counterfactual Comparison**:
+Evaluation of multiple compatible Strategies against the same frozen Observable Cash Game State and Observable Session History, regardless of whether each Strategy would naturally have produced the preceding actions.
+_Avoid_: Replay, simulation
+
+**Decision Score**:
+A normalized value from 0.00 to 1.00 measuring per-decision alignment between a human's complete concrete decision and the Reference Strategy's Policy. Unsized actions use their Choice probability; sized actions use the greatest same-type Choice probability multiplied by Sizing Similarity.
+_Avoid_: Accuracy, Action Rank Score
+
+**Sizing Similarity**:
+An internal Decision Score factor comparing the additional chips committed by two Bet or Raise choices as the smaller amount divided by the larger amount. It measures numerical Policy alignment, not EV or strategic quality.
+_Avoid_: Sizing Quality, bet quality
+
+**Action Probability**:
+The probability that a Strategy assigns to an action type, calculated by summing the probabilities of its Concrete Choices of that type.
+_Avoid_: Decision Score, decision quality
+
+**Action Rank Score**:
+A normalized value from 0.00 to 1.00 representing the rank of the human's selected action type among the action types evaluated by the Reference Strategy, with tied action types sharing a rank.
+_Avoid_: Decision Score, top-action agreement
+
+**Analysis Result**:
+Derived, reproducible analysis of a recorded decision by an identified Reference Strategy version and configuration. It may be cached, replaced, or recomputed without changing the Hand.
+_Avoid_: Hand Record, authoritative score

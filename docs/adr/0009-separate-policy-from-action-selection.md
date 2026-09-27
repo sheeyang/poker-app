@@ -1,0 +1,3 @@
+# Separate Policy from Action Selection
+
+A Strategy composes a logically stateless Policy with an Action Selector: the Policy owns all poker reasoning and returns the authoritative Choice distribution, while the selector only selects from that unchanged distribution. Probability Selector is the default seeded sampler and Highest Probability Selector is the deterministic alternative; manual branch exploration is not an Action Selector. Deck generation, stochastic Policy evaluation, and action selection use independently derived, versioned random sources so changing one cannot implicitly alter the others.
