@@ -1,3 +1,5 @@
 # Remember Definitive Mutation Outcomes
 
 A requestId identifies one logical mutation attempt, and the backend stores its fingerprint with a small acknowledgement or structured rejection once a definitive outcome commits. Accepted poker commands, revisions, and successful request outcomes commit together; definitive domain and application rejections are also retained outside the poker record, while infrastructure failures without a committed outcome remain retryable. Matching retries return the stored outcome without execution, mismatched contents reject requestId reuse, and current observable views are synchronized separately rather than persisted as old idempotent responses.
+
+Create Table requests, which precede an existing TableSessionId, are identified by the authenticated local user's identity and requestId. The new Table Session and its processed creation outcome commit atomically, so an identical retry returns the same TableSessionId without creating another session or generating another committed seed. Unknown-commit recovery follows ADR-0016 and never automatically resubmits an operation confirmed not to have committed.

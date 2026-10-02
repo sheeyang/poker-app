@@ -24,6 +24,18 @@ _Avoid_: Poker game, practice mode
 The analysis experience for comparing strategies and running automated strategy-versus-strategy simulations.
 _Avoid_: Trainer, simulator
 
+**Range Visualizer**:
+The view of a selected Policy's recommendations across every legal hypothetical hole-card combination in one fixed observable decision situation. It shows action distributions and concrete sizings without estimating the likelihood of holding a hand or reaching the situation.
+_Avoid_: Reach range, opponent range estimate
+
+**Equity / Poker Math Overlay**:
+An optional view of poker arithmetic and estimated equity using participant-visible facts and explicitly declared opponent-range assumptions. Estimated results retain their computation method and uncertainty.
+_Avoid_: Decision Score, objective strategic quality
+
+**Complete Equity World**:
+One mutually compatible assignment of hypothetical holdings to every live opponent and a remaining community-card combination under a declared equity model. Its probability follows that model's opponent ranges and chance assumptions.
+_Avoid_: Actual deck, betting trajectory
+
 **Burn Card**:
 A card removed face-down from the top of the deck before a community-card deal. Its identity is unavailable to every participant and strategy during the hand.
 _Avoid_: Discard, exposed burn
