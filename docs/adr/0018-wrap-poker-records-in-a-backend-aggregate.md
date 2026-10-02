@@ -1,0 +1,9 @@
+# Wrap Poker Records in a Backend-Owned Aggregate
+
+The backend will persist each Table Session as a logical PersistedTableSession aggregate containing the engine-owned TableSessionRecord plus participant controllers and Trainer configuration, independently of how PostgreSQL normalizes it. CashGame restores only the nested poker record and remains unaware of Bots, Strategies, preferences, or database infrastructure; recorded Bot actions replay as accepted poker commands without rerunning Strategies. This preserves a reusable engine while retaining the application state required to resume a session after restart.
+
+A Bot Strategy failure remains an application-level controller outcome and submits no poker command or implicit fallback. The unchanged decision may be retried with the same declared inputs and derived seed, or the Table Owner may explicitly replace the Strategy before evaluation resumes.
+
+CashGame owns `pokerRevision`, which advances on successful poker mutations, while the backend owns `sessionRevision`, which advances on committed poker or application configuration changes to the aggregate. Poker requests retain `expectedRevision` for the poker revision; application configuration requests use `expectedSessionRevision`. Derived caches and transient controller or presence status advance neither revision.
+
+Browser disconnection and server restart do not themselves submit poker commands. Bots may continue the current Hand while human decisions wait for reconnection; restoration replays the poker record, restores controllers, and restarts any required Bot work from immutable participant-safe inputs. Normal gameplay requires an explicit operation to start another Hand, and reconnecting clients receive the latest complete view.

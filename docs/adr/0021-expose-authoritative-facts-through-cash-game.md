@@ -1,0 +1,3 @@
+# Expose Authoritative Facts Through CashGame
+
+CashGame is the trusted server-side game abstraction and may expose immutable authoritative domain facts, including hidden cards and configuration, while encapsulating PokerCore, mutable collections, RNG objects, and other implementation details. ParticipantCashGame is the sole game-facing information boundary supplied to participants, Bots, Policies, and participant-facing application paths. Research restores a CashGame from the poker record and reads completed-Hand facts through its authoritative APIs without a separate privileged replay adapter; the Research and server layers enforce Hand completion and construct browser-facing results that omit the master seed.

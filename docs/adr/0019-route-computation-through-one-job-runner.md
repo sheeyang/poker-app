@@ -1,0 +1,5 @@
+# Route Computation Through One Server JobRunner
+
+All Policy, Solver, and Research computation will pass through a server-managed JobRunner that owns execution, concurrency, cancellation, and failures within the single backend deployment. Jobs receive immutable inputs and declared configuration, return plain results, and never mutate CashGame; this provides one execution boundary for different computational backends and keeps orchestration independent of implementation details. Returned Bot work re-enters the Table Session mutation queue and is accepted only if its captured poker revision, Participant, Decision, Strategy assignment, seeds, and evaluation request identity remain current.
+
+Result validity depends on its intended use: Bot actions require current poker state and controller identity, live displays require the current analysis request, and historical analysis requires its frozen inputs and matching request identity. Advancing the live game does not invalidate analysis of an immutable historical decision; a late result may still populate that decision's derived cache.

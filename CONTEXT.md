@@ -12,6 +12,10 @@ _Avoid_: Game backend, table UI
 A continuing no-limit Texas Hold'em game governed by one Game Configuration, with participant stacks and seats persisting across Hands.
 _Avoid_: Tournament, individual Hand
 
+**Playground UI**:
+The enduring engineering interface for exercising and validating platform capabilities before their product experiences are designed. It is independent of the participant-facing Trainer and Research Lab experiences.
+_Avoid_: Trainer, final product UI, disposable prototype
+
 **Trainer**:
 The interactive experience in which a human plays hands against strategy-controlled participants and reviews their decisions.
 _Avoid_: Poker game, practice mode
@@ -37,12 +41,20 @@ Authoritative Game Configuration values unavailable through participant-facing v
 _Avoid_: Observable Game Configuration
 
 **Table Session**:
-A continuing cash game whose seats, participant stacks, button position, and completed hands persist between hands until the session is reset.
+A continuing cash game whose seats, participant stacks, button position, and completed hands persist between Hands. A newly created Table Session has its own poker history and configuration.
 _Avoid_: Match, tournament
 
 **Table Session Record**:
 The private durable representation from which an authoritative Table Session can be reconstructed and researched. It retains versioned deterministic inputs and accepted game commands, while participant-facing consumers receive only explicit observable projections.
 _Avoid_: Observable Session History, live Cash Game object, event log
+
+**Persisted Table Session**:
+The complete application-owned durable representation of a Table Session, containing its Table Session Record, participant controller assignments, and Trainer configuration needed to continue the session.
+_Avoid_: Table Session Record, Cash Game state
+
+**Table Owner**:
+The application user authorized to manage a Table Session and its participant controllers. Ownership is independent of the Participant through whom that user plays.
+_Avoid_: Participant, button, dealer
 
 **Participant**:
 A human or Bot identified throughout a Table Session independently of the Seat they currently occupy.
@@ -101,6 +113,14 @@ _Avoid_: Decision State, authoritative game state
 **Observable Game View**:
 The complete participant-safe view formed from Observable Game Configuration, Observable Cash Game State, and Observable Session History.
 _Avoid_: Authoritative game state, research reveal
+
+**Participant Cash Game**:
+The participant-scoped view of one authoritative Cash Game. It constructs Observable Game Views, Observable Session History, and participant-safe presentation events for its bound Participant without owning separate game state.
+_Avoid_: Cash Game, copied game state, authorization principal
+
+**Observable Presentation Event**:
+Optional participant-safe information describing a recent transition for animation or presentation. It is never required to reconstruct the current Observable Game View.
+_Avoid_: Cash Game Event, state delta, authoritative history
 
 **Concrete Choice**:
 A legal Fold, Check, Call, Bet-to, or Raise-to option paired with its probability in a Strategy policy. Bet-to and Raise-to amounts are exact integer total commitments for the current betting street.

@@ -1,0 +1,7 @@
+# Separate Semantic and Durable Authority
+
+CashGame is the semantic authority that validates and executes poker transitions, while PostgreSQL is the durable source of truth for committed Game Configuration, accepted commands, revisions, and processed network requests. The server serializes mutations per Table Session, applies each request to a temporary working CashGame, transactionally persists its command, Revision, and idempotent result, and only after database commit promotes the working instance and publishes participant-safe updates. Cached CashGame instances are disposable and can be restored from the durable Table Session Record.
+
+M1 uses one FIFO mutation queue per Table Session in a single backend process; different sessions may progress concurrently. PostgreSQL transactions commit the accepted command, new Revision, and processed request together, with a unique `(tableSessionId, requestId)` safeguard, while multi-server coordination and database row locking are deferred.
+
+If confirmation of COMMIT is lost, the affected Table Session enters recovery and its mutation queue and Bot submissions pause until the backend resolves the outcome against durable state and reloads the confirmed aggregate. An initially absent processed-request row does not establish rollback while the transaction remains unresolved. A committed operation returns its stored outcome; a confirmed noncommit causes no automatic retry, and a human may submit a new requestId or Bot orchestration may freshly evaluate the still-current decision.
