@@ -41,3 +41,21 @@ interface ObservableGameView {
 Construct the runtime objects field by field. Returning authoritative objects under narrower TypeScript types is not an information boundary: hidden configuration, unrevealed opponent cards, future cards, deck order, and hidden event payloads must not physically remain in the projection. Hidden hole cards may instead be represented by visibility and card-count facts; a burn presentation event conveys only that a face-down card was burned, never its identity.
 
 ObservableSessionHistory is an immutable derived view of authoritative replay history for the bound ParticipantId, when they joined, and the requested historical point. New participants receive only information legally observable from when they joined; leaving and rejoining preserves stable identity and previously observed history without inventing information they were not allowed to observe. Moving seats neither resets that history nor transfers it to the next occupant. Reveals at later showdown or in Research never retroactively expose earlier hidden facts, and Policies never receive raw events they are expected to filter themselves.
+
+## Committed WebSocket update envelope
+
+The server sends a separately constructed update to each authorized participant, using a fresh facade over the latest committed CashGame. The wire contract identifies the Table Session and includes both committed revisions from ADR-0018:
+
+```typescript
+interface ObservableTableUpdate {
+  readonly tableSessionId: TableSessionId;
+  readonly pokerRevision: Revision;
+  readonly sessionRevision: Revision;
+  readonly view: ObservableGameView;
+  readonly presentationEvents: readonly ObservablePresentationEvent[];
+}
+```
+
+The backend supplies sessionRevision and obtains pokerRevision, the complete view, and projected presentation events from the committed game and participant facade. Publish only after durable commit. The view is the synchronization authority; presentationEvents may be empty and never need to be applied to reconstruct state.
+
+Order updates within each Table Session by sessionRevision, which also advances for committed controller or Trainer configuration changes even when pokerRevision is unchanged. Ignore older updates and do not replay presentation events from an already processed revision. A newer complete view can be accepted despite missing intermediate revisions. On reconnect, send the latest complete participant-safe view with both revisions; missed presentation events need not be replayed. Use pokerRevision for expectedRevision on poker mutations and sessionRevision for expectedSessionRevision on application configuration mutations.
