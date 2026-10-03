@@ -1,3 +1,15 @@
 # Use a Language-Neutral Solver Boundary
 
 The Solver's modeled inputs, configuration, policies, outputs, and solution-quality measurements will be separated from its computational implementation. Algorithms and backends may coexist across TypeScript, native languages, WebAssembly, GPU compute, or other suitable technologies, while generated policies continue to appear through the common Strategy abstraction and readable reference models may validate optimized implementations.
+
+The long-term goal is the most capable and accurate No-Limit Texas Hold'em Solver that is computationally practical, progressively supporting different stack depths, positions, streets, ranges, bet sizes, and eventually multiplayer situations. Small games and heads-up subgames are validation stepping stones, not permanent restrictions. Growing or replacing a backend must not require redesigning the Poker Engine or Strategy contracts.
+
+Prioritize correctness and solution quality over performance initially, undertaking performance optimizations only when they are trivial. Minimize card and bet-sizing abstraction where practical, and expose necessary abstractions as declared, configurable implementation techniques rather than fixed limitations of the public interface. CFR, CFR+, MCCFR variants, subgame solving or re-solving, and other algorithms may coexist and be compared instead of coupling the platform permanently to one technique.
+
+## Evidence and terminology
+
+Every result retains its modeled game, assumptions, abstractions, algorithm and configuration, amount of computation, relevant random seed, and available convergence and solution-quality measurements. Expose exploitability or other mathematically appropriate measures wherever applicable, identify the game to which a measurement applies, and report unavailable measurements explicitly. Do not use an arbitrary confidence score as a substitute or transfer guarantees from an abstracted game to unrestricted poker; multiplayer results require measures and claims appropriate to their mathematical setting.
+
+Use **Solver-Derived Strategy** as the normal formal classification. **Approximate Nash Equilibrium Strategy** and **Nash Equilibrium Strategy** require supporting mathematical evidence and an explicit modeled-game scope. The Trainer may use **GTO** as familiar poker-facing shorthand, but the Research Lab and retained metadata use precise terminology and disclose abstractions and limitations.
+
+Choose implementations primarily for correctness, numerical requirements, and maintainability, with eventual performance improvements validated against readable reference implementations or small validation models where practical. Prefer permissively licensed dependencies throughout the project; introducing restrictive or copyleft dependencies requires an explicit project decision.

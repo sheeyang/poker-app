@@ -1,3 +1,5 @@
 # Separate the Poker Engine, Strategies, and Research Tooling
 
 The workspace will keep contracts, the Poker Engine, Strategies, Solver implementations, simulations, and privileged Research in separate packages. The engine owns rules, participant-safe projections, and legal state transitions without depending on Strategy or Research concepts. Research may depend on the engine, Strategies, and Solver, but none may depend back on Research. The authoritative server may consume all server-side packages, while the untrusted web client depends only on safe wire contracts and must not import authoritative engine or Research APIs.
+
+Use a pnpm monorepo with `packages/contracts`, `packages/engine`, `packages/strategies`, `packages/solver`, `packages/simulation`, and `packages/research`. `apps/server` hosts authoritative orchestration; browser applications use the participant-safe contracts without importing server-only implementations. The engine remains reusable outside the frontend, and neither Bot execution nor Strategy research is coupled to its poker mechanics.

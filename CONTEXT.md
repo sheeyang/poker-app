@@ -24,6 +24,10 @@ _Avoid_: Poker game, practice mode
 The analysis experience for comparing strategies and running automated strategy-versus-strategy simulations.
 _Avoid_: Trainer, simulator
 
+**Admin Mode**:
+The application mode in which authorized privileged completed-Hand inspection and hidden-information reveal are available. It does not expand the information legally observable to a Participant or supplied to a Policy.
+_Avoid_: Participant visibility, unrestricted gameplay
+
 **Range Visualizer**:
 The view of a selected Policy's recommendations across every legal hypothetical hole-card combination in one fixed observable decision situation. It shows action distributions and concrete sizings without estimating the likelihood of holding a hand or reaching the situation.
 _Avoid_: Reach range, opponent range estimate
@@ -91,7 +95,7 @@ The logically stateless strategic reasoning that produces a normalized probabili
 _Avoid_: Action Selector, Bot
 
 **Action Selector**:
-The mechanism that selects one Concrete Choice from an already-computed Policy distribution without adding strategic reasoning or changing its probabilities.
+The mechanism that selects the concrete action represented by one Concrete Choice from an already-computed Policy distribution without adding strategic reasoning or changing its probabilities.
 _Avoid_: Policy, Strategy
 
 **Playing Strategy**:
@@ -155,7 +159,7 @@ The probability that a Strategy assigns to an action type, calculated by summing
 _Avoid_: Decision Score, decision quality
 
 **Action Rank Score**:
-A normalized value from 0.00 to 1.00 representing the rank of the human's selected action type among the action types evaluated by the Reference Strategy, with tied action types sharing a rank.
+A normalized value from 0.00 to 1.00 representing the rank of the human's selected action type among all currently legal action types by aggregated Reference Policy probability, with tied action types sharing a rank.
 _Avoid_: Decision Score, top-action agreement
 
 **Analysis Result**:

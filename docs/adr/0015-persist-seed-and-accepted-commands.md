@@ -5,3 +5,22 @@ The authoritative Table Session Record will contain version 1 metadata, the comp
 Game Configuration is immutable for the lifetime of a Table Session in M1; different settings require a new Table Session with a newly generated server seed.
 
 There is no Reset Table operation; callers create a new Table Session when a fresh game is desired.
+
+## Plain-data export and complete restoration
+
+Do not persist or deserialize the live CashGame instance, PokerCore, mutable collections, RNG objects, or caches. `CashGame.toRecord()` constructs a detached immutable plain-data representation rather than exposing mutable internal references:
+
+```typescript
+interface TableSessionRecord {
+  readonly schemaVersion: 1;
+  readonly engineVersion: "v1";
+  readonly configuration: GameConfiguration;
+  readonly commands: readonly CashGameCommand[];
+}
+```
+
+CashGameCommand represents each successful public mutation, including initial seating and button setup, leaving, moving seats, sitting out, top-ups, Hand starts, and actions. Mutable setup has no second authoritative initial-state representation. Rejected attempts remain outside this record, even when application idempotency or audit data remembers them.
+
+`CashGame.create(configuration)` constructs a fresh authoritative game from trusted explicit inputs. `CashGame.fromRecord(record)` validates the plain-data format and supported versions, creates a fresh temporary game from the authoritative configuration, and replays every command through normal validated behavior. Validate the complete reconstruction and final invariants before returning a usable game. A malformed, incompatible, or rejected command produces a structured restoration failure; never return the state from a valid prefix. Successful restoration reproduces cards, stacks, contributions, pots, button, actor, street, poker revision, Hand/session facts, regenerated events, and observable histories.
+
+Normal callers cannot append recorded commands or events, replace internal state, or inject arbitrary history through methods such as `appendRecordedCommand`, `appendEvent`, `replaceState`, or `loadInternalState`. Trusted restoration may optimize replay internally only while preserving the same semantics. Pre-release compatibility remains governed by ADR-0014; this contract adds no migration or old-version compatibility guarantee.
