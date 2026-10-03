@@ -26,12 +26,6 @@ interface Strategy {
   readonly actionSelector: ActionSelector;
 }
 
-interface StrategyContext {
-  readonly gameConfiguration: ObservableGameConfiguration;
-  readonly gameState: ObservableCashGameState;
-  readonly observableSessionHistory: ObservableSessionHistory;
-}
-
 interface ActionSelector {
   select(
     choices: readonly Choice[],
@@ -40,9 +34,21 @@ interface ActionSelector {
 }
 ```
 
-The Policy receives participant-safe StrategyContext together with its declared configuration and an explicit evaluation seed when needed, and may evaluate synchronously or asynchronously. It returns an authoritative finite, flat Choice distribution, optionally with informational diagnostics. Choice probabilities sum to one. Sized actions use exact integer chips and represent total committed chips on the current street, not additional chips; internally expressed pot fractions or other sizing rules must be converted to legal exact amounts. Any legal size may be returned, with multiple meaningful sizes allowed and no global public sizing buckets. All-in is an ordinary legal Bet, Raise, or Call that exhausts the stack, not another action type.
+The Policy receives an immutable participant-safe ObservableGameView directly, using its existing configuration, state, and history fields as defined in ADR-0017. Do not introduce a separate StrategyContext or a mapping that merely renames those fields: it adds no distinct information or responsibility. Policy configuration and execution options, including the explicit evaluation seed when needed, remain separate from the game view. Pass a snapshot rather than CashGame, ParticipantCashGame, or the WebSocket update envelope; historical and hypothetical evaluations use the same view shape with the appropriate frozen or consistently derived observable facts.
 
-The Strategy framework exposes compatibility checks for configured Strategies using ObservableGameConfiguration and ObservableCashGameState before evaluation, returning structured reasons for unsupported configurations or decisions. A general-purpose Policy may accept broadly; specialized and solver-derived Policies must not silently analyze unsupported games. Validate nonempty legal distributions, finite probabilities in range, at least one positive probability, uniqueness of concrete actions, and normalization before any analysis or selection. Omit zero-probability entries; only documented floating-point normalization tolerance may be corrected, never invalid probabilities or illegal actions. Preserve Choice order through validation. Evaluation and selection failures are explicit and do not produce fallback poker actions.
+```typescript
+const view = game.forParticipant(participantId).getView();
+
+// Inside the Policy job, using the immutable snapshot supplied by JobRunner:
+const result = await configuredPolicy.evaluate(
+  view,
+  { evaluationSeed },
+);
+```
+
+The Policy may evaluate synchronously or asynchronously. It returns an authoritative finite, flat Choice distribution, optionally with informational diagnostics. Choice probabilities sum to one. Sized actions use exact integer chips and represent total committed chips on the current street, not additional chips; internally expressed pot fractions or other sizing rules must be converted to legal exact amounts. Any legal size may be returned, with multiple meaningful sizes allowed and no global public sizing buckets. All-in is an ordinary legal Bet, Raise, or Call that exhausts the stack, not another action type.
+
+The Strategy framework exposes compatibility checks for configured Strategies using the view's ObservableGameConfiguration and ObservableCashGameState before evaluation, returning structured reasons for unsupported configurations or decisions. A general-purpose Policy may accept broadly; specialized and solver-derived Policies must not silently analyze unsupported games. Validate nonempty legal distributions, finite probabilities in range, at least one positive probability, uniqueness of concrete actions, and normalization before any analysis or selection. Omit zero-probability entries; only documented floating-point normalization tolerance may be corrected, never invalid probabilities or illegal actions. Preserve Choice order through validation. Evaluation and selection failures are explicit and do not produce fallback poker actions.
 
 ProbabilitySelector performs seeded probability-based sampling without changing the distribution. HighestProbabilitySelector scans the existing Choice order and keeps the first highest-probability concrete choice: replace the selected entry only on a strictly greater probability. It does not sort, break ties separately, use randomness, or consume a selection seed. Neither selector performs poker reasoning, and any compatible selector can be used for Bot play or analysis; manual branch selection remains a direct user/tooling operation, not a ManualSelector.
 
