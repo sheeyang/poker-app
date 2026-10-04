@@ -1,12 +1,14 @@
 # Use Atomic Mutations on the Stateful CashGame
 
-CashGame will be a stateful mutable domain object whose successful public methods atomically replace its internal authoritative state, advance its monotonic revision, record the accepted command, and return the derived transition events. Each operation computes and validates a private next state before commit, so an expected rejection or unexpected implementation failure leaves the live instance, revision, and history unchanged.
+CashGame will be a stateful mutable domain object whose successful public methods atomically replace its internal authoritative state, record the accepted command, and return the derived transition events. Each operation computes and validates a private next state before commit, so an expected rejection or unexpected implementation failure leaves the live instance and accepted-command history unchanged.
 
 ## High-level commands
 
 The public command surface comprises `seatParticipant`, `leaveParticipant`, `moveParticipant`, `setSittingOut`, `topUpTo`, `setButton`, `startHand`, and `act(participantId, action)`. All methods operate on the same CashGame instance. Humans, Bots, and replay submit the same ConcreteAction; `act` validates the current actor and legal action against current authoritative state without accepting a revision or attempting to identify the previous state from which an asynchronous caller computed it. Orchestration detects stale work before submission.
 
-CashGame's monotonic revision is a generic poker-state version, not network concurrency handling. Expected revisions, requestId, authentication, mutation queues, and persistence remain server concerns; none are arguments to `act` or fields in accepted poker commands. The engine never validates server request metadata.
+CashGame does not own, advance, expose, or restore a poker revision counter. Both `pokerRevision` and `sessionRevision`, expected-revision checks, requestId, authentication, mutation queues, and durable persistence belong to the server. Revision metadata is absent from CashGame method arguments, mutation results, observable views, and accepted poker commands. The engine never validates server request metadata; server revision ownership is defined in ADR-0018.
+
+HandId and DecisionId remain engine-owned domain identifiers needed for deterministic replay and historical projections. They are not server concurrency revisions and do not require a revision counter on CashGame.
 
 `startHand` determines eligible participants and blind positions, collects antes and blinds, shuffles and deals, and begins preflop action as one operation. `act` also performs every consequent betting-round closure, wager reset, burn, board deal, next-actor selection, required reveal, automatic runout, pot derivation, payout, and hand completion. Callers never need to orchestrate those mechanics or feed emitted events back as commands. CashGameEvents are descriptions returned for animation, logging, and replay presentation, not an authoritative persisted event history.
 
@@ -16,7 +18,6 @@ Expected domain failures return a structured rejection, including invalid action
 type CashGameResult =
   | {
       readonly ok: true;
-      readonly revision: Revision;
       readonly events: readonly CashGameEvent[];
     }
   | {
