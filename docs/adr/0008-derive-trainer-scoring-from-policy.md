@@ -2,6 +2,8 @@
 
 The Trainer will use one human-selected Reference Strategy Policy for recommendations, counterfactual comparison, Decision Score, and Action Rank Score rather than introducing a separate decision evaluator. An unsized action's Decision Score is its Choice probability; a sized action takes the maximum same-type `ChoiceProbability × SizingSimilarity`, where similarity is the smaller additional commitment divided by the larger. This deliberately scores low-frequency mixed actions lower and represents per-decision Policy alignment—not EV, regret, accuracy, strategic quality, or long-run frequency calibration.
 
+`packages/research` owns the shared implementation of Decision Score, Action Probability, Action Rank Score, and Hand/session/history score aggregation. These analysis functions consume frozen participant-safe views, validated Policy results, and the concrete decisions being analyzed, returning plain normalized results without mutating a game or accessing hidden facts. Policies produce distributions, the Strategies framework validates them, Research interprets them, and the frontend formats and presents the resulting scores rather than implementing its own scoring formulas. This ownership does not introduce a DecisionEvaluator abstraction or couple Policies to Trainer scoring.
+
 ## Complete scoring rules
 
 For Fold, Check, or Call, use the probability of the matching concrete choice, or zero if it is absent. For a legal Bet or Raise, compare only choices of the same action type, using the frozen participant's street commitment before the decision:

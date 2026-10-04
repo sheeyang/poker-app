@@ -4,13 +4,19 @@ CashGame is the trusted server-side game abstraction and may expose immutable au
 
 CashGame and ParticipantCashGame objects stay server-side. When a client feature needs a result requiring full authoritative information, the server computes it and constructs an authorized result DTO rather than transferring the game or its unrestricted state for browser computation. Normal Policy and equity evaluation retain their participant-visible inputs, while privileged completed-Hand Research uses authoritative inputs only within its authorized server path.
 
+## Participant-safe analysis and privileged inspection
+
+`packages/research` is a server-only analysis layer, not exclusively a completed-Hand inspection layer. It owns shared Trainer scoring and summary computation, Range Visualizer hypothetical-input construction and aggregation, and Poker Math Overlay calculations. These ordinary analysis functions use immutable participant-safe inputs, return plain results through JobRunner, and may run during live play or later review without requiring the Hand to have completed. They do not receive an unrestricted CashGame or authoritative hidden state merely because they live in Research.
+
+Privileged hidden-information inspection is a separate Research path that consumes authoritative persisted data and requires both authorization and Hand completion. The completion gate applies to that inspection path, not to participant-safe live analysis. The frontend owns grids, filters, overlays, score formatting, and interaction; it does not duplicate the Research computations or import the server-only package. Legal-action calculation, observability, accepted-command recording, and deterministic poker replay remain engine responsibilities.
+
 ## Replay, history, and counterfactual analysis
 
 Every completed Hand becomes available in hand history. Normal replay proceeds action by action and permits inspection of each decision while reproducing information that was legally visible at that point, not everything revealed later. Review may select the current Reference Strategy or another compatible Strategy and recompute derived analysis using historical ParticipantCashGame snapshots.
 
 For counterfactual comparison, freeze the original participant's ObservableGameConfiguration, ObservableCashGameState, and ObservableSessionHistory at the exact recorded decision and give that same context to every compatible candidate Strategy. Evaluate candidates independently even if their earlier choices would never have reached this situation; a Bot normally using a candidate Strategy contributes no different personal history. Compare the resulting distributions and selected actions without modifying the authoritative game or leaking later hidden facts into analysis.
 
-Historical reconstruction, completed-Hand inspection, and counterfactual orchestration belong to `packages/research`, not the engine or Strategies package. Research computes plain results through JobRunner but does not own database or cache infrastructure. The server authenticates and authorizes access, loads the private poker record, checks completion, invokes Research, owns result persistence/caching, and constructs the permitted browser DTO.
+Historical reconstruction orchestration, completed-Hand inspection, and counterfactual orchestration belong to `packages/research`, not the engine or Strategies package; the engine still implements deterministic replay and historical participant projections. Research computes plain results through JobRunner but does not own database or cache infrastructure. The server authenticates and authorizes access, supplies the participant-safe snapshot or loads the private poker record appropriate to the operation, checks completion when privileged inspection is requested, submits Research work through JobRunner, owns result persistence/caching, and constructs the permitted browser DTO.
 
 ## Admin-only hidden-information reveal
 
