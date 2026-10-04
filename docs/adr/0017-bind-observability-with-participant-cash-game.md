@@ -6,11 +6,13 @@ The facade is projection-only: authenticated server orchestration submits mutati
 
 Each facade is lightweight and short-lived, bound to one specific CashGame instance and ParticipantId; connections retain stable identifiers and obtain a new facade from the latest committed instance when needed. Its current and historical reads return immutable snapshots, with `getView({ at: { decisionId } })` preserving visibility at the historical decision. Asynchronous work receives those snapshots rather than retaining a facade or a live game reference.
 
+`getView()` is the primary participant read. Callers use `view.configuration`, `view.state`, and `view.history` from the same snapshot rather than assembling a view through separate `getConfiguration`, `getState`, or `getHistory` calls. Do not add those convenience getters without a concrete use case that cannot be served adequately by the complete view. `getRevision()` and `projectEvents()` retain distinct responsibilities for revision metadata and participant-safe presentation events.
+
 ## Observable contracts
 
 Explicitly classify every configuration field as observable or hidden rather than defining visibility by subtracting known secrets with `Omit<GameConfiguration, "seed">`. ObservableGameConfiguration contains seat capacity, blinds, ante, minimum/default/maximum buy-ins, seat-change policy, and other settings participants may legally know. HiddenGameConfiguration contains the authoritative master seed and any future private settings; their intersection forms GameConfiguration for trusted construction, persistence, and replay.
 
-Use ObservableCashGameState as the single canonical participant-visible state type, including visible cards, public participant facts, board, street, pot information, current actor, and the observer's legal actions when applicable. Do not introduce a substantially duplicate ObservableDecisionState. The participant facade offers configuration, state, history, revision, full-view, and presentation-event projections; its complete snapshot has the following composition:
+Use ObservableCashGameState as the single canonical participant-visible state type, including visible cards, public participant facts, board, street, pot information, current actor, and the observer's legal actions when applicable. Do not introduce a substantially duplicate ObservableDecisionState. The participant facade exposes configuration, state, and history together through its full-view projection, alongside the distinct revision and presentation-event reads; its complete snapshot has the following composition:
 
 ```typescript
 interface ObservableGameConfiguration {

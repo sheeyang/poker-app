@@ -94,6 +94,10 @@ _Avoid_: Bot, solver, policy alone
 The logically stateless strategic reasoning that produces a normalized probability distribution over a finite set of Concrete Choices from declared inputs, including the Observable Game Configuration, Observable Cash Game State, and Observable Session History.
 _Avoid_: Action Selector, Bot
 
+**Policy Result**:
+A Policy's distribution over Concrete Choices together with optional Policy-specific diagnostic information. It is distinct from the concrete action selected for play and from the Trainer's derived analysis of a decision.
+_Avoid_: Selected action, Analysis Result
+
 **Action Selector**:
 The mechanism that selects the concrete action represented by one Concrete Choice from an already-computed Policy distribution without adding strategic reasoning or changing its probabilities.
 _Avoid_: Policy, Strategy
