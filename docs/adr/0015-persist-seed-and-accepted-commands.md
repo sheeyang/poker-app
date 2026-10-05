@@ -8,7 +8,7 @@ There is no Reset Table operation; callers create a new Table Session when a fre
 
 ## Plain-data export and complete restoration
 
-Do not persist or deserialize the live CashGame instance, PokerCore, mutable collections, RNG objects, or caches. `CashGame.toRecord()` constructs a detached immutable plain-data representation rather than exposing mutable internal references:
+Do not persist or deserialize the live CashGame instance, its private plain-data state, mutable collections, RNG objects, or caches. Plain-data internal state is still an implementation detail, not the durable format. `CashGame.toRecord()` constructs a detached immutable plain-data record of replay inputs rather than exposing mutable internal references:
 
 ```typescript
 interface TableSessionRecord {

@@ -1,6 +1,6 @@
 # Document Standard CashGame Rules Without Rules Profiles
 
-The initial public game is No-Limit Texas Hold'em CashGame, with standard documented behavior rather than a separate rules-profile system. CashGame owns the rules below and uses internal PokerCore mechanisms for cards, chips, contributions, and invariant-preserving transfers; configurable alternatives belong directly in game configuration only when there is a real use case. This keeps callers at the level of game intentions while preserving a reusable mechanical foundation.
+The initial public game is No-Limit Texas Hold'em CashGame, with standard documented behavior rather than a separate rules-profile system. CashGame owns the rules below and the authoritative cards, chips, contributions, and betting state, using focused internal modules and invariant-preserving helpers rather than a separate PokerCore; configurable alternatives belong directly in game configuration only when there is a real use case. This keeps callers at the level of game intentions with one Hold'em rules implementation and one state owner, as defined in [ADR-0011](0011-use-a-holdem-specific-cash-game.md).
 
 ## Configuration and defaults
 
@@ -15,7 +15,7 @@ The initial public game is No-Limit Texas Hold'em CashGame, with standard docume
 
 CashGame includes only seated participants with at least one chip who are not sitting out. At least two must be eligible to start a Hand. The chosen participants and their seat positions are frozen for that Hand; joining, leaving, moving seats, and external stack changes cannot alter an active Hand. Participants remain in the Hand after forced contributions reduce their stack to zero.
 
-Outside an active Hand, `allowSeatChanges` permits movement to any unoccupied valid seat when enabled and rejects movement when disabled. Do not impose missed-blind obligations, blind debt, or seat-change penalties. Core mechanisms support between-Hand movement independently of this CashGame policy.
+Outside an active Hand, `allowSeatChanges` permits movement to any unoccupied valid seat when enabled and rejects movement when disabled. Do not impose missed-blind obligations, blind debt, or seat-change penalties. CashGame applies seating changes through its private state helpers and preserves seat uniqueness.
 
 ParticipantId remains stable through movement, leaving, rebuying, and rejoining. Seats do not own identity or history, and new occupants do not inherit a previous occupant's observations. Sitting out excludes a participant from the next Hand, not from the stable participant registry.
 
@@ -23,11 +23,11 @@ After a completed Hand, the next button advances clockwise from the previous but
 
 ## Buy-ins and top-ups
 
-A joining participant may supply a buy-in within the minimum and maximum inclusive; omission uses the default. Buy-in validation belongs to CashGame, not PokerCore. Losing below the minimum through play does not require rebuying or prevent continued play with a positive stack.
+A joining participant may supply a buy-in within the minimum and maximum inclusive; omission uses the default. Buy-in validation and stack changes belong to CashGame. Losing below the minimum through play does not require rebuying or prevent continued play with a positive stack.
 
 Between Hands, `topUpTo(participantId, targetStack)` means the desired resulting stack, not the number of chips to add. The target must exceed the current stack and not exceed maximumBuyIn; a zero-stack rebuy must also satisfy minimumBuyIn. A positive-stack participant may top up while remaining below the minimum. A zero-stack participant cannot join the next Hand until rebuying.
 
-Do not let a seated participant remove chips while remaining in the cash game or use topUpTo to lower their stack. They must leave to cash out, and later rejoining preserves ParticipantId and history. Core may provide generic chip additions and removals outside an active Hand, but does not know buy-ins, rebuys, or their limits.
+Do not let a seated participant remove chips while remaining in the cash game or use topUpTo to lower their stack. They must leave to cash out, and later rejoining preserves ParticipantId and history. Private chip-bookkeeping helpers preserve valid amounts and conservation while CashGame applies the permitted buy-in, top-up, and cash-out operations.
 
 ## Antes, blinds, and betting order
 
@@ -41,7 +41,7 @@ Multiway preflop action begins with the next participant able to act clockwise a
 
 Check is available only when nothing is owed; Call commits the amount owed or the remaining stack when that is smaller. Bet opens wagering, while Raise increases an existing wager. The minimum full opening bet is the big blind; a full raise must increase the wager by at least the last full bet or full-raise increment, with the big blind setting the initial preflop increment. A smaller bet or raise is permitted only when it is a genuine all-in.
 
-A short all-in increases what other participants must call but does not by itself count as a full raise or reopen prior betting. Apply the full-bet/full-raise threshold for each participant who already acted; cumulative short all-in increases can reopen action when the total increase that participant now faces reaches the applicable full-raise threshold. Participants whose betting has not been closed retain their legal raise opportunities. CashGame tracks action completion and reopening; PokerCore only performs the validated contributions.
+A short all-in increases what other participants must call but does not by itself count as a full raise or reopen prior betting. Apply the full-bet/full-raise threshold for each participant who already acted; cumulative short all-in increases can reopen action when the total increase that participant now faces reaches the applicable full-raise threshold. Participants whose betting has not been closed retain their legal raise opportunities. CashGame tracks action completion and reopening, and its internal helpers apply validated contributions within the same atomic draft.
 
 Accept every legal integer betTo or raiseTo, not just Strategy sizings. These amounts are the participant's total contribution on the current street after acting. An all-in is an ordinary Bet, Raise, or Call that exhausts the stack; it is not a separate action. Normal validation rejects wrong actors, illegal action types, invalid chip amounts, under-minimum non-all-in wagers, and raises when action has not reopened.
 
@@ -53,7 +53,7 @@ Use a standard 52-card deck with no jokers, shuffled deterministically from the 
 
 After preflop, burn one and deal three cards for the flop; burn one and deal one for the turn; burn one and deal one for the river. Use precisely the same sequence for an automatic all-in board runout. A Hand ending before a later street never burns or deals unnecessary future cards.
 
-Burns are removed face-down and their identities remain hidden in participant projections. Deal and burn events can drive face-down presentation without exposing identities. PokerCore preserves authoritative deck order and unique physical card locations; only CashGame determines whether a drawn card is a hole card, burn, or board card.
+Burns are removed face-down and their identities remain hidden in participant projections. Deal and burn events can drive face-down presentation without exposing identities. CashGame's private card/deck helpers preserve authoritative deck order and unique physical card locations while its dealing logic determines whether a drawn card is a hole card, burn, or board card. Both operate on the same private state, not separate authoritative card collections.
 
 ## Hand evaluation
 
@@ -63,9 +63,9 @@ Compare complete hand ranks and kickers. Ace is high or low in A-2-3-4-5 but can
 
 ## Derived pots and payouts
 
-PokerCore maintains the contribution ledger and derives pots by contribution layers instead of mutating a second pot source of truth. Folded contributions stay in the pot, folded participants lose eligibility, and a participant can win only layers covered by their own contribution. Different contribution caps produce the main pot and side pots, each with an amount and eligible participants. Return unmatched excess to its contributor rather than constructing a one-participant side pot.
+CashGame maintains the contribution ledger in its private state and uses its internal pot-calculation module to derive pots by contribution layers instead of mutating a second pot source of truth. Folded contributions stay in the pot, folded participants lose eligibility, and a participant can win only layers covered by their own contribution. Different contribution caps produce the main pot and side pots, each with an amount and eligible participants. Return unmatched excess to its contributor rather than constructing a one-participant side pot.
 
-CashGame settles every derived pot independently using the best eligible Texas Hold'em hand. Tied winners split equally in integer chip units; award remaining odd chips clockwise from the button among the tied winners, independently for each pot. With only one live hand, award its applicable pots without showdown. Returns and payouts use Core transfers and conserve chips across stacks and contributions.
+CashGame settles every derived pot independently using the best eligible Texas Hold'em hand. Tied winners split equally in integer chip units; award remaining odd chips clockwise from the button among the tied winners, independently for each pot. With only one live hand, award its applicable pots without showdown. Returns and payouts use invariant-preserving internal transfers within the complete draft and conserve chips across stacks and contributions.
 
 For example, contributions of 100, 300, and 300 create a main pot of 300 for all three and a side pot of 400 for the two larger contributors. Contributions of 100 and 300 create a matched pot of 200 and return 200 to the larger contributor, not a separate side pot.
 

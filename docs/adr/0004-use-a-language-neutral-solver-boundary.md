@@ -4,6 +4,8 @@ The Solver's modeled inputs, configuration, policies, outputs, and solution-qual
 
 The long-term goal is the most capable and accurate No-Limit Texas Hold'em Solver that is computationally practical, progressively supporting different stack depths, positions, streets, ranges, bet sizes, and eventually multiplayer situations. Small games and heads-up subgames are validation stepping stones, not permanent restrictions. Growing or replacing a backend must not require redesigning the Poker Engine or Strategy contracts.
 
+For the current milestones, gameplay, simulation, and Solver workflows must reuse the same CashGame implementation as the authoritative source of Hold'em betting, reopening, all-ins, pots, settlement, and other rules. Solver algorithms and numerical backends may differ, but they must not introduce a separate Hold'em rules implementation; language-neutral computation may integrate with CashGame rather than duplicate its transitions. In a later milestone, a shared Hold'em transition kernel may be extracted from CashGame and used by both CashGame and the Solver. That extraction is deferred, as recorded in [ADR-0011](0011-use-a-holdem-specific-cash-game.md).
+
 Prioritize correctness and solution quality over performance initially, undertaking performance optimizations only when they are trivial. Minimize card and bet-sizing abstraction where practical, and expose necessary abstractions as declared, configurable implementation techniques rather than fixed limitations of the public interface. CFR, CFR+, MCCFR variants, subgame solving or re-solving, and other algorithms may coexist and be compared instead of coupling the platform permanently to one technique.
 
 ## Evidence and terminology
