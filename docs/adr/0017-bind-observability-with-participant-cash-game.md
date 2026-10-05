@@ -12,6 +12,8 @@ Each facade is lightweight and short-lived, bound to one specific CashGame insta
 
 Explicitly classify every configuration field as observable or hidden rather than defining visibility by subtracting known secrets with `Omit<GameConfiguration, "seed">`. ObservableGameConfiguration contains seat capacity, blinds, ante, minimum/default/maximum buy-ins, seat-change policy, and other settings participants may legally know. HiddenGameConfiguration contains the authoritative master seed and any future private settings; their intersection forms GameConfiguration for trusted construction, persistence, and replay.
 
+Legal actions come from CashGame's shared internal legality calculation, also used by `act`. Bet/Raise descriptions expose inclusive integer sizing bounds or a single permitted short-all-in amount rather than every possible chip amount, following ADR-0025. They describe the requested snapshot's possibilities, not a guarantee that a later action submission remains legal after the game changes.
+
 Use ObservableCashGameState as the single canonical participant-visible state type, including visible cards, public participant facts, board, street, pot information, current actor, and the observer's legal actions when applicable. Do not introduce a substantially duplicate ObservableDecisionState. The participant facade exposes configuration, state, and history together through its full-view projection, alongside separate presentation-event projection; its complete snapshot has the following composition:
 
 ```typescript

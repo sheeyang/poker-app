@@ -45,6 +45,8 @@ A short all-in increases what other participants must call but does not by itsel
 
 Accept every legal integer betTo or raiseTo, not just Strategy sizings. These amounts are the participant's total contribution on the current street after acting. An all-in is an ordinary Bet, Raise, or Call that exhausts the stack; it is not a separate action. Normal validation rejects wrong actors, illegal action types, invalid chip amounts, under-minimum non-all-in wagers, and raises when action has not reopened.
 
+Observable legal actions and `CashGame.act()` validation derive from the same internal legality calculation, including reopening eligibility. Describe each legal Bet/Raise sizing as inclusive integer minimum/maximum bounds, or as a single permitted short-all-in amount when the participant cannot reach the full minimum. Do not emit an inverted interval, treat below-minimum non-all-in amounts as legal, or enumerate every possible chip amount. A sole short-all-in size remains a Bet or Raise description, not another ConcreteAction type. Policies select finite concrete sizes from these possibilities, and submission is revalidated against current authoritative state.
+
 A betting round ends when every live participant still able to act has satisfied the round's action and matching requirements. One remaining live hand ends the Hand immediately. If no further betting decision is possible after outstanding Call/Fold decisions are resolved, reveal remaining live hole cards as required, run out the board, and settle automatically. The application does not request street transitions, burns, dealing, or settlement separately.
 
 ## Dealing and burns

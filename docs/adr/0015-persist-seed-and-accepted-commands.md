@@ -26,3 +26,5 @@ CashGameCommand represents each successful public mutation, including initial se
 Server concurrency revisions are not part of TableSessionRecord or CashGame restoration. The backend separately restores `pokerRevision` and `sessionRevision` from its PersistedTableSession aggregate alongside the reconstructed game, as defined in ADR-0018.
 
 Normal callers cannot append recorded commands or events, replace internal state, or inject arbitrary history through methods such as `appendRecordedCommand`, `appendEvent`, `replaceState`, or `loadInternalState`. Trusted restoration may optimize replay internally only while preserving the same semantics. Pre-release compatibility remains governed by ADR-0014; this contract adds no migration or old-version compatibility guarantee.
+
+The independent `CashGame.fork()` operation in ADR-0011 does not add a persisted command or a second durable state format. The deferred M4 scenario builder in ADR-0004 constructs validated transient Solver models; it is not an alternative restoration path for authoritative Table Sessions and does not alter this record schema.
