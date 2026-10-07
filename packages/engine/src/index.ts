@@ -233,17 +233,32 @@ export class CashGame {
     const hand = this.#state.hands.at(-1);
     if (!hand || hand.completed) return reject('no-active-hand', 'Start a Hand before acting.');
     if (hand.actorId !== participantId) return reject('wrong-actor', 'Only the current actor can act.');
-    if (!action || typeof action !== 'object' || !['fold', 'check', 'call'].includes(action.type) || Object.keys(action).join(',') !== 'type' || !this.#legalActions(participantId).some(legal => legal.type === action.type)) return reject('illegal-action', 'Choose an action described by the current decision.');
+    if (!action || typeof action !== 'object') return reject('illegal-action', 'Choose an action described by the current decision.');
+    const legal = this.#legalActions(participantId).find(legal => legal.type === action.type);
+    if (!legal) return reject('illegal-action', 'Choose an action described by the current decision.');
+    if (action.type === 'bet' || action.type === 'raise') {
+      const field = action.type === 'bet' ? 'betTo' : 'raiseTo';
+      const amount = action.type === 'bet' ? action.betTo : action.raiseTo;
+      if (Object.keys(action).sort().join(',') !== [field, 'type'].sort().join(',')) return reject('illegal-action', 'Supply only the action type and its total street commitment.');
+      if (!Number.isSafeInteger(amount)) return { ok: false, rejection: { code: 'invalid-action-size', message: 'The total street commitment must be a representable integer.', field } };
+      if (!('minimum' in legal) || amount < legal.minimum || amount > legal.maximum) return { ok: false, rejection: { code: 'illegal-action-size', message: 'Choose a total street commitment within the current inclusive legal bounds.', field } };
+    } else if (Object.keys(action).join(',') !== 'type') return reject('illegal-action', 'Supply only the action type.');
     const concrete = projectAction(action);
     return this.#mutate({ type: 'act', participantId, action: concrete }, draft => {
       const current = draft.hands.at(-1)!;
       const member = current.participants.find(p => p.participantId === participantId)!;
       if (concrete.type === 'fold') member.folded = true;
-      else if (concrete.type === 'call') {
+      else if (concrete.type === 'call' || concrete.type === 'bet' || concrete.type === 'raise') {
         const participant = draft.participants.find(p => p.participantId === participantId)!;
-        const amount = Math.min(current.price - member.wager, participant.stack);
+        const target = concrete.type === 'bet' ? concrete.betTo : concrete.type === 'raise' ? concrete.raiseTo : current.price;
+        const amount = Math.min(target - member.wager, participant.stack);
         participant.stack -= amount; member.wager += amount; member.contribution += amount;
         member.allIn = participant.stack === 0;
+        if (concrete.type === 'bet' || concrete.type === 'raise') {
+          const increment = target - current.price;
+          if (increment >= current.lastFullIncrement) current.lastFullIncrement = increment;
+          current.price = target;
+        }
       }
       member.actedAtPrice = current.price;
       current.actions.push({ participantId, action: concrete });
@@ -410,6 +425,14 @@ export class CashGame {
     const hand = this.#state.hands.at(-1);
     if (!hand || hand.completed || hand.actorId !== participantId) return [];
     const member = hand.participants.find(p => p.participantId === participantId)!;
-    return [{ type: 'fold' }, { type: member.wager < hand.price ? 'call' : 'check' }];
+    const actions: LegalAction[] = [{ type: 'fold' }, { type: member.wager < hand.price ? 'call' : 'check' }];
+    const participant = this.#state.participants.find(p => p.participantId === participantId)!;
+    const maximum = member.wager + participant.stack;
+    const reopened = member.actedAtPrice === null || hand.price - member.actedAtPrice >= hand.lastFullIncrement;
+    if (reopened && maximum > hand.price && hand.participants.some(p => p.participantId !== participantId && !p.folded && !p.allIn)) {
+      const fullMinimum = hand.price === 0 ? this.#configuration.bigBlind : hand.price + hand.lastFullIncrement;
+      actions.push({ type: hand.price === 0 ? 'bet' : 'raise', minimum: Math.min(fullMinimum, maximum), maximum });
+    }
+    return actions;
   }
 }

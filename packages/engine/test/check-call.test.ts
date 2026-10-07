@@ -14,14 +14,14 @@ function game(aliceStack = 1000, bobStack = 1000, seed = configuration.seed) {
 
 test('Call matches the blind and preserves the big blind option; its Check burns and deals the flop with the non-button first', () => {
   const cashGame = game();
-  expect(cashGame.forParticipant('alice').getView().state.legalActions).toEqual([{ type: 'fold' }, { type: 'call' }]);
+  expect(cashGame.forParticipant('alice').getView().state.legalActions).toEqual([{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }]);
   expect(cashGame.act('alice', { type: 'call' }).ok).toBe(true);
   const option = cashGame.forParticipant('bob').getView();
-  expect(option.state).toMatchObject({ street: 'preflop', actorId: 'bob', decisionId: 'hand-1/decision-2', board: [], legalActions: [{ type: 'fold' }, { type: 'check' }] });
+  expect(option.state).toMatchObject({ street: 'preflop', actorId: 'bob', decisionId: 'hand-1/decision-2', board: [], legalActions: [{ type: 'fold' }, { type: 'check' }, { type: 'raise', minimum: 40, maximum: 1000 }] });
   expect(option.state.participants.map(p => [p.stack, p.wager, p.contribution])).toEqual([[980, 20, 20], [980, 20, 20]]);
   const result = cashGame.act('bob', { type: 'check' });
   expect(result.ok).toBe(true);
-  expect(cashGame.forParticipant('bob').getView().state).toMatchObject({ street: 'flop', actorId: 'bob', decisionId: 'hand-1/decision-3', board: ['9c', '4d', 'Tc'], legalActions: [{ type: 'fold' }, { type: 'check' }] });
+  expect(cashGame.forParticipant('bob').getView().state).toMatchObject({ street: 'flop', actorId: 'bob', decisionId: 'hand-1/decision-3', board: ['9c', '4d', 'Tc'], legalActions: [{ type: 'fold' }, { type: 'check' }, { type: 'bet', minimum: 20, maximum: 980 }] });
   expect(cashGame.forParticipant('alice').getView().state.participants.map(p => [p.stack, p.wager, p.contribution])).toEqual([[980, 0, 20], [980, 0, 20]]);
   // Literal draws from the independent Python v1 vector in docs/random-v1.md.
   expect(cashGame.getHand('hand-1')).toMatchObject({ drawnCardCount: 8, burns: ['3d'], board: ['9c', '4d', 'Tc'] });

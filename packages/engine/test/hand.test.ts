@@ -17,7 +17,7 @@ test('explicit Start Hand freezes heads-up positions, deals a v1 deck in clockwi
   expect(cashGame.startHand().ok).toBe(true);
   const alice = cashGame.forParticipant('alice').getView();
   const bob = cashGame.forParticipant('bob').getView();
-  expect(alice.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', decisionId: 'hand-1/decision-1', street: 'preflop', buttonSeat: 1, smallBlindParticipantId: 'alice', bigBlindParticipantId: 'bob', actorId: 'alice', legalActions: [{ type: 'fold' }, { type: 'call' }] });
+  expect(alice.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', decisionId: 'hand-1/decision-1', street: 'preflop', buttonSeat: 1, smallBlindParticipantId: 'alice', bigBlindParticipantId: 'bob', actorId: 'alice', legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }] });
   expect(alice.state.participants).toEqual([
     { participantId: 'alice', seat: 1, stack: 990, sittingOut: false, inHand: true, handSeat: 1, folded: false, allIn: false, contribution: 10, wager: 10, cardCount: 2, holeCards: ['4s', '5d'] },
     { participantId: 'bob', seat: 4, stack: 980, sittingOut: false, inHand: true, handSeat: 4, folded: false, allIn: false, contribution: 20, wager: 20, cardCount: 2 },

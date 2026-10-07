@@ -39,7 +39,7 @@ test('the owner starts a durable heads-up Hand, the bound human Folds, and resta
   const start = { requestId: 'start', expectedPokerRevision: 2 };
   expect(await (await submit(t, 'start-hand', start)).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 3, sessionRevision: 3 });
   const decision = await read(t);
-  expect(decision.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', decisionId: 'hand-1/decision-1', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'call' }] });
+  expect(decision.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', decisionId: 'hand-1/decision-1', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }] });
   expect(decision.view.state.participants[0].holeCards).toHaveLength(2);
   expect(decision.view.state.participants[1]).not.toHaveProperty('holeCards');
   expect(JSON.stringify(decision)).not.toMatch(/"(?:seed|deck|burns|commands|ownerUserId|userId|schemaVersion|engineVersion|cards)"\s*:/);
