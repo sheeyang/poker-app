@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { defaultConfiguration, baselinePlayingStrategy, type ObservableGameConfiguration } from '@poker/contracts';
 import { api, RequestFailure } from './api.js';
 import { usePlayground } from './store.js';
+import { Seating } from './seating.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -72,7 +73,7 @@ export function Playground() {
               <label>Configured Bots
                 <input name="botCount" type="number" min="0" max={Math.max(0, configuration.seatCount - 1)} step="1" required value={botCount} onChange={event => setBotCount(Number(event.target.value))} />
               </label>
-              <p className="help">Participants are allocated now. Seating and play follow after table setup.</p>
+              <p className="help">Participants are allocated now. Choose their seats after creating the table.</p>
               <button type="submit" className="primary">Create Table Session</button>
             </fieldset>
           </form>
@@ -109,10 +110,18 @@ export function Playground() {
             <div><dt>Button</dt><dd>Seat {table.data.view.state.buttonSeat}</dd></div>
             <div><dt>Committed revisions</dt><dd>Poker {table.data.pokerRevision} · Session {table.data.sessionRevision}</dd></div>
           </dl>
-          <div className="empty-table"><h3>Empty table</h3><p>No participants are seated. The Table Session is saved and ready for table setup.</p></div>
-          <ol className="seats">{Array.from({ length: table.data.view.configuration.seatCount }, (_, index) => <li key={index}><span>Seat {index + 1}</span><strong>Empty</strong></li>)}</ol>
+          {table.data.view.state.participants.length === 0 && <div className="empty-table"><h3>Empty table</h3><p>No Participants are seated. Choose a Participant, seat, and buy-in below.</p></div>}
+          <ol className="seats">{Array.from({ length: table.data.view.configuration.seatCount }, (_, index) => {
+            const participant = table.data.view.state.participants.find(p => p.seat === index + 1);
+            const binding = table.data.bindings.find(b => b.participantId === participant?.participantId);
+            return <li key={index}><span>Seat {index + 1}</span><strong>{binding?.name ?? 'Empty'}</strong>{participant && <span>{participant.stack} chips</span>}</li>;
+          })}</ol>
+          <Seating key={table.data.tableSessionId} table={table.data} />
           <h3>Participants</h3>
-          <ul className="bindings">{table.data.bindings.map(binding => <li key={binding.participantId}><strong>{binding.name}</strong><span>{binding.controller.kind === 'human' ? 'Human' : 'Bot · Uniform Choice'} · Unseated</span><code>{binding.participantId}</code></li>)}</ul>
+          <ul className="bindings">{table.data.bindings.map(binding => {
+            const participant = table.data.view.state.participants.find(p => p.participantId === binding.participantId);
+            return <li key={binding.participantId}><strong>{binding.name}</strong><span>{binding.controller.kind === 'human' ? 'Human' : 'Bot · Uniform Choice'} · {participant?.seat ? `Seat ${participant.seat} · ${participant.stack} chips` : 'Unseated'}</span><code>{binding.participantId}</code></li>;
+          })}</ul>
         </> : !table.isFetching && <div className="initial-state"><h2>Your table starts here</h2><p>Create a Table Session with the settings on the left, or reopen one you already own.</p></div>}
       </section>
     </main>

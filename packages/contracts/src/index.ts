@@ -72,6 +72,23 @@ export interface ApplicationRejection {
   readonly rejection: { readonly code: string; readonly message: string; readonly field?: string };
 }
 export type CreationOutcome = CreationAcknowledgement | ApplicationRejection;
+export interface PokerMutationMetadata {
+  readonly requestId: string;
+  readonly expectedPokerRevision: Revision;
+}
+export interface SeatParticipantRequest extends PokerMutationMetadata {
+  readonly participantId: ParticipantId;
+  readonly seat: number;
+  readonly buyIn?: ChipAmount;
+}
+/** A durable outcome contains no complete view; read the current view separately. */
+export interface MutationAcknowledgement {
+  readonly ok: true;
+  readonly tableSessionId: TableSessionId;
+  readonly pokerRevision: Revision;
+  readonly sessionRevision: Revision;
+}
+export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly pokerRevision: Revision;
