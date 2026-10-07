@@ -11,6 +11,11 @@ import { CommitOutcomeUnknown } from './creation.js';
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act';
+/** Internal controller authority. No browser route receives this capability. */
+export interface TableSessionControllerCommands {
+  submitAction(tableSessionId: string, request: ActRequest): Promise<MutationOutcome>;
+}
+type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot' };
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
@@ -51,22 +56,21 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     committed.set(id, session);
     return session;
   }
-  return {
-    async read(id: string, ownerUserId: string) {
+    async function read(id: string, ownerUserId: string) {
       const session = await load(id);
       if (!session || session.aggregate.ownerUserId !== ownerUserId) return undefined;
       const participant = session.aggregate.bindings.find(b => b.controller.kind === 'human' && b.userId === ownerUserId);
       if (!participant) throw new Error('Owned session has no bound human Participant.');
       return projectTableSession(session.aggregate, participant.participantId, session.game);
-    },
-    async submit(id: string, ownerUserId: string, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
+    }
+    async function submit(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
       const previous = queue.get(id) ?? Promise.resolve();
       const operation = previous.catch(() => undefined).then(async (): Promise<MutationOutcome> => {
         const session = await load(id);
-        if (!session || session.aggregate.ownerUserId !== ownerUserId) return { ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } };
+        if (!session || (authority.kind === 'human' && session.aggregate.ownerUserId !== authority.userId)) return { ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } };
         if (recovering.has(id)) return reject('session-recovering', 'This Table Session is paused while a commit outcome is unknown.');
         const { requestId, ...contents } = request;
-        const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ kind, contents })).digest('hex');
+        const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: authority.kind, kind, contents })).digest('hex');
         let proposed: CommittedSession | undefined;
         let commitAttempted = false;
         let newlyProcessed = false;
@@ -81,7 +85,11 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
             const participantId = 'participantId' in request ? request.participantId : undefined;
             const binding = session.aggregate.bindings.find(binding => binding.participantId === participantId);
             if (!result && kind !== 'start-hand' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
-            if (!result && kind === 'act' && (binding?.controller.kind !== 'human' || binding.userId !== ownerUserId)) result = reject('actor-not-authorized', 'This local identity can act only through its bound human Participant.');
+            if (!result && kind === 'act' && (authority.kind === 'human'
+              ? binding?.controller.kind !== 'human' || binding.userId !== authority.userId
+              : binding?.controller.kind !== 'bot')) result = reject('actor-not-authorized', authority.kind === 'human'
+                ? 'This local identity can act only through its bound human Participant.'
+                : 'Trusted controller commands can act only through a bound Bot.');
             if (!result) {
               const working = session.game.fork();
               const accepted = kind === 'start-hand' ? working.startHand() : kind === 'act'
@@ -114,6 +122,10 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       });
       queue.set(id, operation);
       try { return await operation; } finally { if (queue.get(id) === operation) queue.delete(id); }
-    },
+    }
+  return {
+    read,
+    submit: (id: string, ownerUserId: string, kind: PokerMutationKind, request: PokerMutationRequest) => submit(id, { kind: 'human', userId: ownerUserId }, kind, request),
+    submitControllerAction: (id: string, request: ActRequest) => submit(id, { kind: 'bot' }, 'act', request),
   };
 }

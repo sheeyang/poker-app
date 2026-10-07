@@ -60,6 +60,9 @@ export type ObservablePresentationEvent =
   | { readonly type: 'forced-contribution'; readonly participantId: ParticipantId; readonly kind: 'ante' | 'small-blind' | 'big-blind'; readonly amount: ChipAmount }
   | { readonly type: 'hole-cards-dealt'; readonly participantId: ParticipantId; readonly cardCount: number; readonly cards?: readonly Card[] }
   | { readonly type: 'acted'; readonly participantId: ParticipantId; readonly action: ConcreteAction }
+  | { readonly type: 'card-burned'; readonly street: 'flop' | 'turn' | 'river' }
+  | { readonly type: 'board-dealt'; readonly street: 'flop' | 'turn' | 'river'; readonly cards: readonly Card[] }
+  | { readonly type: 'hole-cards-revealed'; readonly participantId: ParticipantId; readonly cards: readonly Card[] }
   | { readonly type: 'uncalled-return' | 'pot-awarded'; readonly participantId: ParticipantId; readonly amount: ChipAmount }
   | { readonly type: 'hand-completed'; readonly handId: HandId };
 export interface ObservableHistoryEntry {

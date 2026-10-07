@@ -11,6 +11,7 @@ export interface HandParticipantState {
   folded: boolean;
   allIn: boolean;
   revealed: boolean;
+  actedAtPrice: number | null;
 }
 export interface PotState { amount: number; eligibleParticipantIds: ParticipantId[] }
 export interface ChipTransfer { participantId: ParticipantId; amount: number }
