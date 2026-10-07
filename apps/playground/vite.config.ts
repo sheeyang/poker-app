@@ -12,5 +12,5 @@ export default defineConfig({
       return null;
     } },
   ],
-  server: { port: 5173, strictPort: true, proxy: { '/api': { target: 'http://127.0.0.1:3001', ws: true } } },
+  server: { port: 5173, strictPort: true, proxy: { '/api': { target: process.env.POKER_API_TARGET ?? 'http://127.0.0.1:3001', ws: true } } },
 });
