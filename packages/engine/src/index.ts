@@ -69,6 +69,7 @@ function configurationRejection(configuration: GameConfiguration): CashGameRejec
     return reject('defaultBuyIn', 'Buy-in limits must be ordered minimum, default, maximum.');
   if (typeof configuration.allowSeatChanges !== 'boolean') return reject('allowSeatChanges', 'Seat-change policy must be a boolean.');
   if (typeof configuration.seed !== 'string' || configuration.seed.length === 0) return reject('seed', 'Trusted construction requires an explicit nonempty master seed.');
+  if (!plainFields(configuration, ['seatCount', 'smallBlind', 'bigBlind', 'ante', 'minimumBuyIn', 'defaultBuyIn', 'maximumBuyIn', 'allowSeatChanges', 'seed'])) return reject('configuration', 'Supply only the complete supported Game Configuration fields.');
 }
 function immutable<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -89,6 +90,17 @@ function plainFields(value: unknown, fields: readonly string[]): boolean {
   const keys = Reflect.ownKeys(value);
   return keys.length === fields.length && keys.every(key => typeof key === 'string' && fields.includes(key)
     && Object.getOwnPropertyDescriptor(value, key)?.enumerable && 'value' in Object.getOwnPropertyDescriptor(value, key)!);
+}
+function plainCommandArray(value: unknown): value is readonly CashGameCommand[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length === value.length + 1 && keys.every(key => {
+    if (key === 'length') return true;
+    if (typeof key !== 'string') return false;
+    const index = Number(key);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    return Number.isInteger(index) && index >= 0 && index < value.length && String(index) === key && descriptor.enumerable && 'value' in descriptor;
+  });
 }
 /** Shared replay dispatch uses the same validated intentions as normal play. */
 function replayCommand(game: CashGame, command: CashGameCommand): CashGameResult | undefined {
@@ -167,7 +179,7 @@ export class CashGame {
     try {
       if (!plainFields(record, ['schemaVersion', 'engineVersion', 'configuration', 'commands'])) return invalid();
       const r = record as TableSessionRecord;
-      if (r.schemaVersion !== 1 || r.engineVersion !== 'v1' || !Array.isArray(r.commands)) return invalid();
+      if (r.schemaVersion !== 1 || r.engineVersion !== 'v1' || !plainCommandArray(r.commands)) return invalid();
       if (!plainFields(r.configuration, ['seatCount', 'smallBlind', 'bigBlind', 'ante', 'minimumBuyIn', 'defaultBuyIn', 'maximumBuyIn', 'allowSeatChanges', 'seed'])) return invalid();
       const result = CashGame.create(r.configuration);
       if (!result.ok) return invalid();
@@ -421,22 +433,22 @@ export class CashGame {
     return replay.#snapshot(participantId, history);
   }
   #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[]): ObservableGameView {
-      const c = this.#configuration;
-      const current = this.#state.hands.at(-1);
-      const hand = current?.observerParticipantIds.includes(participantId) ? current : undefined;
-      return immutable({
-        configuration: {
-          seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,
-          minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn,
-          allowSeatChanges: c.allowSeatChanges,
-        },
-        state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
-          const member = hand?.participants.find(member => member.participantId === p.participantId);
-          return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
-        }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId: hand?.actorId ?? null, legalActions: this.#legalActions(participantId),
-          ...(hand ? { handId: hand.handId, decisionId: hand.decisionId, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) },
-        history: structuredClone(history),
-      });
+    const c = this.#configuration;
+    const current = this.#state.hands.at(-1);
+    const hand = current?.observerParticipantIds.includes(participantId) ? current : undefined;
+    return immutable({
+      configuration: {
+        seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,
+        minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn,
+        allowSeatChanges: c.allowSeatChanges,
+      },
+      state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
+        const member = hand?.participants.find(member => member.participantId === p.participantId);
+        return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
+      }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId: hand?.actorId ?? null, legalActions: this.#legalActions(participantId),
+        ...(hand ? { handId: hand.handId, decisionId: hand.decisionId, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) },
+      history: structuredClone(history),
+    });
   }
   #legalActions(participantId: ParticipantId): LegalAction[] {
     const hand = this.#state.hands.at(-1);

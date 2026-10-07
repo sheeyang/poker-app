@@ -41,9 +41,14 @@ export async function createServer(options: ServerOptions) {
     preValidation: async (request, reply) => {
       const userId = await authenticatedUser(request.cookies.poker_local);
       if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
-      if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !await mutations.read(request.params.id, userId))
-        return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
-      socketOwners.set(request, userId);
+      try {
+        if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !await mutations.read(request.params.id, userId))
+          return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
+        socketOwners.set(request, userId);
+      } catch (error) {
+        if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+        return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Table Session is unavailable. Refresh to try reading it again.' } });
+      }
     },
   }, (socket, request) => {
     let unsubscribe: (() => void) | undefined;

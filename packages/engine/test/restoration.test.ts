@@ -10,6 +10,10 @@ function game() {
   return created.game;
 }
 
+test('trusted construction rejects configuration that cannot form a supported replay record', () => {
+  expect(CashGame.create({ ...configuration, deck: ['As'] } as typeof configuration)).toMatchObject({ ok: false, rejection: { code: 'invalid-configuration' } });
+});
+
 test('a historical DecisionId returns the original complete immutable view despite later Hands and management', () => {
   const cashGame = game();
   cashGame.startHand();
@@ -55,10 +59,12 @@ test('restoration accepts plain replay data only, rejecting accessors and non-da
   Object.defineProperty(accessor.configuration, 'seed', { enumerable: true, get: () => record.configuration.seed });
   const hiddenField = { ...record.configuration };
   Object.defineProperty(hiddenField, 'deck', { value: ['As'], enumerable: false });
+  const hiddenArrayField = [...record.commands];
+  Object.defineProperty(hiddenArrayField, 'events', { value: [], enumerable: false });
   const nonPlainAction = Object.assign(new Date(), { type: 'fold' });
   for (const malformed of [
     Object.assign(Object.create({ privateSeed: 'secret' }), record), accessor,
-    { ...record, configuration: hiddenField },
+    { ...record, configuration: hiddenField }, { ...record, commands: hiddenArrayField },
     { ...record, commands: [...record.commands, { type: 'start-hand' }, { type: 'act', participantId: 'alice', action: nonPlainAction }] },
   ]) expect(CashGame.fromRecord(malformed)).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
 });
