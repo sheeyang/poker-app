@@ -27,6 +27,7 @@ export interface ObservableParticipant {
   readonly folded?: boolean;
   readonly allIn?: boolean;
   readonly contribution?: ChipAmount;
+  readonly anteContribution?: ChipAmount;
   readonly wager?: ChipAmount;
   readonly cardCount?: number;
   readonly holeCards?: readonly Card[];
@@ -46,6 +47,7 @@ export interface ObservableCashGameState {
   readonly pots: readonly { readonly amount: ChipAmount; readonly eligibleParticipantIds: readonly ParticipantId[] }[];
   readonly actorId: ParticipantId | null;
   readonly legalActions: readonly LegalAction[];
+  readonly amountToCall?: ChipAmount;
   readonly handId?: HandId;
   readonly decisionId?: DecisionId | null;
   readonly street?: 'preflop' | 'flop' | 'turn' | 'river';

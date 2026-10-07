@@ -30,7 +30,7 @@ export interface AuthoritativeHandFacts {
   readonly buttonSeat: number;
   readonly smallBlindParticipantId: ParticipantId;
   readonly bigBlindParticipantId: ParticipantId;
-  readonly participants: readonly { readonly participantId: ParticipantId; readonly seat: number; readonly holeCards: readonly string[]; readonly contribution: number; readonly wager: number; readonly folded: boolean; readonly allIn: boolean; readonly revealed: boolean }[];
+  readonly participants: readonly { readonly participantId: ParticipantId; readonly seat: number; readonly holeCards: readonly string[]; readonly contribution: number; readonly anteContribution: number; readonly wager: number; readonly folded: boolean; readonly allIn: boolean; readonly revealed: boolean }[];
   readonly deck: readonly string[];
   readonly drawnCardCount: number;
   readonly burns: readonly string[];
@@ -102,7 +102,7 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
     if (hand.deck.length !== 52 || new Set(hand.deck).size !== 52) throw new Error('Deck uniqueness invariant failed.');
     const locations = [...hand.participants.flatMap(p => p.holeCards), ...hand.burns, ...hand.board];
     if (new Set(locations).size !== locations.length || locations.length !== hand.drawnCardCount || locations.some(card => !hand.deck.slice(0, hand.drawnCardCount).includes(card))) throw new Error('Card location invariant failed.');
-    for (const p of hand.participants) if (![p.contribution, p.wager].every(amount => Number.isSafeInteger(amount) && amount >= 0) || p.wager > p.contribution) throw new Error('Contribution invariant failed.');
+    for (const p of hand.participants) if (![p.contribution, p.anteContribution, p.wager].every(amount => Number.isSafeInteger(amount) && amount >= 0) || p.wager + p.anteContribution > p.contribution) throw new Error('Contribution invariant failed.');
   }
   if (bankroll > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Chip capacity invariant failed.');
   if (bankroll !== BigInt(state.bankroll)) throw new Error('Chip conservation invariant failed.');
@@ -185,7 +185,7 @@ export class CashGame {
     const hand = this.#state.hands.find(h => h.handId === handId);
     if (!hand) return undefined;
     return immutable({ handId: hand.handId, sequence: hand.sequence, completed: hand.completed, buttonSeat: hand.buttonSeat, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId,
-      participants: hand.participants.map(p => ({ participantId: p.participantId, seat: p.seat, holeCards: [...p.holeCards], contribution: p.contribution, wager: p.wager, folded: p.folded, allIn: p.allIn, revealed: p.revealed })),
+      participants: hand.participants.map(p => ({ participantId: p.participantId, seat: p.seat, holeCards: [...p.holeCards], contribution: p.contribution, anteContribution: p.anteContribution, wager: p.wager, folded: p.folded, allIn: p.allIn, revealed: p.revealed })),
       deck: [...hand.deck], drawnCardCount: hand.drawnCardCount, burns: [...hand.burns], board: [...hand.board], street: hand.street, actorId: hand.actorId, decisionId: hand.decisionId,
       pots: hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })), returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) });
   }
@@ -204,7 +204,7 @@ export class CashGame {
       const sequence = draft.hands.length + 1;
       const hand: HandState = { handId: 'hand-' + sequence, sequence, completed: false, buttonSeat: button.seat!, smallBlindParticipantId: smallBlind.participantId, bigBlindParticipantId: bigBlind.participantId,
         observerParticipantIds: draft.participants.filter(p => p.seat !== null).map(p => p.participantId),
-        participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
+        participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, anteContribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
         deck: shuffledDeck(c.seed, sequence), drawnCardCount: 0, burns: [], board: [], street: 'preflop', actorId: null, decisionSequence: 0, decisionId: null, price: c.bigBlind, lastFullIncrement: c.bigBlind, pots: [], returns: [], payouts: [], actions: [] };
       draft.hands.push(hand); draft.status = 'active-hand'; draft.buttonSeat = button.seat!; draft.nextButtonSeat = null;
       const events: CashGameEvent[] = [{ type: 'hand-started', handId: hand.handId, buttonSeat: hand.buttonSeat, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId }];
@@ -212,7 +212,8 @@ export class CashGame {
         const p = draft.participants.find(p => p.participantId === id)!;
         const member = hand.participants.find(p => p.participantId === id)!;
         const amount = Math.min(p.stack, requested);
-        p.stack -= amount; member.contribution += amount; if (kind !== 'ante') member.wager += amount;
+        p.stack -= amount; member.contribution += amount;
+        if (kind === 'ante') member.anteContribution += amount; else member.wager += amount;
         member.allIn = p.stack === 0;
         if (amount > 0) events.push({ type: 'forced-contribution', participantId: id, kind, amount });
       };
@@ -222,9 +223,8 @@ export class CashGame {
       for (let pass = 0; pass < 2; pass++) for (const p of dealOrder) hand.participants.find(member => member.participantId === p.participantId)!.holeCards.push(hand.deck[hand.drawnCardCount++]!);
       for (const p of hand.participants) events.push({ type: 'hole-cards-dealt', participantId: p.participantId, cardCount: 2, cards: [...p.holeCards] });
       const firstSeat = eligible.length === 2 ? button.seat! : bigBlind.seat! % c.seatCount + 1;
-      hand.actorId = [...hand.participants].sort((a, b) => clockwise(a.seat, firstSeat) - clockwise(b.seat, firstSeat)).find(p => !p.allIn)?.participantId ?? null;
-      if (hand.actorId) { hand.decisionSequence = 1; hand.decisionId = hand.handId + '/decision-1'; }
       hand.pots = contributionLayers(hand).pots;
+      this.#continueBetting(draft, hand, (firstSeat + c.seatCount - 2) % c.seatCount + 1, events);
       return events;
     });
   }
@@ -276,6 +276,9 @@ export class CashGame {
   #continueBetting(draft: CashGameState, hand: HandState, afterSeat: number, events: CashGameEvent[]): void {
     const seatCount = this.#configuration.seatCount;
     const able = hand.participants.filter(p => !p.folded && !p.allIn);
+    // With no opponent able to respond, only real outstanding live wagers
+    // require matching. A capped blind cannot create a nominal blind debt.
+    if (able.length === 1) hand.price = Math.max(0, ...hand.participants.filter(p => !p.folded && p.participantId !== able[0]!.participantId).map(p => p.wager));
     const awaiting = able.filter(p => p.wager < hand.price || (able.length > 1 && p.actedAtPrice === null));
     if (awaiting.length > 0) {
       hand.actorId = awaiting.sort((a, b) => ((a.seat - afterSeat - 1 + seatCount) % seatCount) - ((b.seat - afterSeat - 1 + seatCount) % seatCount))[0]!.participantId;
@@ -396,8 +399,9 @@ export class CashGame {
         },
         state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
           const member = hand?.participants.find(member => member.participantId === p.participantId);
-          return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
+          return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, anteContribution: member.anteContribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
         }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId: hand?.actorId ?? null, legalActions: this.#legalActions(participantId),
+          ...(hand?.actorId === participantId ? { amountToCall: Math.min(this.#state.participants.find(p => p.participantId === participantId)!.stack, Math.max(0, hand.price - hand.participants.find(p => p.participantId === participantId)!.wager)) } : {}),
           ...(hand ? { handId: hand.handId, decisionId: hand.decisionId, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) },
         history: this.#state.hands.filter(h => h.completed && h.observerParticipantIds.includes(participantId)).map(h => ({ handId: h.handId, description: 'Completed Hand ' + h.sequence })),
       });

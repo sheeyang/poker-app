@@ -28,11 +28,12 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
       state: {
         status: view.state.status, buttonSeat: view.state.buttonSeat,
         participants: view.state.participants.map(p => ({ participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut,
-          ...(p.inHand ? { inHand: p.inHand, handSeat: p.handSeat, folded: p.folded, allIn: p.allIn, contribution: p.contribution, wager: p.wager, cardCount: p.cardCount, ...(p.holeCards ? { holeCards: [...p.holeCards] } : {}) } : {}) })),
+          ...(p.inHand ? { inHand: p.inHand, handSeat: p.handSeat, folded: p.folded, allIn: p.allIn, contribution: p.contribution, anteContribution: p.anteContribution, wager: p.wager, cardCount: p.cardCount, ...(p.holeCards ? { holeCards: [...p.holeCards] } : {}) } : {}) })),
         board: [...view.state.board],
         pots: view.state.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })),
         actorId: view.state.actorId,
         legalActions: view.state.legalActions.map(a => a.type === 'bet' || a.type === 'raise' ? { type: a.type, minimum: a.minimum, maximum: a.maximum } : { type: a.type }),
+        ...(view.state.amountToCall !== undefined ? { amountToCall: view.state.amountToCall } : {}),
         ...(view.state.handId ? { handId: view.state.handId, decisionId: view.state.decisionId, street: view.state.street, smallBlindParticipantId: view.state.smallBlindParticipantId, bigBlindParticipantId: view.state.bigBlindParticipantId,
           returns: view.state.returns?.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: view.state.payouts?.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}),
       },

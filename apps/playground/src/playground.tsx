@@ -126,6 +126,7 @@ export function Playground() {
             return <li key={index}><span>Seat {index + 1}</span><strong>{binding?.name ?? 'Empty'}</strong>{participant && <>
               <span>{participant.stack} chips{participant.sittingOut ? ' · Sitting out' : ''}{participant.allIn ? ' · All-in' : participant.folded ? ' · Folded' : ''}</span>
               {participant.contribution !== undefined && <span>Committed {participant.contribution} chips</span>}
+              {participant.anteContribution !== undefined && <span>Ante {participant.anteContribution} chips</span>}
               {participant.wager !== undefined && <span>Street wager {participant.wager} chips</span>}
               {participant.holeCards ? <span className="cards" aria-label="Hole cards">{participant.holeCards.join(' ')}</span> : participant.cardCount ? <span>{participant.cardCount} hidden cards</span> : null}
             </>}</li>;
