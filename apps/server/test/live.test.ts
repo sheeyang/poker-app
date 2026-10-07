@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ObservableTableUpdate, type TableLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import type { TableSessionControllerCommands } from '../src/mutations.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -13,16 +14,17 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
+let controllers: TableSessionControllerCommands;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
+  server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() }, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
-async function table() {
+async function table(configuration?: { maximumBuyIn: number }) {
   const identity = await fetch(base + '/api/identity');
   const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
-  const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
+  const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await response.json();
   return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
 }
@@ -47,7 +49,7 @@ test('a real connection receives the latest complete view for the owner’s boun
   live.socket.on('error', () => {});
   try {
     const update = await live.next(3);
-    expect(update).toMatchObject({ tableSessionId: t.id, pokerRevision: 3, sessionRevision: 3, presentationEvents: [], view: { state: { status: 'active-hand', actorId: t.human, legalActions: [{ type: 'fold' }] } } });
+    expect(update).toMatchObject({ tableSessionId: t.id, pokerRevision: 3, sessionRevision: 3, presentationEvents: [], view: { state: { status: 'active-hand', actorId: t.human, legalActions: expect.arrayContaining([{ type: 'fold' }]) } } });
     expect(update.view.state.participants[0]?.holeCards).toHaveLength(2);
     expect(update.view.state.participants[1]).not.toHaveProperty('holeCards');
     expect(update.view).not.toHaveProperty('sessionRevision');
@@ -145,4 +147,63 @@ test('lost COMMIT confirmation publishes recovery feedback independently of unch
       await expect.poll(() => reconnected.messages.find(m => m.type === 'table-status')).toMatchObject({ status: { phase: 'recovering' } });
     } finally { reconnected.socket.terminate(); }
   } finally { afterCommit = async () => {}; live.socket.terminate(); }
+});
+test('committed management commands automatically synchronize their complete views and explicit safe presentation events', async () => {
+  const t = await table({ maximumBuyIn: 2000 });
+  const live = connect(t);
+  try {
+    await live.next(0);
+    const steps = [
+      ['seat-participant', { participantId: t.human, seat: 1 }, { type: 'participant-seated', participantId: t.human, seat: 1, buyIn: 1000 }],
+      ['seat-participant', { participantId: t.bot, seat: 4 }, { type: 'participant-seated', participantId: t.bot, seat: 4, buyIn: 1000 }],
+      ['top-up-to', { participantId: t.human, targetStack: 1500 }, { type: 'participant-topped-up', participantId: t.human, targetStack: 1500, amount: 500 }],
+      ['move-participant', { participantId: t.bot, seat: 2 }, { type: 'participant-moved', participantId: t.bot, fromSeat: 4, seat: 2 }],
+      ['set-sitting-out', { participantId: t.bot, sittingOut: true }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: true }],
+      ['set-sitting-out', { participantId: t.bot, sittingOut: false }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: false }],
+      ['set-button', { seat: 1 }, { type: 'button-set', seat: 1 }],
+      ['leave-participant', { participantId: t.bot }, { type: 'participant-left', participantId: t.bot, seat: 2, cashOut: 1000 }],
+    ] as const;
+    for (let index = 0; index < steps.length; index++) {
+      const [kind, contents, event] = steps[index]!;
+      expect((await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: index, ...contents })).status).toBe(200);
+      const update = await live.next(index + 1);
+      expect(update.presentationEvents).toEqual([event]);
+      expect(update.view).toEqual((await read(t)).view);
+    }
+    expect((await live.next(8)).view.state.participants).toEqual([
+      { participantId: t.human, seat: 1, stack: 1500, sittingOut: false },
+      { participantId: t.bot, seat: null, stack: 0, sittingOut: false },
+    ]);
+  } finally { live.socket.terminate(); }
+});
+test('trusted controller Check and human Call share committed publication, burn events omit identities, and Showdown alone reveals live cards', async () => {
+  const t = await table();
+  await submit(t, 'seat-participant', { requestId: 'human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+  await submit(t, 'seat-participant', { requestId: 'bot', expectedPokerRevision: 1, participantId: t.bot, seat: 4 });
+  await submit(t, 'start-hand', { requestId: 'start', expectedPokerRevision: 2 });
+  const live = connect(t);
+  try {
+    await live.next(3);
+    expect((await submit(t, 'act', { requestId: 'call', expectedPokerRevision: 3, participantId: t.human, action: { type: 'call' } })).status).toBe(200);
+    await live.next(4);
+    for (let revision = 4; revision < 11; revision++) {
+      const current = await live.next(revision);
+      const actor = current.view.state.actorId!;
+      const request = { requestId: randomUUID(), expectedPokerRevision: revision, participantId: actor, action: { type: 'check' as const } };
+      if (actor === t.bot) expect((await controllers.submitAction(t.id, request)).ok).toBe(true);
+      else expect((await submit(t, 'act', request)).status).toBe(200);
+      const update = await live.next(revision + 1);
+      if (revision + 1 < 11) expect(update.view.state.participants.find(p => p.participantId === t.bot)).not.toHaveProperty('holeCards');
+    }
+    const updates = live.messages.filter((message): message is ObservableTableUpdate => message.type === 'table-update');
+    const events = updates.flatMap(update => update.presentationEvents);
+    expect(events.filter(event => event.type === 'card-burned')).toEqual([{ type: 'card-burned', street: 'flop' }, { type: 'card-burned', street: 'turn' }, { type: 'card-burned', street: 'river' }]);
+    expect(events.filter(event => event.type === 'board-dealt').map(event => event.cards.length)).toEqual([3, 1, 1]);
+    expect(events.filter(event => event.type === 'hole-cards-revealed')).toHaveLength(2);
+    const completed = await live.next(11);
+    expect(completed.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
+    expect(completed.view.state.board).toHaveLength(5);
+    expect(completed.view.state.participants.every(p => p.holeCards?.length === 2)).toBe(true);
+    expect(JSON.stringify(updates)).not.toMatch(/"(?:seed|deck|burns|commands|ownerUserId|userId|schemaVersion|engineVersion)"\s*:/);
+  } finally { live.socket.terminate(); }
 });

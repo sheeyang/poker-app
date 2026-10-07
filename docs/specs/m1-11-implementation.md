@@ -26,19 +26,26 @@ closure refreshes the committed view and reconnects with bounded backoff.
 
 ## Approved seam evidence
 
-Validation on 7 October 2026 before the management/progression integration:
+Validation on 7 October 2026 after integration of management and heads-up
+progression through `implement/m1` commit `4b8a0f8`:
 
-- `pnpm check` passed the original 75-test workspace gate; the added recovery
-  status integration check subsequently passed with all five live tests and
-  workspace type checks.
+- `pnpm check` passed: 118 tests in 14 files, workspace type checks, server and
+  Playground production builds, and dependency boundary checks. A subsequent
+  `pnpm install --frozen-lockfile` also passed.
 - The real HTTP/WebSocket/PostgreSQL tests cover authenticated ownership versus
   supplied observer identity, physical opponent-card and hidden-record omission,
   latest authorized initial views, held/failed real transactions, fresh promoted
   views and presentation events, idempotent/rejected commands publishing nothing,
   disconnect submitting no command, reconnect across missed revisions, and
-  recovery feedback at unchanged gameplay revisions.
+  recovery feedback at unchanged gameplay revisions. All seven live tests pass.
+- Integrated management tests receive every committed top-up, move, sitting-out,
+  button, and leave event with its current full view. Integrated human Call and
+  trusted controller Check use the same postcommit publication point. Community
+  deals expose only public cards; all three burn events physically contain only
+  type/street, and Bot hole cards appear only at Showdown.
 - Isolated Chrome session `poker-m1-11` passed `scripts/smoke-live-browser.js`
-  against the real Fastify server, real PostgreSQL, and the local transport relay.
+  against the compiled Fastify production entry point, real PostgreSQL, and the
+  local transport relay. The final Chrome error-console check had no messages.
   The ordinary UI created a one-Bot table, seated both Participants, used Start
   Hand and Fold, and displayed settlement at revisions 4/4 with stacks 990/1010.
 - The relay dropped committed revision 2 while holding its acknowledgement. The
