@@ -5,6 +5,7 @@ import { api, RequestFailure } from './api.js';
 import { usePlayground } from './store.js';
 import { Seating } from './seating.js';
 import { Hand } from './hand.js';
+import { retainNewestTable, useTableSynchronization } from './live.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -24,7 +25,8 @@ export function Playground() {
   const [reopenId, setReopenId] = useState('');
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity, staleTime: Infinity });
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
-  const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: () => api.readSession(selectedId!), enabled: identity.isSuccess && !!selectedId });
+  const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: () => api.readSession(selectedId!), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
+  const live = useTableSynchronization(selectedId, identity.isSuccess);
   const creation = useMutation({
     mutationFn: api.createSession,
     onSuccess: async result => {
@@ -105,6 +107,11 @@ export function Playground() {
         {table.data ? <>
           <div className="table-heading"><h2>Table Session</h2><button onClick={() => void table.refetch()}>Refresh view</button></div>
           <p className="session-id">{table.data.tableSessionId}</p>
+          <div className="live-connection">
+            <p role="status">{live.connection === 'connected' ? 'Live updates connected' : live.connection === 'disconnected' ? 'Live updates disconnected. Refresh the view or reconnect.' : live.connection === 'reconnecting' ? 'Reconnecting live updates… The table will refresh automatically.' : 'Connecting live updates…'}</p>
+            <button onClick={live.connection === 'disconnected' ? live.reconnect : live.disconnect}>{live.connection === 'disconnected' ? 'Reconnect live updates' : 'Disconnect live updates'}</button>
+            {live.runtimeStatus?.phase !== undefined && live.runtimeStatus.phase !== 'idle' && <p role="status">{live.runtimeStatus.message ?? (live.runtimeStatus.phase === 'thinking' ? 'Bot thinking…' : live.runtimeStatus.phase === 'recovering' ? 'This session is paused pending durable recovery.' : 'Bot evaluation failed. Retry or change its Strategy.')}</p>}
+          </div>
           <dl className="table-facts">
             <div><dt>Blinds</dt><dd>{table.data.view.configuration.smallBlind} / {table.data.view.configuration.bigBlind}</dd></div>
             <div><dt>Ante</dt><dd>{table.data.view.configuration.ante}</dd></div>
@@ -123,6 +130,7 @@ export function Playground() {
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
           <Seating key={table.data.tableSessionId} table={table.data} />
+          <details className="presentation-events"><summary>Presentation events received: {live.eventCount}</summary><ul>{live.recentEvents.map((event, index) => <li key={index}>{event.type}</li>)}</ul></details>
           <h3>Participants</h3>
           <ul className="bindings">{table.data.bindings.map(binding => {
             const participant = table.data.view.state.participants.find(p => p.participantId === binding.participantId);

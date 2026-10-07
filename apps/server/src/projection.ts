@@ -1,5 +1,5 @@
-import type { ObservableTableSession, ParticipantBinding } from '@poker/contracts';
-import { CashGame } from '@poker/engine';
+import type { ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding } from '@poker/contracts';
+import { CashGame, type CashGameEvent } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
 export function projectBindings(bindings: readonly ParticipantBinding[]): ParticipantBinding[] {
   return bindings.map(b => ({
@@ -39,4 +39,18 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
       history: view.history.map(h => ({ handId: h.handId, description: h.description })),
     },
   };
+}
+export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, events: readonly CashGameEvent[] = []): ObservableTableUpdate {
+  const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
+    switch (event.type) {
+      case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
+      case 'hand-started': return { type: event.type, handId: event.handId, buttonSeat: event.buttonSeat, smallBlindParticipantId: event.smallBlindParticipantId, bigBlindParticipantId: event.bigBlindParticipantId };
+      case 'forced-contribution': return { type: event.type, participantId: event.participantId, kind: event.kind, amount: event.amount };
+      case 'hole-cards-dealt': return { type: event.type, participantId: event.participantId, cardCount: event.cardCount, ...(event.cards ? { cards: [...event.cards] } : {}) };
+      case 'acted': return { type: event.type, participantId: event.participantId, action: event.action.type === 'bet' ? { type: 'bet', betTo: event.action.betTo } : event.action.type === 'raise' ? { type: 'raise', raiseTo: event.action.raiseTo } : { type: event.action.type } };
+      case 'uncalled-return': case 'pot-awarded': return { type: event.type, participantId: event.participantId, amount: event.amount };
+      case 'hand-completed': return { type: event.type, handId: event.handId };
+    }
+  });
+  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game), presentationEvents };
 }
