@@ -27,7 +27,7 @@ pnpm check
 pnpm --filter @poker/server start
 ```
 
-`pnpm check` typechecks all packages, runs public engine and real localhost HTTP/PostgreSQL tests, builds the server and Playground, and checks workspace dependency directions. Tests require `TEST_DATABASE_URL` and create/drop a uniquely named PostgreSQL schema per test file; they do not modify development Table Sessions. The compiled server includes its SQL initialization asset and can run with `pnpm --filter @poker/server start` after `pnpm build`.
+`pnpm check` typechecks all packages, runs public engine and real localhost HTTP/WebSocket/PostgreSQL tests, builds the server and Playground, and checks workspace dependency directions. Tests require `TEST_DATABASE_URL` and create/drop a uniquely named PostgreSQL schema per test file; they do not modify development Table Sessions. The compiled server includes its SQL initialization asset and can run with `pnpm --filter @poker/server start` after `pnpm build`.
 
 The frontend development command is `pnpm --filter @poker/playground dev`; the backend command is `pnpm --filter @poker/server dev`. Stop development with Ctrl+C. To stop PostgreSQL while keeping its persisted data, use `docker compose stop`.
 
@@ -73,3 +73,13 @@ Confirmed rollback discards the working fork without promoting its seats, stacks
 The Engine's private `#mutate` path evaluates an isolated complete draft, checks seat/identity/chip conservation, and atomically replaces state with one accepted command. Live table chips are bounded by `Number.MAX_SAFE_INTEGER`; exact BigInt sums validate that bound without making valid empty configurations depend on occupancy. The bankroll is the current chip balance, not cumulative gross buy-ins. `fork()` copies state and accepted history without recording a command; `toRecord()` exports detached immutable version-1 replay inputs, and `fromRecord()` validates and replays the complete command sequence before returning a usable game. Private draft and PostgreSQL test hooks can cause controlled failures but expose no draft data or HTTP endpoint.
 
 Future commands extend the Engine command/replay dispatch and private state, and the server's command validation/execution inside this acceptance service. They reuse the same queue, retained outcomes, transaction, revision update, and promotion rules.
+
+## Live synchronization
+
+`GET /api/table-sessions/:id/live` upgrades to WebSocket only for an authenticated Table Owner. The server binds the observer to that owner's human Participant independently of any client-supplied ParticipantId. On connection it sends the latest complete committed view with `tableSessionId`, `pokerRevision`, `sessionRevision`, safe controller bindings, and an empty `presentationEvents` array. Subsequent `table-update` messages publish complete views and explicitly projected events only after confirmed commit and promotion. Connections retain identity bindings rather than live CashGame or participant facade objects.
+
+The Playground orders both HTTP reads and WebSocket snapshots by `sessionRevision` through the same React Query guard. Older and duplicate snapshots cannot replace newer gameplay facts or replay their events; a newer full view is sufficient across missing revisions. Reconnection uses the current complete view without replaying missed animations. Transient `table-status` messages carry thinking/failure/recovery feedback separately, so unchanged durable revisions do not hide that feedback. Lost COMMIT confirmation publishes a recovery status while preserving the last confirmed gameplay view.
+
+The Playground shows live connection status and offers explicit disconnect/reconnect controls. Closing the live connection submits no poker command and leaves valid HTTP action controls available. Unexpected closure triggers automatic reconnection and a guarded HTTP refresh. Selecting another table closes the previous subscription. Presentation-event counts are engineering diagnostics; cards, stacks, pots, and actor come entirely from the latest complete view.
+
+For concurrent local development, `POKER_API_TARGET` can override the Vite proxy target while a server's `PORT` and Vite's `--port` select separate listening ports. The real transport browser fault fixture and reproducible smoke command are documented in [M1-11 implementation evidence](docs/specs/m1-11-implementation.md).
