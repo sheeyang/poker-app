@@ -21,7 +21,7 @@ dependency graph below, with one ticket branch/worktree per slice.
 | [#7](https://github.com/sheeyang/poker-app/issues/7) | Multiway play and antes | #6 | In progress |
 | [#8](https://github.com/sheeyang/poker-app/issues/8) | All-ins and layered payouts | #7 | Pending |
 | [#9](https://github.com/sheeyang/poker-app/issues/9) | Cumulative short-all-in reopening | #8 | Pending |
-| [#10](https://github.com/sheeyang/poker-app/issues/10) | Played-session restart and history | #4 | In progress |
+| [#10](https://github.com/sheeyang/poker-app/issues/10) | Played-session restart and history | #4 | Complete: `a3b9b2b`, 135 tests, browser/checks |
 | [#11](https://github.com/sheeyang/poker-app/issues/11) | WebSocket reconnect synchronization | #3 | Complete: `ac7943e`, 118 tests, browser/checks |
 | [#12](https://github.com/sheeyang/poker-app/issues/12) | Baseline Bots and JobRunner | #9, #10, #11 | Pending |
 | [#13](https://github.com/sheeyang/poker-app/issues/13) | Bot retry and Strategy replacement | #12 | Pending |
