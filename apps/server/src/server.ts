@@ -1,14 +1,14 @@
 import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
-import type { CreateTableSessionRequest } from '@poker/contracts';
+import { eq } from 'drizzle-orm';
+import type { CreateTableSessionRequest, SeatParticipantRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
-import { projectTableSession } from './projection.js';
+import { createTableSessionMutations, type MutationTransactionFaults } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
@@ -31,6 +31,7 @@ export async function createServer(options: ServerOptions) {
     return id;
   }
   const create = createTableSessionCreator(db, options.transactionFaults);
+  const mutations = createTableSessionMutations(db, options.mutationTransactionFaults);
   app.get('/api/identity', async (request, reply) => { await ensureIdentity(request, reply); return { ok: true }; });
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
     const ownerUserId = await ensureIdentity(request, reply);
@@ -54,12 +55,23 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    const rows = await db.select().from(tableSessions).where(and(eq(tableSessions.id, request.params.id), eq(tableSessions.ownerUserId, userId)));
-    const aggregate = rows[0]?.aggregate;
-    if (!aggregate) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
-    const participant = aggregate.bindings.find(b => b.controller.kind === 'human' && b.userId === userId);
-    if (!participant) throw new Error('Owned session has no bound human Participant.');
-    return projectTableSession(aggregate, participant.participantId);
+    const view = await mutations.read(request.params.id, userId);
+    if (!view) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
+    return view;
+  });
+  app.post<{ Params: { id: string }; Body: SeatParticipantRequest }>('/api/table-sessions/:id/seat-participant', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    try {
+      const outcome = await mutations.submit(request.params.id, userId, 'seat-participant', request.body);
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : outcome.rejection.code === 'session-recovering' ? 503 : ['request-id-conflict', 'stale-poker-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+    } catch (error) {
+      if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Seating could not be confirmed. Refresh the committed view before submitting another attempt.' } });
+    }
   });
   return app;
 }

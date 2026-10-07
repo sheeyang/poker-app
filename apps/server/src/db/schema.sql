@@ -15,3 +15,10 @@ CREATE TABLE IF NOT EXISTS creation_requests (
   outcome jsonb NOT NULL,
   PRIMARY KEY(user_id, request_id)
 );
+CREATE TABLE IF NOT EXISTS processed_requests (
+  table_session_id uuid NOT NULL REFERENCES table_sessions(id),
+  request_id text NOT NULL,
+  fingerprint text NOT NULL,
+  outcome jsonb NOT NULL,
+  PRIMARY KEY(table_session_id, request_id)
+);

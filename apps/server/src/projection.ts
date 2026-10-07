@@ -12,10 +12,13 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
     },
   }));
 }
-export function projectTableSession(aggregate: PersistedTableSession, participantId: string): ObservableTableSession {
-  const restored = CashGame.fromRecord(aggregate.pokerRecord);
-  if (!restored.ok) throw new Error('Committed CashGame record could not be restored.');
-  const view = restored.game.forParticipant(participantId).getView();
+export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game?: CashGame): ObservableTableSession {
+  if (!game) {
+    const restored = CashGame.fromRecord(aggregate.pokerRecord);
+    if (!restored.ok) throw new Error('Committed CashGame record could not be restored.');
+    game = restored.game;
+  }
+  const view = game.forParticipant(participantId).getView();
   const c = view.configuration;
   return {
     tableSessionId: aggregate.tableSessionId, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
