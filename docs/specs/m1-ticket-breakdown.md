@@ -2,7 +2,7 @@
 
 Source: [M1 — Playable engine, server, and Playground](m1-playable-engine-server-playground.md), the current six-milestone plan, and its accepted ADRs.
 
-Status: drafted for the to-tickets granularity/dependency review; GitHub publication follows approval. The source is a local spec and there is currently no parent tracker issue.
+Status: approved for implementation on 7 October 2026. Published as GitHub issues #1–#15 with native blocking relationships. The source is a local spec; there is no parent tracker issue. See [implementation status and evidence](m1-implementation.md).
 
 Each ticket is one narrow behavior spanning the engine or other server-side capability, durable aggregate/requests, Playground presentation, and behavioral tests. Establish the workspace as part of creating a usable table rather than a separate scaffolding ticket. No prefactor is needed in the current documentation-only repository.
 
@@ -12,7 +12,7 @@ Early play slices use trusted deterministic acceptance fixtures to drive other P
 
 Common acceptance for every delivered command: one semantic CashGame state owner; atomic rejection and defect isolation; accepted-command replay; server-owned revisions/request metadata; owner/controller authorization; idempotent definitive outcomes; commit before visible publication; physically safe DTOs; and no automatic next Hand.
 
-## Proposed tickets
+## Implementation tickets
 
 1. **Create an owned, persistent Table Session**
    - **Blocked by:** None (can start immediately).
@@ -119,4 +119,3 @@ M1 completes only when all 15 slices pass their acceptance criteria and the comb
 Review granularity (too coarse / too fine), genuine blocking edges, and any proposed merges or splits. Once approved, publish one ready-for-agent GitHub issue per ticket in topological order, substituting real issue references and native blocking relationships for draft ticket numbers. Source publication is not required for these self-contained issues; there is no parent issue to alter.
 
 The invoked to-tickets skill says: “Iterate until the user approves the breakdown.”
-
