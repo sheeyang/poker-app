@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { CashGame } from '@poker/engine';
-import type { ActRequest, MutationOutcome, PokerMutationRequest, SeatParticipantRequest } from '@poker/contracts';
+import type { ActRequest, MutationOutcome, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import type { PersistedTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { processedRequests, tableSessions } from './db/schema.js';
@@ -10,7 +10,7 @@ import { CommitOutcomeUnknown } from './creation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
-export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act';
+export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'leave-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
 /** Internal controller authority. No browser route receives this capability. */
 export interface TableSessionControllerCommands {
   submitAction(tableSessionId: string, request: ActRequest): Promise<MutationOutcome>;
@@ -28,7 +28,11 @@ function canonical(value: unknown): string {
 }
 const reject = (code: string, message: string): MutationOutcome => ({ ok: false, rejection: { code, message } });
 function applicationRejection(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
-  const fields = ['requestId', 'expectedPokerRevision', ...(kind === 'seat-participant' ? ['participantId', 'seat', 'buyIn'] : kind === 'act' ? ['participantId', 'action'] : [])];
+  const commandFields: Record<PokerMutationKind, readonly string[]> = {
+    'seat-participant': ['participantId', 'seat', 'buyIn'], 'start-hand': [], act: ['participantId', 'action'],
+    'leave-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'],
+  };
+  const fields = ['requestId', 'expectedPokerRevision', ...commandFields[kind]];
   if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
     return reject('invalid-mutation-request', 'Supply supported mutation fields and a nonnegative expectedPokerRevision.');
 }
@@ -84,7 +88,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
             if (!result && request.expectedPokerRevision !== session.aggregate.pokerRevision) result = reject('stale-poker-revision', 'The table changed. Refresh its committed view before submitting a new attempt.');
             const participantId = 'participantId' in request ? request.participantId : undefined;
             const binding = session.aggregate.bindings.find(binding => binding.participantId === participantId);
-            if (!result && kind !== 'start-hand' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
+            if (!result && kind !== 'start-hand' && kind !== 'set-button' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
             if (!result && kind === 'act' && (authority.kind === 'human'
               ? binding?.controller.kind !== 'human' || binding.userId !== authority.userId
               : binding?.controller.kind !== 'bot')) result = reject('actor-not-authorized', authority.kind === 'human'
@@ -92,9 +96,18 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
                 : 'Trusted controller commands can act only through a bound Bot.');
             if (!result) {
               const working = session.game.fork();
-              const accepted = kind === 'start-hand' ? working.startHand() : kind === 'act'
-                ? working.act((request as ActRequest).participantId, (request as ActRequest).action)
-                : working.seatParticipant((request as SeatParticipantRequest).participantId, (request as SeatParticipantRequest).seat, (request as SeatParticipantRequest).buyIn);
+              const accepted = (() => {
+                switch (kind) {
+                  case 'start-hand': return working.startHand();
+                  case 'act': return working.act((request as ActRequest).participantId, (request as ActRequest).action);
+                  case 'seat-participant': return working.seatParticipant((request as SeatParticipantRequest).participantId, (request as SeatParticipantRequest).seat, (request as SeatParticipantRequest).buyIn);
+                  case 'leave-participant': return working.leaveParticipant((request as LeaveParticipantRequest).participantId);
+                  case 'move-participant': return working.moveParticipant((request as MoveParticipantRequest).participantId, (request as MoveParticipantRequest).seat);
+                  case 'set-sitting-out': return working.setSittingOut((request as SetSittingOutRequest).participantId, (request as SetSittingOutRequest).sittingOut);
+                  case 'top-up-to': return working.topUpTo((request as TopUpToRequest).participantId, (request as TopUpToRequest).targetStack);
+                  case 'set-button': return working.setButton((request as SetButtonRequest).seat);
+                }
+              })();
               if (!accepted.ok) result = { ok: false, rejection: accepted.rejection };
               else {
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord: working.toRecord(), pokerRevision: session.aggregate.pokerRevision + 1, sessionRevision: session.aggregate.sessionRevision + 1 };

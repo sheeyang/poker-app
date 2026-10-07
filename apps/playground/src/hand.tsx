@@ -7,6 +7,7 @@ export function Hand({ table }: { table: ObservableTableSession }) {
   const queryClient = useQueryClient();
   const pending = usePlayground(state => state.pendingHand);
   const seating = usePlayground(state => state.pendingSeating);
+  const management = usePlayground(state => state.pendingManagement);
   const setPending = usePlayground(state => state.setPendingHand);
   const ownPending = pending?.tableSessionId === table.tableSessionId ? pending : null;
   const state = table.view.state;
@@ -29,7 +30,7 @@ export function Hand({ table }: { table: ObservableTableSession }) {
     setPending(attempt); mutation.mutate(attempt);
   }
   const eligible = state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).length;
-  const busy = mutation.isPending || !!pending || !!seating;
+  const busy = mutation.isPending || !!pending || !!seating || !!management;
   const pot = state.status === 'active-hand' ? state.participants.reduce((sum, p) => sum + (p.contribution ?? 0), 0) : state.pots.reduce((sum, p) => sum + p.amount, 0);
   const ownFacts = state.participants.find(p => p.participantId === human.participantId);
   const price = Math.max(state.street === 'preflop' ? table.view.configuration.bigBlind : 0, ...state.participants.map(p => p.wager ?? 0));
