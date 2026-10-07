@@ -24,6 +24,8 @@ decks, derived seeds, burns, RNG state, events, or application revisions.
 configuration, non-plain data, malformed commands, and semantically rejected
 suffixes. It validates final invariants and returns a structured `invalid-record`
 failure without a usable prefix, including when reconstruction throws.
+Trusted construction rejects unsupported configuration fields so a successfully
+created game's export always has the same supported replay format.
 
 The server checks ownership before reconstructing a cold cached session and
 deduplicates reconstruction across authorized reads and trusted controllers.
@@ -55,7 +57,11 @@ Validation on 7–8 October 2026:
   connection and React DevTools notices. Assigned processes stopped and the
   isolated browser schema was removed.
 
-The implementation merged integration `6e34b81`, including Check/Call/showdown
-and live synchronization. `pnpm check` passed with 126 tests in 16 files,
+The implementation merged integration `775913e`, including Check/Call/showdown,
+live synchronization, and exact Bet/Raise sizing. An added public fixture locks
+Raise-to 53 and Bet-to 31 through complete replay, preserving original full
+raise minimums and Bet bounds (947 chips before later play reduces the current
+maximum to 916). Historical views exclude later sizing and rejected malformed
+sized suffixes return no usable game. `pnpm check` passed with 135 tests in 18 files,
 workspace type checks, both production builds, and dependency boundary checks.
 The frozen lockfile installation and `git diff --check` also passed.
