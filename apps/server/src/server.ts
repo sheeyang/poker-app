@@ -6,10 +6,10 @@ import { eq } from 'drizzle-orm';
 import type { CreateTableSessionRequest, PokerMutationRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
-import { createTableSessionMutations, type MutationTransactionFaults } from './mutations.js';
+import { createTableSessionMutations, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
@@ -34,6 +34,7 @@ export async function createServer(options: ServerOptions) {
   }
   const create = createTableSessionCreator(db, options.transactionFaults);
   const mutations = createTableSessionMutations(db, options.mutationTransactionFaults);
+  options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/live', {
     websocket: true,
@@ -83,7 +84,7 @@ export async function createServer(options: ServerOptions) {
     if (!view) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
     return view;
   });
-  for (const kind of ['seat-participant', 'start-hand', 'act'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+  for (const kind of ['seat-participant', 'start-hand', 'act', 'leave-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });

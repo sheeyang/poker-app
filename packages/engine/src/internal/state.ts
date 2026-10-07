@@ -11,6 +11,7 @@ export interface HandParticipantState {
   folded: boolean;
   allIn: boolean;
   revealed: boolean;
+  actedAtPrice: number | null;
 }
 export interface PotState { amount: number; eligibleParticipantIds: ParticipantId[] }
 export interface ChipTransfer { participantId: ParticipantId; amount: number }
@@ -21,6 +22,8 @@ export interface HandState {
   buttonSeat: number;
   smallBlindParticipantId: ParticipantId;
   bigBlindParticipantId: ParticipantId;
+  /** Seated observers include sitting-out Participants; absent identities gain no history. */
+  observerParticipantIds: ParticipantId[];
   participants: HandParticipantState[];
   deck: string[];
   drawnCardCount: number;
@@ -41,6 +44,7 @@ export interface HandState {
 export interface CashGameState {
   status: 'between-hands' | 'active-hand' | 'completed-hand';
   buttonSeat: number;
+  nextButtonSeat: number | null;
   participants: ParticipantState[];
   hands: HandState[];
   commands: CashGameCommand[];

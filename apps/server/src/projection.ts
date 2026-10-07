@@ -44,10 +44,18 @@ export function projectTableUpdate(aggregate: PersistedTableSession, participant
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
       case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
+      case 'participant-left': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
+      case 'participant-moved': return { type: event.type, participantId: event.participantId, fromSeat: event.fromSeat, seat: event.seat };
+      case 'sitting-out-changed': return { type: event.type, participantId: event.participantId, sittingOut: event.sittingOut };
+      case 'participant-topped-up': return { type: event.type, participantId: event.participantId, targetStack: event.targetStack, amount: event.amount };
+      case 'button-set': return { type: event.type, seat: event.seat };
       case 'hand-started': return { type: event.type, handId: event.handId, buttonSeat: event.buttonSeat, smallBlindParticipantId: event.smallBlindParticipantId, bigBlindParticipantId: event.bigBlindParticipantId };
       case 'forced-contribution': return { type: event.type, participantId: event.participantId, kind: event.kind, amount: event.amount };
       case 'hole-cards-dealt': return { type: event.type, participantId: event.participantId, cardCount: event.cardCount, ...(event.cards ? { cards: [...event.cards] } : {}) };
       case 'acted': return { type: event.type, participantId: event.participantId, action: event.action.type === 'bet' ? { type: 'bet', betTo: event.action.betTo } : event.action.type === 'raise' ? { type: 'raise', raiseTo: event.action.raiseTo } : { type: event.action.type } };
+      case 'card-burned': return { type: event.type, street: event.street };
+      case 'board-dealt': return { type: event.type, street: event.street, cards: [...event.cards] };
+      case 'hole-cards-revealed': return { type: event.type, participantId: event.participantId, cards: [...event.cards] };
       case 'uncalled-return': case 'pot-awarded': return { type: event.type, participantId: event.participantId, amount: event.amount };
       case 'hand-completed': return { type: event.type, handId: event.handId };
     }

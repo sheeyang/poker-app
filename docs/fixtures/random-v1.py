@@ -2,9 +2,11 @@
 import hashlib
 import hmac
 import json
+import sys
 
 message = json.dumps(["poker-random-v1", "deck", 1], ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-seed = hmac.new(b"heads-up-fixture", message, hashlib.sha256).digest()
+master_seed = sys.argv[1] if len(sys.argv) > 1 else "heads-up-fixture"
+seed = hmac.new(master_seed.encode("utf-8"), message, hashlib.sha256).digest()
 
 def words():
     for counter in range(2**64):

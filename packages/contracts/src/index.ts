@@ -56,10 +56,18 @@ export interface ObservableCashGameState {
 }
 export type ObservablePresentationEvent =
   | { readonly type: 'participant-seated'; readonly participantId: ParticipantId; readonly seat: number; readonly buyIn: ChipAmount }
+  | { readonly type: 'participant-left'; readonly participantId: ParticipantId; readonly seat: number; readonly cashOut: ChipAmount }
+  | { readonly type: 'participant-moved'; readonly participantId: ParticipantId; readonly fromSeat: number; readonly seat: number }
+  | { readonly type: 'sitting-out-changed'; readonly participantId: ParticipantId; readonly sittingOut: boolean }
+  | { readonly type: 'participant-topped-up'; readonly participantId: ParticipantId; readonly targetStack: ChipAmount; readonly amount: ChipAmount }
+  | { readonly type: 'button-set'; readonly seat: number }
   | { readonly type: 'hand-started'; readonly handId: HandId; readonly buttonSeat: number; readonly smallBlindParticipantId: ParticipantId; readonly bigBlindParticipantId: ParticipantId }
   | { readonly type: 'forced-contribution'; readonly participantId: ParticipantId; readonly kind: 'ante' | 'small-blind' | 'big-blind'; readonly amount: ChipAmount }
   | { readonly type: 'hole-cards-dealt'; readonly participantId: ParticipantId; readonly cardCount: number; readonly cards?: readonly Card[] }
   | { readonly type: 'acted'; readonly participantId: ParticipantId; readonly action: ConcreteAction }
+  | { readonly type: 'card-burned'; readonly street: 'flop' | 'turn' | 'river' }
+  | { readonly type: 'board-dealt'; readonly street: 'flop' | 'turn' | 'river'; readonly cards: readonly Card[] }
+  | { readonly type: 'hole-cards-revealed'; readonly participantId: ParticipantId; readonly cards: readonly Card[] }
   | { readonly type: 'uncalled-return' | 'pot-awarded'; readonly participantId: ParticipantId; readonly amount: ChipAmount }
   | { readonly type: 'hand-completed'; readonly handId: HandId };
 export interface ObservableHistoryEntry {
@@ -109,11 +117,18 @@ export interface SeatParticipantRequest extends PokerMutationMetadata {
   readonly buyIn?: ChipAmount;
 }
 export interface StartHandRequest extends PokerMutationMetadata {}
+export interface LeaveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
+export interface MoveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly seat: number }
+export interface SetSittingOutRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly sittingOut: boolean }
+export interface TopUpToRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly targetStack: ChipAmount }
+export interface SetButtonRequest extends PokerMutationMetadata { readonly seat: number }
+export type ParticipantManagementRequest = LeaveParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest;
+export type ParticipantManagementKind = 'leave-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
 export interface ActRequest extends PokerMutationMetadata {
   readonly participantId: ParticipantId;
   readonly action: ConcreteAction;
 }
-export type PokerMutationRequest = SeatParticipantRequest | StartHandRequest | ActRequest;
+export type PokerMutationRequest = SeatParticipantRequest | StartHandRequest | ActRequest | ParticipantManagementRequest;
 /** A durable outcome contains no complete view; read the current view separately. */
 export interface MutationAcknowledgement {
   readonly ok: true;
