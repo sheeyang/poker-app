@@ -73,6 +73,13 @@ export type ObservablePresentationEvent =
 export interface ObservableHistoryEntry {
   readonly handId: string;
   readonly description: string;
+  /** Decisions retain their original visibility; the accepted action is public information. */
+  readonly decisions: readonly {
+    readonly decisionId: DecisionId;
+    readonly state: ObservableCashGameState;
+    readonly action: { readonly participantId: ParticipantId; readonly action: ConcreteAction };
+  }[];
+  readonly result?: ObservableCashGameState;
 }
 export type ObservableSessionHistory = readonly ObservableHistoryEntry[];
 export interface ObservableGameView {

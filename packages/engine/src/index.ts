@@ -1,4 +1,4 @@
-import type { ConcreteAction, LegalAction, ObservableGameConfiguration, ObservableGameView, ObservablePresentationEvent, ParticipantId } from '@poker/contracts';
+import type { ConcreteAction, LegalAction, ObservableGameConfiguration, ObservableGameView, ObservableHistoryEntry, ObservablePresentationEvent, ParticipantId } from '@poker/contracts';
 import { draftFaults } from './internal/draft-faults.js';
 import type { CashGameState, HandState } from './internal/state.js';
 import { shuffledDeck } from './internal/random.js';
@@ -69,6 +69,7 @@ function configurationRejection(configuration: GameConfiguration): CashGameRejec
     return reject('defaultBuyIn', 'Buy-in limits must be ordered minimum, default, maximum.');
   if (typeof configuration.allowSeatChanges !== 'boolean') return reject('allowSeatChanges', 'Seat-change policy must be a boolean.');
   if (typeof configuration.seed !== 'string' || configuration.seed.length === 0) return reject('seed', 'Trusted construction requires an explicit nonempty master seed.');
+  if (!plainFields(configuration, ['seatCount', 'smallBlind', 'bigBlind', 'ante', 'minimumBuyIn', 'defaultBuyIn', 'maximumBuyIn', 'allowSeatChanges', 'seed'])) return reject('configuration', 'Supply only the complete supported Game Configuration fields.');
 }
 function immutable<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -81,6 +82,56 @@ function projectAction(action: ConcreteAction): ConcreteAction {
   if (action.type === 'bet') return { type: 'bet', betTo: action.betTo };
   if (action.type === 'raise') return { type: 'raise', raiseTo: action.raiseTo };
   return { type: action.type };
+}
+function plainFields(value: unknown, fields: readonly string[]): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length === fields.length && keys.every(key => typeof key === 'string' && fields.includes(key)
+    && Object.getOwnPropertyDescriptor(value, key)?.enumerable && 'value' in Object.getOwnPropertyDescriptor(value, key)!);
+}
+function plainCommandArray(value: unknown): value is readonly CashGameCommand[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length === value.length + 1 && keys.every(key => {
+    if (key === 'length') return true;
+    if (typeof key !== 'string') return false;
+    const index = Number(key);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    return Number.isInteger(index) && index >= 0 && index < value.length && String(index) === key && descriptor.enumerable && 'value' in descriptor;
+  });
+}
+/** Shared replay dispatch uses the same validated intentions as normal play. */
+function replayCommand(game: CashGame, command: CashGameCommand): CashGameResult | undefined {
+  if (!command || typeof command !== 'object' || Array.isArray(command)) return;
+  switch (command.type) {
+    case 'seat-participant':
+      if (!plainFields(command, ['type', 'participantId', 'seat', 'buyIn']) || !Number.isSafeInteger(command.buyIn)) return;
+      return game.seatParticipant(command.participantId, command.seat, command.buyIn);
+    case 'start-hand':
+      if (!plainFields(command, ['type'])) return;
+      return game.startHand();
+    case 'leave-participant':
+      if (!plainFields(command, ['type', 'participantId'])) return;
+      return game.leaveParticipant(command.participantId);
+    case 'move-participant':
+      if (!plainFields(command, ['type', 'participantId', 'seat'])) return;
+      return game.moveParticipant(command.participantId, command.seat);
+    case 'set-sitting-out':
+      if (!plainFields(command, ['type', 'participantId', 'sittingOut'])) return;
+      return game.setSittingOut(command.participantId, command.sittingOut);
+    case 'top-up-to':
+      if (!plainFields(command, ['type', 'participantId', 'targetStack'])) return;
+      return game.topUpTo(command.participantId, command.targetStack);
+    case 'set-button':
+      if (!plainFields(command, ['type', 'seat'])) return;
+      return game.setButton(command.seat);
+    case 'act':
+      if (!plainFields(command, ['type', 'participantId', 'action'])) return;
+      if (!plainFields(command.action, command.action?.type === 'bet' ? ['type', 'betTo'] : command.action?.type === 'raise' ? ['type', 'raiseTo'] : ['type'])) return;
+      return game.act(command.participantId, command.action);
+  }
 }
 function validateState(state: CashGameState, configuration: GameConfiguration): void {
   const identities = new Set<string>();
@@ -107,9 +158,10 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
   if (bankroll > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Chip capacity invariant failed.');
   if (bankroll !== BigInt(state.bankroll)) throw new Error('Chip conservation invariant failed.');
 }
+export interface ParticipantViewOptions { readonly at: { readonly decisionId: string } }
 export class ParticipantCashGame {
-  constructor(private readonly read: () => ObservableGameView, private readonly project: (events: readonly CashGameEvent[]) => readonly ObservablePresentationEvent[]) {}
-  getView(): ObservableGameView { return this.read(); }
+  constructor(private readonly read: (options?: ParticipantViewOptions) => ObservableGameView, private readonly project: (events: readonly CashGameEvent[]) => readonly ObservablePresentationEvent[]) {}
+  getView(options?: ParticipantViewOptions): ObservableGameView { return this.read(options); }
   projectEvents(events: readonly CashGameEvent[]): readonly ObservablePresentationEvent[] { return this.project(events); }
 }
 export class CashGame {
@@ -124,54 +176,21 @@ export class CashGame {
 
   static fromRecord(record: unknown): CashGameConstructionResult {
     const invalid = (): CashGameConstructionResult => ({ ok: false, rejection: { code: 'invalid-record', message: 'The complete record must use supported versions and valid accepted commands.' } });
-    if (!record || typeof record !== 'object') return invalid();
-    const r = record as Partial<TableSessionRecord>;
-    if (Object.keys(r).some(key => !['schemaVersion', 'engineVersion', 'configuration', 'commands'].includes(key)) || r.schemaVersion !== 1 || r.engineVersion !== 'v1' || !Array.isArray(r.commands) || !r.configuration)
-      return invalid();
-    const result = CashGame.create(r.configuration);
-    if (!result.ok) return invalid();
-    for (const command of r.commands) {
-      if (!command || typeof command !== 'object') return invalid();
-      let accepted: CashGameResult;
-      switch (command.type) {
-        case 'seat-participant':
-          if (Object.keys(command).sort().join(',') !== 'buyIn,participantId,seat,type' || !Number.isSafeInteger(command.buyIn)) return invalid();
-          accepted = result.game.seatParticipant(command.participantId, command.seat, command.buyIn);
-          break;
-        case 'start-hand':
-          if (Object.keys(command).join(',') !== 'type') return invalid();
-          accepted = result.game.startHand();
-          break;
-        case 'leave-participant':
-          if (Object.keys(command).sort().join(',') !== 'participantId,type') return invalid();
-          accepted = result.game.leaveParticipant(command.participantId);
-          break;
-        case 'move-participant':
-          if (Object.keys(command).sort().join(',') !== 'participantId,seat,type') return invalid();
-          accepted = result.game.moveParticipant(command.participantId, command.seat);
-          break;
-        case 'set-sitting-out':
-          if (Object.keys(command).sort().join(',') !== 'participantId,sittingOut,type') return invalid();
-          accepted = result.game.setSittingOut(command.participantId, command.sittingOut);
-          break;
-        case 'top-up-to':
-          if (Object.keys(command).sort().join(',') !== 'participantId,targetStack,type') return invalid();
-          accepted = result.game.topUpTo(command.participantId, command.targetStack);
-          break;
-        case 'set-button':
-          if (Object.keys(command).sort().join(',') !== 'seat,type') return invalid();
-          accepted = result.game.setButton(command.seat);
-          break;
-        case 'act':
-          if (Object.keys(command).sort().join(',') !== 'action,participantId,type') return invalid();
-          accepted = result.game.act(command.participantId, command.action);
-          break;
-        default: return invalid();
+    try {
+      if (!plainFields(record, ['schemaVersion', 'engineVersion', 'configuration', 'commands'])) return invalid();
+      const r = record as TableSessionRecord;
+      if (r.schemaVersion !== 1 || r.engineVersion !== 'v1' || !plainCommandArray(r.commands)) return invalid();
+      if (!plainFields(r.configuration, ['seatCount', 'smallBlind', 'bigBlind', 'ante', 'minimumBuyIn', 'defaultBuyIn', 'maximumBuyIn', 'allowSeatChanges', 'seed'])) return invalid();
+      const result = CashGame.create(r.configuration);
+      if (!result.ok) return invalid();
+      for (const command of r.commands) {
+        if (!replayCommand(result.game, command)?.ok) return invalid();
       }
-      if (!accepted.ok) return invalid();
+      validateState(result.game.#state, result.game.#configuration);
+      return result;
+    } catch {
+      return invalid();
     }
-    validateState(result.game.#state, result.game.#configuration);
-    return result;
   }
   fork(): CashGame {
     const fork = new CashGame(this.#configuration);
@@ -385,23 +404,7 @@ export class CashGame {
     return result;
   }
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
-    return new ParticipantCashGame(() => {
-      const c = this.#configuration;
-      const hand = this.#state.hands.at(-1);
-      return immutable({
-        configuration: {
-          seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,
-          minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn,
-          allowSeatChanges: c.allowSeatChanges,
-        },
-        state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
-          const member = hand?.participants.find(member => member.participantId === p.participantId);
-          return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
-        }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId: hand?.actorId ?? null, legalActions: this.#legalActions(participantId),
-          ...(hand ? { handId: hand.handId, decisionId: hand.decisionId, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) },
-        history: this.#state.hands.filter(h => h.completed && h.observerParticipantIds.includes(participantId)).map(h => ({ handId: h.handId, description: 'Completed Hand ' + h.sequence })),
-      });
-    }, events => immutable(events.map(event => {
+    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.map(event => {
       switch (event.type) {
         case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
         case 'participant-left': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
@@ -420,6 +423,47 @@ export class CashGame {
         case 'hand-completed': return { type: event.type, handId: event.handId };
       }
     })));
+  }
+  #readView(participantId: ParticipantId, options?: ParticipantViewOptions): ObservableGameView {
+    // Rebuild derived observations from replay inputs. They never enter toRecord().
+    const replay = new CashGame(this.#configuration);
+    const history: { handId: string; description: string; decisions: ObservableHistoryEntry['decisions'][number][]; result?: ObservableHistoryEntry['result'] }[] = [];
+    for (const command of this.#state.commands) {
+      const before = replay.#state.hands.at(-1);
+      if (options && before?.decisionId === options.at.decisionId && before.observerParticipantIds.includes(participantId)) return replay.#snapshot(participantId, history);
+      const observes = before?.observerParticipantIds.includes(participantId);
+      const decision = command.type === 'act' && before?.decisionId && observes
+        ? { decisionId: before.decisionId, state: replay.#snapshot(participantId, []).state, action: { participantId: command.participantId, action: projectAction(command.action) } } : undefined;
+      if (!replayCommand(replay, command)?.ok) throw new Error('Accepted history could not be reconstructed.');
+      const hand = replay.#state.hands.at(-1);
+      if (hand?.observerParticipantIds.includes(participantId) && (decision || hand.completed && (hand.handId !== before?.handId || !before.completed))) {
+        let entry = history.find(h => h.handId === hand.handId);
+        if (!entry) { entry = { handId: hand.handId, description: 'Hand ' + hand.sequence, decisions: [] }; history.push(entry); }
+        if (decision) entry.decisions.push(decision);
+        if (hand.completed) { entry.description = 'Completed Hand ' + hand.sequence; entry.result = replay.#snapshot(participantId, []).state; }
+      }
+    }
+    const hand = replay.#state.hands.at(-1);
+    if (options && (hand?.decisionId !== options.at.decisionId || !hand.observerParticipantIds.includes(participantId))) throw new RangeError('This DecisionId was not observed by this Participant.');
+    return replay.#snapshot(participantId, history);
+  }
+  #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[]): ObservableGameView {
+    const c = this.#configuration;
+    const current = this.#state.hands.at(-1);
+    const hand = current?.observerParticipantIds.includes(participantId) ? current : undefined;
+    return immutable({
+      configuration: {
+        seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,
+        minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn,
+        allowSeatChanges: c.allowSeatChanges,
+      },
+      state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
+        const member = hand?.participants.find(member => member.participantId === p.participantId);
+        return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
+      }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId: hand?.actorId ?? null, legalActions: this.#legalActions(participantId),
+        ...(hand ? { handId: hand.handId, decisionId: hand.decisionId, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) },
+      history: structuredClone(history),
+    });
   }
   #legalActions(participantId: ParticipantId): LegalAction[] {
     const hand = this.#state.hands.at(-1);
