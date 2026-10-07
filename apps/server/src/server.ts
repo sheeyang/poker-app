@@ -1,5 +1,6 @@
 import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
+import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { CreateTableSessionRequest, PokerMutationRequest } from '@poker/contracts';
@@ -14,6 +15,7 @@ export async function createServer(options: ServerOptions) {
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
   await initializeDatabase(pool);
   await app.register(cookie);
+  await app.register(websocket);
   app.addHook('onClose', async () => { await pool.end(); });
   const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
   async function authenticatedUser(token: string | undefined) {
@@ -33,6 +35,28 @@ export async function createServer(options: ServerOptions) {
   const create = createTableSessionCreator(db, options.transactionFaults);
   const mutations = createTableSessionMutations(db, options.mutationTransactionFaults);
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction });
+  const socketOwners = new WeakMap<FastifyRequest, string>();
+  app.get<{ Params: { id: string } }>('/api/table-sessions/:id/live', {
+    websocket: true,
+    preValidation: async (request, reply) => {
+      const userId = await authenticatedUser(request.cookies.poker_local);
+      if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
+      if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !await mutations.read(request.params.id, userId))
+        return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
+      socketOwners.set(request, userId);
+    },
+  }, (socket, request) => {
+    let unsubscribe: (() => void) | undefined;
+    socket.on('close', () => unsubscribe?.());
+    socket.on('error', () => socket.close());
+    void mutations.subscribe(request.params.id, socketOwners.get(request)!, update => {
+      if (socket.readyState === 1) socket.send(JSON.stringify(update));
+    }).then(subscription => {
+      if (socket.readyState !== 1) subscription?.();
+      else if (!subscription) socket.close(1008, 'Table Session unavailable.');
+      else unsubscribe = subscription;
+    }).catch(() => socket.close(1011, 'The committed view could not be loaded.'));
+  });
   app.get('/api/identity', async (request, reply) => { await ensureIdentity(request, reply); return { ok: true }; });
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
     const ownerUserId = await ensureIdentity(request, reply);

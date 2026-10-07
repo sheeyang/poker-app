@@ -151,6 +151,18 @@ export interface ObservableTableSession {
   readonly bindings: readonly ParticipantBinding[];
   readonly view: ObservableGameView;
 }
+/** Every live update is a complete participant-safe snapshot of a committed aggregate. */
+export interface ObservableTableUpdate extends ObservableTableSession {
+  readonly type: 'table-update';
+  readonly presentationEvents: readonly ObservablePresentationEvent[];
+}
+/** Transient controller/recovery feedback does not advance a durable revision. */
+export interface TableRuntimeStatus {
+  readonly type: 'table-status';
+  readonly tableSessionId: TableSessionId;
+  readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string };
+}
+export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
   minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,
