@@ -5,6 +5,7 @@ import { api, RequestFailure } from './api.js';
 import { usePlayground } from './store.js';
 import { Seating } from './seating.js';
 import { Hand } from './hand.js';
+import { Management } from './management.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -116,17 +117,18 @@ export function Playground() {
             const participant = table.data.view.state.participants.find(p => p.seat === index + 1);
             const binding = table.data.bindings.find(b => b.participantId === participant?.participantId);
             return <li key={index}><span>Seat {index + 1}</span><strong>{binding?.name ?? 'Empty'}</strong>{participant && <>
-              <span>{participant.stack} chips{participant.allIn ? ' · All-in' : participant.folded ? ' · Folded' : ''}</span>
+              <span>{participant.stack} chips{participant.sittingOut ? ' · Sitting out' : ''}{participant.allIn ? ' · All-in' : participant.folded ? ' · Folded' : ''}</span>
               {participant.contribution !== undefined && <span>Committed {participant.contribution} chips</span>}
               {participant.holeCards ? <span className="cards" aria-label="Hole cards">{participant.holeCards.join(' ')}</span> : participant.cardCount ? <span>{participant.cardCount} hidden cards</span> : null}
             </>}</li>;
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
           <Seating key={table.data.tableSessionId} table={table.data} />
+          <Management key={'management-' + table.data.tableSessionId} table={table.data} />
           <h3>Participants</h3>
           <ul className="bindings">{table.data.bindings.map(binding => {
             const participant = table.data.view.state.participants.find(p => p.participantId === binding.participantId);
-            return <li key={binding.participantId}><strong>{binding.name}</strong><span>{binding.controller.kind === 'human' ? 'Human' : 'Bot · Uniform Choice'} · {participant?.seat ? `Seat ${participant.seat} · ${participant.stack} chips` : 'Unseated'}</span><code>{binding.participantId}</code></li>;
+            return <li key={binding.participantId}><strong>{binding.name}</strong><span>{binding.controller.kind === 'human' ? 'Human' : 'Bot · Uniform Choice'} · {participant?.seat ? `Seat ${participant.seat} · ${participant.stack} chips${participant.sittingOut ? ' · Sitting out' : ''}` : 'Unseated'}</span><code>{binding.participantId}</code></li>;
           })}</ul>
         </> : !table.isFetching && <div className="initial-state"><h2>Your table starts here</h2><p>Create a Table Session with the settings on the left, or reopen one you already own.</p></div>}
       </section>
