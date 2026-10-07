@@ -5,10 +5,10 @@ import { eq } from 'drizzle-orm';
 import type { CreateTableSessionRequest, PokerMutationRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
-import { createTableSessionMutations, type MutationTransactionFaults } from './mutations.js';
+import { createTableSessionMutations, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
@@ -32,6 +32,7 @@ export async function createServer(options: ServerOptions) {
   }
   const create = createTableSessionCreator(db, options.transactionFaults);
   const mutations = createTableSessionMutations(db, options.mutationTransactionFaults);
+  options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction });
   app.get('/api/identity', async (request, reply) => { await ensureIdentity(request, reply); return { ok: true }; });
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
     const ownerUserId = await ensureIdentity(request, reply);

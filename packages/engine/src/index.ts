@@ -3,7 +3,10 @@ import { draftFaults } from './internal/draft-faults.js';
 import type { CashGameState, HandState } from './internal/state.js';
 import { shuffledDeck } from './internal/random.js';
 import { contributionLayers } from './internal/pots.js';
+import { revealLiveHands, settleHand } from './internal/settlement.js';
 export { createRandomSource, deriveSeed } from './internal/random.js';
+export { rankHand, compareHandRanks } from './internal/ranking.js';
+export type { HandRank } from './internal/ranking.js';
 export type { ObservableGameConfiguration, ObservableGameView, ParticipantId } from '@poker/contracts';
 export interface HiddenGameConfiguration { readonly seed: string }
 export type GameConfiguration = ObservableGameConfiguration & HiddenGameConfiguration;
@@ -201,7 +204,7 @@ export class CashGame {
       const sequence = draft.hands.length + 1;
       const hand: HandState = { handId: 'hand-' + sequence, sequence, completed: false, buttonSeat: button.seat!, smallBlindParticipantId: smallBlind.participantId, bigBlindParticipantId: bigBlind.participantId,
         observerParticipantIds: draft.participants.filter(p => p.seat !== null).map(p => p.participantId),
-        participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, wager: 0, folded: false, allIn: false, revealed: false })),
+        participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
         deck: shuffledDeck(c.seed, sequence), drawnCardCount: 0, burns: [], board: [], street: 'preflop', actorId: null, decisionSequence: 0, decisionId: null, price: c.bigBlind, lastFullIncrement: c.bigBlind, pots: [], returns: [], payouts: [], actions: [] };
       draft.hands.push(hand); draft.status = 'active-hand'; draft.buttonSeat = button.seat!; draft.nextButtonSeat = null;
       const events: CashGameEvent[] = [{ type: 'hand-started', handId: hand.handId, buttonSeat: hand.buttonSeat, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId }];
@@ -230,39 +233,51 @@ export class CashGame {
     const hand = this.#state.hands.at(-1);
     if (!hand || hand.completed) return reject('no-active-hand', 'Start a Hand before acting.');
     if (hand.actorId !== participantId) return reject('wrong-actor', 'Only the current actor can act.');
-    if (!action || typeof action !== 'object' || action.type !== 'fold' || Object.keys(action).join(',') !== 'type' || !this.#legalActions(participantId).some(legal => legal.type === action.type)) return reject('illegal-action', 'Choose an action described by the current decision.');
-    return this.#mutate({ type: 'act', participantId, action: { type: 'fold' } }, draft => {
+    if (!action || typeof action !== 'object' || !['fold', 'check', 'call'].includes(action.type) || Object.keys(action).join(',') !== 'type' || !this.#legalActions(participantId).some(legal => legal.type === action.type)) return reject('illegal-action', 'Choose an action described by the current decision.');
+    const concrete = projectAction(action);
+    return this.#mutate({ type: 'act', participantId, action: concrete }, draft => {
       const current = draft.hands.at(-1)!;
       const member = current.participants.find(p => p.participantId === participantId)!;
-      member.folded = true;
-      current.actions.push({ participantId, action: { type: 'fold' } });
-      const events: CashGameEvent[] = [{ type: 'acted', participantId, action: { type: 'fold' } }];
+      if (concrete.type === 'fold') member.folded = true;
+      else if (concrete.type === 'call') {
+        const participant = draft.participants.find(p => p.participantId === participantId)!;
+        const amount = Math.min(current.price - member.wager, participant.stack);
+        participant.stack -= amount; member.wager += amount; member.contribution += amount;
+        member.allIn = participant.stack === 0;
+      }
+      member.actedAtPrice = current.price;
+      current.actions.push({ participantId, action: concrete });
+      const events: CashGameEvent[] = [{ type: 'acted', participantId, action: concrete }];
       const live = current.participants.filter(p => !p.folded);
-      const layers = contributionLayers(current);
-      current.pots = layers.pots;
+      current.pots = contributionLayers(current).pots;
       if (live.length === 1) {
-        current.returns = layers.returns;
-        for (const transfer of current.returns) {
-          draft.participants.find(p => p.participantId === transfer.participantId)!.stack += transfer.amount;
-          events.push({ type: 'uncalled-return', participantId: transfer.participantId, amount: transfer.amount });
-        }
-        for (const pot of current.pots) {
-          const winner = live[0]!;
-          if (!pot.eligibleParticipantIds.includes(winner.participantId)) throw new Error('A matched pot has no eligible live hand.');
-          draft.participants.find(p => p.participantId === winner.participantId)!.stack += pot.amount;
-          current.payouts.push({ participantId: winner.participantId, amount: pot.amount });
-          events.push({ type: 'pot-awarded', participantId: winner.participantId, amount: pot.amount });
-        }
-        current.completed = true; current.actorId = null; current.decisionId = null;
-        draft.status = 'completed-hand';
-        events.push({ type: 'hand-completed', handId: current.handId });
+        settleHand(draft, current, events, this.#configuration.seatCount);
       } else {
-        const seatCount = this.#configuration.seatCount;
-        current.actorId = live.filter(p => !p.allIn).sort((a, b) => ((a.seat - member.seat - 1 + seatCount) % seatCount) - ((b.seat - member.seat - 1 + seatCount) % seatCount))[0]?.participantId ?? null;
-        current.decisionId = current.actorId ? current.handId + '/decision-' + ++current.decisionSequence : null;
+        this.#continueBetting(draft, current, member.seat, events);
       }
       return events;
     });
+  }
+  #continueBetting(draft: CashGameState, hand: HandState, afterSeat: number, events: CashGameEvent[]): void {
+    const seatCount = this.#configuration.seatCount;
+    const able = hand.participants.filter(p => !p.folded && !p.allIn);
+    const awaiting = able.filter(p => p.wager < hand.price || (able.length > 1 && p.actedAtPrice === null));
+    if (awaiting.length > 0) {
+      hand.actorId = awaiting.sort((a, b) => ((a.seat - afterSeat - 1 + seatCount) % seatCount) - ((b.seat - afterSeat - 1 + seatCount) % seatCount))[0]!.participantId;
+      hand.decisionId = hand.handId + '/decision-' + ++hand.decisionSequence;
+      return;
+    }
+    if (able.length < 2) revealLiveHands(hand, events);
+    if (hand.street === 'river') { settleHand(draft, hand, events, seatCount); return; }
+    hand.street = hand.street === 'preflop' ? 'flop' : hand.street === 'flop' ? 'turn' : 'river';
+    hand.price = 0; hand.lastFullIncrement = this.#configuration.bigBlind;
+    for (const p of hand.participants) { p.wager = 0; p.actedAtPrice = null; }
+    hand.burns.push(hand.deck[hand.drawnCardCount++]!);
+    events.push({ type: 'card-burned', street: hand.street });
+    const cards = Array.from({ length: hand.street === 'flop' ? 3 : 1 }, () => hand.deck[hand.drawnCardCount++]!);
+    hand.board.push(...cards);
+    events.push({ type: 'board-dealt', street: hand.street, cards });
+    this.#continueBetting(draft, hand, hand.buttonSeat, events);
   }
   seatParticipant(participantId: ParticipantId, seat: number, buyIn = this.#configuration.defaultBuyIn): CashGameResult {
     const reject = (code: string, message: string, field?: string): CashGameResult => ({ ok: false, rejection: { code, message, ...(field ? { field } : {}) } });
@@ -383,6 +398,9 @@ export class CashGame {
         case 'forced-contribution': return { type: event.type, participantId: event.participantId, kind: event.kind, amount: event.amount };
         case 'hole-cards-dealt': return { type: event.type, participantId: event.participantId, cardCount: event.cardCount, ...(event.participantId === participantId && event.cards ? { cards: [...event.cards] } : {}) };
         case 'acted': return { type: event.type, participantId: event.participantId, action: projectAction(event.action) };
+        case 'card-burned': return { type: event.type, street: event.street };
+        case 'board-dealt': return { type: event.type, street: event.street, cards: [...event.cards] };
+        case 'hole-cards-revealed': return { type: event.type, participantId: event.participantId, cards: [...event.cards] };
         case 'uncalled-return': case 'pot-awarded': return { type: event.type, participantId: event.participantId, amount: event.amount };
         case 'hand-completed': return { type: event.type, handId: event.handId };
       }
@@ -390,6 +408,8 @@ export class CashGame {
   }
   #legalActions(participantId: ParticipantId): LegalAction[] {
     const hand = this.#state.hands.at(-1);
-    return hand && !hand.completed && hand.actorId === participantId ? [{ type: 'fold' }] : [];
+    if (!hand || hand.completed || hand.actorId !== participantId) return [];
+    const member = hand.participants.find(p => p.participantId === participantId)!;
+    return [{ type: 'fold' }, { type: member.wager < hand.price ? 'call' : 'check' }];
   }
 }
