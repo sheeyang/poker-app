@@ -66,3 +66,9 @@ computes test expectations.
 the existing price/full-increment facts for the sized-action extension. Full
 multiway/all-in readiness and layered/odd-chip acceptance coverage remain the
 planned M1-07/M1-08 work. There is no second rules state or mutable pot ledger.
+
+Integration validation: merged `implement/m1` at `449a9c9`, preserving M1-04's
+management commands, `observerParticipantIds`, `nextButtonSeat`, history, and
+pending-management UI guards. `pnpm check` passed with 111 tests in 13 files,
+all type checks, both production builds, and dependency boundaries. The ticket
+implementation is `cefba66`; the integration merge is `278465f`.
