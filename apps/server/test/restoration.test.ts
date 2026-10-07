@@ -85,7 +85,7 @@ test('restart resumes an exact human decision and between-Hand state across mana
   await command(t, 'top-up-to', { participantId: t.human, targetStack: 1500 });
   await command(t, 'set-button', { seat: 2 }); await command(t, 'start-hand');
   const decision = await read(t);
-  expect(decision).toMatchObject({ pokerRevision: 16, sessionRevision: 16, view: { state: { handId: 'hand-3', decisionId: 'hand-3/decision-1', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'call' }] } } });
+  expect(decision).toMatchObject({ pokerRevision: 16, sessionRevision: 16, view: { state: { handId: 'hand-3', decisionId: 'hand-3/decision-1', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1500 }] } } });
   expect(JSON.stringify(decision)).not.toMatch(/"(?:seed|deck|burns|commands|events|ownerUserId|userId|schemaVersion|engineVersion)"\s*:/);
   await server.close(); await startServer(); expect(await read(t)).toEqual(decision);
   expect(await liveView(t)).toEqual({ type: 'table-update', ...decision, presentationEvents: [] });

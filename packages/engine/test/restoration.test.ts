@@ -132,3 +132,30 @@ test('a full multi-Hand record restores facts, original decision visibility, reg
   expect(fork.toRecord()).toEqual(record);
   expect(() => { (record.commands as unknown[]).pop(); }).toThrow();
 });
+
+test('historical Bet/Raise bounds and exact accepted totals survive later sizing and complete record restoration', () => {
+  const cashGame = game(); cashGame.startHand();
+  const originalRaise = cashGame.forParticipant('alice').getView();
+  expect(originalRaise.state.legalActions).toContainEqual({ type: 'raise', minimum: 40, maximum: 1000 });
+  expect(cashGame.act('alice', { type: 'raise', raiseTo: 53 }).ok).toBe(true);
+  const response = cashGame.forParticipant('bob').getView();
+  expect(response.state.legalActions).toContainEqual({ type: 'raise', minimum: 86, maximum: 1000 });
+  expect(cashGame.act('bob', { type: 'call' }).ok).toBe(true);
+  const originalBet = cashGame.forParticipant('bob').getView();
+  expect(originalBet.state.legalActions).toContainEqual({ type: 'bet', minimum: 20, maximum: 947 });
+  expect(cashGame.act('bob', { type: 'bet', betTo: 31 }).ok).toBe(true);
+  expect(cashGame.act('alice', { type: 'call' }).ok).toBe(true);
+  expect(cashGame.forParticipant('bob').getView().state.legalActions).toContainEqual({ type: 'bet', minimum: 20, maximum: 916 });
+  const record = cashGame.toRecord();
+  const restored = CashGame.fromRecord(JSON.parse(JSON.stringify(record)));
+  if (!restored.ok) throw new Error('Expected exact sized-command restoration.');
+  for (const replay of [cashGame, restored.game]) {
+    expect(replay.forParticipant('alice').getView({ at: { decisionId: originalRaise.state.decisionId! } })).toEqual(originalRaise);
+    expect(replay.forParticipant('bob').getView({ at: { decisionId: response.state.decisionId! } })).toEqual(response);
+    expect(replay.forParticipant('bob').getView({ at: { decisionId: originalBet.state.decisionId! } })).toEqual(originalBet);
+  }
+  expect(restored.game.toRecord()).toEqual(record);
+  expect(restored.game.forParticipant('bob').getView()).toEqual(cashGame.forParticipant('bob').getView());
+  expect(restored.game.forParticipant('bob').getView().history[0].decisions.map(d => d.action.action)).toEqual([{ type: 'raise', raiseTo: 53 }, { type: 'call' }, { type: 'bet', betTo: 31 }, { type: 'call' }]);
+  for (const tail of [{ type: 'act', participantId: 'bob', action: { type: 'bet', betTo: 19 } }, { type: 'act', participantId: 'bob', action: { type: 'bet', betTo: 31, to: 31 } }]) expect(CashGame.fromRecord({ ...record, commands: [...record.commands, tail] })).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
+});
