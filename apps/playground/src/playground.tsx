@@ -4,6 +4,7 @@ import { defaultConfiguration, baselinePlayingStrategy, type ObservableGameConfi
 import { api, RequestFailure } from './api.js';
 import { usePlayground } from './store.js';
 import { Seating } from './seating.js';
+import { Hand } from './hand.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -114,8 +115,13 @@ export function Playground() {
           <ol className="seats">{Array.from({ length: table.data.view.configuration.seatCount }, (_, index) => {
             const participant = table.data.view.state.participants.find(p => p.seat === index + 1);
             const binding = table.data.bindings.find(b => b.participantId === participant?.participantId);
-            return <li key={index}><span>Seat {index + 1}</span><strong>{binding?.name ?? 'Empty'}</strong>{participant && <span>{participant.stack} chips</span>}</li>;
+            return <li key={index}><span>Seat {index + 1}</span><strong>{binding?.name ?? 'Empty'}</strong>{participant && <>
+              <span>{participant.stack} chips{participant.allIn ? ' · All-in' : participant.folded ? ' · Folded' : ''}</span>
+              {participant.contribution !== undefined && <span>Committed {participant.contribution} chips</span>}
+              {participant.holeCards ? <span className="cards" aria-label="Hole cards">{participant.holeCards.join(' ')}</span> : participant.cardCount ? <span>{participant.cardCount} hidden cards</span> : null}
+            </>}</li>;
           })}</ol>
+          <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
           <Seating key={table.data.tableSessionId} table={table.data} />
           <h3>Participants</h3>
           <ul className="bindings">{table.data.bindings.map(binding => {

@@ -2,7 +2,7 @@ import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import type { CreateTableSessionRequest, SeatParticipantRequest } from '@poker/contracts';
+import type { CreateTableSessionRequest, PokerMutationRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { createTableSessionMutations, type MutationTransactionFaults } from './mutations.js';
@@ -59,18 +59,18 @@ export async function createServer(options: ServerOptions) {
     if (!view) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
     return view;
   });
-  app.post<{ Params: { id: string }; Body: SeatParticipantRequest }>('/api/table-sessions/:id/seat-participant', async (request, reply) => {
+  for (const kind of ['seat-participant', 'start-hand', 'act'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
-      const outcome = await mutations.submit(request.params.id, userId, 'seat-participant', request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : outcome.rejection.code === 'session-recovering' ? 503 : ['request-id-conflict', 'stale-poker-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : outcome.rejection.code === 'actor-not-authorized' ? 403 : outcome.rejection.code === 'session-recovering' ? 503 : ['request-id-conflict', 'stale-poker-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
     } catch (error) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
-      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Seating could not be confirmed. Refresh the committed view before submitting another attempt.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The mutation could not be confirmed. Refresh the committed view before submitting another attempt.' } });
     }
   });
   return app;

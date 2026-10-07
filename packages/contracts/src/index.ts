@@ -3,6 +3,9 @@ export type ParticipantId = string;
 export type TableSessionId = string;
 export type ChipAmount = number;
 export type Revision = number;
+export type HandId = string;
+export type DecisionId = string;
+export type Card = string;
 
 export interface ObservableGameConfiguration {
   readonly seatCount: number;
@@ -19,10 +22,19 @@ export interface ObservableParticipant {
   readonly seat: number | null;
   readonly stack: ChipAmount;
   readonly sittingOut: boolean;
+  readonly inHand?: boolean;
+  readonly handSeat?: number;
+  readonly folded?: boolean;
+  readonly allIn?: boolean;
+  readonly contribution?: ChipAmount;
+  readonly wager?: ChipAmount;
+  readonly cardCount?: number;
+  readonly holeCards?: readonly Card[];
 }
 export type ConcreteAction =
   | { readonly type: 'fold' | 'check' | 'call' }
-  | { readonly type: 'bet' | 'raise'; readonly to: ChipAmount };
+  | { readonly type: 'bet'; readonly betTo: ChipAmount }
+  | { readonly type: 'raise'; readonly raiseTo: ChipAmount };
 export type LegalAction =
   | { readonly type: 'fold' | 'check' | 'call' }
   | { readonly type: 'bet' | 'raise'; readonly minimum: ChipAmount; readonly maximum: ChipAmount };
@@ -34,7 +46,22 @@ export interface ObservableCashGameState {
   readonly pots: readonly { readonly amount: ChipAmount; readonly eligibleParticipantIds: readonly ParticipantId[] }[];
   readonly actorId: ParticipantId | null;
   readonly legalActions: readonly LegalAction[];
+  readonly handId?: HandId;
+  readonly decisionId?: DecisionId | null;
+  readonly street?: 'preflop' | 'flop' | 'turn' | 'river';
+  readonly smallBlindParticipantId?: ParticipantId;
+  readonly bigBlindParticipantId?: ParticipantId;
+  readonly returns?: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
+  readonly payouts?: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
 }
+export type ObservablePresentationEvent =
+  | { readonly type: 'participant-seated'; readonly participantId: ParticipantId; readonly seat: number; readonly buyIn: ChipAmount }
+  | { readonly type: 'hand-started'; readonly handId: HandId; readonly buttonSeat: number; readonly smallBlindParticipantId: ParticipantId; readonly bigBlindParticipantId: ParticipantId }
+  | { readonly type: 'forced-contribution'; readonly participantId: ParticipantId; readonly kind: 'ante' | 'small-blind' | 'big-blind'; readonly amount: ChipAmount }
+  | { readonly type: 'hole-cards-dealt'; readonly participantId: ParticipantId; readonly cardCount: number; readonly cards?: readonly Card[] }
+  | { readonly type: 'acted'; readonly participantId: ParticipantId; readonly action: ConcreteAction }
+  | { readonly type: 'uncalled-return' | 'pot-awarded'; readonly participantId: ParticipantId; readonly amount: ChipAmount }
+  | { readonly type: 'hand-completed'; readonly handId: HandId };
 export interface ObservableHistoryEntry {
   readonly handId: string;
   readonly description: string;
@@ -81,6 +108,12 @@ export interface SeatParticipantRequest extends PokerMutationMetadata {
   readonly seat: number;
   readonly buyIn?: ChipAmount;
 }
+export interface StartHandRequest extends PokerMutationMetadata {}
+export interface ActRequest extends PokerMutationMetadata {
+  readonly participantId: ParticipantId;
+  readonly action: ConcreteAction;
+}
+export type PokerMutationRequest = SeatParticipantRequest | StartHandRequest | ActRequest;
 /** A durable outcome contains no complete view; read the current view separately. */
 export interface MutationAcknowledgement {
   readonly ok: true;

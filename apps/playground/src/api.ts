@@ -1,4 +1,4 @@
-import type { CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement } from '@poker/contracts';
+import type { ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement } from '@poker/contracts';
 export class RequestFailure extends Error {
   constructor(readonly code: string, message: string, readonly definitive: boolean) { super(message); }
 }
@@ -17,4 +17,6 @@ export const api = {
   readSession: (id: string) => request<ObservableTableSession>('/table-sessions/' + encodeURIComponent(id)),
   createSession: (body: CreateTableSessionRequest) => request<CreationAcknowledgement>('/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   seatParticipant: (id: string, body: SeatParticipantRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/seat-participant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  startHand: (id: string, body: StartHandRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/start-hand', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  act: (id: string, body: ActRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/act', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
 };
