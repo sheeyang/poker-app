@@ -12,8 +12,8 @@ dependency graph below, with one ticket branch/worktree per slice.
 
 | Ticket | Capability | Blocked by | Status |
 | --- | --- | --- | --- |
-| [#1](https://github.com/sheeyang/poker-app/issues/1) | Owned persistent Table Session | — | In progress |
-| [#2](https://github.com/sheeyang/poker-app/issues/2) | Durable atomic seating | #1 | Pending |
+| [#1](https://github.com/sheeyang/poker-app/issues/1) | Owned persistent Table Session | — | Complete: `f87b854`, 33 tests, browser/startup/checks |
+| [#2](https://github.com/sheeyang/poker-app/issues/2) | Durable atomic seating | #1 | In progress |
 | [#3](https://github.com/sheeyang/poker-app/issues/3) | Heads-up dealing and fold settlement | #2 | Pending |
 | [#4](https://github.com/sheeyang/poker-app/issues/4) | Between-Hand management | #3 | Pending |
 | [#5](https://github.com/sheeyang/poker-app/issues/5) | Check/Call through showdown | #3 | Pending |
