@@ -82,7 +82,7 @@ function SizedAction({ action, disabled, submit }: { action: Extract<LegalAction
   }}>
     <div className="sized-action-fields">
       <label>{label} total (chips)
-        <input type="number" inputMode="numeric" required step="1" min={action.minimum} max={action.maximum} value={amount} onChange={event => setAmount(event.target.value)} disabled={disabled} aria-describedby={helpId} />
+        <input name={action.type === 'bet' ? 'betTo' : 'raiseTo'} type="number" inputMode="numeric" required step="1" min={action.minimum} max={action.maximum} value={amount} onChange={event => setAmount(event.target.value)} disabled={disabled} aria-describedby={helpId} />
       </label>
       <button type="submit" disabled={disabled}>{label}</button>
     </div>

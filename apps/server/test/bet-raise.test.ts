@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, type ConcreteAction, type ObservableTableSession } from '@poker/contracts';
+import WebSocket from 'ws';
+import { baselinePlayingStrategy, type ConcreteAction, type ObservableTableSession, type ObservableTableUpdate } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 
@@ -99,4 +100,40 @@ test('held and rolled-back sized HTTP commands expose no working contribution an
   expect(committed.view.state.participants[0]).toMatchObject({ stack: 943, wager: 57, contribution: 57 });
   expect(await (await humanAct(t, 3, { type: 'raise', raiseTo: 57 }, 'held-raise')).json()).toMatchObject({ ok: true, pokerRevision: 4 });
   expect(await read(t)).toEqual(committed);
+});
+
+test('committed WebSocket views publish exact Bet/Raise intentions once and withhold the working size before COMMIT', async () => {
+  const t = await table();
+  const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/table-sessions/' + t.id + '/live', { headers: { cookie: t.cookie } });
+  const updates: ObservableTableUpdate[] = [];
+  socket.on('message', data => { const message = JSON.parse(data.toString()); if (message.type === 'table-update') updates.push(message); });
+  socket.on('error', () => {});
+  const next = async (revision: number) => {
+    await expect.poll(() => updates.find(update => update.sessionRevision === revision)).toBeDefined();
+    return updates.find(update => update.sessionRevision === revision)!;
+  };
+  const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
+  try {
+    await next(3);
+    expect((await humanAct(t, 3, { type: 'raise', raiseTo: 53 })).status).toBe(200);
+    const raise = await next(4);
+    expect(raise.presentationEvents).toEqual([{ type: 'acted', participantId: t.human, action: { type: 'raise', raiseTo: 53 } }]);
+    expect(raise.view.state.participants[0]).toMatchObject({ stack: 947, wager: 53, contribution: 53 });
+    expect((await botAct(t, 4, { type: 'call' })).ok).toBe(true);
+    expect((await botAct(t, 5, { type: 'check' })).ok).toBe(true);
+    const flop = await next(6);
+    expect(flop.view.state.legalActions).toEqual([{ type: 'fold' }, { type: 'check' }, { type: 'bet', minimum: 20, maximum: 947 }]);
+    beforeCommit = async context => { if (context.tableSessionId === t.id && context.requestId === 'live-bet') { entered.resolve(); await release.promise; } };
+    const betting = humanAct(t, 6, { type: 'bet', betTo: 37 }, 'live-bet'); await entered.promise;
+    try { expect(await read(t)).toMatchObject({ pokerRevision: 6 }); expect(updates.some(update => update.sessionRevision === 7)).toBe(false); }
+    finally { release.resolve(); beforeCommit = async () => {}; }
+    expect((await betting).status).toBe(200);
+    const bet = await next(7);
+    expect(bet.presentationEvents).toEqual([{ type: 'acted', participantId: t.human, action: { type: 'bet', betTo: 37 } }]);
+    expect(bet.view.state.participants[0]).toMatchObject({ stack: 910, wager: 37, contribution: 90 });
+    expect(bet.view.state.participants[1]).not.toHaveProperty('holeCards');
+    expect(JSON.stringify(bet)).not.toMatch(/"(?:seed|deck|burns|commands|drawnCardCount)"\s*:/);
+    expect((await humanAct(t, 6, { type: 'bet', betTo: 37 }, 'live-bet')).status).toBe(200);
+    expect(updates.filter(update => update.sessionRevision === 7)).toHaveLength(1);
+  } finally { release.resolve(); beforeCommit = async () => {}; socket.terminate(); }
 });
