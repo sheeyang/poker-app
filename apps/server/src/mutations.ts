@@ -1,7 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
 import { CashGame } from '@poker/engine';
-import type { MutationOutcome, SeatParticipantRequest } from '@poker/contracts';
+import type { ActRequest, MutationOutcome, PokerMutationRequest, SeatParticipantRequest } from '@poker/contracts';
 import type { PersistedTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { processedRequests, tableSessions } from './db/schema.js';
@@ -10,7 +10,7 @@ import { CommitOutcomeUnknown } from './creation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
-export type PokerMutationKind = 'seat-participant';
+export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act';
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
@@ -22,9 +22,10 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 const reject = (code: string, message: string): MutationOutcome => ({ ok: false, rejection: { code, message } });
-function applicationRejection(request: SeatParticipantRequest): MutationOutcome | undefined {
-  if (Object.keys(request).some(key => !['requestId', 'expectedPokerRevision', 'participantId', 'seat', 'buyIn'].includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
-    return reject('invalid-mutation-request', 'Supply supported seating fields and a nonnegative expectedPokerRevision.');
+function applicationRejection(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
+  const fields = ['requestId', 'expectedPokerRevision', ...(kind === 'seat-participant' ? ['participantId', 'seat', 'buyIn'] : kind === 'act' ? ['participantId', 'action'] : [])];
+  if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
+    return reject('invalid-mutation-request', 'Supply supported mutation fields and a nonnegative expectedPokerRevision.');
 }
 export function createTableSessionMutations(db: Database, faults?: MutationTransactionFaults) {
   const committed = new Map<string, CommittedSession>();
@@ -58,7 +59,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       if (!participant) throw new Error('Owned session has no bound human Participant.');
       return projectTableSession(session.aggregate, participant.participantId, session.game);
     },
-    async submit(id: string, ownerUserId: string, kind: PokerMutationKind, request: SeatParticipantRequest): Promise<MutationOutcome> {
+    async submit(id: string, ownerUserId: string, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
       const previous = queue.get(id) ?? Promise.resolve();
       const operation = previous.catch(() => undefined).then(async (): Promise<MutationOutcome> => {
         const session = await load(id);
@@ -75,12 +76,17 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
             const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
             const known = rows[0];
             if (known) return known.fingerprint === fingerprint ? known.outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
-            let result = applicationRejection(request);
+            let result = applicationRejection(kind, request);
             if (!result && request.expectedPokerRevision !== session.aggregate.pokerRevision) result = reject('stale-poker-revision', 'The table changed. Refresh its committed view before submitting a new attempt.');
-            if (!result && !session.aggregate.bindings.some(binding => binding.participantId === request.participantId)) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
+            const participantId = 'participantId' in request ? request.participantId : undefined;
+            const binding = session.aggregate.bindings.find(binding => binding.participantId === participantId);
+            if (!result && kind !== 'start-hand' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
+            if (!result && kind === 'act' && (binding?.controller.kind !== 'human' || binding.userId !== ownerUserId)) result = reject('actor-not-authorized', 'This local identity can act only through its bound human Participant.');
             if (!result) {
               const working = session.game.fork();
-              const accepted = working.seatParticipant(request.participantId, request.seat, request.buyIn);
+              const accepted = kind === 'start-hand' ? working.startHand() : kind === 'act'
+                ? working.act((request as ActRequest).participantId, (request as ActRequest).action)
+                : working.seatParticipant((request as SeatParticipantRequest).participantId, (request as SeatParticipantRequest).seat, (request as SeatParticipantRequest).buyIn);
               if (!accepted.ok) result = { ok: false, rejection: accepted.rejection };
               else {
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord: working.toRecord(), pokerRevision: session.aggregate.pokerRevision + 1, sessionRevision: session.aggregate.sessionRevision + 1 };

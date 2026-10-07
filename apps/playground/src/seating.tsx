@@ -7,6 +7,7 @@ import { usePlayground, type PendingSeating } from './store.js';
 export function Seating({ table }: { table: ObservableTableSession }) {
   const queryClient = useQueryClient();
   const pending = usePlayground(state => state.pendingSeating);
+  const pendingHand = usePlayground(state => state.pendingHand);
   const setPending = usePlayground(state => state.setPendingSeating);
   const [participantId, setParticipantId] = useState('');
   const [seat, setSeat] = useState('');
@@ -46,7 +47,7 @@ export function Seating({ table }: { table: ObservableTableSession }) {
     <h3 id="seating-heading">Seat a Participant</h3>
     <p className="help">Choose an empty seat. Buy-in limits are {table.view.configuration.minimumBuyIn}–{table.view.configuration.maximumBuyIn} chips.</p>
     <form onSubmit={submit}>
-      <fieldset disabled={mutation.isPending || !!pending || table.view.state.status === 'active-hand' || unseated.length === 0 || emptySeats.length === 0}>
+      <fieldset disabled={mutation.isPending || !!pending || !!pendingHand || table.view.state.status === 'active-hand' || unseated.length === 0 || emptySeats.length === 0}>
         <div className="seating-fields">
           <label>Participant<select name="participantId" required value={chosenParticipant} onChange={event => setParticipantId(event.target.value)}>
             {unseated.length === 0 && <option value="">All Participants seated</option>}
