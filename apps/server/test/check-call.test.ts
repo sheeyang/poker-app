@@ -54,7 +54,7 @@ test('authenticated human Call and trusted Bot Check progress every street, reve
     expect(JSON.stringify(view)).not.toMatch(/"(?:seed|deck|burns|commands|drawnCardCount|ownerUserId|userId)"\s*:/);
     expect(await botAct(t, 5 + index * 2, { type: 'check' })).toMatchObject({ ok: true, pokerRevision: 6 + index * 2 });
     const humanTurn = await read(t);
-    expect(humanTurn.view.state).toMatchObject({ actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'check' }] });
+    expect(humanTurn.view.state).toMatchObject({ actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'check' }, { type: 'bet', minimum: 20, maximum: 980 }] });
     expect((await humanAct(t, 6 + index * 2, { type: 'check' })).status).toBe(200);
   }
   const completed = await read(t);
@@ -72,7 +72,10 @@ test('authenticated human Call and trusted Bot Check progress every street, reve
   expect((await read(t)).view.state.actorId).toBe(t.bot);
   expect(await botAct(t, 12, { type: 'call' })).toMatchObject({ ok: true, pokerRevision: 13 });
   expect((await humanAct(t, 13, { type: 'check' })).status).toBe(200);
-  expect((await read(t)).view.state).toMatchObject({ street: 'flop', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'check' }] });
+  const nextFlop = (await read(t)).view.state;
+  // The server-generated deck may award Hand 1 to either player; winnings carry into this Hand.
+  const humanStack = nextFlop.participants.find(p => p.participantId === t.human)!.stack;
+  expect(nextFlop).toMatchObject({ street: 'flop', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'check' }, { type: 'bet', minimum: 20, maximum: humanStack }] });
 });
 
 test('trusted controller commands retain actor, binding, and revision checks and share the human command FIFO', async () => {
