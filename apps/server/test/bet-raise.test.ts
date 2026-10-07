@@ -81,6 +81,22 @@ test('minimum, maximum and invalid HTTP sizes respect committed legality without
     expect((await botAct(t, 4, { type: 'call' })).ok).toBe(true);
     expect((await read(t)).view.state.status).toBe(amount === 1000 ? 'completed-hand' : 'active-hand');
   }
+  for (const amount of [20, 980]) {
+    const t = await table();
+    await humanAct(t, 3, { type: 'call' }); await botAct(t, 4, { type: 'check' }); await botAct(t, 5, { type: 'check' });
+    const flop = await read(t);
+    expect(flop.view.state.legalActions).toEqual([{ type: 'fold' }, { type: 'check' }, { type: 'bet', minimum: 20, maximum: 980 }]);
+    expect((await humanAct(t, 6, { type: 'bet', betTo: 19 })).status).toBe(400);
+    expect(await read(t)).toEqual(flop);
+    expect((await humanAct(t, 6, { type: 'bet', betTo: amount })).status).toBe(200);
+    expect((await read(t)).view.state.participants[0]).toMatchObject({ stack: 980 - amount, wager: amount, contribution: amount + 20 });
+    expect((await botAct(t, 7, { type: 'call' })).ok).toBe(true);
+    if (amount === 20) for (const revision of [8, 10]) { await botAct(t, revision, { type: 'check' }); await humanAct(t, revision + 1, { type: 'check' }); }
+    const completed = await read(t);
+    expect(completed.view.state.status).toBe('completed-hand');
+    expect(completed.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(2000);
+    expect(completed.view.state.payouts!.reduce((sum, p) => sum + p.amount, 0)).toBe(amount === 980 ? 2000 : 80);
+  }
 });
 
 test('held and rolled-back sized HTTP commands expose no working contribution and retain exact retry identity', async () => {
