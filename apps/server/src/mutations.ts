@@ -10,6 +10,9 @@ import { CommitOutcomeUnknown } from './creation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
+export class TableSessionRestorationError extends Error {
+  constructor() { super('The complete committed Table Session could not be restored.'); }
+}
 export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'leave-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
 /** Internal controller authority. No browser route receives this capability. */
 export interface TableSessionControllerCommands {
@@ -41,27 +44,28 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
   const loading = new Map<string, Promise<CommittedSession | undefined>>();
   const queue = new Map<string, Promise<unknown>>();
   const recovering = new Set<string>();
-  async function load(id: string): Promise<CommittedSession | undefined> {
+  async function load(id: string, ownerUserId?: string): Promise<CommittedSession | undefined> {
     const cached = committed.get(id);
-    if (cached) return cached;
-    const pending = loading.get(id);
+    if (cached) return ownerUserId && cached.aggregate.ownerUserId !== ownerUserId ? undefined : cached;
+    const key = id + ':' + (ownerUserId ?? 'trusted-controller');
+    const pending = loading.get(key);
     if (pending) return pending;
-    const operation = restore(id);
-    loading.set(id, operation);
-    try { return await operation; } finally { loading.delete(id); }
+    const operation = restore(id, ownerUserId);
+    loading.set(key, operation);
+    try { return await operation; } finally { loading.delete(key); }
   }
-  async function restore(id: string): Promise<CommittedSession | undefined> {
-    const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
+  async function restore(id: string, ownerUserId?: string): Promise<CommittedSession | undefined> {
+    const rows = await db.select().from(tableSessions).where(ownerUserId ? and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, ownerUserId)) : eq(tableSessions.id, id));
     const aggregate = rows[0]?.aggregate;
     if (!aggregate) return undefined;
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
-    if (!restored.ok) throw new Error('Committed CashGame record could not be restored.');
+    if (!restored.ok) throw new TableSessionRestorationError();
     const session = { aggregate, game: restored.game };
     committed.set(id, session);
     return session;
   }
     async function read(id: string, ownerUserId: string) {
-      const session = await load(id);
+      const session = await load(id, ownerUserId);
       if (!session || session.aggregate.ownerUserId !== ownerUserId) return undefined;
       const participant = session.aggregate.bindings.find(b => b.controller.kind === 'human' && b.userId === ownerUserId);
       if (!participant) throw new Error('Owned session has no bound human Participant.');
@@ -70,7 +74,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     async function submit(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
       const previous = queue.get(id) ?? Promise.resolve();
       const operation = previous.catch(() => undefined).then(async (): Promise<MutationOutcome> => {
-        const session = await load(id);
+        const session = await load(id, authority.kind === 'human' ? authority.userId : undefined);
         if (!session || (authority.kind === 'human' && session.aggregate.ownerUserId !== authority.userId)) return { ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } };
         if (recovering.has(id)) return reject('session-recovering', 'This Table Session is paused while a commit outcome is unknown.');
         const { requestId, ...contents } = request;
