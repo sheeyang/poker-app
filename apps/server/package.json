@@ -1,0 +1,24 @@
+{
+  "name": "@poker/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/main.ts",
+    "start": "node --env-file-if-exists=../../.env dist/main.js",
+    "db:init": "node --env-file-if-exists=../../.env --import tsx src/db/init.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/build-server.mjs"
+  },
+  "dependencies": {
+    "@poker/contracts": "workspace:*",
+    "@poker/engine": "workspace:*",
+    "fastify": "5.12.5",
+    "@fastify/cookie": "11.1.2",
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}
