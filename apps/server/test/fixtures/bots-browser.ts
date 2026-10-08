@@ -9,7 +9,11 @@ const schema = 'browser_bot_' + randomUUID().replaceAll('-', '');
 const administration = new Pool({ connectionString: databaseUrl });
 await administration.query('CREATE SCHEMA "' + schema + '"');
 let failOnce = process.env.POKER_BROWSER_FAIL_ONCE === '1';
-const server = await createServer({ databaseUrl, schema, strategyFactory: descriptor => {
+let failSaveOnce = process.env.POKER_BROWSER_FAIL_SAVE_ONCE === '1';
+const port = Number(process.env.POKER_BROWSER_PORT ?? 3012);
+const server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: async context => {
+  if (context.requestId.startsWith('bot:') && failSaveOnce) { failSaveOnce = false; throw new Error('Controlled browser PostgreSQL rollback.'); }
+} }, strategyFactory: descriptor => {
   const strategy = baselineStrategy(descriptor);
   return { ...strategy, policy: {
     checkCompatibility: view => strategy.policy.checkCompatibility(view),
@@ -19,6 +23,6 @@ const server = await createServer({ databaseUrl, schema, strategyFactory: descri
     },
   } };
 } });
-await server.listen({ host: '127.0.0.1', port: 3012 });
-console.log('Bot browser fixture ready on 3012, isolated schema ' + schema);
+await server.listen({ host: '127.0.0.1', port });
+console.log('Bot browser fixture ready on ' + port + ', isolated schema ' + schema);
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, async () => { await server.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); process.exit(0); });
