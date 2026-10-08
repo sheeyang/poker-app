@@ -78,6 +78,9 @@ importers:
       '@poker/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@poker/strategies':
+        specifier: workspace:*
+        version: link:../../packages/strategies
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(@types/pg@8.23.1)(pg@8.23.1)
@@ -129,6 +132,9 @@ importers:
       '@poker/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@poker/engine':
+        specifier: workspace:*
+        version: link:../engine
 
 packages:
 

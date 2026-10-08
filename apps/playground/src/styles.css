@@ -89,3 +89,9 @@ label input, label select { display: block; margin-top: 6px; font-weight: 400; }
 @media (min-width: 1000px) { .connection-status { position: absolute; right: 0; top: 10px; margin-top: 0; } }
 @media (max-width: 850px) { .app-shell { padding: 20px; } .workspace { grid-template-columns: 1fr; gap: 28px; } .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; } .reopen { margin: 0; padding: 0; border-top: 0; } .table-view { min-height: 400px; padding: 20px; } }
 @media (max-width: 550px) { .controls { grid-template-columns: 1fr; } .reopen { border-top: 1px solid #c4cec7; padding-top: 24px; } .seats { grid-template-columns: 1fr 1fr; } .bindings li { grid-template-columns: 1fr; } .bindings code { grid-column: 1; } }
+.bot-controls { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
+.bot-strategy + .bot-strategy { margin-top: 20px; padding-top: 20px; border-top: 1px solid #e1e7e2; }
+.bot-strategy-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
+.bot-strategy-fields button { margin-bottom: 14px; }
+.bot-strategy > p { margin-top: 12px; }
+@media (max-width: 1100px) { .bot-strategy-fields { grid-template-columns: minmax(0, 1fr); gap: 0; } .bot-strategy-fields button { justify-self: start; } }

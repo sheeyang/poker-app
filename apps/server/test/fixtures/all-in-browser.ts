@@ -24,7 +24,7 @@ crypto.randomBytes = ((size: number) => {
 }) as typeof crypto.randomBytes;
 syncBuiltinESMExports();
 let controllers: TableSessionControllerCommands;
-const app = await createServer({ databaseUrl, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+const app = await createServer({ automaticBots: false, databaseUrl, schema, onControllerCommandsReady: commands => { controllers = commands; } });
 const running = new Set<string>();
 const port = Number(process.env.PORT ?? 3008); const base = 'http://127.0.0.1:' + port;
 async function advance(id: string, cookie: string) {

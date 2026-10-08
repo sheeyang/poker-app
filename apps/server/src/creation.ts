@@ -1,3 +1,4 @@
+import { isBaselineStrategy } from '@poker/strategies';
 import { validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
@@ -16,7 +17,7 @@ function canonical(value: unknown): string {
 export class CommitOutcomeUnknown extends Error {}
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
 export interface CreationTransactionFaults { readonly beforeCommit?: () => Promise<void>; readonly afterCommit?: () => Promise<void> }
-export function createTableSessionCreator(db: Database, faults?: CreationTransactionFaults) {
+export function createTableSessionCreator(db: Database, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isBaselineStrategy) {
   const queue = new Map<string, Promise<unknown>>();
   const pending = new Set<string>();
   return async (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => {
@@ -41,18 +42,18 @@ export function createTableSessionCreator(db: Database, faults?: CreationTransac
         if (existing) return existing.fingerprint === fingerprint ? existing.outcome : {
           ok: false, rejection: { code: 'request-id-conflict', message: 'This requestId was already used for different creation contents.' },
         };
-        const created = validateCreationRequest(request) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
+        const created = validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
         let outcome: CreationOutcome;
         if (!created.ok) outcome = { ok: false, rejection: created.rejection };
         else {
           const tableSessionId = randomUUID();
           const bindings: PersistedTableSession['bindings'] = [
             { participantId: randomUUID(), name: 'You', controller: { kind: 'human' }, userId: ownerUserId },
-            ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: b.name, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy } })),
+            ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: b.name, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
           ];
           const aggregate: PersistedTableSession = {
             schemaVersion: 1, tableSessionId, ownerUserId, pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: 0, sessionRevision: 0, adminMode: true,
+            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [],
           };
           await tx.insert(tableSessions).values({ id: tableSessionId, ownerUserId, aggregate });
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };

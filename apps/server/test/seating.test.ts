@@ -12,7 +12,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema });
+  server = await createServer({ automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -45,7 +45,7 @@ test('the owner seats a bound Participant durably with both revisions advancing 
   expect(committed).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: table.human, seat: 2, stack: 1000, sittingOut: false }] } } });
   expect(JSON.stringify(committed)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
-  server = await createServer({ databaseUrl, schema });
+  server = await createServer({ automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(table)).toEqual(committed);
   expect(await (await submit(table, { requestId: 'human-seat', expectedPokerRevision: 0, participantId: table.human, seat: 2 })).json()).toEqual({ ok: true, tableSessionId: table.id, pokerRevision: 1, sessionRevision: 1 });

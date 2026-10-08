@@ -13,7 +13,7 @@ let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -53,7 +53,7 @@ test('owner management commits and retries exactly once through the durable poke
   const managed = await read(t);
   expect(managed).toMatchObject({ pokerRevision: 11, sessionRevision: 11, view: { state: { buttonSeat: 3, participants: [{ participantId: t.human, seat: 3, stack: 1200 }, { participantId: t.bot, seat: 2, stack: 100 }] } } });
   expect(managed.view.history).toEqual(initial.view.history);
-  await server.close(); server = await createServer({ databaseUrl: databaseUrl!, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } }); base = await server.listen({ host: '127.0.0.1', port: 0 });
+  await server.close(); server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } }); base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual(managed);
   expect((await submit(t, 'start-hand', { requestId: 'next', expectedPokerRevision: 11 })).status).toBe(200);
   expect((await read(t)).view.state.buttonSeat).toBe(3);
