@@ -1,6 +1,21 @@
-import type { ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding } from '@poker/contracts';
+import type { ConcreteAction, ObservableCashGameState, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding } from '@poker/contracts';
 import { CashGame, type CashGameEvent } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
+function projectAction(action: ConcreteAction): ConcreteAction {
+  return action.type === 'bet' ? { type: 'bet', betTo: action.betTo } : action.type === 'raise' ? { type: 'raise', raiseTo: action.raiseTo } : { type: action.type };
+}
+function projectState(state: ObservableCashGameState): ObservableCashGameState {
+  return {
+    status: state.status, buttonSeat: state.buttonSeat,
+    participants: state.participants.map(p => ({ participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut,
+      ...(p.inHand ? { inHand: p.inHand, handSeat: p.handSeat, folded: p.folded, allIn: p.allIn, contribution: p.contribution, anteContribution: p.anteContribution, wager: p.wager, cardCount: p.cardCount, ...(p.holeCards ? { holeCards: [...p.holeCards] } : {}) } : {}) })),
+    board: [...state.board], pots: state.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })), actorId: state.actorId,
+    legalActions: state.legalActions.map(a => a.type === 'bet' || a.type === 'raise' ? { type: a.type, minimum: a.minimum, maximum: a.maximum } : { type: a.type }),
+    ...(state.amountToCall !== undefined ? { amountToCall: state.amountToCall } : {}),
+    ...(state.handId ? { handId: state.handId, decisionId: state.decisionId, street: state.street, smallBlindParticipantId: state.smallBlindParticipantId, bigBlindParticipantId: state.bigBlindParticipantId,
+      returns: state.returns?.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: state.payouts?.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}),
+  };
+}
 export function projectBindings(bindings: readonly ParticipantBinding[]): ParticipantBinding[] {
   return bindings.map(b => ({
     participantId: b.participantId, name: b.name,
@@ -25,19 +40,11 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     bindings: projectBindings(aggregate.bindings),
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
-      state: {
-        status: view.state.status, buttonSeat: view.state.buttonSeat,
-        participants: view.state.participants.map(p => ({ participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut,
-          ...(p.inHand ? { inHand: p.inHand, handSeat: p.handSeat, folded: p.folded, allIn: p.allIn, contribution: p.contribution, anteContribution: p.anteContribution, wager: p.wager, cardCount: p.cardCount, ...(p.holeCards ? { holeCards: [...p.holeCards] } : {}) } : {}) })),
-        board: [...view.state.board],
-        pots: view.state.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })),
-        actorId: view.state.actorId,
-        legalActions: view.state.legalActions.map(a => a.type === 'bet' || a.type === 'raise' ? { type: a.type, minimum: a.minimum, maximum: a.maximum } : { type: a.type }),
-        ...(view.state.amountToCall !== undefined ? { amountToCall: view.state.amountToCall } : {}),
-        ...(view.state.handId ? { handId: view.state.handId, decisionId: view.state.decisionId, street: view.state.street, smallBlindParticipantId: view.state.smallBlindParticipantId, bigBlindParticipantId: view.state.bigBlindParticipantId,
-          returns: view.state.returns?.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: view.state.payouts?.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}),
-      },
-      history: view.history.map(h => ({ handId: h.handId, description: h.description })),
+      state: projectState(view.state),
+      history: view.history.map(h => ({ handId: h.handId, description: h.description,
+        decisions: h.decisions.map(d => ({ decisionId: d.decisionId, state: projectState(d.state), action: { participantId: d.action.participantId, action: projectAction(d.action.action) } })),
+        ...(h.result ? { result: projectState(h.result) } : {}),
+      })),
     },
   };
 }
