@@ -11,7 +11,7 @@ const schema = 'browser_sizing_' + randomUUID().replaceAll('-', '');
 const administration = new Pool({ connectionString: databaseUrl });
 await administration.query('CREATE SCHEMA "' + schema + '"');
 let controllers: TableSessionControllerCommands;
-const app = await createServer({ databaseUrl, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+const app = await createServer({ automaticBots: false, databaseUrl, schema, onControllerCommandsReady: commands => { controllers = commands; } });
 const running = new Set<string>();
 const port = Number(process.env.PORT ?? 3006);
 const base = 'http://127.0.0.1:' + port;

@@ -15,6 +15,7 @@
     "@fastify/websocket": "^11.3.3",
     "@poker/contracts": "workspace:*",
     "@poker/engine": "workspace:*",
+    "@poker/strategies": "workspace:*",
     "drizzle-orm": "0.45.3",
     "fastify": "5.12.5",
     "pg": "8.23.1",

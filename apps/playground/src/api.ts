@@ -1,4 +1,4 @@
-import type { ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest } from '@poker/contracts';
+import type { SetPlayingStrategyRequest, RetryBotRequest, ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest } from '@poker/contracts';
 export class RequestFailure extends Error {
   constructor(readonly code: string, message: string, readonly definitive: boolean) { super(message); }
 }
@@ -12,6 +12,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 export const api = {
+  setPlayingStrategy: (id: string, body: SetPlayingStrategyRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-playing-strategy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  retryBot: (id: string, body: RetryBotRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/retry-bot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   establishIdentity: () => request<{ ok: true }>('/identity'),
   listSessions: () => request<{ tableSessionIds: string[] }>('/table-sessions'),
   readSession: (id: string) => request<ObservableTableSession>('/table-sessions/' + encodeURIComponent(id)),

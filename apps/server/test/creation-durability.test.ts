@@ -12,7 +12,7 @@ let beforeCommit: () => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({
+  server = await createServer({ automaticBots: false,
     databaseUrl, schema,
     transactionFaults: { beforeCommit: () => beforeCommit(), afterCommit: () => afterCommit() },
   });

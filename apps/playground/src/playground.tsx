@@ -1,6 +1,7 @@
+import { BotControls, baselineOptions } from './bots.js';
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { defaultConfiguration, baselinePlayingStrategy, type ObservableGameConfiguration } from '@poker/contracts';
+import { defaultConfiguration, baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameConfiguration } from '@poker/contracts';
 import { api, RequestFailure } from './api.js';
 import { usePlayground } from './store.js';
 import { Seating } from './seating.js';
@@ -23,6 +24,7 @@ export function Playground() {
   const setPending = usePlayground(state => state.setPendingCreation);
   const [configuration, setConfiguration] = useState<ObservableGameConfiguration>({ ...defaultConfiguration });
   const [botCount, setBotCount] = useState(2);
+  const [botSelectors, setBotSelectors] = useState<Record<number, string>>({});
   const [reopenId, setReopenId] = useState('');
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity, staleTime: Infinity });
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
@@ -41,7 +43,7 @@ export function Playground() {
     event.preventDefault();
     const request = {
       requestId: crypto.randomUUID(), configuration,
-      bots: Array.from({ length: botCount }, (_, index) => ({ name: 'Bot ' + (index + 1), playingStrategy: baselinePlayingStrategy })),
+      bots: Array.from({ length: botCount }, (_, index) => ({ name: 'Bot ' + (index + 1), playingStrategy: botSelectors[index] === 'highest-probability' ? highestProbabilityPlayingStrategy : baselinePlayingStrategy })),
     };
     setPending(request);
     creation.mutate(request);
@@ -77,6 +79,10 @@ export function Playground() {
               <label>Configured Bots
                 <input name="botCount" type="number" min="0" max={Math.max(0, configuration.seatCount - 1)} step="1" required value={botCount} onChange={event => setBotCount(Number(event.target.value))} />
               </label>
+              {Array.from({ length: botCount }, (_, index) => <label key={index}>Bot {index + 1} Playing Strategy
+                <select name={'botStrategy' + index} value={botSelectors[index] ?? 'seeded-sampling'} onChange={event => setBotSelectors({ ...botSelectors, [index]: event.target.value })}>{baselineOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+              </label>)}
+              <p className="help">Uniform Choice is a testing baseline with no claim of poker expertise.</p>
               <p className="help">Participants are allocated now. Choose their seats after creating the table.</p>
               <button type="submit" className="primary">Create Table Session</button>
             </fieldset>
@@ -111,7 +117,7 @@ export function Playground() {
           <div className="live-connection">
             <p role="status">{live.connection === 'connected' ? 'Live updates connected' : live.connection === 'disconnected' ? 'Live updates disconnected. Refresh the view or reconnect.' : live.connection === 'reconnecting' ? 'Reconnecting live updates… The table will refresh automatically.' : 'Connecting live updates…'}</p>
             <button onClick={live.connection === 'disconnected' ? live.reconnect : live.disconnect}>{live.connection === 'disconnected' ? 'Reconnect live updates' : 'Disconnect live updates'}</button>
-            {live.runtimeStatus?.phase !== undefined && live.runtimeStatus.phase !== 'idle' && <p role="status">{live.runtimeStatus.message ?? (live.runtimeStatus.phase === 'thinking' ? 'Bot thinking…' : live.runtimeStatus.phase === 'recovering' ? 'This session is paused pending durable recovery.' : 'Bot evaluation failed. Retry or change its Strategy.')}</p>}
+            {live.runtimeStatus?.phase === 'recovering' && <p role="status">{live.runtimeStatus.message ?? 'This session is paused pending durable recovery.'}</p>}
           </div>
           <dl className="table-facts">
             <div><dt>Blinds</dt><dd>{table.data.view.configuration.smallBlind} / {table.data.view.configuration.bigBlind}</dd></div>
@@ -136,13 +142,14 @@ export function Playground() {
             </>}</li>;
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
+          <BotControls table={table.data} status={live.runtimeStatus} />
           <Seating key={table.data.tableSessionId} table={table.data} />
           <Management key={'management-' + table.data.tableSessionId} table={table.data} />
           <details className="presentation-events"><summary>Presentation events received: {live.eventCount}</summary><ul>{live.recentEvents.map((event, index) => <li key={index}>{event.type}</li>)}</ul></details>
           <h3>Participants</h3>
           <ul className="bindings">{table.data.bindings.map(binding => {
             const participant = table.data.view.state.participants.find(p => p.participantId === binding.participantId);
-            return <li key={binding.participantId}><strong>{binding.name}</strong><span>{binding.controller.kind === 'human' ? 'Human' : 'Bot · Uniform Choice'} · {participant?.seat ? `Seat ${participant.seat} · ${participant.stack} chips${participant.sittingOut ? ' · Sitting out' : ''}` : 'Unseated'}</span><code>{binding.participantId}</code></li>;
+            return <li key={binding.participantId}><strong>{binding.name}</strong><span>{binding.controller.kind === 'human' ? 'Human' : `Bot · Uniform Choice + ${binding.controller.playingStrategy.selector.id === 'highest-probability' ? 'Highest Probability Selector' : 'Probability Selector'}`} · {participant?.seat ? `Seat ${participant.seat} · ${participant.stack} chips${participant.sittingOut ? ' · Sitting out' : ''}` : 'Unseated'}</span><code>{binding.participantId}</code></li>;
           })}</ul>
         </> : !table.isFetching && <div className="initial-state"><h2>Your table starts here</h2><p>Create a Table Session with the settings on the left, or reopen one you already own.</p></div>}
       </section>

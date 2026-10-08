@@ -75,3 +75,36 @@ Complete deck:
 ```text
 4s 2c 5d Ah 3d 9c 4d Tc Qh Jc 5s 3c 9s 6d 8d 3s 7d Ks 7h Kc As 2h Jh 6c 7s Ts 8h Th Kd 4h 3h Kh Ad 9d Js Ac 7c Qc Qd 8c 4c 5c 8s 2d Qs 2s 6h 9h 6s 5h Td Jd
 ```
+
+## M1 Policy and Action Selector identities
+
+M1 Bot orchestration uses exactly `ParticipantId, DecisionId` after its namespace.
+It appends no Strategy/version/configuration suffix. Declared implementation,
+version, configuration, input fingerprint and effective seeds are retained and
+checked separately as part of the Bot request identity. Changing a descriptor
+keeps the independent domain seed but changes the request/assignment identity;
+retrying the same decision retains the same effective seeds. Each selection
+constructs a fresh source, so equal declared inputs and seeds repeat the action.
+
+Independent Python fixtures live in [fixtures/strategy-v1.py](fixtures/strategy-v1.py).
+For the UTF-8 master key `heads-up-fixture`, ParticipantId `alice`, DecisionId
+`hand-1/decision-1`, the exact messages are:
+
+```text
+["poker-random-v1","policy","alice","hand-1/decision-1"]
+["poker-random-v1","selector","alice","hand-1/decision-1"]
+```
+
+Policy effective seed:
+`9306c6cddb37a44ae7bc272f280146af0412e7786fefec56c73ca607c3c9cac6`;
+first word `723867575`, first unit `0.16853855340741575`.
+Selector effective seed:
+`50e60c430ba5b8f52529a1b5eb24082a3925f9e03e37cc18128aa37fed0247fa`;
+first word `2273501134`, first unit `0.5293407323770225`.
+
+ProbabilitySelector scans validated canonical choices using cumulative
+left-closed/right-open intervals, consumes one unit from a fresh source, and
+returns the final choice if only floating-point accumulation leaves a residual.
+For equally likely Fold, Call, Raise-to 40, Raise-to 147, this selector seed picks
+Raise-to 40. HighestProbabilitySelector consumes no seed and keeps Fold in that
+tie. UniformChoicePolicy consumes no Policy randomness.

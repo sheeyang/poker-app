@@ -1,22 +1,23 @@
+import { JobRunner, type JobRunnerOptions } from './job-runner.js';
+import { isBaselineStrategy, type Strategy } from '@poker/strategies';
 import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import type { CreateTableSessionRequest, PokerMutationRequest } from '@poker/contracts';
+import type { CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
   await initializeDatabase(pool);
   await app.register(cookie);
   await app.register(websocket);
-  app.addHook('onClose', async () => { await pool.end(); });
   const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
   async function authenticatedUser(token: string | undefined) {
     if (!token) return undefined;
@@ -32,9 +33,11 @@ export async function createServer(options: ServerOptions) {
     reply.setCookie('poker_local', token, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: 31536000 });
     return id;
   }
-  const create = createTableSessionCreator(db, options.transactionFaults);
-  const mutations = createTableSessionMutations(db, options.mutationTransactionFaults);
-  options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction });
+  const create = createTableSessionCreator(db, options.transactionFaults, options.supportsStrategy ?? isBaselineStrategy);
+  const jobRunner = new JobRunner(options.jobRunnerOptions);
+  const mutations = createTableSessionMutations(db, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy });
+  options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
+  app.addHook('onClose', async () => { await mutations.close(); await pool.end(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/live', {
     websocket: true,
@@ -109,5 +112,20 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The mutation could not be confirmed. Refresh the committed view before submitting another attempt.' } });
     }
   });
+  for (const kind of ['set-playing-strategy', 'retry-bot'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    try {
+      const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : outcome.rejection.code === 'session-recovering' ? 503 : ['request-id-conflict', 'stale-session-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The controller commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The controller change could not be confirmed. Refresh its committed view.' } });
+    }
+  });
+  await mutations.resumeBots();
   return app;
 }

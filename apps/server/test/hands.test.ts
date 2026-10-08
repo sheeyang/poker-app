@@ -13,7 +13,7 @@ let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -53,7 +53,7 @@ test('the owner starts a durable heads-up Hand, the bound human Folds, and resta
   expect(await (await submit(t, 'act', fold)).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 4, sessionRevision: 4 });
   expect(await read(t)).toEqual(completed);
   await server.close();
-  server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual(completed);
 });

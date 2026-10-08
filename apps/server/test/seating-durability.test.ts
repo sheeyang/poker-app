@@ -14,7 +14,7 @@ let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Pr
 let afterCommit: () => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
+  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -89,7 +89,7 @@ test('lost COMMIT confirmation pauses submissions without promoting or blindly r
   expect(await (await submit(t, 'new-after-unknown', t.bot, 2, 1)).json()).toMatchObject({ ok: false, rejection: { code: 'session-recovering' } });
   expect(await (await submit(t, 'ambiguous')).json()).toMatchObject({ ok: false, rejection: { code: 'session-recovering' } });
   await server.close();
-  server = await createServer({ databaseUrl, schema });
+  server = await createServer({ automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: t.human, seat: 1, stack: 1000 }] } } });
   expect(await (await submit(t, 'ambiguous')).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });

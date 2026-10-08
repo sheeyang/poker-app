@@ -162,7 +162,7 @@ export interface ObservableTableUpdate extends ObservableTableSession {
 export interface TableRuntimeStatus {
   readonly type: 'table-status';
   readonly tableSessionId: TableSessionId;
-  readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string };
+  readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string; readonly code?: 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' };
 }
 export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
@@ -174,3 +174,8 @@ export const baselinePlayingStrategy: StrategyDescriptor = Object.freeze({
   policy: Object.freeze({ id: 'uniform-choice', version: 'v1', configuration: Object.freeze({}) }),
   selector: Object.freeze({ id: 'seeded-sampling', version: 'v1', configuration: Object.freeze({}) }),
 });
+
+export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
+export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
+export interface RetryBotRequest extends ControllerMutationMetadata {}
+export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });

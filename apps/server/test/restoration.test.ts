@@ -14,7 +14,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
 async function startServer() {
-  server = await createServer({ databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
