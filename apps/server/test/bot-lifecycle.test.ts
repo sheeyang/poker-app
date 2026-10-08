@@ -44,11 +44,11 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     base = await server.listen({ host: '127.0.0.1', port: 0 });
   };
   await start();
-  async function table(strategy = descriptor()) {
+  async function table(strategy = descriptor(), botCount = 1) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
-    const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: strategy }] }) });
+    const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: botCount }, (_, index) => ({ name: 'Bot ' + (index + 1), playingStrategy: strategy })) }) });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) as string[] };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
@@ -185,6 +185,30 @@ test('startup resumes only the current Bot without a browser and human decisions
     await f.restart(); await expect.poll(() => f.evaluations.length).toBe(1);
     expect(f.evaluations[0]?.view.state.decisionId).toBe(current.view.state.decisionId);
     f.evaluations[0]!.result.resolve(answer({ type: 'fold' })); await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
+  } finally { await f.close(); }
+});
+
+test('startup resumes the current Bot in a Bot-only Hand and supplies only its own participant-safe Strategy input', async () => {
+  const f = await fixture();
+  try {
+    await f.restart(false);
+    const t = await f.table(descriptor(), 2);
+    await f.command(t, 'seat-participant', { participantId: t.bots[0], seat: 1 });
+    await f.command(t, 'seat-participant', { participantId: t.bots[1], seat: 2 });
+    await f.command(t, 'start-hand');
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 3, view: { state: { actorId: null, legalActions: [] }, history: [] } });
+    await f.restart();
+    await expect.poll(() => f.evaluations.length).toBe(1);
+    const evaluation = f.evaluations[0]!;
+    expect(evaluation.view).toBe(evaluation.compatibilityView);
+    expect(evaluation.view.state).toMatchObject({ handId: 'hand-1', actorId: t.bots[0], legalActions: expect.arrayContaining([{ type: 'fold' }, { type: 'call' }]) });
+    expect(evaluation.view.state.participants.find(participant => participant.participantId === t.bots[0])?.holeCards).toHaveLength(2);
+    expect(evaluation.view.state.participants.find(participant => participant.participantId === t.bots[1])).not.toHaveProperty('holeCards');
+    expect(JSON.stringify(evaluation.view)).not.toMatch(/"(?:seed|pokerRevision|sessionRevision|evaluationRequestId|playingStrategy|deck|burns|commands)"\s*:/);
+    evaluation.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(async () => (await f.read(t)).inspection.completedHands).toEqual([{ handId: 'hand-1', sequence: 1 }]);
+    await expect.poll(async () => (await f.read(t)).runtimeStatus?.phase).toBe('idle');
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, runtimeStatus: { phase: 'idle' } });
   } finally { await f.close(); }
 });
 

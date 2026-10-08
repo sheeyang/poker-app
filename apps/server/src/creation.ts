@@ -9,13 +9,9 @@ import { creationRequests, tableSessions } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
 import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
+import { canonical } from './canonical.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
-  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
-  return JSON.stringify(value);
-}
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
 export interface CreationTransactionFaults extends AcceptanceFaults { readonly beforeCommit?: () => Promise<void>; readonly afterCommit?: () => Promise<void> }
 export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isBaselineStrategy) {

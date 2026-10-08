@@ -10,6 +10,7 @@ import { creationRequests, processedRequests, tableSessions } from './db/schema.
 import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
+import { canonical } from './canonical.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
@@ -27,11 +28,6 @@ type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot'; iden
 export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
   readonly afterCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
-}
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
-  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + canonical((value as Record<string, unknown>)[key])).join(',') + '}';
-  return JSON.stringify(value);
 }
 const reject = (code: string, message: string): MutationOutcome => ({ ok: false, rejection: { code, message } });
 function applicationRejection(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
@@ -71,20 +67,21 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     return next.finally(() => { if (queue.get(id) === next) queue.delete(id); });
   }
   function capture(session: CommittedSession, evaluationRequestId: string) {
-    const actor = session.game.forParticipant(session.aggregate.bindings[0]!.participantId).getView().state.actorId;
-    const binding = session.aggregate.bindings.find(binding => binding.participantId === actor);
-    if (!binding || binding.controller.kind !== 'bot') return undefined;
-    const view = session.game.forParticipant(binding.participantId).getView();
-    if (!view.state.handId || !view.state.decisionId) return undefined;
-    const masterSeed = session.aggregate.pokerRecord.configuration.seed;
-    const identity: BotIdentity = immutableData({ tableSessionId: session.aggregate.tableSessionId, pokerRevision: session.aggregate.pokerRevision,
-      participantId: binding.participantId, handId: view.state.handId, decisionId: view.state.decisionId,
-      playingStrategy: binding.controller.playingStrategy, assignmentId: binding.assignmentId ?? 'initial:' + binding.participantId,
-      evaluationSeed: deriveSeed(masterSeed, 'policy', binding.participantId, view.state.decisionId),
-      selectionSeed: deriveSeed(masterSeed, 'selector', binding.participantId, view.state.decisionId),
-      inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'), evaluationRequestId,
-    });
-    return { identity, view };
+    for (const binding of session.aggregate.bindings) {
+      if (binding.controller.kind !== 'bot') continue;
+      const view = session.game.forParticipant(binding.participantId).getView();
+      if (view.state.actorId !== binding.participantId || !view.state.handId || !view.state.decisionId) continue;
+      const masterSeed = session.aggregate.pokerRecord.configuration.seed;
+      const identity: BotIdentity = immutableData({ tableSessionId: session.aggregate.tableSessionId, pokerRevision: session.aggregate.pokerRevision,
+        participantId: binding.participantId, handId: view.state.handId, decisionId: view.state.decisionId,
+        playingStrategy: binding.controller.playingStrategy, assignmentId: binding.assignmentId ?? 'initial:' + binding.participantId,
+        evaluationSeed: deriveSeed(masterSeed, 'policy', binding.participantId, view.state.decisionId),
+        selectionSeed: deriveSeed(masterSeed, 'selector', binding.participantId, view.state.decisionId),
+        inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'), evaluationRequestId,
+      });
+      return { identity, view };
+    }
+    return undefined;
   }
   function current(id: string, identity: BotIdentity): boolean {
     if (stopped || recovering.has(id) || work.get(id)?.identity.evaluationRequestId !== identity.evaluationRequestId) return false;

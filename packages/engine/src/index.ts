@@ -1,6 +1,7 @@
 import type { ConcreteAction, LegalAction, ObservableGameConfiguration, ObservableGameView, ObservableHistoryEntry, ObservablePresentationEvent, ParticipantId } from '@poker/contracts';
 import { draftFaults } from './internal/draft-faults.js';
 import type { CashGameState, HandState } from './internal/state.js';
+import type { DraftEvent, ManagementEvent } from './internal/events.js';
 import { shuffledDeck } from './internal/random.js';
 import { contributionLayers } from './internal/pots.js';
 import { revealLiveHands, settleHand } from './internal/settlement.js';
@@ -19,7 +20,7 @@ export type CashGameCommand =
   | { readonly type: 'set-button'; readonly seat: number }
   | { readonly type: 'start-hand' }
   | { readonly type: 'act'; readonly participantId: ParticipantId; readonly action: ConcreteAction };
-export type CashGameEvent = ObservablePresentationEvent | { readonly type: 'hole-cards-dealt'; readonly participantId: ParticipantId; readonly cardCount: number; readonly cards: readonly string[] };
+export type CashGameEvent = ManagementEvent | (Exclude<DraftEvent, ManagementEvent> & { readonly handId: string });
 export type CashGameResult =
   | { readonly ok: true; readonly events: readonly CashGameEvent[] }
   | { readonly ok: false; readonly rejection: CashGameRejection };
@@ -230,7 +231,7 @@ export class CashGame {
         participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, anteContribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
         deck: shuffledDeck(c.seed, sequence), drawnCardCount: 0, burns: [], board: [], street: 'preflop', actorId: null, decisionSequence: 0, decisionId: null, price: c.bigBlind, lastFullIncrement: c.bigBlind, pots: [], returns: [], payouts: [], actions: [] };
       draft.hands.push(hand); draft.status = 'active-hand'; draft.buttonSeat = button.seat!; draft.nextButtonSeat = null;
-      const events: CashGameEvent[] = [{ type: 'hand-started', handId: hand.handId, buttonSeat: hand.buttonSeat, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId }];
+      const events: DraftEvent[] = [{ type: 'hand-started', handId: hand.handId, buttonSeat: hand.buttonSeat, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId }];
       const contribute = (id: string, requested: number, kind: 'ante' | 'small-blind' | 'big-blind') => {
         const p = draft.participants.find(p => p.participantId === id)!;
         const member = hand.participants.find(p => p.participantId === id)!;
@@ -285,7 +286,7 @@ export class CashGame {
       }
       member.actedAtPrice = current.price;
       current.actions.push({ participantId, action: concrete });
-      const events: CashGameEvent[] = [{ type: 'acted', participantId, action: concrete }];
+      const events: DraftEvent[] = [{ type: 'acted', participantId, action: concrete }];
       const live = current.participants.filter(p => !p.folded);
       current.pots = contributionLayers(current).pots;
       if (live.length === 1) {
@@ -296,7 +297,7 @@ export class CashGame {
       return events;
     });
   }
-  #continueBetting(draft: CashGameState, hand: HandState, afterSeat: number, events: CashGameEvent[]): void {
+  #continueBetting(draft: CashGameState, hand: HandState, afterSeat: number, events: DraftEvent[]): void {
     const seatCount = this.#configuration.seatCount;
     const able = hand.participants.filter(p => !p.folded && !p.allIn);
     // With no opponent able to respond, only real outstanding live wagers
@@ -400,18 +401,24 @@ export class CashGame {
     if (this.#state.status === 'active-hand') return { ok: false, rejection: { code: 'active-hand', message: 'Manage Participants between Hands.' } };
     if (!this.#state.participants.some(p => p.participantId === participantId && p.seat !== null)) return { ok: false, rejection: { code: 'participant-not-seated', message: 'Choose a seated Participant.', field: 'participantId' } };
   }
-  #mutate(command: CashGameCommand, evaluate: (draft: CashGameState) => CashGameEvent[]): CashGameResult {
+  #mutate(command: CashGameCommand, evaluate: (draft: CashGameState) => DraftEvent[]): CashGameResult {
     const draft = structuredClone(this.#state);
     const events = evaluate(draft);
     draft.commands.push(structuredClone(command));
     draftFaults.afterEvaluation?.();
     validateState(draft, this.#configuration);
-    const result = immutable({ ok: true as const, events });
+    const authoritativeEvents: CashGameEvent[] = events.map(event => {
+      switch (event.type) {
+        case 'participant-seated': case 'participant-left': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': return event;
+        default: return { ...event, handId: draft.hands.at(-1)!.handId };
+      }
+    });
+    const result = immutable({ ok: true as const, events: authoritativeEvents });
     this.#state = draft;
     return result;
   }
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
-    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.map(event => {
+    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || this.#state.hands.find(hand => hand.handId === event.handId)?.observerParticipantIds.includes(participantId)).map(event => {
       switch (event.type) {
         case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
         case 'participant-left': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
