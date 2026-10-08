@@ -9,7 +9,7 @@ import type { TableSessionControllerCommands } from '../src/mutations.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const administration = new Pool({ connectionString: databaseUrl });
-interface Evaluation { view: ObservableGameView; seed: string; compatibilityView: ObservableGameView; signal?: AbortSignal; result: ReturnType<typeof Promise.withResolvers<PolicyResult>> }
+interface Evaluation { view: ObservableGameView; seed: string; descriptor: StrategyDescriptor; compatibilityView: ObservableGameView; signal?: AbortSignal; result: ReturnType<typeof Promise.withResolvers<PolicyResult>> }
 const descriptor = (mode = 'hold', selector = 'highest-probability'): StrategyDescriptor => ({ policy: { id: 'fixture', version: 'v1', configuration: { mode } }, selector: { id: selector, version: 'v1', configuration: {} } });
 async function fixture(options: Partial<ServerOptions> = {}) {
   const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -33,7 +33,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
               if (mode === 'invalid') return { choices: [{ action: { type: 'call' }, probability: .2 }], diagnostics: { private: 'untrusted diagnostic' } };
               if (mode === 'selector-error') return { choices: [{ action: view.state.legalActions.some(a => a.type === 'call') ? { type: 'call' } : { type: 'check' }, probability: 1 }] };
               const result = Promise.withResolvers<PolicyResult>();
-              evaluations.push({ view, compatibilityView: compatibilityView!, seed: execution.evaluationSeed, signal: execution.signal, result });
+              evaluations.push({ view, descriptor: configured, compatibilityView: compatibilityView!, seed: execution.evaluationSeed, signal: execution.signal, result });
               if (futureAnswers.length) result.resolve(futureAnswers.shift()!);
               return result.promise;
             },
@@ -267,4 +267,103 @@ test('recovery takes precedence over a cancelled computation’s late error and 
     expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 5, bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: descriptor('throw') } })] });
     expect((await f.commands.readPersistedSession(t.id))?.botProvenance).toEqual([]);
   } finally { socket?.terminate(); await f.close(); }
+});
+
+test('confirmed Bot-action rollback exposes a safe persistence failure and retry retains the decision and seeds', async () => {
+  let failOnce = true;
+  let failedEvaluationId: string | undefined;
+  const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => {
+    if (context.requestId.startsWith('bot:') && failOnce) { failOnce = false; failedEvaluationId = context.requestId.slice(4); throw new Error('untrusted PostgreSQL/private input failure'); }
+  } } });
+  let socket: WebSocket | undefined;
+  try {
+    const t = await f.table(); const live = f.connect(t); socket = live.socket; await f.botDecision(t);
+    await expect.poll(() => f.evaluations.length).toBe(1);
+    const failed = f.evaluations[0]!; failed.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(() => live.messages.at(-1)).toMatchObject({ type: 'table-status', status: {
+      phase: 'failed', participantId: t.bot, code: 'persistence-unavailable',
+      message: 'The Bot action could not be saved. Retry this decision.',
+    } });
+    expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, botProvenance: [] });
+    expect(JSON.stringify(live.messages)).not.toMatch(/untrusted|PostgreSQL|private input|evaluationSeed|selectionSeed/);
+    expect((await f.configure(t, 'retry-bot')).status).toBe(200);
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    const retried = f.evaluations[1]!; expect(retried.view).toEqual(failed.view); expect(retried.seed).toBe(failed.seed);
+    retried.result.resolve(answer({ type: 'fold' })); await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
+    expect((await f.commands.readPersistedSession(t.id))?.botProvenance).toHaveLength(1);
+    expect((await f.commands.readPersistedSession(t.id))?.botProvenance?.[0]?.evaluationRequestId).not.toBe(failedEvaluationId);
+  } finally { socket?.terminate(); await f.close(); }
+});
+
+test('matching Retry outcomes survive later assignments and restart without scheduling another evaluation, and stale rejections remain definitive', async () => {
+  const f = await fixture();
+  try {
+    const t = await f.table(); await f.botDecision(t); await expect.poll(() => f.evaluations.length).toBe(1);
+    const retry = { requestId: 'durable-retry', expectedSessionRevision: 4, participantId: t.bot };
+    const accepted = await (await f.submit(t, 'retry-bot', retry)).json();
+    expect(accepted).toMatchObject({ ok: true, pokerRevision: 4, sessionRevision: 4 });
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    const stale = { ...retry, requestId: 'durable-stale-retry', expectedSessionRevision: 3 };
+    const rejected = await (await f.submit(t, 'retry-bot', stale)).json();
+    expect(rejected).toMatchObject({ ok: false, rejection: { code: 'stale-session-revision' } });
+    expect((await f.configure(t, 'set-playing-strategy', { playingStrategy: descriptor('incompatible') })).status).toBe(200);
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 5 });
+    await f.restart();
+    expect(await (await f.submit(t, 'retry-bot', retry)).json()).toEqual(accepted);
+    expect(await (await f.submit(t, 'retry-bot', stale)).json()).toEqual(rejected);
+    expect((await f.submit(t, 'retry-bot', { ...retry, expectedSessionRevision: 5 })).status).toBe(409);
+    expect(f.evaluations).toEqual([]);
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 5, view: { state: { actorId: t.bot } } });
+    expect((await f.commands.readPersistedSession(t.id))?.botProvenance).toEqual([]);
+  } finally { await f.close(); }
+});
+
+test('repeated fresh retries preserve declared inputs while obsolete errors and actions cannot replace the latest thinking state or accepted action', async () => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 3, maximumQueued: 1, timeoutMs: 2000 } });
+  let socket: WebSocket | undefined;
+  try {
+    const t = await f.table(); const live = f.connect(t); socket = live.socket; await f.botDecision(t);
+    await expect.poll(() => f.evaluations.length).toBe(1); const first = f.evaluations[0]!;
+    expect((await f.configure(t, 'retry-bot')).status).toBe(200); await expect.poll(() => f.evaluations.length).toBe(2);
+    expect((await f.configure(t, 'retry-bot')).status).toBe(200); await expect.poll(() => f.evaluations.length).toBe(3);
+    const second = f.evaluations[1]!; const latest = f.evaluations[2]!;
+    expect(latest.view).toEqual(first.view); expect(latest.descriptor).toEqual(first.descriptor); expect(latest.seed).toBe(first.seed);
+    expect(second.signal?.aborted).toBe(true); expect(first.signal?.aborted).toBe(true);
+    first.result.reject(new Error('obsolete private failure')); second.result.resolve(answer({ type: 'check' }));
+    // The HTTP round trip and current-request snapshot observe the committed decision while old work settles.
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, view: { state: { actorId: t.bot } } });
+    await expect.poll(() => live.messages.at(-1)).toMatchObject({ type: 'table-status', status: { phase: 'thinking', participantId: t.bot } });
+    latest.result.resolve(answer({ type: 'fold' })); await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
+    await expect.poll(() => live.messages.at(-1)).toMatchObject({ type: 'table-status', status: { phase: 'idle' } });
+    expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[4]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });
+    expect((await f.commands.readPersistedSession(t.id))?.botProvenance).toHaveLength(1);
+    expect(JSON.stringify(live.messages)).not.toContain('obsolete private failure');
+  } finally { socket?.terminate(); await f.close(); }
+});
+
+test('a controller change queued ahead of a returning action promotes only after COMMIT and accepts the new configuration at the same decision', async () => {
+  const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
+  const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => {
+    if (context.requestId === 'held-configuration') { entered.resolve(); await release.promise; }
+  } } });
+  let socket: WebSocket | undefined;
+  let changing: Promise<Response> | undefined;
+  try {
+    const t = await f.table(); const live = f.connect(t); socket = live.socket; await f.botDecision(t);
+    await expect.poll(() => f.evaluations.length).toBe(1); const obsolete = f.evaluations[0]!;
+    const replacement = { ...descriptor(), policy: { ...descriptor().policy, configuration: { mode: 'hold', experiment: 2 } } };
+    changing = f.configure(t, 'set-playing-strategy', { playingStrategy: replacement }, 'held-configuration');
+    await entered.promise; obsolete.result.resolve(answer({ type: 'check' }));
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: descriptor() } })] });
+    expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, botProvenance: [] });
+    expect(live.messages.filter(m => m.type === 'table-update').map(m => m.sessionRevision)).not.toContain(5);
+    release.resolve(); expect((await changing).status).toBe(200);
+    await expect.poll(() => f.evaluations.length).toBe(2); const fresh = f.evaluations[1]!;
+    expect(fresh.descriptor).toEqual(replacement); expect(fresh.view).toEqual(obsolete.view); expect(fresh.seed).toBe(obsolete.seed);
+    await expect.poll(() => live.messages.find(m => m.type === 'table-update' && m.sessionRevision === 5)).toMatchObject({ pokerRevision: 4, bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: replacement } })], view: { state: { actorId: t.bot, decisionId: obsolete.view.state.decisionId } } });
+    expect(live.messages.at(-1)).toMatchObject({ type: 'table-status', status: { phase: 'thinking', participantId: t.bot } });
+    fresh.result.resolve(answer({ type: 'fold' })); await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
+    expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRevision: 5, sessionRevision: 6, botProvenance: [expect.objectContaining({ playingStrategy: replacement, decisionId: obsolete.view.state.decisionId, evaluationSeed: obsolete.seed })] });
+    expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[4]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });
+  } finally { release.resolve(); await changing?.catch(() => {}); socket?.terminate(); await f.close(); }
 });

@@ -186,7 +186,7 @@ export interface ObservableTableUpdate extends ObservableTableSession {
 export interface TableRuntimeStatus {
   readonly type: 'table-status';
   readonly tableSessionId: TableSessionId;
-  readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string; readonly code?: 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' };
+  readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string; readonly code?: 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' | 'persistence-unavailable' };
 }
 export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
