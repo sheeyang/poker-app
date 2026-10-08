@@ -33,9 +33,7 @@ export function Hand({ table }: { table: ObservableTableSession }) {
   const eligible = state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).length;
   const busy = mutation.isPending || !!pending || !!seating || !!management;
   const pot = state.status === 'active-hand' ? state.participants.reduce((sum, p) => sum + (p.contribution ?? 0), 0) : state.pots.reduce((sum, p) => sum + p.amount, 0);
-  const ownFacts = state.participants.find(p => p.participantId === human.participantId);
-  const price = Math.max(state.street === 'preflop' ? table.view.configuration.bigBlind : 0, ...state.participants.map(p => p.wager ?? 0));
-  const callAmount = Math.min(ownFacts?.stack ?? 0, Math.max(0, price - (ownFacts?.wager ?? 0)));
+  const callAmount = state.amountToCall ?? 0;
   const showdown = state.status === 'completed-hand' && state.board.length === 5 && state.participants.filter(p => p.inHand && !p.folded).length > 1;
   const paused = mutation.error instanceof RequestFailure && ['commit-outcome-unknown', 'session-recovering'].includes(mutation.error.code);
   return <section className="hand-controls" aria-labelledby="hand-heading">

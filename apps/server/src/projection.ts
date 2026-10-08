@@ -8,9 +8,10 @@ function projectState(state: ObservableCashGameState): ObservableCashGameState {
   return {
     status: state.status, buttonSeat: state.buttonSeat,
     participants: state.participants.map(p => ({ participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut,
-      ...(p.inHand ? { inHand: p.inHand, handSeat: p.handSeat, folded: p.folded, allIn: p.allIn, contribution: p.contribution, wager: p.wager, cardCount: p.cardCount, ...(p.holeCards ? { holeCards: [...p.holeCards] } : {}) } : {}) })),
+      ...(p.inHand ? { inHand: p.inHand, handSeat: p.handSeat, folded: p.folded, allIn: p.allIn, contribution: p.contribution, anteContribution: p.anteContribution, wager: p.wager, cardCount: p.cardCount, ...(p.holeCards ? { holeCards: [...p.holeCards] } : {}) } : {}) })),
     board: [...state.board], pots: state.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })), actorId: state.actorId,
     legalActions: state.legalActions.map(a => a.type === 'bet' || a.type === 'raise' ? { type: a.type, minimum: a.minimum, maximum: a.maximum } : { type: a.type }),
+    ...(state.amountToCall !== undefined ? { amountToCall: state.amountToCall } : {}),
     ...(state.handId ? { handId: state.handId, decisionId: state.decisionId, street: state.street, smallBlindParticipantId: state.smallBlindParticipantId, bigBlindParticipantId: state.bigBlindParticipantId,
       returns: state.returns?.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: state.payouts?.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}),
   };

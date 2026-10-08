@@ -7,6 +7,7 @@ export interface HandParticipantState {
   seat: number;
   holeCards: string[];
   contribution: number;
+  anteContribution: number;
   wager: number;
   folded: boolean;
   allIn: boolean;
