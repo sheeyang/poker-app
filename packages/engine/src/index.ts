@@ -200,6 +200,10 @@ export class CashGame {
   toRecord(): TableSessionRecord {
     return immutable({ schemaVersion: 1, engineVersion: 'v1', configuration: structuredClone(this.#configuration), commands: structuredClone(this.#state.commands) });
   }
+  /** Trusted application metadata; Participant histories remain separately scoped. */
+  getCompletedHands(): readonly { readonly handId: string; readonly sequence: number }[] {
+    return immutable(this.#state.hands.filter(hand => hand.completed).map(hand => ({ handId: hand.handId, sequence: hand.sequence })));
+  }
   getHand(handId: string): AuthoritativeHandFacts | undefined {
     const hand = this.#state.hands.find(h => h.handId === handId);
     if (!hand) return undefined;

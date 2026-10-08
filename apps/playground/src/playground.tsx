@@ -8,6 +8,7 @@ import { Seating } from './seating.js';
 import { Hand } from './hand.js';
 import { retainNewestTable, useTableSynchronization } from './live.js';
 import { Management } from './management.js';
+import { Inspection } from './inspection.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -143,6 +144,7 @@ export function Playground() {
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
           <BotControls table={table.data} status={live.runtimeStatus} />
+          {live.inspectionCapabilities?.adminMode && <Inspection key={'inspection-' + table.data.tableSessionId + '-' + live.inspectionGeneration} table={table.data} capabilities={live.inspectionCapabilities} />}
           <Seating key={table.data.tableSessionId} table={table.data} />
           <Management key={'management-' + table.data.tableSessionId} table={table.data} />
           <details className="presentation-events"><summary>Presentation events received: {live.eventCount}</summary><ul>{live.recentEvents.map((event, index) => <li key={index}>{event.type}</li>)}</ul></details>

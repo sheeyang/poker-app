@@ -27,7 +27,7 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
     },
   }));
 }
-export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game?: CashGame): ObservableTableSession {
+export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game?: CashGame, adminMode = true): ObservableTableSession {
   if (!game) {
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new Error('Committed CashGame record could not be restored.');
@@ -38,6 +38,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   return {
     tableSessionId: aggregate.tableSessionId, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
+    inspection: { adminMode, completedHands: adminMode ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
       state: projectState(view.state),
@@ -48,7 +49,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     },
   };
 }
-export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, events: readonly CashGameEvent[] = []): ObservableTableUpdate {
+export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, events: readonly CashGameEvent[] = [], adminMode = true): ObservableTableUpdate {
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
       case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
@@ -68,5 +69,5 @@ export function projectTableUpdate(aggregate: PersistedTableSession, participant
       case 'hand-completed': return { type: event.type, handId: event.handId };
     }
   });
-  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game), presentationEvents };
+  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game, adminMode), presentationEvents };
 }

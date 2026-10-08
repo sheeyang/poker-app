@@ -46,6 +46,7 @@ type BotIdentity = Omit<BotActionProvenance, 'commandIndex'> & { readonly tableS
 export interface BotRuntimeOptions {
   readonly runner: JobRunner;
   readonly automaticBots?: boolean;
+  readonly adminMode?: boolean;
   readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy;
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
 }
@@ -141,7 +142,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     if (entries.size === 0) subscribers.delete(id);
   }
   function publishCommitted(id: string, events: readonly CashGameEvent[] = []) {
-    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, events));
+    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, events, bots?.adminMode !== false));
   }
   function publishStatus(id: string, status: TableRuntimeStatus['status']) {
     if (stopped) return;
@@ -185,7 +186,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       const session = committed.get(id);
       const participantId = observer(session, ownerUserId);
       if (!session || !participantId) return undefined;
-      return projectTableSession(session.aggregate, participantId, session.game);
+      return projectTableSession(session.aggregate, participantId, session.game, bots?.adminMode !== false);
     }
     async function subscribe(id: string, ownerUserId: string, publish: (update: TableLiveMessage) => void) {
       await load(id, ownerUserId);
@@ -198,7 +199,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish(projectTableUpdate(session.aggregate, participantId, session.game));
+        publish(projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false));
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
