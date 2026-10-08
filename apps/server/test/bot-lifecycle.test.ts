@@ -260,9 +260,10 @@ test('recovery takes precedence over a cancelled computation’s late error and 
     const old = f.evaluations[0]!;
     expect((await f.configure(t, 'set-playing-strategy', { playingStrategy: descriptor('throw') }, 'lost-assignment')).status).toBe(503);
     old.result.reject(new Error('untrusted late failure in recovery'));
-    await expect.poll(() => live.messages.at(-1)).toMatchObject({ type: 'table-status', status: { phase: 'recovering' } });
-    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4 });
-    expect((await f.configure(t, 'retry-bot')).status).toBe(503);
+    await expect.poll(() => live.messages.find(message => message.type === 'table-status' && message.status.phase === 'recovering')).toMatchObject({ type: 'table-status', status: { phase: 'recovering' } });
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4 });
+    // M1-15 resolves a matching committed controller attempt without requiring restart.
+    expect(await (await f.submit(t, 'set-playing-strategy', { requestId: 'lost-assignment', expectedSessionRevision: 4, participantId: t.bot, playingStrategy: descriptor('throw') })).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 4, sessionRevision: 5 });
     socket.terminate(); socket = undefined; await f.restart(false);
     expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 5, bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: descriptor('throw') } })] });
     expect((await f.commands.readPersistedSession(t.id))?.botProvenance).toEqual([]);

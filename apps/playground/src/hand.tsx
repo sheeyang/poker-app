@@ -1,3 +1,4 @@
+import { AttemptRecovery } from './recovery.js';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import type { ConcreteAction, LegalAction, ObservableTableSession } from '@poker/contracts';
@@ -31,11 +32,10 @@ export function Hand({ table }: { table: ObservableTableSession }) {
     setPending(attempt); mutation.mutate(attempt);
   }
   const eligible = state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).length;
-  const busy = mutation.isPending || !!pending || !!seating || !!management;
+  const busy = table.runtimeStatus?.phase === 'recovering' || mutation.isPending || !!pending || !!seating || !!management;
   const pot = state.status === 'active-hand' ? state.participants.reduce((sum, p) => sum + (p.contribution ?? 0), 0) : state.pots.reduce((sum, p) => sum + p.amount, 0);
   const callAmount = state.amountToCall ?? 0;
   const showdown = state.status === 'completed-hand' && state.board.length === 5 && state.participants.filter(p => p.inHand && !p.folded).length > 1;
-  const paused = mutation.error instanceof RequestFailure && ['commit-outcome-unknown', 'session-recovering'].includes(mutation.error.code);
   return <section className="hand-controls" aria-labelledby="hand-heading">
     <h3 id="hand-heading">{state.handId ? `Hand ${state.handId.slice(5)}` : 'Start a Hand'}</h3>
     <dl className="table-facts">
@@ -64,11 +64,8 @@ export function Hand({ table }: { table: ObservableTableSession }) {
     {state.payouts?.map((p, i) => <p key={i}>{name(p.participantId)} won {p.amount} chips.</p>)}
     {state.returns?.map((p, i) => <p key={i}>{p.amount} uncalled chips returned to {name(p.participantId)}.</p>)}
     {mutation.isPending && <p role="status">Saving the Hand command…</p>}
-    {mutation.error && <p role="alert" className="error"><strong>{mutation.error instanceof RequestFailure && mutation.error.definitive ? 'Hand command rejected. ' : 'Hand command awaiting confirmation. '}</strong>{mutation.error.message}</p>}
-    {ownPending && !mutation.isPending && <div className="pending-attempt">
-      <p>{paused ? 'This session is paused pending durable recovery. Refresh its view to check the committed table.' : 'The outcome is unconfirmed. Refresh the view or retry this same attempt.'}</p>
-      {!paused && <button onClick={() => mutation.mutate(ownPending)}>Retry Hand command</button>}
-    </div>}
+    {mutation.error && <p role="alert" className="error"><strong>{mutation.error instanceof RequestFailure && mutation.error.code === 'commit-not-applied' ? 'Attempt did not commit. ' : mutation.error instanceof RequestFailure && mutation.error.definitive ? 'Hand command rejected. ' : 'Hand command awaiting confirmation. '}</strong>{mutation.error.message}</p>}
+    {ownPending && !mutation.isPending && <AttemptRecovery error={mutation.error} check={() => mutation.mutate(ownPending)} dismiss={() => { setPending(null); mutation.reset(); }} />}
     {pending && !ownPending && <p className="help">Resolve the pending Hand command in its Table Session before submitting another.</p>}
   </section>;
 }

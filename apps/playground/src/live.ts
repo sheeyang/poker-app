@@ -8,7 +8,10 @@ import type { ObservableTableSession, ObservablePresentationEvent, TableLiveMess
 export function retainNewestTable(previous: unknown, incoming: unknown): ObservableTableSession {
   const current = previous as ObservableTableSession | undefined;
   const next = incoming as ObservableTableSession;
-  return current?.tableSessionId === next.tableSessionId && current.sessionRevision >= next.sessionRevision ? current : next;
+  if (current?.tableSessionId === next.tableSessionId && current.sessionRevision > next.sessionRevision) return current;
+  if (current?.tableSessionId === next.tableSessionId && current.sessionRevision === next.sessionRevision)
+    return Object.hasOwn(next, 'runtimeStatus') ? { ...current, runtimeStatus: next.runtimeStatus } : current;
+  return next;
 }
 type Connection = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 export function useTableSynchronization(id: string | null, enabled: boolean) {
@@ -47,6 +50,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean) {
         if (message.type === 'table-status') {
           // Thinking/failure/recovery may change without a durable session revision.
           setRuntime({ id: id!, status: message.status });
+          queryClient.setQueryData<ObservableTableSession>(key, current => current ? { ...current, runtimeStatus: message.status } : current);
           return;
         }
         if (message.type !== 'table-update') return;

@@ -6,9 +6,10 @@ import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
 import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import type { PersistedTableSession, BotActionProvenance } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
-import { processedRequests, tableSessions } from './db/schema.js';
+import { creationRequests, processedRequests, tableSessions } from './db/schema.js';
 import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
+import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
@@ -23,7 +24,7 @@ export interface TableSessionControllerCommands {
 }
 type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot'; identity?: BotIdentity };
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
-export interface MutationTransactionFaults {
+export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
   readonly afterCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
 }
@@ -50,7 +51,7 @@ export interface BotRuntimeOptions {
   readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy;
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
 }
-export function createTableSessionMutations(db: Database, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions) {
+export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions) {
   const committed = new Map<string, CommittedSession>();
   const loading = new Map<string, Promise<CommittedSession | undefined>>();
   const queue = new Map<string, Promise<unknown>>();
@@ -59,6 +60,8 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
   const statuses = new Map<string, TableRuntimeStatus['status']>();
   const work = new Map<string, { identity: BotIdentity; handle?: JobHandle<ConcreteAction> }>();
   let stopped = false;
+  let recoveryTimer: ReturnType<typeof setInterval> | undefined;
+  const scheduledRecovery = new Set<string>();
   const strategyFactory = bots?.strategyFactory ?? baselineStrategy;
   const supportsStrategy = bots?.supportsStrategy ?? isBaselineStrategy;
   function enqueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
@@ -90,6 +93,63 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     return !!fresh && canonical(fresh.identity) === canonical(identity);
   }
   function retire(id: string) { const prior = work.get(id); work.delete(id); prior?.handle?.cancel(); }
+  function pause(id: string) {
+    const fresh = !recovering.has(id);
+    recovering.add(id); retire(id);
+    if (fresh || statuses.get(id)?.phase !== 'recovering') publishStatus(id, { phase: 'recovering' });
+  }
+  async function reconcile(id: string): Promise<boolean> {
+    const attempts = (await acceptance.attempts()).filter(entry => entry.tableSessionId === id && entry.state === 'pending');
+    let pending = false;
+    for (const attempt of attempts) {
+      const status = await acceptance.status(attempt);
+      if (status === 'pending') { pending = true; continue; }
+      if (status === 'committed') {
+        // The transaction oracle and its outcome are intentionally distinct snapshots.
+        const rows = attempt.kind === 'table'
+          ? await db.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, attempt.requestId)))
+          : await db.select().from(creationRequests).where(and(eq(creationRequests.userId, attempt.id), eq(creationRequests.requestId, attempt.requestId)));
+        if (!rows[0] || rows[0].fingerprint !== attempt.fingerprint) { pending = true; continue; }
+        // Restore replaces game, revisions, bindings, assignments and provenance together.
+        await restore(id);
+        await acceptance.forget(attempt).catch(() => {});
+      }
+    }
+    if (pending) { pause(id); return false; }
+    if (recovering.has(id)) {
+      await restore(id);
+      retire(id); recovering.delete(id);
+      publishCommitted(id); publishStatus(id, { phase: 'idle' });
+      const session = committed.get(id); if (session) ensureBot(id, session, true);
+    }
+    return true;
+  }
+  async function resolveRequest(id: string, requestId: string, fingerprint: string): Promise<MutationOutcome | undefined> {
+    const attempt = await acceptance.find({ kind: 'table', id, requestId });
+    if (attempt && attempt.fingerprint !== fingerprint) return reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
+    if (attempt) {
+      const status = await acceptance.status(attempt);
+      if (status === 'pending') { pause(id); throw new CommitOutcomeUnknown('The earlier transaction remains unresolved.'); }
+      if (status === 'noncommit') { await reconcile(id); return reject('commit-not-applied', 'The attempt did not commit. Submit a new requestId to deliberately try again.'); }
+      pause(id);
+    }
+    if (recovering.has(id)) await reconcile(id);
+    const rows = await db.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
+    if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
+    if (attempt || recovering.has(id)) return reject('session-recovering', 'This Table Session is paused while a commit outcome is unknown.');
+  }
+  async function startRecovery() {
+    for (const attempt of await acceptance.attempts()) if (attempt.state === 'pending' && attempt.tableSessionId) pause(attempt.tableSessionId);
+    recoveryTimer = setInterval(() => {
+      if (stopped) return;
+      for (const id of recovering) {
+        if (scheduledRecovery.has(id)) continue;
+        scheduledRecovery.add(id);
+        void enqueue(id, () => reconcile(id)).catch(() => {}).finally(() => scheduledRecovery.delete(id));
+      }
+    }, 100);
+    recoveryTimer.unref();
+  }
   function ensureBot(id: string, session: CommittedSession, force = false) {
     if (stopped || recovering.has(id) || !bots || bots.automaticBots === false) return;
     const proposed = capture(session, randomUUID());
@@ -155,6 +215,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     deliver(id, () => ({ type: 'table-status', tableSessionId: id, status: safeStatus }));
   }
   async function load(id: string, ownerUserId?: string): Promise<CommittedSession | undefined> {
+    if (!recovering.has(id) && (await acceptance.attempts()).some(entry => entry.tableSessionId === id && entry.state === 'pending')) pause(id);
     const cached = committed.get(id);
     if (cached) return ownerUserId && cached.aggregate.ownerUserId !== ownerUserId ? undefined : cached;
     if (ownerUserId) {
@@ -186,7 +247,8 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       const session = committed.get(id);
       const participantId = observer(session, ownerUserId);
       if (!session || !participantId) return undefined;
-      return projectTableSession(session.aggregate, participantId, session.game, bots?.adminMode !== false);
+      const projected = projectTableSession(session.aggregate, participantId, session.game, bots?.adminMode !== false);
+      return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
     }
     async function subscribe(id: string, ownerUserId: string, publish: (update: TableLiveMessage) => void) {
       await load(id, ownerUserId);
@@ -199,7 +261,7 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish(projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false));
+        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
@@ -209,20 +271,19 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       return () => { entries.delete(entry); if (entries.size === 0) subscribers.delete(id); };
     }
     async function accept(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
-        const session = await load(id, authority.kind === 'human' ? authority.userId : undefined);
+        let session = await load(id, authority.kind === 'human' ? authority.userId : undefined);
         if (!session || (authority.kind === 'human' && session.aggregate.ownerUserId !== authority.userId)) return { ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } };
         if (stopped) return reject('server-closing', 'The server is closing.');
-        if (recovering.has(id)) return reject('session-recovering', 'This Table Session is paused while a commit outcome is unknown.');
-        if (authority.kind === 'bot' && authority.identity && !current(id, authority.identity)) return reject('obsolete-bot-work', 'The Bot decision changed.');
         const { requestId, ...contents } = request;
         const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: authority.kind, kind, contents })).digest('hex');
+        const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
+        session = committed.get(id)!;
+        if (authority.kind === 'bot' && authority.identity && !current(id, authority.identity)) return reject('obsolete-bot-work', 'The Bot decision changed.');
         let proposed: CommittedSession | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
-        let commitAttempted = false;
-        let newlyProcessed = false;
         const context = { tableSessionId: id, requestId };
         try {
-          const outcome = await db.transaction(async (tx): Promise<MutationOutcome> => {
+          const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async (tx): Promise<MutationOutcome> => {
             const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
             const known = rows[0];
             if (known) return known.fingerprint === fingerprint ? known.outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
@@ -266,21 +327,12 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
               }
             }
             await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
-            await faults?.beforeCommit?.(context);
-            commitAttempted = true;
-            newlyProcessed = true;
             return result;
-          });
-          if (newlyProcessed) await faults?.afterCommit?.(context);
+          }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
           if (proposed) { committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed); }
           return outcome;
         } catch (error) {
-          if (commitAttempted) {
-            recovering.add(id);
-            retire(id);
-            publishStatus(id, { phase: 'recovering', message: 'This Table Session is paused while its commit outcome is unknown.' });
-            throw new CommitOutcomeUnknown('Mutation COMMIT acknowledgement was not confirmed.', { cause: error });
-          }
+          if (error instanceof CommitOutcomeUnknown) pause(id);
           throw error;
         }
     }
@@ -289,16 +341,17 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     }
     async function configure(id: string, ownerUserId: string, kind: 'set-playing-strategy' | 'retry-bot', request: SetPlayingStrategyRequest | RetryBotRequest): Promise<MutationOutcome> {
       return enqueue(id, async () => {
-        const session = await load(id, ownerUserId);
+        let session = await load(id, ownerUserId);
         if (!session || session.aggregate.ownerUserId !== ownerUserId) return reject('not-found', 'This Table Session is unavailable to this local identity.');
-        if (stopped || recovering.has(id)) return reject('session-recovering', 'This Table Session is paused.');
+        if (stopped) return reject('server-closing', 'The server is closing.');
         const { requestId, ...contents } = request;
         const fingerprint = createHash('sha256').update('controller-mutation-v1:' + canonical({ ownerUserId, kind, contents })).digest('hex');
+        const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
+        session = committed.get(id)!;
         let proposed: CommittedSession | undefined;
         let fresh = false;
-        let commitAttempted = false;
         try {
-          const outcome = await db.transaction(async tx => {
+          const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async tx => {
             const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
             if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
             const fields = ['requestId', 'expectedSessionRevision', 'participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])];
@@ -317,16 +370,14 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
             }
             result ??= { ok: true, tableSessionId: id, pokerRevision: session.aggregate.pokerRevision, sessionRevision: proposed?.aggregate.sessionRevision ?? session.aggregate.sessionRevision };
             await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
-            await faults?.beforeCommit?.({ tableSessionId: id, requestId });
-            commitAttempted = true; fresh = true;
+            fresh = true;
             return result;
-          });
-          if (fresh) await faults?.afterCommit?.({ tableSessionId: id, requestId });
+          }, { ...faults, beforeCommit: () => faults?.beforeCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve() });
           if (proposed) { committed.set(id, proposed); publishCommitted(id); }
           if (fresh && outcome.ok) ensureBot(id, proposed ?? session, kind === 'retry-bot');
           return outcome;
         } catch (error) {
-          if (commitAttempted) { recovering.add(id); retire(id); publishStatus(id, { phase: 'recovering' }); throw new CommitOutcomeUnknown('Controller COMMIT confirmation was lost.', { cause: error }); }
+          if (error instanceof CommitOutcomeUnknown) pause(id);
           throw error;
         }
       });
@@ -343,9 +394,13 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
       // A corrupt session remains unavailable at its routes without preventing other sessions from starting.
       await Promise.allSettled(rows.map(row => enqueue(row.id, async () => { const session = await load(row.id); if (session) ensureBot(row.id, session); })));
     }
-    async function close() {
+    function stop() {
       stopped = true;
+      clearInterval(recoveryTimer);
       for (const id of work.keys()) retire(id);
+    }
+    async function close() {
+      stop();
       await bots?.runner.close();
       await Promise.allSettled([...queue.values()]);
     }
@@ -354,6 +409,8 @@ export function createTableSessionMutations(db: Database, faults?: MutationTrans
     subscribe,
     configure,
     resumeBots,
+    startRecovery,
+    stop,
     close,
     readPersistedSession,
     /** Use only after promoting confirmed durable state, including application-only mutations. */

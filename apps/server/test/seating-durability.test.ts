@@ -76,18 +76,16 @@ test('confirmed rollback leaves committed seating and revisions unchanged and st
   expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1 });
 });
 
-test('lost COMMIT confirmation pauses submissions without promoting or blindly re-executing until durable restoration', async () => {
+test('lost COMMIT confirmation recovers its original outcome live and after restart without duplicate seating', async () => {
   const t = await table();
-  const before = await read(t);
   afterCommit = async () => { throw new Error('controlled lost COMMIT confirmation'); };
   try {
     const ambiguous = await submit(t, 'ambiguous');
     expect(ambiguous.status).toBe(503);
     expect(await ambiguous.json()).toMatchObject({ ok: false, rejection: { code: 'commit-outcome-unknown' } });
-    expect(await read(t)).toEqual(before);
   } finally { afterCommit = async () => {}; }
-  expect(await (await submit(t, 'new-after-unknown', t.bot, 2, 1)).json()).toMatchObject({ ok: false, rejection: { code: 'session-recovering' } });
-  expect(await (await submit(t, 'ambiguous')).json()).toMatchObject({ ok: false, rejection: { code: 'session-recovering' } });
+  // M1-15 replaces the interim permanent recovery gate with durable live resolution.
+  expect(await (await submit(t, 'ambiguous')).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });
   await server.close();
   server = await createServer({ automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
