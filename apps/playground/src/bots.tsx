@@ -1,3 +1,4 @@
+import { AttemptRecovery } from './recovery.js';
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableSession, type ParticipantBinding, type TableRuntimeStatus } from '@poker/contracts';
@@ -52,7 +53,7 @@ function BotStrategy({ table, binding, status }: { table: ObservableTableSession
     </div>}
     {mutation.isPending && <p role="status">{mutation.variables?.kind === 'retry-bot' ? 'Requesting this Bot decision again…' : 'Saving Playing Strategy…'}</p>}
     {mutation.isSuccess && <p role="status" className="success">{mutation.variables?.kind === 'retry-bot' ? 'Bot retry accepted.' : 'Playing Strategy saved.'}</p>}
-    {mutation.error && <p role="alert" className="error">{mutation.error instanceof RequestFailure && mutation.error.definitive ? 'Controller request rejected. ' : 'Controller request awaiting confirmation. '}{mutation.error.message}</p>}
-    {ownPending && !mutation.isPending && <div className="pending-attempt"><p>{paused ? 'Refresh the table to check durable recovery.' : 'Refresh the table or retry this same controller request to confirm its outcome.'}</p>{!paused && <button onClick={() => mutation.mutate(ownPending)}>Retry controller request</button>}</div>}
+    {mutation.error && <p role="alert" className="error">{mutation.error instanceof RequestFailure && mutation.error.code === 'commit-not-applied' ? 'Attempt did not commit. ' : mutation.error instanceof RequestFailure && mutation.error.definitive ? 'Controller request rejected. ' : 'Controller request awaiting confirmation. '}{mutation.error.message}</p>}
+    {ownPending && !mutation.isPending && <AttemptRecovery error={mutation.error} check={() => mutation.mutate(ownPending)} dismiss={() => { setPending(null); mutation.reset(); }} />}
   </div>;
 }

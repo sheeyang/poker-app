@@ -16,6 +16,8 @@ import { AcceptanceTransactions } from './db/acceptance.js';
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
+  let closing = false;
+  app.addHook('onSend', async (_request, reply) => { if (closing) reply.header('connection', 'close'); });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
   await initializeDatabase(pool);
   await app.register(cookie);
@@ -40,7 +42,7 @@ export async function createServer(options: ServerOptions) {
   const jobRunner = new JobRunner(options.jobRunnerOptions);
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy });
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
-  app.addHook('preClose', async () => { acceptance.stop(); mutations.stop(); });
+  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/live', {

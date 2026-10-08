@@ -1,3 +1,4 @@
+import { AttemptRecovery } from './recovery.js';
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ObservableTableSession } from '@poker/contracts';
@@ -48,7 +49,7 @@ export function Seating({ table }: { table: ObservableTableSession }) {
     <h3 id="seating-heading">Seat a Participant</h3>
     <p className="help">Choose an empty seat. Buy-in limits are {table.view.configuration.minimumBuyIn}–{table.view.configuration.maximumBuyIn} chips.</p>
     <form onSubmit={submit}>
-      <fieldset disabled={mutation.isPending || !!pending || !!pendingHand || !!pendingManagement || table.view.state.status === 'active-hand' || unseated.length === 0 || emptySeats.length === 0}>
+      <fieldset disabled={table.runtimeStatus?.phase === 'recovering' || mutation.isPending || !!pending || !!pendingHand || !!pendingManagement || table.view.state.status === 'active-hand' || unseated.length === 0 || emptySeats.length === 0}>
         <div className="seating-fields">
           <label>Participant<select name="participantId" required value={chosenParticipant} onChange={event => setParticipantId(event.target.value)}>
             {unseated.length === 0 && <option value="">All Participants seated</option>}
@@ -65,11 +66,8 @@ export function Seating({ table }: { table: ObservableTableSession }) {
     </form>
     {mutation.isPending && <p role="status">Saving seat and buy-in…</p>}
     {mutation.isSuccess && <p role="status" className="success">Seat saved. The table shows the committed seat and stack.</p>}
-    {error && <p role="alert" className="error"><strong>{error instanceof RequestFailure ? error.code === 'stale-poker-revision' ? 'Seating needs a refresh. ' : error.definitive ? 'Seating rejected. ' : 'Seating awaiting confirmation. ' : 'Seating awaiting confirmation. '}</strong>{error.message}</p>}
-    {awaitingConfirmation && <div className="pending-attempt">
-      <p>{paused ? 'This session is paused pending durable recovery. Refresh its view to check the committed table.' : 'The outcome has not been confirmed. Refresh the view or explicitly retry this same attempt.'}</p>
-      {!paused && <button onClick={() => mutation.mutate(ownPending)}>Retry seating attempt</button>}
-    </div>}
+    {error && <p role="alert" className="error"><strong>{error instanceof RequestFailure ? error.code === 'commit-not-applied' ? 'Seating did not commit. ' : error.code === 'stale-poker-revision' ? 'Seating needs a refresh. ' : error.definitive ? 'Seating rejected. ' : 'Seating awaiting confirmation. ' : 'Seating awaiting confirmation. '}</strong>{error.message}</p>}
+    {awaitingConfirmation && <AttemptRecovery error={error} check={() => mutation.mutate(ownPending!)} dismiss={() => { setPending(null); mutation.reset(); }} />}
     {pending && !ownPending && <p className="help">Resolve the pending seating attempt in its Table Session before submitting another.</p>}
     {unseated.length === 0 && <p className="help">All configured Participants are seated.</p>}
   </section>;

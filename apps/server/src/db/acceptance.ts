@@ -58,7 +58,10 @@ export class AcceptanceTransactions {
         if (journaled) await this.forget(scope);
       } catch { /* A surviving journal conservatively gates recovery. */ }
       throw error;
-    } finally { release(unusable); }
+    } finally {
+      // Disposition cannot replace an established outcome (or its original failure).
+      try { release(unusable); } catch { /* The client owner remains responsible for cleanup. */ }
+    }
   }
   async attempts(): Promise<Attempt[]> {
     const result = await this.journal.query('SELECT scope_kind, scope_id, request_id, fingerprint, transaction_id, state, table_session_id FROM acceptance_attempts');

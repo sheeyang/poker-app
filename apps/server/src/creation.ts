@@ -35,7 +35,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
       }
       const priorRows = await db.select().from(creationRequests).where(and(eq(creationRequests.userId, ownerUserId), eq(creationRequests.requestId, requestId)));
       if (priorRows[0]) {
-        if (attempt) await acceptance.forget(scope);
+        if (attempt) await acceptance.forget(scope).catch(() => {});
         return priorRows[0].fingerprint === fingerprint ? priorRows[0].outcome : { ok: false, rejection: { code: 'request-id-conflict', message: 'This requestId was already used for different creation contents.' } };
       }
       if (attempt) throw new CommitOutcomeUnknown('The committed creation outcome is unavailable.');
@@ -44,7 +44,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         if (status === 'noncommit') continue;
         if (status === 'committed') {
           const known = await db.select().from(creationRequests).where(and(eq(creationRequests.userId, ownerUserId), eq(creationRequests.requestId, pending.requestId)));
-          if (known[0]?.fingerprint === pending.fingerprint) { await acceptance.forget(pending); continue; }
+          if (known[0]?.fingerprint === pending.fingerprint) { await acceptance.forget(pending).catch(() => {}); continue; }
         }
         throw new CommitOutcomeUnknown('An earlier creation transaction remains unresolved.');
       }

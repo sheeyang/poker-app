@@ -175,6 +175,8 @@ export interface ObservableTableSession {
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
   readonly view: ObservableGameView;
+  /** Application feedback; never part of the game view or a Policy input. */
+  readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;
 }
 /** Every live update is a complete participant-safe snapshot of a committed aggregate. */

@@ -1,3 +1,4 @@
+import { AttemptRecovery } from './recovery.js';
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ObservableTableSession, ParticipantManagementKind, ParticipantManagementRequest, PokerMutationMetadata } from '@poker/contracts';
@@ -53,9 +54,8 @@ export function Management({ table }: { table: ObservableTableSession }) {
     event.preventDefault();
     submit('set-button', { seat: Number(chosenButton) }, `Seat ${chosenButton} is the button for the next Hand.`);
   }
-  const busy = mutation.isPending || !!pending || !!seating || !!hand;
+  const busy = table.runtimeStatus?.phase === 'recovering' || mutation.isPending || !!pending || !!seating || !!hand;
   const active = table.view.state.status === 'active-hand';
-  const paused = mutation.error instanceof RequestFailure && ['commit-outcome-unknown', 'session-recovering'].includes(mutation.error.code);
   return <section className="management-controls" aria-labelledby="management-heading">
     <h3 id="management-heading">Manage between Hands</h3>
     <p className="help">{active ? 'Complete the current Hand to change seats, stacks, sitting-out status, or the next button.' : 'Changes apply to the next Hand. Participant identity and prior observations continue across moves and rejoining.'}</p>
@@ -98,11 +98,8 @@ export function Management({ table }: { table: ObservableTableSession }) {
     </form>
     {mutation.isPending && <p role="status">Saving the table change…</p>}
     {feedback?.pokerRevision === table.pokerRevision && <p role="status" className="success">{feedback.text}</p>}
-    {mutation.error && <p role="alert" className="error"><strong>{mutation.error instanceof RequestFailure && mutation.error.definitive ? 'Table change rejected. ' : 'Table change awaiting confirmation. '}</strong>{mutation.error.message}</p>}
-    {ownPending && !mutation.isPending && <div className="pending-attempt">
-      <p>{paused ? 'This session is paused pending durable recovery. Refresh its view to check the committed table.' : 'The outcome is unconfirmed. Refresh the view or retry this same attempt.'}</p>
-      {!paused && <button onClick={() => mutation.mutate(ownPending)}>Retry table change</button>}
-    </div>}
+    {mutation.error && <p role="alert" className="error"><strong>{mutation.error instanceof RequestFailure && mutation.error.code === 'commit-not-applied' ? 'Attempt did not commit. ' : mutation.error instanceof RequestFailure && mutation.error.definitive ? 'Table change rejected. ' : 'Table change awaiting confirmation. '}</strong>{mutation.error.message}</p>}
+    {ownPending && !mutation.isPending && <AttemptRecovery error={mutation.error} check={() => mutation.mutate(ownPending)} dismiss={() => { setPending(null); mutation.reset(); }} />}
     {pending && !ownPending && <p className="help">Resolve the pending table change in its Table Session before submitting another.</p>}
   </section>;
 }

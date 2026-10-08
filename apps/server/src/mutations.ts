@@ -61,6 +61,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   const work = new Map<string, { identity: BotIdentity; handle?: JobHandle<ConcreteAction> }>();
   let stopped = false;
   let recoveryTimer: ReturnType<typeof setInterval> | undefined;
+  const scheduledRecovery = new Set<string>();
   const strategyFactory = bots?.strategyFactory ?? baselineStrategy;
   const supportsStrategy = bots?.supportsStrategy ?? isBaselineStrategy;
   function enqueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
@@ -111,7 +112,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (!rows[0] || rows[0].fingerprint !== attempt.fingerprint) { pending = true; continue; }
         // Restore replaces game, revisions, bindings, assignments and provenance together.
         await restore(id);
-        await acceptance.forget(attempt);
+        await acceptance.forget(attempt).catch(() => {});
       }
     }
     if (pending) { pause(id); return false; }
@@ -141,7 +142,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     for (const attempt of await acceptance.attempts()) if (attempt.state === 'pending' && attempt.tableSessionId) pause(attempt.tableSessionId);
     recoveryTimer = setInterval(() => {
       if (stopped) return;
-      for (const id of recovering) void enqueue(id, () => reconcile(id)).catch(() => {});
+      for (const id of recovering) {
+        if (scheduledRecovery.has(id)) continue;
+        scheduledRecovery.add(id);
+        void enqueue(id, () => reconcile(id)).catch(() => {}).finally(() => scheduledRecovery.delete(id));
+      }
     }, 100);
     recoveryTimer.unref();
   }
@@ -243,7 +248,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const participantId = observer(session, ownerUserId);
       if (!session || !participantId) return undefined;
       const projected = projectTableSession(session.aggregate, participantId, session.game, bots?.adminMode !== false);
-      return { ...projected, ...(statuses.has(id) ? { runtimeStatus: statuses.get(id) } : {}) };
+      return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
     }
     async function subscribe(id: string, ownerUserId: string, publish: (update: TableLiveMessage) => void) {
       await load(id, ownerUserId);
@@ -256,7 +261,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish(projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false));
+        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {

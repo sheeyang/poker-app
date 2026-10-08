@@ -1,3 +1,4 @@
+import { AttemptRecovery } from './recovery.js';
 import { BotControls, baselineOptions } from './bots.js';
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,6 +32,7 @@ export function Playground() {
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
   const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: () => api.readSession(selectedId!), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
   const live = useTableSynchronization(selectedId, identity.isSuccess);
+  const runtimeStatus = live.runtimeStatus ?? table.data?.runtimeStatus;
   const creation = useMutation({
     mutationFn: api.createSession,
     onSuccess: async result => {
@@ -90,11 +92,7 @@ export function Playground() {
           </form>
           {creation.isPending && <p role="status">Committing Table Session…</p>}
           <ErrorMessage error={creation.error} />
-          {pending && !creation.isPending && <div className="pending-attempt">
-            <p>Creation has not been confirmed. Refresh owned sessions or retry the same creation attempt.</p>
-            <button onClick={() => creation.mutate(pending)}>Retry creation</button>
-            <button onClick={() => { setPending(null); creation.reset(); }}>Start a new creation attempt</button>
-          </div>}
+          {pending && !creation.isPending && <AttemptRecovery error={creation.error} check={() => creation.mutate(pending)} dismiss={() => { setPending(null); creation.reset(); }} />}
         </section>
         <section className="reopen">
           <h2>Reopen Table Session</h2>
@@ -118,7 +116,7 @@ export function Playground() {
           <div className="live-connection">
             <p role="status">{live.connection === 'connected' ? 'Live updates connected' : live.connection === 'disconnected' ? 'Live updates disconnected. Refresh the view or reconnect.' : live.connection === 'reconnecting' ? 'Reconnecting live updates… The table will refresh automatically.' : 'Connecting live updates…'}</p>
             <button onClick={live.connection === 'disconnected' ? live.reconnect : live.disconnect}>{live.connection === 'disconnected' ? 'Reconnect live updates' : 'Disconnect live updates'}</button>
-            {live.runtimeStatus?.phase === 'recovering' && <p role="status">{live.runtimeStatus.message ?? 'This session is paused pending durable recovery.'}</p>}
+            {runtimeStatus?.phase === 'recovering' && <p role="status">{runtimeStatus.message ?? 'This session is paused pending durable recovery.'}</p>}
           </div>
           <dl className="table-facts">
             <div><dt>Blinds</dt><dd>{table.data.view.configuration.smallBlind} / {table.data.view.configuration.bigBlind}</dd></div>
@@ -143,7 +141,7 @@ export function Playground() {
             </>}</li>;
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
-          <BotControls table={table.data} status={live.runtimeStatus} />
+          <BotControls table={table.data} status={runtimeStatus} />
           {live.inspectionCapabilities?.adminMode && <Inspection key={'inspection-' + table.data.tableSessionId + '-' + live.inspectionGeneration} table={table.data} capabilities={live.inspectionCapabilities} />}
           <Seating key={table.data.tableSessionId} table={table.data} />
           <Management key={'management-' + table.data.tableSessionId} table={table.data} />
