@@ -40,9 +40,9 @@ test('a normal Fold atomically awards the matched pot, returns uncalled chips, a
   const decision = facade.getView();
   const result = cashGame.act('alice', { type: 'fold' });
   expect(result).toEqual({ ok: true, events: [
-    { type: 'acted', participantId: 'alice', action: { type: 'fold' } },
-    { type: 'uncalled-return', participantId: 'bob', amount: 10 },
-    { type: 'pot-awarded', participantId: 'bob', amount: 20 },
+    { type: 'acted', handId: 'hand-1', participantId: 'alice', action: { type: 'fold' } },
+    { type: 'uncalled-return', handId: 'hand-1', participantId: 'bob', amount: 10 },
+    { type: 'pot-awarded', handId: 'hand-1', participantId: 'bob', amount: 20 },
     { type: 'hand-completed', handId: 'hand-1' },
   ] });
   const after = facade.getView();

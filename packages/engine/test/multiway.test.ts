@@ -141,11 +141,11 @@ test('antes precede blinds, preserve short all-in membership, and remain separat
   ]);
   if (!start.ok) throw new Error('Expected accepted Start Hand.');
   expect(start.events.filter(e => e.type === 'forced-contribution')).toEqual([
-    { type: 'forced-contribution', participantId: 'alice', kind: 'ante', amount: 3 },
-    { type: 'forced-contribution', participantId: 'bob', kind: 'ante', amount: 5 },
-    { type: 'forced-contribution', participantId: 'carol', kind: 'ante', amount: 5 },
-    { type: 'forced-contribution', participantId: 'bob', kind: 'small-blind', amount: 10 },
-    { type: 'forced-contribution', participantId: 'carol', kind: 'big-blind', amount: 20 },
+    { type: 'forced-contribution', handId: 'hand-1', participantId: 'alice', kind: 'ante', amount: 3 },
+    { type: 'forced-contribution', handId: 'hand-1', participantId: 'bob', kind: 'ante', amount: 5 },
+    { type: 'forced-contribution', handId: 'hand-1', participantId: 'carol', kind: 'ante', amount: 5 },
+    { type: 'forced-contribution', handId: 'hand-1', participantId: 'bob', kind: 'small-blind', amount: 10 },
+    { type: 'forced-contribution', handId: 'hand-1', participantId: 'carol', kind: 'big-blind', amount: 20 },
   ]);
   accept(game.act('bob', { type: 'call' }));
   expect(game.forParticipant('carol').getView().state.legalActions).toEqual([{ type: 'fold' }, { type: 'check' }, { type: 'raise', minimum: 40, maximum: 95 }]);

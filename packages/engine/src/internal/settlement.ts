@@ -1,9 +1,9 @@
-import type { CashGameEvent } from '../index.js';
+import type { DraftEvent } from './events.js';
 import type { CashGameState, HandState } from './state.js';
 import { contributionLayers } from './pots.js';
 import { compareHandRanks, rankHand } from './ranking.js';
 
-export function revealLiveHands(hand: HandState, events: CashGameEvent[]): void {
+export function revealLiveHands(hand: HandState, events: DraftEvent[]): void {
   for (const member of hand.participants.filter(p => !p.folded)) {
     if (member.revealed) continue;
     member.revealed = true;
@@ -12,7 +12,7 @@ export function revealLiveHands(hand: HandState, events: CashGameEvent[]): void 
 }
 
 /** Derive every transfer from the contribution ledger on the caller's isolated draft. */
-export function settleHand(state: CashGameState, hand: HandState, events: CashGameEvent[], seatCount: number): void {
+export function settleHand(state: CashGameState, hand: HandState, events: DraftEvent[], seatCount: number): void {
   const live = hand.participants.filter(p => !p.folded);
   if (live.length > 1) revealLiveHands(hand, events);
   const layers = contributionLayers(hand);

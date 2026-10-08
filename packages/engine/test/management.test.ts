@@ -107,6 +107,30 @@ test('Participant observations follow identity across movement and rejoining, ex
   expect(restored.game.forParticipant('alice').getView()).toEqual(cashGame.forParticipant('alice').getView());
 });
 
+test('presentation events preserve the originating Hand’s observer membership after absence and later rejoining', () => {
+  const cashGame = game({ ...configuration, ante: 10, minimumBuyIn: 10, defaultBuyIn: 10 });
+  cashGame.seatParticipant('observer', 3, 10);
+  const left = cashGame.leaveParticipant('observer');
+  if (!left.ok) throw new Error('Expected accepted leave.');
+  expect(cashGame.forParticipant('observer').projectEvents(left.events)).toEqual([{ type: 'participant-left', participantId: 'observer', seat: 3, cashOut: 10 }]);
+  const missed = cashGame.startHand();
+  if (!missed.ok) throw new Error('Expected forced all-in Hand.');
+  expect(cashGame.getHand('hand-1')?.completed).toBe(true);
+  const copiedEvents = structuredClone(missed.events);
+  expect(cashGame.forParticipant('observer').getView()).toMatchObject({ state: { board: [], actorId: null }, history: [] });
+  expect(cashGame.forParticipant('observer').projectEvents(copiedEvents)).toEqual([]);
+  expect(cashGame.forParticipant('alice').projectEvents(copiedEvents).filter(event => event.type === 'hole-cards-revealed')).toHaveLength(2);
+  cashGame.seatParticipant('observer', 3, 10);
+  cashGame.setSittingOut('observer', true);
+  for (const participant of ['alice', 'bob']) { cashGame.leaveParticipant(participant); cashGame.seatParticipant(participant, participant === 'alice' ? 1 : 4, 10); }
+  const observed = cashGame.startHand();
+  if (!observed.ok) throw new Error('Expected next all-in Hand.');
+  expect(cashGame.forParticipant('observer').projectEvents(observed.events).filter(event => event.type === 'board-dealt')).toHaveLength(3);
+  expect(cashGame.forParticipant('observer').projectEvents(observed.events).filter(event => event.type === 'card-burned')).toEqual([{ type: 'card-burned', street: 'flop' }, { type: 'card-burned', street: 'turn' }, { type: 'card-burned', street: 'river' }]);
+  expect(cashGame.forParticipant('observer').projectEvents(copiedEvents)).toEqual([]);
+  expect(cashGame.forParticipant('observer').getView().history.map(hand => hand.handId)).toEqual(['hand-2']);
+});
+
 test('every between-Hand command rejects active changes atomically and complete command replay and forks stay independent', () => {
   const cashGame = game(); cashGame.startHand();
   const before = cashGame.toRecord(); const view = cashGame.forParticipant('alice').getView(); const facts = cashGame.getHand('hand-1');

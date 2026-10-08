@@ -130,7 +130,7 @@ test('disconnect submits no poker command, and reconnect supplies the latest com
     expect(current.view.state.participants[1]).not.toHaveProperty('holeCards');
   } finally { reconnected.socket.terminate(); }
 });
-test('lost COMMIT confirmation publishes recovery feedback independently of unchanged gameplay revisions and reconnect preserves that pause', async () => {
+test('lost COMMIT confirmation publishes recovery feedback before proven committed promotion, and delayed reconnect receives the current view', async () => {
   const t = await table();
   const live = connect(t);
   try {
@@ -139,12 +139,23 @@ test('lost COMMIT confirmation publishes recovery feedback independently of unch
     expect((await submit(t, 'seat-participant', { requestId: 'unknown-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(503);
     afterCommit = async () => {};
     await expect.poll(() => live.messages.find(m => m.type === 'table-status')).toMatchObject({ type: 'table-status', tableSessionId: t.id, status: { phase: 'recovering' } });
-    expect(live.messages.filter(m => m.type === 'table-update')).toEqual([before]);
-    expect(await read(t)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, view: before.view });
+    const recoveryIndex = live.messages.findIndex(m => m.type === 'table-status' && m.status.phase === 'recovering');
+    expect(live.messages.slice(0, recoveryIndex).filter(m => m.type === 'table-update')).toEqual([before]);
+    expect(before).toMatchObject({ pokerRevision: 0, sessionRevision: 0, view: { state: { participants: [] } } });
+    // Delay reconnect until PostgreSQL recovery has proved and promoted the commit.
+    const promoted = await live.next(1);
+    expect(promoted).toMatchObject({ pokerRevision: 1, sessionRevision: 1, presentationEvents: [], view: { state: { participants: [{ participantId: t.human, seat: 1, stack: 1000 }] } } });
+    await expect.poll(() => live.messages.find(m => m.type === 'table-status' && m.status.phase === 'idle')).toBeDefined();
+    const currentView = await read(t);
+    expect(currentView).toMatchObject({ pokerRevision: 1, sessionRevision: 1, runtimeStatus: { phase: 'idle' }, view: promoted.view });
+    const retry = await submit(t, 'seat-participant', { requestId: 'unknown-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });
+    expect(live.messages.filter(m => m.type === 'table-update').map(m => m.sessionRevision)).toEqual([0, 1]);
     const reconnected = connect(t);
     try {
-      expect(await reconnected.next(0)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, presentationEvents: [], view: before.view });
-      await expect.poll(() => reconnected.messages.find(m => m.type === 'table-status')).toMatchObject({ status: { phase: 'recovering' } });
+      expect(await reconnected.next(1)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, presentationEvents: [], runtimeStatus: { phase: 'idle' }, view: currentView.view });
+      await expect.poll(() => reconnected.messages.find(m => m.type === 'table-status')).toMatchObject({ status: { phase: 'idle' } });
     } finally { reconnected.socket.terminate(); }
   } finally { afterCommit = async () => {}; live.socket.terminate(); }
 });

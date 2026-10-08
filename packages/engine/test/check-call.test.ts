@@ -109,11 +109,11 @@ test('Check progresses every street and the last river decision reveals live han
   cashGame.act('bob', { type: 'check' });
   const result = cashGame.act('alice', { type: 'check' });
   expect(result).toEqual({ ok: true, events: [
-    { type: 'acted', participantId: 'alice', action: { type: 'check' } },
-    { type: 'hole-cards-revealed', participantId: 'alice', cards: ['4s', '5d'] },
-    { type: 'hole-cards-revealed', participantId: 'bob', cards: ['2c', 'Ah'] },
+    { type: 'acted', handId: 'hand-1', participantId: 'alice', action: { type: 'check' } },
+    { type: 'hole-cards-revealed', handId: 'hand-1', participantId: 'alice', cards: ['4s', '5d'] },
+    { type: 'hole-cards-revealed', handId: 'hand-1', participantId: 'bob', cards: ['2c', 'Ah'] },
     // Bob's 2c completes the J-high club flush; Alice has a pair of fours.
-    { type: 'pot-awarded', participantId: 'bob', amount: 40 },
+    { type: 'pot-awarded', handId: 'hand-1', participantId: 'bob', amount: 40 },
     { type: 'hand-completed', handId: 'hand-1' },
   ] });
   const after = facade.getView();
