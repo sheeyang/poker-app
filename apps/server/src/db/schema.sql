@@ -22,3 +22,14 @@ CREATE TABLE IF NOT EXISTS processed_requests (
   outcome jsonb NOT NULL,
   PRIMARY KEY(table_session_id, request_id)
 );
+-- Deliberately no FK to a target's still-uncommitted table_sessions row.
+CREATE TABLE IF NOT EXISTS acceptance_attempts (
+  scope_kind text NOT NULL,
+  scope_id text NOT NULL,
+  request_id text NOT NULL,
+  fingerprint text NOT NULL,
+  transaction_id text NOT NULL,
+  state text NOT NULL CHECK (state IN ('pending', 'noncommit')),
+  table_session_id uuid,
+  PRIMARY KEY(scope_kind, scope_id, request_id)
+);
