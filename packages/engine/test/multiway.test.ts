@@ -34,6 +34,7 @@ test('the sole able multiway actor resolves a real capped Call or Fold before a 
     expect(game.forParticipant('alice').getView().state).toMatchObject({ status: 'active-hand', actorId: 'alice', amountToCall: 15, board: [], legalActions: [{ type: 'fold' }, { type: 'call' }] });
     const record = game.toRecord(); const before = game.forParticipant('alice').getView();
     expect(game.act('alice', { type: 'check' })).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
+    expect(game.act('alice', { type: 'raise', raiseTo: 40 })).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
     expect(game.toRecord()).toEqual(record); expect(game.forParticipant('alice').getView()).toEqual(before);
     accept(game.act('alice', { type: action }));
     const facts = game.getHand('hand-1')!;
@@ -96,6 +97,22 @@ test('nine participants receive eighteen distinct hole cards and complete a cloc
   expect(game.forParticipant('p1').getView().state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(9000);
 });
 
+test('multiway Bet and Raise reopen matching traversal, keep folded chips, and skip the folded actor on later streets', () => {
+  const game = create();
+  for (const [participantId, seat] of [['alice', 1], ['bob', 2], ['carol', 3]] as const) accept(game.seatParticipant(participantId, seat));
+  accept(game.startHand()); accept(game.act('alice', { type: 'raise', raiseTo: 53 }));
+  expect(game.forParticipant('bob').getView().state.legalActions).toEqual([{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 86, maximum: 1000 }]);
+  accept(game.act('bob', { type: 'call' })); accept(game.act('carol', { type: 'call' }));
+  accept(game.act('bob', { type: 'bet', betTo: 31 })); accept(game.act('carol', { type: 'raise', raiseTo: 75 }));
+  expect(game.forParticipant('alice').getView().state).toMatchObject({ actorId: 'alice', amountToCall: 75, legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 119, maximum: 947 }] });
+  accept(game.act('alice', { type: 'fold' }));
+  expect(game.forParticipant('bob').getView().state).toMatchObject({ actorId: 'bob', amountToCall: 44 });
+  accept(game.act('bob', { type: 'call' }));
+  for (let street = 0; street < 2; street++) for (const actor of ['bob', 'carol']) { expect(game.forParticipant(actor).getView().state.actorId).toBe(actor); accept(game.act(actor, { type: 'check' })); }
+  expect(game.getHand('hand-1')).toMatchObject({ completed: true, pots: [{ amount: 159, eligibleParticipantIds: ['bob', 'carol'] }, { amount: 150, eligibleParticipantIds: ['bob', 'carol'] }], payouts: [{ participantId: 'carol', amount: 159 }, { participantId: 'carol', amount: 150 }], returns: [] });
+  expect(game.forParticipant('alice').getView().state.participants.map(p => [p.stack, p.contribution])).toEqual([[947, 53], [872, 128], [1181, 128]]);
+});
+
 test.each([2, 3, 4, 5, 6, 7, 8, 9])('%i eligible participants can complete within a nine-seat capacity', count => {
   const game = create({ ante: 1 });
   for (let seat = 1; seat <= count; seat++) accept(game.seatParticipant('p' + seat, seat));
@@ -119,7 +136,7 @@ test('antes precede blinds, preserve short all-in membership, and remain separat
   const start = game.startHand(); accept(start);
   const view = game.forParticipant('bob').getView();
   expect(view.state).toMatchObject({ buttonSeat: 1, smallBlindParticipantId: 'bob', bigBlindParticipantId: 'carol', actorId: 'bob', legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 95 }] });
-  expect(view.state.participants.map(p => [p.participantId, p.stack, p.contribution, p.wager, (p as { anteContribution?: number }).anteContribution, p.allIn, p.cardCount])).toEqual([
+  expect(view.state.participants.map(p => [p.participantId, p.stack, p.contribution, p.wager, p.anteContribution, p.allIn, p.cardCount])).toEqual([
     ['alice', 0, 3, 0, 3, true, 2], ['bob', 85, 15, 10, 5, false, 2], ['carol', 75, 25, 20, 5, false, 2],
   ]);
   if (!start.ok) throw new Error('Expected accepted Start Hand.');
@@ -135,6 +152,11 @@ test('antes precede blinds, preserve short all-in membership, and remain separat
   accept(game.act('carol', { type: 'check' }));
   const flop = game.forParticipant('bob').getView();
   expect(flop.state).toMatchObject({ street: 'flop', actorId: 'bob', pots: [{ amount: 9, eligibleParticipantIds: ['alice', 'bob', 'carol'] }, { amount: 44, eligibleParticipantIds: ['bob', 'carol'] }] });
-  expect(flop.state.participants.map(p => [p.stack, p.wager, p.contribution, (p as { anteContribution?: number }).anteContribution])).toEqual([[0, 0, 3, 3], [75, 0, 25, 5], [75, 0, 25, 5]]);
+  expect(flop.state.participants.map(p => [p.stack, p.wager, p.contribution, p.anteContribution])).toEqual([[0, 0, 3, 3], [75, 0, 25, 5], [75, 0, 25, 5]]);
+  const beforeDecision = flop;
+  accept(game.act('bob', { type: 'check' })); accept(game.act('carol', { type: 'check' }));
+  const historical = game.forParticipant('bob').getView({ at: { decisionId: beforeDecision.state.decisionId! } });
+  expect(historical).toEqual(beforeDecision);
+  expect(historical.state.participants.find(p => p.participantId === 'carol')).not.toHaveProperty('holeCards');
   expect(flop.state.participants.reduce((sum, p) => sum + p.stack + (p.contribution ?? 0), 0)).toBe(203);
 });
