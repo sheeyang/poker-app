@@ -1,11 +1,13 @@
 # M1-08 implementation evidence
 
-The existing CashGame settlement and runout implementation from M1-05/M1-07
-already meets the all-in rules. New acceptance fixtures exercise it through
-public CashGame/ParticipantCashGame commands and real HTTP/WebSocket/PostgreSQL.
-No alternate pot ledger, action type, state injection, seed request field, or
-production rules refactoring was needed. Shared legality remains unchanged for
-M1-09's cumulative reopening stress.
+CashGame derives contested pots from contribution layers and coalesces adjacent
+matched layers with identical live eligible sets. Folded-only caps previously
+created artificial side pots, letting the same clockwise winner receive extra
+odd chips. The narrow pot-derivation fix corrects that payout defect while
+retaining genuine main/side boundaries whenever live eligibility differs.
+Public CashGame/ParticipantCashGame and real HTTP/WebSocket/PostgreSQL fixtures
+exercise the complete behavior. No alternate pot ledger, action type, state
+injection, seed request field, or betting-legality change was introduced.
 
 The Playground now lists the authoritative main pot and each side pot with its
 amount and eligible Participant names. It reads these facts directly from the
@@ -29,30 +31,47 @@ requires an explicit Start Hand.
 - Live 100, live 300, folded 200 produces pots 300/200 and return 100. Live
   100, folded 300, live 400 produces pots 300/400 and return 100. The folded
   Participant funds matched layers without eligibility or public hole cards.
-- Contributions 2/2/2/1/1, with the latter three folded, produce pots 5 and 3
-  eligible to the first two live Participants. Tied Alice/Bob receive 3/2 and
-  2/1 respectively, so Alice wins 5 and Bob 3. Combining the pots before
-  splitting would incorrectly give 4 each.
+- Contributions 2/2/2/1/1, with the latter three folded, produce one 8-chip
+  pot eligible to the first two live Participants. Tied Alice/Bob receive 4
+  each. The earlier 5/3 payout oracle was incorrect: folded caps are only
+  accounting boundaries and cannot produce additional odd chips.
+- With all five hands live at the same contributions, the 1-chip all-ins
+  remain eligible for main pot 5, while side pot 3 is available to the first
+  three. If tied Alice/Bob beat every short hand, each pot splits separately
+  3/2 and 2/1, producing correct combined payouts 5/3. This is reachable with
+  starting stacks 10/10/2/1/1, ante/SB/BB 1, and the 2-chip hand Calling its
+  remaining chip. Different eligible sets remain separate even if winners match.
 - Ante-all-in 3 against 100/100 retains two hole cards and a main cap of 3:
   pots 9/194, with the side available only to the larger contributors.
 
 [all-in-board-ties.py](../fixtures/all-in-board-ties.py) independently finds
-literal board-playing ties with Python's standard library, without production
-RNG or ranking imports. It excludes any live hand's higher straight or flush.
-Run it normally for engine fixtures and with `--hex` for creation entropy:
+literal ties with Python's standard library, without production RNG or ranking
+imports. The board-playing mode excludes higher straights and flushes; the
+`--live-odd` mode independently ranks every five-card combination and finds two
+tied hands above all three live short hands. Run with `--hex` for creation entropy:
 
 - `all-in-board-tie-3-1441`: draws
   `Jd Ad 7d Js Ks Tc Qd 7h 4c 5c 5d 6c Qs 8s`; all three play the eight-high
   straight. Main 300 splits 100 each; side 400 splits 200 each.
 - `all-in-board-tie-5-44`: draws
   `7d Qc 8s 8c 6h Ad Js 2h 4c 2d Jd 2s Ah 5s Qd 4h Tc 3c`; Alice/Bob play
-  the wheel, with Alice first clockwise from the button for each odd chip.
+  the wheel in the folded-cap fixture, splitting the coalesced 8-chip pot 4/4.
+- `all-in-board-tie-5-30` (`--live-odd`): draws
+  `4d Jh Jd 5c Jc 9h 4h 2h 6d Kd 4s 3s 8d 2c Js 5s Th Ah`.
+  Alice has `4d 9h`, Bob `Jh 4h`; each four makes the wheel. Carol's pair of
+  fives, Dave's high card, and Eve's pair of twos lose. Pots 5/3 retain
+  different live eligibility; Alice receives both independent odd chips.
 - 32-byte hex master seed ending `0489` (all preceding digits zero): draws
   `8d Td 8c Kd Th 6d 4h 4d 2s 5d Ks 6c 4s 3h`; all three play the six-high
   straight in the durable main/side tie test.
 - 32-byte hex master seed ending `06d7`: draws
   `Ac 3d 9d Ah Qh Ks 8h 7s Qs Kd 5s 8s Jc Th Kh 9c Tc 7h`; Alice/Bob play
-  the jack-high straight in the durable per-pot odd-chip test.
+  the jack-high straight in the durable folded-cap equal-split test.
+- 32-byte hex master seed ending `00ba` (`--hex --live-odd`): draws
+  `6h 9d 2c 4h 5h 9h 3c Th Tc Ts 7d Qh Qc Ad Jc 9c 3s 6c`.
+  Alice/Bob each pair the nine on board `Qh Qc Ad 9c 6c`, making queens and
+  nines with an ace kicker. The live short hands have only queens. Genuine
+  main 5 and side 3 split independently, giving Alice 5 and Bob 3 overall.
 - The all-zero 32-byte seed can be reproduced with `random-v1.py` and 64 zero
   digits. Three-player board is `Td Qh 5c Ad 4s`, burns `3d Js Qs`; Bob in
   Seat 2 holds `4d 8s` and pairs the four. With caps 100/300/300 he wins both
@@ -62,10 +81,13 @@ Run it normally for engine fixtures and with `--hex` for creation entropy:
 
 ## Validation on 8 October 2026
 
-- Frozen-lockfile installation passed. `pnpm check` passed 167 tests in 22
+- Frozen-lockfile installation passed. `pnpm check` passed 169 tests in 22
   files, all workspace type checks, both production builds, and dependency
   boundaries. `git diff --check` passed.
-- Seven new public-engine fixtures cover the literal caps, distinct main/side
+- The corrected public folded-cap fixture first failed with artificial pots
+  5/3 and payouts 5/3, then passed as one pot 8 and payouts 4/4 after minimal
+  coalescing. The focused engine/multiway/durable suite passed 31 tests in 3 files.
+- Eight new public-engine fixtures cover the literal caps, distinct main/side
   winners, folded layers, tied main/side winners, independent odd chips,
   chip conservation after each action, exactly one recorded command per action,
   normal versus automatic deterministic burns/dealing, frozen historical
@@ -73,7 +95,7 @@ Run it normally for engine fixtures and with `--hex` for creation entropy:
   Existing M1-06/07 fixtures cover genuine singleton short Bet/Raise, below-
   minimum rejection, a single short raise's closed/unacted betting rights,
   capped short Call, short antes/blinds, outstanding Call/Fold, and fold privacy.
-- Eight new real HTTP/WebSocket/PostgreSQL fixtures cover layered all-in
+- Nine new real HTTP/WebSocket/PostgreSQL fixtures cover layered all-in
   acceptance, short Bet/Raise/Call, ante all-in, folded layers, unmatched returns,
   early fold privacy, tied main/side payouts, independent odd chips, commit-gated
   reveals and events, rollback, exact retry, server restart, zero-stack exclusion,
@@ -91,12 +113,20 @@ Run it normally for engine fixtures and with `--hex` for creation entropy:
   It then disconnected/reconnected without accepted play, rebought the human
   to 100, confirmed no automatic new Hand, explicitly started Hand 2 excluding
   the unreplenished zero stack, and played 100/300 to pot 200 plus return 200.
+- The corrected browser tracer used actual five-Participant setup and Check
+  controls. Folded caps completed at revision 18 with one pot 8, payouts 4/4,
+  stacks 12/12/8/9/9, and folded cards hidden. Live short all-ins completed at
+  revision 15 with pots 5/3, eligible sets of five/three Participants, payouts
+  3/2/2/1, and stacks 13/11/0/0/0. Every live hand revealed at showdown while
+  earlier decisions retained only the observer's cards. No next Hand started.
 - Desktop 1280px and mobile 390px captures were inspected. Pot eligibility,
   disabled Start Hand, rebuy, and payout information remain readable. Mobile
   document width equals its viewport (390px). Console errors are empty and
   the single required Impeccable mechanical scan returned no findings.
   Captures are outside the worktree in the shared task visualization directory:
   `m1-08-layered-desktop.png` and `m1-08-layered-mobile.png`.
+  Correction captures are `m1-08-folded-pot-desktop.png` and
+  `m1-08-genuine-odd-pots-mobile.png`.
 
 ## Reproduce the browser acceptance
 
@@ -112,3 +142,10 @@ its Vite `/@fs/<absolute-path>` source and evaluating the returned function.
 It creates fresh tables through the browser's own identity and uses actual
 Playground controls. Type `stop` in the fixture terminal to close the server
 and drop its schema; stop the assigned Vite process and named Chrome bridge.
+
+For the corrected pot-boundary acceptance, start that same standalone fixture
+with `BROWSER_POT_BOUNDARIES=1` and evaluate
+`scripts/smoke-pot-boundaries-browser.js`. It controls creation entropy only:
+default buy-in 10 selects the independent `06d7` folded-cap vector, default
+buy-in 1 selects the `00ba` genuine live-cap vector. All buy-ins and intentions
+remain normal public commands; no private state or poker record is injected.

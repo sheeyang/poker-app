@@ -109,7 +109,7 @@ test('multiway Bet and Raise reopen matching traversal, keep folded chips, and s
   expect(game.forParticipant('bob').getView().state).toMatchObject({ actorId: 'bob', amountToCall: 44 });
   accept(game.act('bob', { type: 'call' }));
   for (let street = 0; street < 2; street++) for (const actor of ['bob', 'carol']) { expect(game.forParticipant(actor).getView().state.actorId).toBe(actor); accept(game.act(actor, { type: 'check' })); }
-  expect(game.getHand('hand-1')).toMatchObject({ completed: true, pots: [{ amount: 159, eligibleParticipantIds: ['bob', 'carol'] }, { amount: 150, eligibleParticipantIds: ['bob', 'carol'] }], payouts: [{ participantId: 'carol', amount: 159 }, { participantId: 'carol', amount: 150 }], returns: [] });
+  expect(game.getHand('hand-1')).toMatchObject({ completed: true, pots: [{ amount: 309, eligibleParticipantIds: ['bob', 'carol'] }], payouts: [{ participantId: 'carol', amount: 309 }], returns: [] });
   expect(game.forParticipant('alice').getView().state.participants.map(p => [p.stack, p.contribution])).toEqual([[947, 53], [872, 128], [1181, 128]]);
 });
 

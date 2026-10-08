@@ -15,10 +15,12 @@ await administration.query('CREATE SCHEMA "' + schema + '"');
 // only for creation, using the independent all-zero hex master-seed vector.
 const realRandomBytes = crypto.randomBytes;
 let seedPending = false;
+let seedHex = '0'.repeat(64);
+const potBoundaries = process.env.BROWSER_POT_BOUNDARIES === '1';
 crypto.randomBytes = ((size: number) => {
   if (!seedPending) return realRandomBytes(size);
   if (size !== 32) throw new Error('Expected creation seed allocation.');
-  seedPending = false; return Buffer.alloc(32);
+  seedPending = false; return Buffer.from(seedHex, 'hex');
 }) as typeof crypto.randomBytes;
 syncBuiltinESMExports();
 let controllers: TableSessionControllerCommands;
@@ -36,7 +38,9 @@ async function advance(id: string, cookie: string) {
       const state = table.view.state; const member = state.participants.find(p => p.participantId === actor.participantId)!;
       const price = Math.max(...state.participants.map(p => p.wager ?? 0));
       const canRespond = state.participants.some(p => p.inHand && p.participantId !== actor.participantId && !p.folded && !p.allIn);
-      const action: ConcreteAction = state.street === 'preflop' && canRespond && member.stack + (member.wager ?? 0) > price
+      const boundaryAction: ConcreteAction = member.seat === 1 || member.seat === 4 || member.seat === 5 && state.street !== 'preflop'
+        ? { type: 'fold' } : { type: (member.wager ?? 0) < price ? 'call' : 'check' };
+      const action: ConcreteAction = potBoundaries ? boundaryAction : state.street === 'preflop' && canRespond && member.stack + (member.wager ?? 0) > price
         ? { type: 'raise', raiseTo: member.stack + (member.wager ?? 0) }
         : { type: (member.wager ?? 0) < price ? 'call' : 'check' };
       const outcome = await controllers.submitAction(id, { requestId: randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: actor.participantId, action });
@@ -44,7 +48,13 @@ async function advance(id: string, cookie: string) {
     }
   } finally { running.delete(id); }
 }
-app.addHook('onRequest', async request => { if (request.method === 'POST' && request.url === '/api/table-sessions') seedPending = true; });
+app.addHook('preHandler', async request => {
+  if (request.method === 'POST' && request.url === '/api/table-sessions') {
+    const body = request.body as { configuration?: { defaultBuyIn?: number } };
+    seedHex = (potBoundaries ? body.configuration?.defaultBuyIn === 1 ? 'ba' : '6d7' : '0').padStart(64, '0');
+    seedPending = true;
+  }
+});
 app.addHook('onResponse', async request => {
   if (request.url === '/api/table-sessions') seedPending = false;
   const match = /^\/api\/table-sessions\/([^/]+)\/(?:start-hand|act)$/.exec(request.url);

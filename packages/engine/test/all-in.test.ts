@@ -104,7 +104,7 @@ test('tied live hands split the main and side pot independently at unequal all-i
   replay(game, 'alice');
 });
 
-test('each odd chip goes clockwise from the button independently for the 5-chip main pot and 3-chip side pot', () => {
+test('folded-only contribution caps form one 8-chip pot split equally between the two tied live hands', () => {
   const game = create([['bob', 3, 10], ['alice', 2, 10], ['carol', 5, 10], ['dave', 1, 10], ['eve', 4, 10]], { smallBlind: 1, bigBlind: 1, ante: 1, seed: 'all-in-board-tie-5-44' });
   play(game, 'eve', { type: 'fold' }, 50);
   play(game, 'carol', { type: 'call' }, 50);
@@ -117,11 +117,31 @@ test('each odd chip goes clockwise from the button independently for the 5-chip 
   play(game, 'carol', { type: 'fold' }, 50);
   for (let street = 0; street < 2; street++) for (const id of ['alice', 'bob']) play(game, id, { type: 'check' }, 50);
   const done = game.forParticipant('alice').getView();
-  // A wheel board ties Alice/Bob. Alice sits first clockwise, despite Bob's earlier identity entry.
-  expect(done.state).toMatchObject({ board: ['2s', 'Ah', '5s', '4h', '3c'], pots: [{ amount: 5, eligibleParticipantIds: ['bob', 'alice'] }, { amount: 3, eligibleParticipantIds: ['bob', 'alice'] }], returns: [], payouts: [{ participantId: 'alice', amount: 3 }, { participantId: 'bob', amount: 2 }, { participantId: 'alice', amount: 2 }, { participantId: 'bob', amount: 1 }] });
-  expect(done.state.participants.map(p => [p.stack, p.contribution])).toEqual([[11, 2], [13, 2], [8, 2], [9, 1], [9, 1]]);
+  // All live hands cover every chip. Folded caps cannot create separate pots.
+  expect(done.state).toMatchObject({ board: ['2s', 'Ah', '5s', '4h', '3c'], pots: [{ amount: 8, eligibleParticipantIds: ['bob', 'alice'] }], returns: [], payouts: [{ participantId: 'alice', amount: 4 }, { participantId: 'bob', amount: 4 }] });
+  expect(done.state.participants.map(p => [p.stack, p.contribution])).toEqual([[12, 2], [12, 2], [8, 2], [9, 1], [9, 1]]);
   expect(game.getHand('hand-1')).toMatchObject({ drawnCardCount: 18, burns: ['Jd', 'Qd', 'Tc'] });
   expect(done.state.participants.filter(p => p.holeCards).map(p => p.participantId)).toEqual(['bob', 'alice']);
+  expect(game.forParticipant('alice').getView({ at: { decisionId: before.state.decisionId! } })).toEqual(before);
+  replay(game, 'alice');
+});
+
+test('genuine 5-chip and 3-chip pots retain distinct live eligibility and award each clockwise odd chip independently', () => {
+  const game = create([['bob', 3, 10], ['alice', 2, 10], ['carol', 5, 2], ['dave', 1, 1], ['eve', 4, 1]], { smallBlind: 1, bigBlind: 1, ante: 1, seed: 'all-in-board-tie-5-30' });
+  play(game, 'carol', { type: 'call' }, 24);
+  play(game, 'alice', { type: 'check' }, 24);
+  play(game, 'bob', { type: 'check' }, 24);
+  const before = game.forParticipant('alice').getView();
+  expect(before.state.pots).toEqual([{ amount: 5, eligibleParticipantIds: ['bob', 'alice', 'carol', 'dave', 'eve'] }, { amount: 3, eligibleParticipantIds: ['bob', 'alice', 'carol'] }]);
+  expect(before.state.participants.filter(p => p.allIn).map(p => p.participantId)).toEqual(['carol', 'dave', 'eve']);
+  expect(before.state.participants.filter(p => p.holeCards)).toHaveLength(1);
+  for (let street = 0; street < 3; street++) for (const id of ['alice', 'bob']) play(game, id, { type: 'check' }, 24);
+  const done = game.forParticipant('alice').getView();
+  // Alice/Bob each use a four to make the wheel; every live short stack loses.
+  expect(done.state).toMatchObject({ board: ['3s', '8d', '2c', '5s', 'Ah'], pots: [{ amount: 5, eligibleParticipantIds: ['bob', 'alice', 'carol', 'dave', 'eve'] }, { amount: 3, eligibleParticipantIds: ['bob', 'alice', 'carol'] }], returns: [], payouts: [{ participantId: 'alice', amount: 3 }, { participantId: 'bob', amount: 2 }, { participantId: 'alice', amount: 2 }, { participantId: 'bob', amount: 1 }] });
+  expect(done.state.participants.map(p => [p.stack, p.contribution, p.folded])).toEqual([[11, 2, false], [13, 2, false], [0, 2, false], [0, 1, false], [0, 1, false]]);
+  expect(done.state.participants.every(p => p.holeCards?.length === 2)).toBe(true);
+  expect(game.getHand('hand-1')).toMatchObject({ drawnCardCount: 18, burns: ['4s', 'Js', 'Th'] });
   expect(game.forParticipant('alice').getView({ at: { decisionId: before.state.decisionId! } })).toEqual(before);
   replay(game, 'alice');
 });

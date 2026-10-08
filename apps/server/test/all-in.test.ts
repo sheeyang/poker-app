@@ -187,7 +187,7 @@ test('real main and side pot ties retain independent payouts and restoration', a
   } finally { live.socket.terminate(); }
 });
 
-test('real 5-chip and 3-chip pots each give their own clockwise odd chip to the tied winner', async () => {
+test('folded-only caps publish one 8-chip pot and an equal split to the tied live hands', async () => {
   const t = await table(5, { smallBlind: 1, bigBlind: 1, ante: 1 }, '6d7'.padStart(64, '0')); const [alice, bob, carol, dave, eve] = t.ids as [string, string, string, string, string];
   for (const [participantId, seat] of [[alice, 2], [bob, 3], [carol, 5], [dave, 1], [eve, 4]] as const) await command(t, 'seat-participant', { participantId, seat, buyIn: 10 });
   await command(t, 'start-hand'); await act(t, eve, { type: 'fold' }); await act(t, carol, { type: 'call' }); await act(t, dave, { type: 'fold' }); await act(t, alice, { type: 'check' }); await act(t, bob, { type: 'check' });
@@ -195,8 +195,30 @@ test('real 5-chip and 3-chip pots each give their own clockwise odd chip to the 
   for (let street = 0; street < 2; street++) for (const id of [alice, bob]) await act(t, id, { type: 'check' });
   const done = await read(t);
   // Independent vector: Alice and Bob play the jack-high board straight.
-  expect(done.view.state).toMatchObject({ board: ['8s', 'Jc', 'Th', '9c', '7h'], pots: [{ amount: 5, eligibleParticipantIds: [alice, bob] }, { amount: 3, eligibleParticipantIds: [alice, bob] }], returns: [], payouts: [{ participantId: alice, amount: 3 }, { participantId: bob, amount: 2 }, { participantId: alice, amount: 2 }, { participantId: bob, amount: 1 }] });
-  expect(done.view.state.participants.map(p => [p.stack, p.contribution])).toEqual([[13, 2], [11, 2], [8, 2], [9, 1], [9, 1]]); expect(done.view.state.participants.filter(p => p.holeCards).map(p => p.participantId)).toEqual([alice, bob]);
+  expect(done.view.state).toMatchObject({ board: ['8s', 'Jc', 'Th', '9c', '7h'], pots: [{ amount: 8, eligibleParticipantIds: [alice, bob] }], returns: [], payouts: [{ participantId: alice, amount: 4 }, { participantId: bob, amount: 4 }] });
+  expect(done.view.state.participants.map(p => [p.stack, p.contribution])).toEqual([[12, 2], [12, 2], [8, 2], [9, 1], [9, 1]]); expect(done.view.state.participants.filter(p => p.holeCards).map(p => p.participantId)).toEqual([alice, bob]);
   expect(done.view.history[0]!.decisions.every(d => d.state.participants.filter(p => p.holeCards).length === 1)).toBe(true);
   await server.close(); await startServer(); expect(await read(t)).toEqual(done);
+});
+
+test('genuine live all-in caps keep separate 5-chip and 3-chip pots even when the same tied winners take both', async () => {
+  const t = await table(5, { smallBlind: 1, bigBlind: 1, ante: 1 }, 'ba'.padStart(64, '0')); const [alice, bob, carol, dave, eve] = t.ids as [string, string, string, string, string];
+  for (const [participantId, seat, buyIn] of [[alice, 2, 10], [bob, 3, 10], [carol, 5, 2], [dave, 1, 1], [eve, 4, 1]] as const) await command(t, 'seat-participant', { participantId, seat, buyIn });
+  await command(t, 'start-hand'); await act(t, carol, { type: 'call' }); await act(t, alice, { type: 'check' }); await act(t, bob, { type: 'check' });
+  const before = await read(t);
+  expect(before.view.state.pots).toEqual([{ amount: 5, eligibleParticipantIds: [alice, bob, carol, dave, eve] }, { amount: 3, eligibleParticipantIds: [alice, bob, carol] }]);
+  expect(before.view.state.participants.filter(p => p.allIn).map(p => p.participantId)).toEqual([carol, dave, eve]);
+  for (let street = 0; street < 2; street++) for (const id of [alice, bob]) await act(t, id, { type: 'check' });
+  await act(t, alice, { type: 'check' }); const live = connect(t);
+  try {
+    await live.next(t.revision); await act(t, bob, { type: 'check' }); const update = await live.next(t.revision); const done = await read(t);
+    // Alice/Bob pair the board's nine: queens and nines, ace kicker. Short hands have only queens.
+    expect(done.view.state).toMatchObject({ board: ['Qh', 'Qc', 'Ad', '9c', '6c'], pots: [{ amount: 5, eligibleParticipantIds: [alice, bob, carol, dave, eve] }, { amount: 3, eligibleParticipantIds: [alice, bob, carol] }], returns: [], payouts: [{ participantId: alice, amount: 3 }, { participantId: bob, amount: 2 }, { participantId: alice, amount: 2 }, { participantId: bob, amount: 1 }] });
+    expect(done.view.state.participants.map(p => [p.stack, p.contribution, p.folded])).toEqual([[13, 2, false], [11, 2, false], [0, 2, false], [0, 1, false], [0, 1, false]]);
+    expect(done.view.state.participants.every(p => p.holeCards?.length === 2)).toBe(true); expect(update.view).toEqual(done.view);
+    expect(update.presentationEvents.flatMap(e => e.type === 'pot-awarded' ? [e.amount] : [])).toEqual([3, 2, 2, 1]);
+    expect(done.view.history[0]!.decisions.every(d => d.state.participants.filter(p => p.holeCards).length === 1)).toBe(true);
+    expect(JSON.stringify(update)).not.toMatch(/"(?:seed|deck|burns|drawnCardCount|commands)"\s*:/);
+    live.socket.terminate(); await server.close(); await startServer(); expect(await read(t)).toEqual(done);
+  } finally { live.socket.terminate(); }
 });

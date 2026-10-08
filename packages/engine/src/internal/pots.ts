@@ -10,7 +10,14 @@ export function contributionLayers(hand: HandState): { pots: PotState[]; returns
     const contributors = hand.participants.filter(p => p.contribution >= level);
     const amount = (level - previous) * contributors.length;
     if (contributors.length === 1) returns.push({ participantId: contributors[0]!.participantId, amount });
-    else pots.push({ amount, eligibleParticipantIds: contributors.filter(p => !p.folded).map(p => p.participantId) });
+    else {
+      const eligibleParticipantIds = contributors.filter(p => !p.folded).map(p => p.participantId);
+      const previousPot = pots.at(-1);
+      // Folded caps are accounting boundaries, not independent contested pots.
+      if (previousPot && previousPot.eligibleParticipantIds.length === eligibleParticipantIds.length
+        && previousPot.eligibleParticipantIds.every((id, index) => id === eligibleParticipantIds[index])) previousPot.amount += amount;
+      else pots.push({ amount, eligibleParticipantIds });
+    }
     previous = level;
   }
   return { pots, returns };
