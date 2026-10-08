@@ -1,17 +1,18 @@
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
+import { loadCompletedHandInspection, inspectCompletedHand } from '@poker/research';
 import { isBaselineStrategy, type Strategy } from '@poker/strategies';
 import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
@@ -35,7 +36,7 @@ export async function createServer(options: ServerOptions) {
   }
   const create = createTableSessionCreator(db, options.transactionFaults, options.supportsStrategy ?? isBaselineStrategy);
   const jobRunner = new JobRunner(options.jobRunnerOptions);
-  const mutations = createTableSessionMutations(db, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy });
+  const mutations = createTableSessionMutations(db, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy });
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
   app.addHook('onClose', async () => { await mutations.close(); await pool.end(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
@@ -124,6 +125,30 @@ export async function createServer(options: ServerOptions) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The controller commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The controller change could not be confirmed. Refresh its committed view.' } });
+    }
+  });
+  app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/inspect-hand', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (options.adminMode === false) return reply.code(403).send({ ok: false, rejection: { code: 'admin-mode-disabled', message: 'Completed-Hand inspection is disabled on this server.' } });
+    if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId'))
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-inspection-request', message: 'Supply only the completed Hand ID.' } });
+    try {
+      const input = await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
+        const owned = await db.select({ id: tableSessions.id }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, userId)));
+        if (!owned.length) return undefined;
+        const aggregate = await mutations.readPersistedSession(id);
+        return aggregate?.ownerUserId === userId ? aggregate.pokerRecord : undefined;
+      });
+      if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
+      const result = await jobRunner.submit(input, inspectCompletedHand).result;
+      if (!result.ok) return reply.code(503).send({ ok: false, rejection: { code: 'inspection-' + result.code, message: result.code === 'capacity' ? 'The computation queue is full. Try revealing this completed Hand again.' : 'Inspection could not complete. Try revealing this completed Hand again.' } });
+      const outcome = result.value;
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'hand-not-found' ? 404 : outcome.rejection.code === 'record-restoration-failed' ? 503 : 400).send(outcome);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Hand could not be read. Try revealing it again.' } });
     }
   });
   await mutations.resumeBots();

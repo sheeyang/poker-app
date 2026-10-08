@@ -21,6 +21,7 @@ const relay = http.createServer(async (request, response) => {
       if (control.kind === 'hold') holds.add(keyFor(id, control.responseKind));
       if (control.kind === 'release') {
         const key = keyFor(id, control.responseKind);
+        holds.delete(key);
         for (let index = held.length - 1; index >= 0; index--) if (held[index]!.key === key) held.splice(index, 1)[0]!.send();
       }
       if (control.kind === 'drop') {
@@ -62,7 +63,8 @@ relay.on('upgrade', (request, socket, head) => {
       const frame = JSON.parse(data.toString());
       const captured = frames.get(id) ?? [];
       captured.push(frame); frames.set(id, captured);
-      if (!dropped.get(id)?.has(frame.sessionRevision) && client.readyState === WebSocket.OPEN) client.send(data.toString());
+      const send = () => { if (!dropped.get(id)?.has(frame.sessionRevision) && client.readyState === WebSocket.OPEN) client.send(data.toString()); };
+      if (holds.has(keyFor(id, 'live'))) held.push({ key: keyFor(id, 'live'), send }); else send();
     });
     server.on('close', () => client.close());
     server.on('error', () => client.close());
