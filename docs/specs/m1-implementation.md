@@ -18,8 +18,8 @@ dependency graph below, with one ticket branch/worktree per slice.
 | [#4](https://github.com/sheeyang/poker-app/issues/4) | Between-Hand management | #3 | Complete: `0117f07`, 80 tests, browser/checks |
 | [#5](https://github.com/sheeyang/poker-app/issues/5) | Check/Call through showdown | #3 | Complete: `cefba66`, 111 tests, browser/checks |
 | [#6](https://github.com/sheeyang/poker-app/issues/6) | Exact Bet-to/Raise-to | #5 | Complete: `8cccae3`, 126 tests, browser/checks |
-| [#7](https://github.com/sheeyang/poker-app/issues/7) | Multiway play and antes | #6 | In progress |
-| [#8](https://github.com/sheeyang/poker-app/issues/8) | All-ins and layered payouts | #7 | Pending |
+| [#7](https://github.com/sheeyang/poker-app/issues/7) | Multiway play and antes | #6 | Complete: `d956fe7`, 152 tests, browser/checks |
+| [#8](https://github.com/sheeyang/poker-app/issues/8) | All-ins and layered payouts | #7 | In progress |
 | [#9](https://github.com/sheeyang/poker-app/issues/9) | Cumulative short-all-in reopening | #8 | Pending |
 | [#10](https://github.com/sheeyang/poker-app/issues/10) | Played-session restart and history | #4 | Complete: `a3b9b2b`, 135 tests, browser/checks |
 | [#11](https://github.com/sheeyang/poker-app/issues/11) | WebSocket reconnect synchronization | #3 | Complete: `ac7943e`, 118 tests, browser/checks |
