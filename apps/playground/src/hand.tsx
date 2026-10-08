@@ -45,9 +45,13 @@ export function Hand({ table }: { table: ObservableTableSession }) {
       <div><dt>Current actor</dt><dd>{state.actorId ? name(state.actorId) : '—'}</dd></div>
     </dl>
     {state.board.length > 0 && <p aria-label="Community cards">Board: <span className="community-cards">{state.board.join(' ')}</span></p>}
+    {state.pots.length > 0 && <ol className="pot-layers" aria-label="Pot layers">{state.pots.map((layer, index) => <li key={index}>
+      <strong>{index === 0 ? 'Main pot' : `Side pot ${index}`} · {layer.amount} chips</strong>
+      <span>Eligible: {layer.eligibleParticipantIds.map(name).join(', ')}</span>
+    </li>)}</ol>}
     {showdown && <p className="help">Showdown: all live hole cards are public.</p>}
     {state.status !== 'active-hand' && <>
-      <p className="help">{eligible < 2 ? 'Seat at least two Participants with chips to start a Hand.' : state.status === 'completed-hand' ? 'The Hand has settled. Start another Hand when ready.' : 'Start Hand posts forced bets and deals private cards.'}</p>
+      <p className="help">{eligible < 2 ? state.participants.some(p => p.seat !== null && p.stack === 0) ? 'At least two Participants need chips to start. Rebuy a zero stack in Manage between Hands.' : 'Seat at least two Participants with chips to start a Hand.' : state.status === 'completed-hand' ? 'The Hand has settled. Start another Hand when ready.' : 'Start Hand posts forced bets and deals private cards.'}</p>
       <button className="primary" disabled={busy || eligible < 2} onClick={() => submit('start-hand')}>Start Hand</button>
     </>}
     {state.actorId === human.participantId && <>

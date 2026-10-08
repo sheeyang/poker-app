@@ -128,6 +128,7 @@ export function Playground() {
               {participant.handSeat === index + 1 && participant.participantId === table.data.view.state.smallBlindParticipantId && <span>Small blind</span>}
               {participant.handSeat === index + 1 && participant.participantId === table.data.view.state.bigBlindParticipantId && <span>Big blind</span>}
               <span>{participant.stack} chips{participant.sittingOut ? ' · Sitting out' : ''}{participant.allIn ? ' · All-in' : participant.folded ? ' · Folded' : ''}</span>
+              {table.data.view.state.status !== 'active-hand' && participant.stack === 0 && <span>Rebuy to play the next Hand</span>}
               {participant.contribution !== undefined && <span>Committed {participant.contribution} chips</span>}
               {participant.anteContribution !== undefined && <span>Ante {participant.anteContribution} chips</span>}
               {participant.wager !== undefined && <span>Street wager {participant.wager} chips</span>}

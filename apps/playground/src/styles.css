@@ -66,6 +66,10 @@ label input, label select { display: block; margin-top: 6px; font-weight: 400; }
 .success { color: #19553e; margin: 12px 0; }
 .hand-controls { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
 .hand-controls > p { margin-top: 12px; }
+.pot-layers { list-style: none; margin: 18px 0; padding: 0; }
+.pot-layers li { padding: 10px 0; border-bottom: 1px solid #d3ddd5; overflow-wrap: anywhere; }
+.pot-layers strong { display: block; font-size: .875rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.pot-layers span { display: block; margin-top: 4px; font-size: .875rem; color: #53635b; }
 .hand-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .sized-action { margin-top: 18px; }
 .sized-action-fields { display: grid; grid-template-columns: minmax(0, 260px) auto; gap: 12px; align-items: end; justify-content: start; }
