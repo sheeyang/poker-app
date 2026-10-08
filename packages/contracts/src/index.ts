@@ -146,12 +146,36 @@ export interface MutationAcknowledgement {
   readonly sessionRevision: Revision;
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
+/** Explicitly authorized completed-Hand Research output; never an Observable Game View. */
+export interface CompletedHandInspection {
+  readonly handId: HandId;
+  readonly sequence: number;
+  readonly buttonSeat: number;
+  readonly smallBlindParticipantId: ParticipantId;
+  readonly bigBlindParticipantId: ParticipantId;
+  readonly participants: readonly { readonly participantId: ParticipantId; readonly seat: number; readonly holeCards: readonly Card[]; readonly contribution: ChipAmount; readonly anteContribution: ChipAmount; readonly folded: boolean; readonly allIn: boolean }[];
+  readonly deck: readonly Card[];
+  readonly drawnCardCount: number;
+  readonly burns: readonly Card[];
+  readonly board: readonly Card[];
+  readonly pots: readonly { readonly amount: ChipAmount; readonly eligibleParticipantIds: readonly ParticipantId[] }[];
+  readonly returns: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
+  readonly payouts: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
+}
+export interface InspectHandRequest { readonly handId: HandId }
+export type CompletedHandInspectionOutcome = { readonly ok: true; readonly tableSessionId: TableSessionId; readonly hand: CompletedHandInspection } | ApplicationRejection;
+/** Owner application metadata, outside Participant histories and Policy inputs. */
+export interface InspectionCapabilities {
+  readonly adminMode: boolean;
+  readonly completedHands: readonly { readonly handId: HandId; readonly sequence: number }[];
+}
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
   readonly view: ObservableGameView;
+  readonly inspection: InspectionCapabilities;
 }
 /** Every live update is a complete participant-safe snapshot of a committed aggregate. */
 export interface ObservableTableUpdate extends ObservableTableSession {
