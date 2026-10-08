@@ -23,9 +23,9 @@ dependency graph below, with one ticket branch/worktree per slice.
 | [#9](https://github.com/sheeyang/poker-app/issues/9) | Cumulative short-all-in reopening | #8 | Complete: `017e7c4`, 188 tests, boundary/browser/checks |
 | [#10](https://github.com/sheeyang/poker-app/issues/10) | Played-session restart and history | #4 | Complete: `a3b9b2b`, 135 tests, browser/checks |
 | [#11](https://github.com/sheeyang/poker-app/issues/11) | WebSocket reconnect synchronization | #3 | Complete: `ac7943e`, 118 tests, browser/checks |
-| [#12](https://github.com/sheeyang/poker-app/issues/12) | Baseline Bots and JobRunner | #9, #10, #11 | In progress |
-| [#13](https://github.com/sheeyang/poker-app/issues/13) | Bot retry and Strategy replacement | #12 | Pending |
-| [#14](https://github.com/sheeyang/poker-app/issues/14) | Completed-Hand Admin inspection | #12 | Pending |
+| [#12](https://github.com/sheeyang/poker-app/issues/12) | Baseline Bots and JobRunner | #9, #10, #11 | Complete: `adba70a`, 208 tests, Bot/browser/checks |
+| [#13](https://github.com/sheeyang/poker-app/issues/13) | Bot retry and Strategy replacement | #12 | In progress |
+| [#14](https://github.com/sheeyang/poker-app/issues/14) | Completed-Hand Admin inspection | #12 | In progress |
 | [#15](https://github.com/sheeyang/poker-app/issues/15) | Unknown-commit recovery | #13 | Pending |
 
 Completion requires the combined browser flow, type/build/dependency checks,
