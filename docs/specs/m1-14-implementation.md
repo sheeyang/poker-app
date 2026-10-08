@@ -94,5 +94,9 @@ Captures outside the repository:
 - `C:/Users/sy/.codex/visualizations/2026/10/07/01a115dd-7d6d-79d2-82a4-f9d61deb33de/m1-14-desktop.png`
 - `C:/Users/sy/.codex/visualizations/2026/10/07/01a115dd-7d6d-79d2-82a4-f9d61deb33de/m1-14-mobile.png`
 
-Final workspace check and task-owned fixture cleanup are recorded with the completion
-commit after merging the latest integration branch.
+Final `pnpm check` passed after merging integration `4844086`: workspace typechecks,
+**218 tests in 29 files**, production server/Playground builds and dependency-boundary
+checks. All ticket-owned server/control, relay, Vite and named Chrome bridge
+processes were stopped. The exact isolated schema
+`browser_inspection_918a548d01704d92aa60278642719633` was dropped and verified absent.
+Other processes and databases were not changed.
