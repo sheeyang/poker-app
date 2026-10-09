@@ -1,15 +1,17 @@
-import { CashGame, type TableSessionRecord } from '@poker/engine';
+import { CashGame } from '@poker/engine';
 import type { CompletedHandInspectionOutcome } from '@poker/contracts';
 
 /** These are the entire permitted durable inputs; never a live CashGame or aggregate. */
 export interface CompletedHandInspectionInput {
   readonly tableSessionId: string;
   readonly handId: string;
-  readonly pokerRecord: TableSessionRecord;
+  /** Unvalidated durable data; the admitted job validates the complete record. */
+  readonly pokerRecord: unknown;
 }
-export async function loadCompletedHandInspection(tableSessionId: string, handId: string, readPermittedRecord: (id: string) => Promise<TableSessionRecord | undefined>): Promise<CompletedHandInspectionInput | undefined> {
-  const pokerRecord = await readPermittedRecord(tableSessionId);
-  return pokerRecord && { tableSessionId, handId, pokerRecord };
+export async function loadCompletedHandInspection(tableSessionId: string, handId: string, readPermittedRecord: (id: string) => Promise<{ readonly pokerRecord: unknown } | undefined>): Promise<CompletedHandInspectionInput | undefined> {
+  const permitted = await readPermittedRecord(tableSessionId);
+  // A missing authorized row differs from an existing row with corrupt or missing poker data.
+  return permitted && { tableSessionId, handId, pokerRecord: permitted.pokerRecord };
 }
 /** Bounded M1 reconstruction runs only within the authoritative deployment's JobRunner. */
 export function inspectCompletedHand(input: CompletedHandInspectionInput): CompletedHandInspectionOutcome {

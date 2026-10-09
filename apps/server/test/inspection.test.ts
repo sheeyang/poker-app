@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ObservableTableSession, type TableLiveMessage } from '@poker/contracts';
+import { CashGame, type TableSessionRecord } from '@poker/engine';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import type { Strategy } from '@poker/strategies';
@@ -63,6 +64,26 @@ test('owner explicitly inspects one durable completed Hand without changing comm
   expect(await read(t)).toEqual(before);
   expect(await controllers.readPersistedSession(t.id)).toEqual(durableBefore);
   expect(before.view.history[0]!.decisions[0]!.state.participants[1]).not.toHaveProperty('holeCards');
+});
+
+test('admitted completed-Hand inspection replays once from immutable durable inputs', async () => {
+  const t = await completed();
+  const before = await controllers.readPersistedSession(t.id);
+  // Observe the public reconstruction interface without replacing its implementation.
+  const replay = vi.spyOn(CashGame, 'fromRecord');
+  try {
+    const response = await inspect(t);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, hand: { handId: 'hand-1' } });
+    expect(replay).toHaveBeenCalledTimes(1);
+    const record = replay.mock.calls[0]![0] as TableSessionRecord;
+    expect(record).toEqual(before!.pokerRecord);
+    expect(Object.isFrozen(record)).toBe(true);
+    expect(Object.isFrozen(record.configuration)).toBe(true);
+    expect(Object.isFrozen(record.commands)).toBe(true);
+    expect(record.commands.every(command => Object.isFrozen(command))).toBe(true);
+  } finally { replay.mockRestore(); }
+  expect(await controllers.readPersistedSession(t.id)).toEqual(before);
 });
 
 test('owner selection lists completed Bot-only Hands outside the filtered Participant history, including reconnect', async () => {
@@ -143,6 +164,71 @@ test('showdown inspection reconstructs burn-before-board draws while earlier dec
   expect(await controllers.readPersistedSession(t.id)).toEqual(persisted);
 });
 
+test.each(['invalid suffix', 'null record', 'missing record'])('inspection rejects the complete corrupt durable input: %s', async corruption => {
+  const t = await completed();
+  const stranger = await table();
+  // External corruption fixture; verification stays at the HTTP and trusted-reader interfaces.
+  if (corruption === 'invalid suffix') {
+    await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(aggregate, \'{pokerRecord,commands}\', (aggregate #> \'{pokerRecord,commands}\') || $1::jsonb) WHERE id = $2', [JSON.stringify([{ type: 'act', participantId: t.bots[0], action: { type: 'fold' } }]), t.id]);
+  } else if (corruption === 'null record') {
+    await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(aggregate, \'{pokerRecord}\', \'null\'::jsonb) WHERE id = $1', [t.id]);
+  } else {
+    await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = aggregate - \'pokerRecord\' WHERE id = $1', [t.id]);
+  }
+  expect((await inspect(t, 'hand-1', stranger.cookie)).status).toBe(404);
+  const replay = vi.spyOn(CashGame, 'fromRecord');
+  try {
+    const response = await inspect(t);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, rejection: { code: 'record-restoration-failed', message: 'The complete committed Table Session could not be restored.' } });
+    expect(replay).toHaveBeenCalledTimes(1);
+  } finally { replay.mockRestore(); }
+  await expect(controllers.readPersistedSession(t.id)).rejects.toThrow('The complete committed Table Session could not be restored.');
+});
+
+test('queued inspection retains its captured active-Hand rejection after the live Hand completes', async () => {
+  await server.close();
+  const release = Promise.withResolvers<void>();
+  const evaluating = Promise.withResolvers<void>();
+  const strategy: Strategy = {
+    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async () => { evaluating.resolve(); await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
+    actionSelector: { select: choices => choices[0]!.action },
+  };
+  server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  base = await server.listen({ host: '127.0.0.1', port: 0 });
+  try {
+    const t = await completed();
+    await command(t, 'start-hand');
+    await evaluating.promise;
+    const active = await read(t);
+    const captured = await controllers.readPersistedSession(t.id);
+    const replay = vi.spyOn(CashGame, 'fromRecord');
+    try {
+      const queued = inspect(t, 'hand-2');
+      let finished = false;
+      void queued.then(() => { finished = true; });
+      await expect.poll(async () => (await (await inspect(t, 'hand-2')).json()).rejection?.code).toBe('inspection-capacity');
+      expect(finished).toBe(false);
+      expect(replay).not.toHaveBeenCalled();
+      expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: active.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } })).toMatchObject({ ok: true });
+      const completedView = await read(t);
+      expect(completedView.view.state.status).toBe('completed-hand');
+      const committed = await controllers.readPersistedSession(t.id);
+      replay.mockClear();
+      release.resolve();
+      const response = await queued;
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
+      expect(replay).toHaveBeenCalledTimes(1);
+      expect(replay.mock.calls[0]![0]).toEqual(captured!.pokerRecord);
+      replay.mockRestore();
+      expect((await inspect(t, 'hand-2')).status).toBe(200);
+      expect(await read(t)).toEqual(completedView);
+      expect(await controllers.readPersistedSession(t.id)).toEqual(committed);
+    } finally { replay.mockRestore(); }
+  } finally { release.resolve(); }
+});
+
 test('inspection shares Bot capacity, waits outside mutation acceptance and retains a completed result when later poker advances', async () => {
   await server.close();
   const release = Promise.withResolvers<void>();
@@ -155,15 +241,25 @@ test('inspection shares Bot capacity, waits outside mutation acceptance and reta
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();
+    const corrupt = await completed();
+    await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(aggregate, \'{pokerRecord,commands}\', (aggregate #> \'{pokerRecord,commands}\') || $1::jsonb) WHERE id = $2', [JSON.stringify([{ type: 'act', participantId: corrupt.bots[0], action: { type: 'fold' } }]), corrupt.id]);
     const first = await read(t);
     await command(t, 'start-hand');
     await expect.poll(() => policyView).toBeDefined();
-    const queued = inspect(t);
-    let finished = false;
-    void queued.then(() => { finished = true; });
-    // Capacity proves this is the same runner as the executing Bot, not a second Research runner.
-    await expect.poll(async () => (await inspect(t)).status).toBe(503);
-    expect(finished).toBe(false);
+    const replay = vi.spyOn(CashGame, 'fromRecord');
+    let queued: Promise<Response>;
+    try {
+      queued = inspect(t);
+      let finished = false;
+      void queued.then(() => { finished = true; });
+      // Capacity proves this is the same runner as the executing Bot, not a second Research runner.
+      await expect.poll(async () => (await (await inspect(t)).json()).rejection?.code).toBe('inspection-capacity');
+      expect(finished).toBe(false);
+      const rejected = await inspect(corrupt);
+      expect(rejected.status).toBe(503);
+      expect(await rejected.json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
+      expect(replay).not.toHaveBeenCalled();
+    } finally { replay.mockRestore(); }
     const active = await read(t);
     expect(JSON.stringify(policyView)).not.toMatch(/"(?:inspection|deck|burns|seed|configurationSeed|commands|pokerRecord)"\s*:/);
     await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: active.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } });

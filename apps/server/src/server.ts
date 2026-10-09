@@ -141,10 +141,10 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-inspection-request', message: 'Supply only the completed Hand ID.' } });
     try {
       const input = await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
-        const owned = await db.select({ id: tableSessions.id }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, userId)));
-        if (!owned.length) return undefined;
-        const aggregate = await mutations.readPersistedSession(id);
-        return aggregate?.ownerUserId === userId ? aggregate.pokerRecord : undefined;
+        // Load authorized durable inputs; reconstruction belongs to the admitted Research job.
+        const owned = await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, userId)));
+        const aggregate = owned[0]?.aggregate;
+        return aggregate?.ownerUserId === userId ? { pokerRecord: aggregate.pokerRecord } : undefined;
       });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
       const result = await jobRunner.submit(input, inspectCompletedHand).result;
