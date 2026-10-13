@@ -11,10 +11,10 @@ docker compose up -d --wait
 Copy-Item .env.example .env
 pnpm install --frozen-lockfile
 pnpm db:init
-pnpm dev
+pnpm dev:playground
 ```
 
-On macOS/Linux use `cp .env.example .env` for the copy step. Open [the Playground](http://127.0.0.1:5173). Vite proxies `/api` to the Fastify server at `127.0.0.1:3001`, so cookies and requests use the same browser origin. Keep both development processes running. The PostgreSQL service listens only on `127.0.0.1:54329`; its named Docker volume survives process/container restarts.
+On macOS/Linux use `cp .env.example .env` for the copy step. Open [the Playground](http://127.0.0.1:5173). `pnpm dev:playground` starts the Playground and API server together; `pnpm dev` starts all apps. Vite proxies `/api` to the Fastify server at `127.0.0.1:3001`, so cookies and requests use the same browser origin. Keep both development processes running. The PostgreSQL service listens only on `127.0.0.1:54329`; its named Docker volume survives process/container restarts.
 
 For an existing PostgreSQL installation, create separate `poker` and `poker_test` databases and update `DATABASE_URL` and `TEST_DATABASE_URL` in `.env`. The server and database initialization scripts load the root `.env`; environment variables already supplied by the shell take precedence. Initialization is idempotent and also runs when the server starts.
 

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "pnpm -r --parallel --filter './apps/*' dev",
+    "dev:playground": "pnpm -r --parallel --filter @poker/server --filter @poker/playground dev",
     "test": "vitest run",
     "typecheck": "pnpm -r --if-present typecheck",
     "build": "pnpm -r --if-present build",
