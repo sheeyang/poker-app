@@ -204,7 +204,7 @@ export async function createServer(options: ServerOptions) {
         return aggregate?.ownerUserId === userId ? { pokerRecord: aggregate.pokerRecord } : undefined;
       });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
-      const result = await jobRunner.submit(input, inspectCompletedHand).result;
+      const result = await jobRunner.submit('interactive-analysis', input, inspectCompletedHand).result;
       if (!result.ok) return reply.code(503).send({ ok: false, rejection: { code: 'inspection-' + result.code, message: result.code === 'capacity' ? 'The computation queue is full. Try revealing this completed Hand again.' : 'Inspection could not complete. Try revealing this completed Hand again.' } });
       const outcome = result.value;
       return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'hand-not-found' ? 404 : outcome.rejection.code === 'record-restoration-failed' ? 503 : 400).send(outcome);
