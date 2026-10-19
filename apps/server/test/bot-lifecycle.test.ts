@@ -158,6 +158,7 @@ test('timeouts retain executing capacity until late work settles, bounded retrie
     const old = f.evaluations[0]!; expect(old.signal?.aborted).toBe(true);
     for (let attempt = 0; attempt < 3; attempt++) expect((await f.configure(t, 'retry-bot')).status).toBe(200);
     expect(f.evaluations.map(e => e.view.state.decisionId)).toEqual([old.view.state.decisionId]);
+    expect(await (await f.submit(t, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
     const other = await f.table(); const secondLive = f.connect(other);
     try {
       await f.botDecision(other);
@@ -391,4 +392,45 @@ test('a controller change queued ahead of a returning action promotes only after
     expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRevision: 5, sessionRevision: 6, botProvenance: [expect.objectContaining({ playingStrategy: replacement, decisionId: obsolete.view.state.decisionId, evaluationSeed: obsolete.seed })] });
     expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[4]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });
   } finally { release.resolve(); await changing?.catch(() => {}); socket?.terminate(); await f.close(); }
+});
+
+test('waiting Bot decisions run FIFO ahead of earlier interactive inspection without preempting work or exceeding shared admission', async () => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 3, timeoutMs: 30000 } });
+  try {
+    const completed = await f.table();
+    await f.command(completed, 'seat-participant', { participantId: completed.human, seat: 1 });
+    await f.command(completed, 'seat-participant', { participantId: completed.bot, seat: 2 });
+    await f.command(completed, 'start-hand');
+    await f.command(completed, 'act', { participantId: completed.human, action: { type: 'fold' } });
+    const beforeInspection = await f.read(completed);
+    const running = await f.table(); await f.botDecision(running);
+    await expect.poll(() => f.evaluations.length).toBe(1);
+    let inspectionFinished = false;
+    const inspection = f.submit(completed, 'inspect-hand', { handId: 'hand-1' }).then(response => { inspectionFinished = true; return response; });
+    const first = await f.table(); await f.botDecision(first);
+    const second = await f.table(); await f.botDecision(second);
+    expect(await (await f.submit(completed, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
+    expect(inspectionFinished).toBe(false);
+    expect(f.evaluations).toHaveLength(1);
+    expect(f.evaluations[0]!.signal?.aborted).toBe(false);
+    f.evaluations[0]!.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    expect(f.evaluations[1]!.view.state.actorId).toBe(first.bot);
+    expect(await f.read(first)).toMatchObject({ pokerRevision: 4, runtimeStatus: { phase: 'thinking' } });
+    expect(inspectionFinished).toBe(false);
+    f.evaluations[1]!.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(() => f.evaluations.length).toBe(3);
+    expect(f.evaluations[2]!.view.state.actorId).toBe(second.bot);
+    expect(await f.read(second)).toMatchObject({ pokerRevision: 4, runtimeStatus: { phase: 'thinking' } });
+    expect(inspectionFinished).toBe(false);
+    f.evaluations[2]!.result.resolve(answer({ type: 'fold' }));
+    const response = await inspection;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, tableSessionId: completed.id, hand: { handId: 'hand-1' } });
+    expect(await f.read(completed)).toEqual(beforeInspection);
+    for (const table of [running, first, second]) await expect.poll(async () => (await f.read(table)).pokerRevision).toBe(5);
+  } finally {
+    for (let remaining = 0; remaining < 3; remaining++) f.answerNext(answer({ type: 'fold' }));
+    await f.close();
+  }
 });
