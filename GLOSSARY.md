@@ -17,8 +17,8 @@ The enduring engineering interface for exercising and validating platform capabi
 _Avoid_: Trainer, final product UI, disposable prototype
 
 **Trainer**:
-The interactive experience in which a human plays hands against strategy-controlled participants and reviews their decisions.
-_Avoid_: Poker game, practice mode
+The interactive experience in which a human plays hands against strategy-controlled participants and examines numerical Strategy outputs and alignment scores for their decisions.
+_Avoid_: Poker game, practice mode, advice engine
 
 **Research Lab**:
 The analysis experience for comparing strategies and running automated strategy-versus-strategy simulations.
@@ -29,7 +29,7 @@ The application mode in which authorized privileged completed-Hand inspection an
 _Avoid_: Participant visibility, unrestricted gameplay
 
 **Range Visualizer**:
-The view of a selected Policy's recommendations across every legal hypothetical hole-card combination in one fixed observable decision situation. It shows action distributions and concrete sizings without estimating the likelihood of holding a hand or reaching the situation.
+The view of a selected Policy's distributions across every legal hypothetical hole-card combination in one fixed observable decision situation. It shows action distributions and concrete sizings without estimating the likelihood of holding a hand or reaching the situation.
 _Avoid_: Reach range, opponent range estimate
 
 **Equity / Poker Math Overlay**:
@@ -107,8 +107,12 @@ The Strategy assigned to control a Bot's decisions.
 _Avoid_: Reference Strategy
 
 **Reference Strategy**:
-The human-selected Strategy whose Policy supplies recommendation overlays, alignment scores, and counterfactual comparison independently of every Bot's Playing Strategy.
+The human-selected Strategy used independently of every Bot's Playing Strategy to supply Policy distributions, concrete selected actions, alignment scores, and counterfactual comparison.
 _Avoid_: Playing Strategy
+
+**Live Analysis**:
+Optional evaluation of the Reference Strategy for the human's current decision before they act. Its numerical results comprise the Policy's action probabilities and concrete sizings together with the Action Selector's selected action.
+_Avoid_: Advice, best-action instruction
 
 **Observable Session History**:
 The immutable participant-specific projection of prior Table Session information that was legally observable to a Participant at each point after they joined. Strategies may derive adaptive information from it but do not own persistent cross-hand memory.
@@ -169,3 +173,7 @@ _Avoid_: Decision Score, top-action agreement
 **Analysis Result**:
 Derived, reproducible analysis of a recorded decision by an identified Reference Strategy version and configuration. It may be cached, replaced, or recomputed without changing the Hand.
 _Avoid_: Hand Record, authoritative score
+
+**Score Summary**:
+The pair of arithmetic means of Decision Score and Action Rank Score over a declared set of accepted human decisions evaluated against one fixed Reference Strategy. It is complete only when every required decision analysis has succeeded, and a set containing no human decisions has no score.
+_Avoid_: Partial average, average of Hand averages

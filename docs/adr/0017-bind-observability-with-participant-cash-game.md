@@ -52,6 +52,7 @@ The server sends a separately constructed update to each authorized participant,
 
 ```typescript
 interface ObservableTableUpdate {
+  readonly type: "table-update";
   readonly tableSessionId: TableSessionId;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
@@ -63,3 +64,18 @@ interface ObservableTableUpdate {
 The backend supplies both pokerRevision and sessionRevision from the committed aggregate and obtains only the complete view and projected presentation events from the committed game's participant facade. The revisions and projection must describe the same committed aggregate; publish only after durable commit. Revision metadata stays in the server-owned update envelope rather than becoming part of ObservableGameView or Policy input. The view is the synchronization authority; presentationEvents may be empty and never need to be applied to reconstruct state.
 
 Order updates within each Table Session by sessionRevision, which also advances for committed controller or Trainer configuration changes even when pokerRevision is unchanged. Ignore older updates and do not replay presentation events from an already processed revision. A newer complete view can be accepted despite missing intermediate revisions. On reconnect, send the latest complete participant-safe view with both revisions; missed presentation events need not be replayed. Use pokerRevision for expectedPokerRevision on poker mutations and sessionRevision for expectedSessionRevision on application configuration mutations. These expectations belong to server request metadata, not CashGame method arguments.
+
+## Shared Table Session live-message contract
+
+M2 extends the existing Table Session connection with analysis delivery. `packages/contracts` owns one shared TypeScript union listing every permitted message, used by server delivery and client dispatch:
+
+```typescript
+type TableLiveMessage =
+  | ObservableTableUpdate // type: 'table-update'
+  | TableRuntimeStatus   // type: 'table-status'
+  | AnalysisUpdate;      // type: 'analysis-update'
+```
+
+`AnalysisUpdate` identifies the exact analysis request and execution attempt for completion and failure delivery. Analysis state does not advance pokerRevision or sessionRevision, so clients order it using its own request/attempt freshness rules rather than filtering it through gameplay revision checks. A delayed HTTP pending response cannot replace a newer terminal WebSocket state for the same attempt, and old attempts or superseded requests cannot replace newer analysis.
+
+Extend the existing connection modules for authorization, delivery, typed dispatch, cleanup, and reconnect; no new connection class is needed. Scheduling, caching, deduplication, and retry remain in the analysis module. Normal operation requires no polling. Once the reconnect subscription is established and the initial complete table view has arrived, refresh current analysis through HTTP to recover missed updates. Reconciliation must discard retired connection responses and account for transient pending/failure state being lost after a server restart. These rules close the gap where an analysis could complete before the WebSocket subscribed, without requiring a durable event backlog.
