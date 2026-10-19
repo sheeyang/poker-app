@@ -158,7 +158,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const pending: { identity: BotIdentity; handle?: JobHandle<ConcreteAction> } = { identity: proposed.identity };
     work.set(id, pending);
     publishStatus(id, { phase: 'thinking', participantId: proposed.identity.participantId });
-    pending.handle = bots.runner.submit({ view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
+    pending.handle = bots.runner.submit('bot-decision', { view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
       const strategy = strategyFactory(input.descriptor);
       const compatibility = await strategy.policy.checkCompatibility(input.view);
       if (!compatibility.compatible) throw new JobFailure('incompatible');
