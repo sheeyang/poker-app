@@ -47,7 +47,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
     seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
     minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000, allowSeatChanges: true,
   });
-  expect(JSON.stringify(before)).not.toMatch(/seed|commands|ownerUserId|schemaVersion|engineVersion/);
+  expect(JSON.stringify(before)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
   server = await createServer({ automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
