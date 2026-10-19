@@ -14,7 +14,7 @@ interface PlaygroundState {
   pendingManagement: PendingManagement | null;
   pendingController: PendingController | null;
   pendingTrainerConfiguration: PendingTrainerConfiguration | null;
-  select: (id: string) => void;
+  select: (id: string | null) => void;
   setPendingCreation: (request: CreateTableSessionRequest | null) => void;
   setPendingSeating: (request: PendingSeating | null) => void;
   setPendingHand: (request: PendingHand | null) => void;

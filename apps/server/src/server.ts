@@ -6,7 +6,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
@@ -45,6 +45,63 @@ export async function createServer(options: ServerOptions) {
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
+  // The user channel is independent of open table subscriptions. Analysis publishes here
+  // only after establishing the request owner's authorization and making HTTP state readable.
+  const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
+  function publishUserUpdate(userId: string, message: AnalysisUpdate) {
+    for (const deliver of userChannels.get(userId) ?? []) deliver(message);
+  }
+  app.get('/api/live', {
+    websocket: true,
+    preValidation: async (request, reply) => {
+      const userId = await authenticatedUser(request.cookies.poker_local);
+      if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Playground to establish your local identity.' } });
+      socketOwners.set(request, userId);
+    },
+  }, (socket, request) => {
+    const userId = socketOwners.get(request)!;
+    const deliver = (message: ServerLiveMessage) => { if (socket.readyState === 1) socket.send(JSON.stringify(message)); };
+    const channels = userChannels.get(userId) ?? new Set();
+    channels.add(deliver); userChannels.set(userId, channels);
+    const subscriptions = new Map<string, () => void>();
+    let disconnected = false;
+    let commands = Promise.resolve();
+    socket.on('message', data => {
+      let message: ClientLiveMessage;
+      try { message = JSON.parse(data.toString()); } catch { socket.close(1008, 'Invalid live message.'); return; }
+      if (!message || !['subscribe-table', 'unsubscribe-table'].includes(message.type) || typeof message.requestId !== 'string' || message.requestId.length < 1 || message.requestId.length > 128 || typeof message.tableSessionId !== 'string') {
+        socket.close(1008, 'Invalid live message.'); return;
+      }
+      // Serialize subscription commands so removal cannot overtake authorization/loading.
+      commands = commands.then(async () => {
+        if (disconnected) return;
+        const result = { type: 'table-subscription-result' as const, requestId: message.requestId, tableSessionId: message.tableSessionId };
+        subscriptions.get(message.tableSessionId)?.();
+        subscriptions.delete(message.tableSessionId);
+        if (message.type === 'unsubscribe-table') { deliver({ ...result, status: 'unsubscribed' }); return; }
+        if (!/^[0-9a-f-]{36}$/.test(message.tableSessionId)) { deliver({ ...result, status: 'rejected', code: 'not-found' }); return; }
+        const initial: TableLiveMessage[] = [];
+        let accepted = false;
+        try {
+          const unsubscribe = await mutations.subscribe(message.tableSessionId, userId, update => { if (accepted) deliver(update); else initial.push(update); });
+          if (disconnected) { unsubscribe?.(); return; }
+          if (!unsubscribe) { deliver({ ...result, status: 'rejected', code: 'not-found' }); return; }
+          subscriptions.set(message.tableSessionId, unsubscribe);
+          deliver({ ...result, status: 'subscribed' });
+          accepted = true;
+          for (const update of initial) deliver(update);
+        } catch { deliver({ ...result, status: 'rejected', code: 'unavailable' }); }
+      });
+    });
+    socket.on('close', () => {
+      disconnected = true;
+      for (const unsubscribe of subscriptions.values()) unsubscribe();
+      subscriptions.clear();
+      channels.delete(deliver); if (channels.size === 0) userChannels.delete(userId);
+    });
+    socket.on('error', () => socket.close());
+    deliver({ type: 'user-channel-ready' });
+  });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/live', {
     websocket: true,
     preValidation: async (request, reply) => {

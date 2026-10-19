@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableUpdate, type TableLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
@@ -35,9 +35,11 @@ const configure = (t: Table, body: object) => fetch(base + '/api/table-sessions/
 const chosenConfiguration = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true };
 const change = (expectedSessionRevision = 0, requestId: string = randomUUID()) => ({ requestId, expectedSessionRevision, trainerConfiguration: chosenConfiguration });
 function connect(t: Table) {
-  const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/table-sessions/' + t.id + '/live', { headers: { cookie: t.cookie } });
-  const messages: TableLiveMessage[] = [];
-  socket.on('message', data => messages.push(JSON.parse(data.toString())));
+  const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: t.cookie } });
+  const messages: ObservableTableUpdate[] = [];
+  socket.on('open', () => socket.send(JSON.stringify({ type: 'subscribe-table', requestId: randomUUID(), tableSessionId: t.id })));
+  socket.on('error', () => {});
+  socket.on('message', data => { const message: ServerLiveMessage = JSON.parse(data.toString()); if (message.type === 'table-update') messages.push(message); });
   return { socket, messages, async next(revision: number) {
     await expect.poll(() => messages.find(message => message.type === 'table-update' && message.sessionRevision === revision)).toBeDefined();
     return messages.find((message): message is ObservableTableUpdate => message.type === 'table-update' && message.sessionRevision === revision)!;
