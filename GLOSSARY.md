@@ -114,6 +114,10 @@ _Avoid_: Playing Strategy
 Optional evaluation of the Reference Strategy for the human's current decision before they act. Its numerical results comprise the Policy's action probabilities and concrete sizings together with the Action Selector's selected action.
 _Avoid_: Advice, best-action instruction
 
+**Reference Strategy Evaluation**:
+The Policy Result and Action Selector's selected concrete action for one fixed observable decision situation and one complete Reference Strategy. Alignment scores additionally depend on the human's accepted concrete action.
+_Avoid_: Decision Score, selected action alone
+
 **Observable Session History**:
 The immutable participant-specific projection of prior Table Session information that was legally observable to a Participant at each point after they joined. Strategies may derive adaptive information from it but do not own persistent cross-hand memory.
 _Avoid_: Strategy Memory, unrestricted session history

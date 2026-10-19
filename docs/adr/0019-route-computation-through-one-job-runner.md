@@ -6,18 +6,18 @@ Result validity depends on its intended use: Bot actions require current poker s
 
 ## Purpose-based scheduling
 
-Use the same JobRunner for every job purpose. Callers declare a typed purpose, and one server-owned scheduling policy assigns its priority; callers do not choose arbitrary priority numbers or own separate policies.
+Use the same JobRunner for every job purpose. Callers declare a typed purpose, and one server-owned scheduling policy assigns its numeric priority; callers do not choose arbitrary priority numbers or own separate policies. Smaller numbers are dispatched first, and priority levels use numbers rather than word labels.
 
 | Job purpose | Priority |
 | --- | --- |
-| Bot decision needed to advance play | Highest |
-| Live Analysis or explicitly requested interactive analysis | High |
-| Missing analyses for Hand or Table Session summaries | Normal |
-| Bulk Research or simulation, when introduced | Low |
+| Bot decision needed to advance play | 0 |
+| Live Analysis or explicitly requested interactive analysis | 1 |
+| Automatic post-action analysis or missing analyses for Hand or Table Session summaries | 2 |
+| Bulk Research or simulation, when introduced | 3 |
 
-M2 implements FIFO queues per priority class inside the existing JobRunner. Priority chooses which waiting job starts next, without preempting running work, and a simple fairness policy prevents indefinite starvation of admitted lower-priority jobs. Admission bounds are distinct from execution ordering: bound summary concurrency and submissions globally across requests and tabs so lower-priority work cannot fill every waiting slot and prevent Bot jobs from entering. No second runner or durable analysis queue is required.
+M2 extends M1's existing bounded FIFO runner with FIFO ordering within each numeric priority. Each job's priority is fixed when submitted; priority selects which waiting job starts next without preempting running computation. Preserve bounded concurrency and queue capacity, submit summary work in small globally bounded batches across requests and tabs, and return an explicit capacity error when admission fails. M2 adds no reserved Bot slots or special fairness rule: continuous arrivals with smaller priority numbers may starve waiting work with larger numbers. This keeps the existing in-process execution model without a second runner or durable analysis queue.
 
-The analysis module deduplicates matching queued/running analyses. A higher-priority request that needs existing queued work promotes that work through the runner rather than submitting another execution. Connections own delivery and subscriptions, while scheduling, cache identity, deduplication, and retry behavior remain analysis responsibilities. Deduplication must not let one consumer abandoning a request cancel work still required by other consumers.
+The analysis module deduplicates matching queued/running analyses. An interactive request reuses matching work at its original numeric priority; M2 requires no promotion or duplicate execution. Connections own delivery and subscriptions, while scheduling, cache identity, deduplication, and retry behavior remain analysis responsibilities. Deduplication must not let one consumer abandoning a request cancel work still required by other consumers.
 
 ## Optional Live Analysis
 
