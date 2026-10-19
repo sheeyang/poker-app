@@ -38,6 +38,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   return {
     tableSessionId: aggregate.tableSessionId, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
+    trainerConfiguration: structuredClone(aggregate.trainerConfiguration),
     inspection: { adminMode, completedHands: adminMode ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },

@@ -218,7 +218,10 @@ test('Bot provenance and play stay invisible while real PostgreSQL commit is hel
   const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => { if (context.requestId.startsWith('bot:')) { entered.resolve(); await release.promise; } } } });
   let socket: WebSocket | undefined;
   try {
-    const t = await f.table(); const live = f.connect(t); socket = live.socket; await f.botDecision(t); await expect.poll(() => f.evaluations.length).toBe(1);
+    const t = await f.table(); const live = f.connect(t); socket = live.socket;
+    socket.on('error', () => {});
+    await expect.poll(() => live.messages.some(message => message.type === 'table-update' && message.pokerRevision === 0)).toBe(true);
+    await f.botDecision(t); await expect.poll(() => f.evaluations.length).toBe(1);
     f.evaluations[0]!.result.resolve(answer({ type: 'fold' })); await entered.promise;
     expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, view: { state: { actorId: t.bot } } });
     expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, botProvenance: [] });

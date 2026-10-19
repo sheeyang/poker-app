@@ -93,6 +93,11 @@ export interface StrategyDescriptor {
   readonly policy: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
   readonly selector: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
 }
+/** Table Owner preferences, independent of every Bot's Playing Strategy. */
+export interface TrainerConfiguration {
+  readonly referenceStrategy: StrategyDescriptor;
+  readonly liveAnalysis: boolean;
+}
 export type ControllerDescriptor =
   | { readonly kind: 'human' }
   | { readonly kind: 'bot'; readonly playingStrategy: StrategyDescriptor };
@@ -174,6 +179,7 @@ export interface ObservableTableSession {
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
+  readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
@@ -219,8 +225,14 @@ export const baselinePlayingStrategy: StrategyDescriptor = Object.freeze({
   policy: Object.freeze({ id: 'uniform-choice', version: 'v1', configuration: Object.freeze({}) }),
   selector: Object.freeze({ id: 'seeded-sampling', version: 'v1', configuration: Object.freeze({}) }),
 });
+export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({ referenceStrategy: baselinePlayingStrategy, liveAnalysis: false });
 
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
 export interface RetryBotRequest extends ControllerMutationMetadata {}
+export interface SetTrainerConfigurationRequest {
+  readonly requestId: string;
+  readonly expectedSessionRevision: Revision;
+  readonly trainerConfiguration: TrainerConfiguration;
+}
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });

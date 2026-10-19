@@ -3,7 +3,7 @@ import { JobRunner, JobFailure, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
-import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import type { PersistedTableSession, BotActionProvenance } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, processedRequests, tableSessions } from './db/schema.js';
@@ -11,6 +11,7 @@ import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
+import { validateTrainerConfiguration } from './validation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
@@ -232,6 +233,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
     const aggregate = rows[0]?.aggregate;
     if (!aggregate) return undefined;
+    if (validateTrainerConfiguration(aggregate.trainerConfiguration, supportsStrategy)) throw new TableSessionRestorationError();
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new TableSessionRestorationError();
     const session = { aggregate, game: restored.game };
@@ -336,7 +338,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     function submit(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest) {
       return enqueue(id, () => accept(id, authority, kind, request));
     }
-    async function configure(id: string, ownerUserId: string, kind: 'set-playing-strategy' | 'retry-bot', request: SetPlayingStrategyRequest | RetryBotRequest): Promise<MutationOutcome> {
+    async function configure(id: string, ownerUserId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest): Promise<MutationOutcome> {
       return enqueue(id, async () => {
         let session = await load(id, ownerUserId);
         if (!session || session.aggregate.ownerUserId !== ownerUserId) return reject('not-found', 'This Table Session is unavailable to this local identity.');
@@ -351,17 +353,27 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
           const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async tx => {
             const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
             if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
-            const fields = ['requestId', 'expectedSessionRevision', 'participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])];
+            const trainer = kind === 'set-trainer-configuration';
+            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])])];
             let result: MutationOutcome | undefined;
-            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject('invalid-controller-request', 'Supply supported controller fields and a nonnegative expectedSessionRevision.');
-            if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new controller request.');
-            const binding = session.aggregate.bindings.find(binding => binding.participantId === request.participantId);
-            if (!result && binding?.controller.kind !== 'bot') result = reject('participant-not-bot', 'Choose a bound Bot.');
+            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
+            if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
+            const binding = !trainer && session.aggregate.bindings.find(binding => binding.participantId === (request as RetryBotRequest).participantId);
+            if (!result && !trainer && (!binding || binding.controller.kind !== 'bot')) result = reject('participant-not-bot', 'Choose a bound Bot.');
             if (!result && kind === 'set-playing-strategy' && !supportsStrategy((request as SetPlayingStrategyRequest).playingStrategy)) result = reject('unsupported-strategy', 'Choose a supported complete Playing Strategy.');
-            if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== request.participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
+            if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== (request as RetryBotRequest).participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
+            if (!result && trainer) {
+              const configuration = (request as SetTrainerConfigurationRequest).trainerConfiguration;
+              result = validateTrainerConfiguration(configuration, supportsStrategy);
+              if (!result) {
+                const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, trainerConfiguration: immutableData(configuration) };
+                proposed = { aggregate, game: session.game };
+                await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
+              }
+            }
             if (!result && kind === 'set-playing-strategy') {
               const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
-                bindings: session.aggregate.bindings.map(item => item.participantId === request.participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
+                bindings: session.aggregate.bindings.map(item => item.participantId === (request as SetPlayingStrategyRequest).participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
               proposed = { aggregate, game: session.game };
               await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
             }
@@ -371,7 +383,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve() });
           if (proposed) { committed.set(id, proposed); publishCommitted(id); }
-          if (fresh && outcome.ok) ensureBot(id, proposed ?? session, kind === 'retry-bot');
+          if (fresh && outcome.ok && kind !== 'set-trainer-configuration') ensureBot(id, proposed ?? session, kind === 'retry-bot');
           return outcome;
         } catch (error) {
           if (error instanceof CommitOutcomeUnknown) pause(id);
@@ -383,7 +395,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
       const aggregate = rows[0]?.aggregate;
       if (!aggregate) return undefined;
-      if (!CashGame.fromRecord(aggregate.pokerRecord).ok) throw new TableSessionRestorationError();
+      if (validateTrainerConfiguration(aggregate.trainerConfiguration, supportsStrategy) || !CashGame.fromRecord(aggregate.pokerRecord).ok) throw new TableSessionRestorationError();
       return immutableData(aggregate);
     }
     async function resumeBots() {
