@@ -190,7 +190,26 @@ export interface TableRuntimeStatus {
   readonly tableSessionId: TableSessionId;
   readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string; readonly code?: 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' | 'persistence-unavailable' };
 }
-export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus;
+/** Results remain HTTP resources; live analysis delivery only invalidates a request/attempt. */
+export interface AnalysisUpdate {
+  readonly type: 'analysis-update';
+  readonly tableSessionId: TableSessionId;
+  readonly resource: 'analysis' | 'summary';
+  readonly requestId: string;
+  readonly attemptId: string;
+  readonly status: 'complete' | 'error';
+}
+export interface UserChannelReady { readonly type: 'user-channel-ready' }
+export interface SubscribeTable { readonly type: 'subscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
+export interface UnsubscribeTable { readonly type: 'unsubscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
+export type ClientLiveMessage = SubscribeTable | UnsubscribeTable;
+export type TableSubscriptionResult = {
+  readonly type: 'table-subscription-result';
+  readonly requestId: string;
+  readonly tableSessionId: TableSessionId;
+} & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
+export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate;
+export type ServerLiveMessage = UserChannelReady | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
   minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,

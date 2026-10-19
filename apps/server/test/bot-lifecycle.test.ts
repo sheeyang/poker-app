@@ -387,7 +387,7 @@ test('a controller change queued ahead of a returning action promotes only after
     await expect.poll(() => f.evaluations.length).toBe(2); const fresh = f.evaluations[1]!;
     expect(fresh.descriptor).toEqual(replacement); expect(fresh.view).toEqual(obsolete.view); expect(fresh.seed).toBe(obsolete.seed);
     await expect.poll(() => live.messages.find(m => m.type === 'table-update' && m.sessionRevision === 5)).toMatchObject({ pokerRevision: 4, bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: replacement } })], view: { state: { actorId: t.bot, decisionId: obsolete.view.state.decisionId } } });
-    expect(live.messages.at(-1)).toMatchObject({ type: 'table-status', status: { phase: 'thinking', participantId: t.bot } });
+    await expect.poll(() => live.messages.at(-1)).toMatchObject({ type: 'table-status', status: { phase: 'thinking', participantId: t.bot } });
     fresh.result.resolve(answer({ type: 'fold' })); await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
     expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRevision: 5, sessionRevision: 6, botProvenance: [expect.objectContaining({ playingStrategy: replacement, decisionId: obsolete.view.state.decisionId, evaluationSeed: obsolete.seed })] });
     expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[4]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });

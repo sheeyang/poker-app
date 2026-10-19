@@ -87,11 +87,10 @@
   for (const frameRevision of [4, 3, 4]) await transport({ kind: 'replay', tableSessionId: id, revision: frameRevision });
   await new Promise(resolve => setTimeout(resolve, 100));
   check(revision() === 'Poker 4 · Session 4' && events() === 'Presentation events received: 10' && document.body.textContent.includes('Hand completed'), 'Duplicate or older live views/events were reapplied');
-  for (const phase of ['thinking', 'failed', 'idle']) {
-    await transport({ kind: 'status', tableSessionId: id, status: { phase, message: 'Transport fixture ' + phase } });
-    if (phase !== 'idle') await wait(() => document.body.textContent.includes('Transport fixture ' + phase));
-  }
-  await wait(() => !document.body.textContent.includes('Transport fixture failed'));
+  await transport({ kind: 'status', tableSessionId: id, status: { phase: 'recovering', message: 'Transport fixture recovery' } });
+  await wait(() => document.body.textContent.includes('Transport fixture recovery'));
+  await transport({ kind: 'status', tableSessionId: id, status: { phase: 'idle' } });
+  await wait(() => !document.body.textContent.includes('Transport fixture recovery'));
   check(revision() === 'Poker 4 · Session 4', 'Transient status changed gameplay revisions');
   click('Disconnect live updates');
   await wait(() => document.body.textContent.includes('Live updates disconnected'));
@@ -108,5 +107,8 @@
   click(id);
   await wait(() => document.querySelector('.session-id')?.textContent === id && document.body.textContent.includes('Live updates connected'));
   check(revision() === 'Poker 4 · Session 4' && events() === 'Presentation events received: 0', 'Reopening replayed old events');
+  await wait(() => button('Reveal Hidden Information'));
+  click('Reveal Hidden Information');
+  await wait(() => document.body.textContent.includes('Revealed Hand 1'));
   return { passed: true, tableSessionId: id, pokerRevision: 4, sessionRevision: 4, stacks: [990, 1010], cases: ['UI creation/seating/start/Fold', 'real transport gap', 'duplicate and reordered frames', 'held older HTTP read after newer WS', 'own-card privacy', 'disconnect submits no action', 'reconnect latest view', 'transient status independent of revisions', 'switch unsubscribes'] };
 })

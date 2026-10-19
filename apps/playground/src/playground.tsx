@@ -30,7 +30,7 @@ export function Playground() {
   const [reopenId, setReopenId] = useState('');
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity, staleTime: Infinity });
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
-  const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: () => api.readSession(selectedId!), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
+  const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: ({ signal }) => api.readSession(selectedId!, signal), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
   const live = useTableSynchronization(selectedId, identity.isSuccess);
   const runtimeStatus = live.runtimeStatus ?? table.data?.runtimeStatus;
   const creation = useMutation({
@@ -111,7 +111,7 @@ export function Playground() {
         {table.isFetching && <p role="status">Loading Table Session…</p>}
         <ErrorMessage error={table.error} />
         {table.data ? <>
-          <div className="table-heading"><h2>Table Session</h2><button onClick={() => void table.refetch()}>Refresh view</button></div>
+          <div className="table-heading"><h2>Table Session</h2><button onClick={() => select(null)}>Close Table Session</button><button onClick={() => void table.refetch()}>Refresh view</button></div>
           <p className="session-id">{table.data.tableSessionId}</p>
           <div className="live-connection">
             <p role="status">{live.connection === 'connected' ? 'Live updates connected' : live.connection === 'disconnected' ? 'Live updates disconnected. Refresh the view or reconnect.' : live.connection === 'reconnecting' ? 'Reconnecting live updates… The table will refresh automatically.' : 'Connecting live updates…'}</p>
