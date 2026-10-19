@@ -2,7 +2,7 @@ import { isBaselineStrategy } from '@poker/strategies';
 import { validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { defaultConfiguration, type CreateTableSessionRequest, type CreationOutcome } from '@poker/contracts';
+import { defaultConfiguration, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
 import { creationRequests, tableSessions } from './db/schema.js';
@@ -61,7 +61,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           ];
           const aggregate: PersistedTableSession = {
             schemaVersion: 1, tableSessionId, ownerUserId, pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [],
+            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [], trainerConfiguration: structuredClone(defaultTrainerConfiguration),
           };
           await tx.insert(tableSessions).values({ id: tableSessionId, ownerUserId, aggregate });
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };

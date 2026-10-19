@@ -10,6 +10,7 @@ import { Hand } from './hand.js';
 import { retainNewestTable, useTableSynchronization } from './live.js';
 import { Management } from './management.js';
 import { Inspection } from './inspection.js';
+import { TrainerConfigurationControls } from './trainer-configuration.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -141,6 +142,7 @@ export function Playground() {
             </>}</li>;
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
+          <TrainerConfigurationControls key={'trainer-configuration-' + table.data.tableSessionId} table={table.data} />
           <BotControls table={table.data} status={runtimeStatus} />
           {live.inspectionCapabilities?.adminMode && <Inspection key={'inspection-' + table.data.tableSessionId + '-' + live.inspectionGeneration} table={table.data} capabilities={live.inspectionCapabilities} />}
           <Seating key={table.data.tableSessionId} table={table.data} />
