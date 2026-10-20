@@ -420,10 +420,14 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const participantId = observer(session, ownerUserId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      const view = session.game.forParticipant(participantId).getView();
-      if (view.state.actorId !== participantId || view.state.decisionId !== decisionId || !view.state.handId || !view.state.legalActions.length) return null;
+      const participant = session.game.forParticipant(participantId);
+      const current = participant.getView();
+      const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
+      let view;
+      try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
+      if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
       const masterSeed = session.aggregate.pokerRecord.configuration.seed;
-      return immutableData({ ownerUserId, view, identity: {
+      return immutableData({ ownerUserId, view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
         tableSessionId: id, participantId, handId: view.state.handId, decisionId,
         referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
         inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),

@@ -254,12 +254,24 @@ export interface EvaluationIdentity {
 export interface ReferenceStrategyEvaluation {
   readonly policyResult: { readonly choices: readonly { readonly action: ConcreteAction; readonly probability: number }[] };
   readonly selectedAction: ConcreteAction;
+  readonly actionProbabilities: readonly ActionProbability[];
+}
+export interface ActionProbability { readonly type: ConcreteAction['type']; readonly probability: number }
+export interface DecisionScores {
+  readonly decisionScore: number;
+  readonly actionRankScore: number;
+  readonly actionProbabilities: readonly ActionProbability[];
 }
 export type AnalysisFailureCode = 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' | 'persistence-unavailable';
-export interface AnalysisRequestIdentity extends EvaluationIdentity { readonly ok: true; readonly requestId: string; readonly attemptId: string }
+export interface ScoredDecision { readonly acceptedAction: ConcreteAction; readonly scoringMethodVersion: 'v1' }
+export interface AnalysisRequestIdentity extends EvaluationIdentity {
+  readonly ok: true; readonly requestId: string; readonly attemptId: string;
+  readonly scoredDecision?: ScoredDecision;
+  readonly evaluationRequestId?: string;
+}
 export type DecisionAnalysis = AnalysisRequestIdentity & (
   | { readonly status: 'pending' }
-  | { readonly status: 'complete'; readonly evaluation: ReferenceStrategyEvaluation }
+  | { readonly status: 'complete'; readonly evaluation: ReferenceStrategyEvaluation; readonly scores?: DecisionScores }
   | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
 );
 export interface GetOrStartAnalysisRequest { readonly decisionId: string }
