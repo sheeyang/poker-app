@@ -7,6 +7,7 @@ const frames = new Map<string, unknown[]>();
 const dropped = new Map<string, Set<number>>();
 const sockets = new Map<WebSocket, { id: number; tables: Set<string> }>();
 let opened = 0;
+const requests = new Map<string, number>();
 const holds = new Set<string>();
 const held: { key: string; send: () => void }[] = [];
 const keyFor = (id: string, kind: string) => id + ':' + kind;
@@ -35,21 +36,28 @@ const relay = http.createServer(async (request, response) => {
         if (!frame) { response.writeHead(404).end('Frame not captured'); return; }
         for (const [socket, tableId] of sockets) if (tableId.tables.has(id) && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
       }
+      if (control.kind === 'replay-analysis') {
+        const frame = frames.get(id)?.find(value => (value as { requestId?: string; type?: string }).type === 'analysis-update' && (value as { requestId?: string }).requestId === control.requestId);
+        if (!frame) { response.writeHead(404).end('Analysis frame not captured'); return; }
+        for (const socket of sockets.keys()) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ ...(frame as object), ...(control.attemptId ? { attemptId: control.attemptId } : {}) }));
+      }
       if (control.kind === 'disconnect') for (const [socket, connection] of sockets) if (!id || connection.tables.has(id)) socket.close();
       if (control.kind === 'status') for (const [socket, tableId] of sockets) if (tableId.tables.has(id) && socket.readyState === WebSocket.OPEN)
         socket.send(JSON.stringify({ type: 'table-status', tableSessionId: id, status: control.status }));
     }
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ held: held.map(entry => entry.key), sockets: [...sockets.values()].flatMap(connection => [...connection.tables]), connections: [...sockets.values()].map(connection => ({ id: connection.id, tableSessionIds: [...connection.tables] })), opened }));
+    response.end(JSON.stringify({ held: held.map(entry => entry.key), sockets: [...sockets.values()].flatMap(connection => [...connection.tables]), requests: Object.fromEntries(requests), frames: Object.fromEntries(frames), connections: [...sockets.values()].map(connection => ({ id: connection.id, tableSessionIds: [...connection.tables] })), opened }));
     return;
   }
+  requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
   const outgoing = http.request(new URL(request.url!, upstream), { method: request.method, headers: request.headers }, incoming => {
     const chunks: Buffer[] = [];
     incoming.on('data', chunk => chunks.push(chunk));
     incoming.on('end', () => {
       const send = () => { response.writeHead(incoming.statusCode!, incoming.headers); response.end(Buffer.concat(chunks)); };
       const match = /^\/api\/table-sessions\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname);
-      const key = match ? keyFor(match[1]!, match[2] ?? 'read') : '';
+      const analysisRead = /^\/api\/table-sessions\/([^/]+)\/analysis\/[^/]+$/.exec(url.pathname);
+      const key = analysisRead ? keyFor(analysisRead[1]!, 'analysis-read') : match ? keyFor(match[1]!, match[2] ?? 'read') : '';
       if (holds.delete(key)) held.push({ key, send }); else send();
     });
   });
@@ -75,7 +83,8 @@ relay.on('upgrade', (request, socket, head) => {
       const captured = frames.get(id) ?? [];
       captured.push(frame); frames.set(id, captured);
       const send = () => { if (!dropped.get(id)?.has(frame.sessionRevision) && client.readyState === WebSocket.OPEN) client.send(data.toString()); };
-      if (holds.has(keyFor(id, 'live'))) held.push({ key: keyFor(id, 'live'), send }); else send();
+      const kind = frame.type === 'analysis-update' ? 'analysis-live' : frame.type === 'user-channel-ready' ? 'ready' : 'live';
+      if (holds.has(keyFor(id, kind))) held.push({ key: keyFor(id, kind), send }); else send();
     });
     server.on('close', () => client.close());
     server.on('error', () => client.close());

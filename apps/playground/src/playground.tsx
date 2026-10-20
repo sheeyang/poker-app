@@ -1,6 +1,7 @@
+import { DecisionAnalysisControls, useDecisionAnalysis } from './analysis.js';
 import { AttemptRecovery } from './recovery.js';
 import { BotControls, baselineOptions } from './bots.js';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { defaultConfiguration, baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameConfiguration } from '@poker/contracts';
 import { api, RequestFailure } from './api.js';
@@ -32,7 +33,9 @@ export function Playground() {
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity, staleTime: Infinity });
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
   const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: ({ signal }) => api.readSession(selectedId!, signal), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
-  const live = useTableSynchronization(selectedId, identity.isSuccess);
+  const analysis = useDecisionAnalysis(table.data);
+  const live = useTableSynchronization(selectedId, identity.isSuccess, analysis.consumers);
+  useEffect(() => { analysis.connectionChanged(live.userChannel?.generation ?? null); }, [live.userChannel?.generation, analysis.connectionChanged]);
   const runtimeStatus = live.runtimeStatus ?? table.data?.runtimeStatus;
   const creation = useMutation({
     mutationFn: api.createSession,
@@ -143,6 +146,7 @@ export function Playground() {
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
           <TrainerConfigurationControls key={'trainer-configuration-' + table.data.tableSessionId} table={table.data} />
+          <DecisionAnalysisControls analysis={analysis} />
           <BotControls table={table.data} status={runtimeStatus} />
           {live.inspectionCapabilities?.adminMode && <Inspection key={'inspection-' + table.data.tableSessionId + '-' + live.inspectionGeneration} table={table.data} capabilities={live.inspectionCapabilities} />}
           <Seating key={table.data.tableSessionId} table={table.data} />
