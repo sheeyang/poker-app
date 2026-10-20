@@ -32,7 +32,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
             if (mode === 'invalid') return { choices: [{ action: { type: 'call' }, probability: .2 }] };
             const result = Promise.withResolvers<PolicyResult>();
             const evaluation = { view, compatibilityView: compatibilityView!, seed: execution.evaluationSeed, signal: execution.signal, result };
-            evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation));
+            evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation), () => held.delete(evaluation));
             return result.promise;
           },
         }, actionSelector: mode === 'selector-error' ? { select() { throw new Error('private selector diagnostic'); } } : new HighestProbabilitySelector() };
@@ -218,5 +218,116 @@ test('shutdown discards late old-lifecycle work and restart schedules genuinely 
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(async () => (await (await f.result(t, fresh.requestId)).json()).status).toBe('complete');
     expect(await f.read(t)).toEqual(before);
+  } finally { await f.close(); }
+});
+
+
+test('failed-only Retry preserves its immutable request while concurrent consumers reuse one new attempt', async () => {
+  const f = await fixture();
+  try {
+    const t = await f.decision(); const stranger = await f.table();
+    await f.configure(t, fixtureStrategy('hold'));
+    const pending = await (await f.request(t)).json();
+    await expect.poll(() => f.evaluations.length).toBe(1);
+    const original = f.evaluations[0]!;
+    original.result.resolve({ choices: [{ action: { type: 'call' }, probability: .2 }] });
+    await expect.poll(async () => (await (await f.result(t, pending.requestId)).json()).status).toBe('error');
+    const failed = await (await f.result(t, pending.requestId)).json();
+    expect(await (await f.request(t)).json()).toEqual(failed);
+    await f.configure(t, highestProbabilityPlayingStrategy);
+    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const before = await f.read(t);
+    const retry = () => f.post(t, 'analysis/' + pending.requestId + '/retry', {});
+    expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', {}, stranger.cookie)).status).toBe(404);
+    expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', {}, '')).status).toBe(401);
+    expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', { referenceStrategy: baselinePlayingStrategy })).status).toBe(400);
+    const responses = await Promise.all([retry(), retry(), retry()]);
+    expect(responses.map(response => response.status)).toEqual([200, 200, 200]);
+    const states = await Promise.all(responses.map(response => response.json()));
+    expect(states[1]).toEqual(states[0]); expect(states[2]).toEqual(states[0]);
+    expect(states[0]).toMatchObject({ ...pending, status: 'pending', attemptId: expect.any(String) });
+    expect(states[0].attemptId).not.toBe(pending.attemptId);
+    expect(states[0]).not.toHaveProperty('error');
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    expect(f.evaluations[1]!.view).toEqual(original.view); expect(f.evaluations[1]!.seed).toBe(original.seed);
+    expect(await (await retry()).json()).toEqual(states[0]);
+    const live = f.connect(t); await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
+    f.evaluations[1]!.result.resolve(distribution);
+    await expect.poll(() => live.messages.find(message => message.type === 'analysis-update')).toMatchObject({ requestId: pending.requestId, attemptId: states[0].attemptId, status: 'complete' });
+    const complete = await (await f.result(t, pending.requestId)).json();
+    expect(complete).toMatchObject({ ...states[0], status: 'complete' });
+    expect(await (await retry()).json()).toEqual(complete);
+    expect(f.evaluations).toHaveLength(2); expect(await f.read(t)).toEqual(before);
+    await f.restart();
+    expect(await (await retry()).json()).toEqual(complete);
+    expect(f.evaluations).toHaveLength(0);
+  } finally { await f.close(); }
+});
+
+
+test.each(['success', 'error'] as const)('timed-out old %s cannot replace a retry attempt while underlying work retains its runner capacity', async late => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 2, maximumQueued: 0, timeoutMs: 600 } });
+  try {
+    const t = await f.decision(); const before = await f.read(t);
+    const live = f.connect(t); await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
+    const original = await (await f.request(t)).json(); await expect.poll(() => f.evaluations.length).toBe(1);
+    await expect.poll(async () => (await (await f.result(t, original.requestId)).json()).error?.code, { timeout: 3000 }).toBe('timeout');
+    const retried = await (await f.post(t, 'analysis/' + original.requestId + '/retry', {})).json();
+    expect(retried).toMatchObject({ status: 'pending', requestId: original.requestId });
+    expect(retried.attemptId).not.toBe(original.attemptId);
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    expect(f.evaluations[1]!.seed).toBe(f.evaluations[0]!.seed); expect(f.evaluations[1]!.view).toEqual(f.evaluations[0]!.view);
+    if (late === 'success') f.evaluations[0]!.result.resolve(distribution);
+    else f.evaluations[0]!.result.reject(new Error('private obsolete Strategy error'));
+    expect(await (await f.result(t, original.requestId)).json()).toEqual(retried);
+    f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
+    await expect.poll(async () => (await (await f.result(t, original.requestId)).json()).status).toBe('complete');
+    expect(await (await f.result(t, original.requestId)).json()).toMatchObject({ attemptId: retried.attemptId, evaluation: { selectedAction: { type: 'fold' } } });
+    await expect.poll(() => live.messages.filter(message => message.type === 'analysis-update' && message.status === 'complete')).toEqual([expect.objectContaining({ attemptId: retried.attemptId })]);
+    expect(await f.read(t)).toEqual(before);
+  } finally { await f.close(); }
+});
+
+test('Retry reports capacity honestly until timed-out underlying work settles, then reuses the same frozen request', async () => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 0, timeoutMs: 150 } });
+  try {
+    const t = await f.decision(); const original = await (await f.request(t)).json();
+    await expect.poll(async () => (await (await f.result(t, original.requestId)).json()).error?.code).toBe('timeout');
+    const rejected = await f.post(t, 'analysis/' + original.requestId + '/retry', {});
+    expect(rejected.status).toBe(503);
+    const capacity = await rejected.json(); expect(capacity).toMatchObject({ status: 'error', requestId: original.requestId, error: { code: 'capacity' } });
+    expect(await (await f.result(t, original.requestId)).json()).toEqual(capacity);
+    expect(await (await f.request(t)).json()).toEqual(capacity); expect(f.evaluations).toHaveLength(1);
+    f.evaluations[0]!.result.resolve(distribution);
+    // A public HTTP round trip observes the retained error while the released Strategy settles.
+    expect(await (await f.result(t, original.requestId)).json()).toEqual(capacity);
+    const retried = await f.post(t, 'analysis/' + original.requestId + '/retry', {}); expect(retried.status).toBe(200);
+    const pending = await retried.json(); expect(pending).toMatchObject({ status: 'pending', requestId: original.requestId });
+    await expect.poll(() => f.evaluations.length).toBe(2); f.evaluations[1]!.result.resolve(distribution);
+    await expect.poll(async () => (await (await f.result(t, original.requestId)).json()).status).toBe('complete');
+  } finally { await f.close(); }
+});
+
+
+test('Retry after a real PostgreSQL result failure saves a new attempt and makes success readable before notification', async () => {
+  const f = await fixture();
+  try {
+    const t = await f.decision(); const before = await f.read(t);
+    await administration.query('CREATE FUNCTION "' + f.schema + '".retry_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION $fault$private database failure$fault$; END $$');
+    await administration.query('CREATE TRIGGER retry_failure BEFORE INSERT ON "' + f.schema + '".analysis_evaluations FOR EACH ROW EXECUTE FUNCTION "' + f.schema + '".retry_failure()');
+    const original = await (await f.request(t)).json(); await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
+    await expect.poll(async () => (await (await f.result(t, original.requestId)).json()).error?.code).toBe('persistence-unavailable');
+    await administration.query('DROP TRIGGER retry_failure ON "' + f.schema + '".analysis_evaluations');
+    const retried = await (await f.post(t, 'analysis/' + original.requestId + '/retry', {})).json();
+    expect(retried.attemptId).not.toBe(original.attemptId);
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    expect(f.evaluations[1]!.seed).toBe(f.evaluations[0]!.seed);
+    const live = f.connect(t); await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
+    const reads: Promise<any>[] = []; live.socket.on('message', data => { const message = JSON.parse(data.toString()); if (message.type === 'analysis-update') reads.push(f.result(t, message.requestId).then(response => response.json())); });
+    f.evaluations[1]!.result.resolve(distribution);
+    await expect.poll(() => reads.length).toBe(1);
+    expect(await Promise.all(reads)).toEqual([expect.objectContaining({ status: 'complete', requestId: original.requestId, attemptId: retried.attemptId })]);
+    expect(await f.read(t)).toEqual(before);
+    await f.restart(); expect(await (await f.result(t, original.requestId)).json()).toMatchObject({ status: 'complete', attemptId: retried.attemptId });
   } finally { await f.close(); }
 });
