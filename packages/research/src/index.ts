@@ -1,5 +1,27 @@
 import { CashGame } from '@poker/engine';
-import type { CompletedHandInspectionOutcome } from '@poker/contracts';
+import type { ActionProbability, CompletedHandInspectionOutcome, ConcreteAction, DecisionScores, ObservableGameView, ReferenceStrategyEvaluation } from '@poker/contracts';
+
+/** v1 treats aggregate probabilities within 1e-12 of a rank representative as tied. */
+export const scoringMethodVersion = 'v1' as const;
+export function calculateActionProbabilities(view: ObservableGameView, choices: ReferenceStrategyEvaluation['policyResult']['choices']): readonly ActionProbability[] {
+  return view.state.legalActions.map(legal => ({ type: legal.type, probability: choices.filter(choice => choice.action.type === legal.type).reduce((sum, choice) => sum + choice.probability, 0) }));
+}
+
+/** Numerical interpretation of a successful validated Policy, independent of execution and storage. */
+export function calculateDecisionScores(view: ObservableGameView, choices: readonly { readonly action: ConcreteAction; readonly probability: number }[], action: ConcreteAction): DecisionScores {
+  const actionProbabilities = calculateActionProbabilities(view, choices);
+  const distinct: number[] = [];
+  for (const probability of actionProbabilities.map(item => item.probability).sort((a, b) => b - a)) {
+    if (!distinct.some(representative => Math.abs(representative - probability) <= 1e-12)) distinct.push(probability);
+  }
+  const probability = actionProbabilities.find(item => item.type === action.type)!.probability;
+  const wager = view.state.participants.find(participant => participant.participantId === view.state.actorId)!.wager ?? 0;
+  const added = (choice: ConcreteAction) => (choice.type === 'bet' ? choice.betTo : choice.type === 'raise' ? choice.raiseTo : 0) - wager;
+  const decisionScore = action.type === 'bet' || action.type === 'raise'
+    ? choices.filter(choice => choice.action.type === action.type).reduce((best, choice) => Math.max(best, choice.probability * Math.min(added(action), added(choice.action)) / Math.max(added(action), added(choice.action))), 0)
+    : choices.find(choice => choice.action.type === action.type)?.probability ?? 0;
+  return { decisionScore, actionRankScore: distinct.length === 1 ? 1 : 1 - distinct.findIndex(representative => Math.abs(representative - probability) <= 1e-12) / (distinct.length - 1), actionProbabilities };
+}
 
 /** These are the entire permitted durable inputs; never a live CashGame or aggregate. */
 export interface CompletedHandInspectionInput {
