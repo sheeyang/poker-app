@@ -88,11 +88,25 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const entry: Entry = { input: immutableData(input), state: immutableData(state) };
     scores.set(fingerprint, entry); byRequest.set(state.requestId, entry);
     if (state.status === 'complete') return entry;
-    const { acceptedAction: _action, ...evaluationInput } = input;
-    const dependency = await operations.getOrStart(evaluationInput);
-    entry.state = immutableData({ ...entry.state, evaluationRequestId: dependency.requestId });
-    const completion = completeScore(entry, fingerprint, dependency);
-    completions.add(completion); void completion.finally(() => completions.delete(completion));
+    return startScore(entry, fingerprint);
+  }
+  async function startScore(entry: Entry, fingerprint: string, retryFailed = false): Promise<Entry> {
+    const state = entry.state;
+    const current = () => !stopped && entry.state.attemptId === state.attemptId;
+    const { acceptedAction: _action, ...evaluationInput } = entry.input;
+    try {
+      let dependency = await operations.getOrStart(evaluationInput);
+      if (retryFailed && dependency.status === 'error') dependency = (await operations.retry(state.tableSessionId, dependency.requestId, entry.input.ownerUserId))!;
+      if (!current()) return entry;
+      entry.state = immutableData({ ...state, evaluationRequestId: dependency.requestId });
+      const completion = completeScore(entry, fingerprint, dependency);
+      completions.add(completion); void completion.finally(() => completions.delete(completion));
+    } catch {
+      if (current()) {
+        entry.state = immutableData({ ...state, status: 'error', error: { code: 'persistence-unavailable', message: 'The evaluation dependency could not be loaded.' } });
+        notify(entry);
+      }
+    }
     return entry;
   }
   async function waitForEvaluation(requestId: string): Promise<DecisionAnalysis | undefined> {
@@ -105,23 +119,25 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     finally { waiters.delete(terminal.resolve); if (!waiters.size) terminalWaiters.delete(requestId); }
   }
   async function completeScore(entry: Entry, fingerprint: string, initial: DecisionAnalysis): Promise<void> {
+    const state = entry.state;
+    const current = () => !stopped && entry.state.attemptId === state.attemptId;
     const dependency = initial.status === 'pending' ? await waitForEvaluation(initial.requestId) : initial;
-    if (!dependency || stopped) return;
-    if (dependency.status === 'error') { entry.state = immutableData({ ...entry.state, status: 'error', error: dependency.error }); notify(entry); return; }
+    if (!dependency || !current()) return;
+    if (dependency.status === 'error') { entry.state = immutableData({ ...state, status: 'error', error: dependency.error }); notify(entry); return; }
     if (dependency.status !== 'complete') return;
     const input = entry.input;
     const handle = runner.submit('interactive-analysis', { view: input.view, choices: dependency.evaluation.policyResult.choices, action: input.acceptedAction! }, frozen => calculateDecisionScores(frozen.view, frozen.choices, frozen.action));
     const result = await handle.result;
-      if (stopped) return;
-      if (!result.ok) entry.state = immutableData({ ...entry.state, status: 'error', error: { code: result.code, message: 'Decision scoring could not complete.' } });
-      else {
-        const complete = immutableData({ ...entry.state, status: 'complete' as const, evaluation: dependency.evaluation, scores: result.value });
-        try {
-          await db.insert(analysisScores).values({ fingerprint, requestId: entry.state.requestId, tableSessionId: input.identity.tableSessionId, ownerUserId: input.ownerUserId, result: complete });
-          if (!stopped) entry.state = complete;
-        } catch { if (!stopped) entry.state = immutableData({ ...entry.state, status: 'error', error: { code: 'persistence-unavailable', message: 'The decision scores could not be saved.' } }); }
-      }
-      notify(entry);
+    if (!current()) return;
+    if (!result.ok) entry.state = immutableData({ ...state, status: 'error', error: { code: result.code, message: 'Decision scoring could not complete.' } });
+    else {
+      const complete = immutableData({ ...state, status: 'complete' as const, evaluation: dependency.evaluation, scores: result.value });
+      try {
+        await db.insert(analysisScores).values({ fingerprint, requestId: state.requestId, tableSessionId: input.identity.tableSessionId, ownerUserId: input.ownerUserId, result: complete });
+        if (current()) entry.state = complete;
+      } catch { if (current()) entry.state = immutableData({ ...state, status: 'error', error: { code: 'persistence-unavailable', message: 'The decision scores could not be saved.' } }); }
+    }
+    if (current()) notify(entry);
   }
   async function read(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
     const memory = byRequest.get(requestId);
@@ -163,9 +179,10 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       if (!operation) {
         if (entry.state.status !== 'error') return entry.state;
         // Inputs and matching identity remain frozen; only execution gets a new identity.
-        entry.state = immutableData({ ok: true, ...entry.input.identity, requestId, attemptId: randomUUID(), status: 'pending' });
-        const fingerprint = createHash('sha256').update(canonical(entry.input.identity)).digest('hex');
-        operation = start(entry, fingerprint); retrying.set(requestId, operation);
+        const scoredDecision = entry.input.acceptedAction ? { acceptedAction: entry.input.acceptedAction, scoringMethodVersion } : undefined;
+        entry.state = immutableData({ ok: true, ...entry.input.identity, ...(scoredDecision ? { scoredDecision } : {}), requestId, attemptId: randomUUID(), status: 'pending' });
+        const fingerprint = createHash('sha256').update(canonical({ ...entry.input.identity, ...(scoredDecision ? { scoredDecision } : {}) })).digest('hex');
+        operation = scoredDecision ? startScore(entry, fingerprint, true) : start(entry, fingerprint); retrying.set(requestId, operation);
       }
       try { return (await operation).state; }
       finally { if (retrying.get(requestId) === operation) retrying.delete(requestId); }

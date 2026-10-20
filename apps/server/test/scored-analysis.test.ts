@@ -168,8 +168,14 @@ test('a score persistence failure retains its successful evaluation, is readable
     expect(await (await f.result(t, evaluation.requestId)).json()).toMatchObject({ status: 'complete' });
     expect(f.evaluations).toHaveLength(1);
     expect(await f.read(t)).toEqual(before);
+    const retried = await (await f.post(t, 'analysis/' + requested.requestId + '/retry', {})).json();
+    expect(retried).toMatchObject({ requestId: requested.requestId, scoredDecision: failure.scoredDecision, evaluationRequestId: evaluation.requestId });
+    expect(retried.attemptId).not.toBe(failure.attemptId);
+    await expect.poll(async () => (await (await f.result(t, requested.requestId)).json()).status).toBe('complete');
+    expect(f.evaluations).toHaveLength(1);
     await f.restart();
     const fresh = await (await f.request(t)).json();
+    expect(fresh.requestId).toBe(requested.requestId);
     await expect.poll(async () => (await (await f.result(t, fresh.requestId)).json()).status).toBe('complete');
     expect(f.evaluations).toHaveLength(0);
   } finally { await f.close(); }
@@ -177,7 +183,8 @@ test('a score persistence failure retains its successful evaluation, is readable
 
 test('a failed evaluation remains a safe failed score dependency without implicit restart', async () => {
   let compatibilityChecks = 0;
-  const f = await fixture({ strategyFactory: () => ({ policy: { checkCompatibility: () => { compatibilityChecks++; return { compatible: false, reasons: [{ code: 'private', message: 'private diagnostics' }] }; }, evaluate: () => { throw new Error('Unreachable'); } }, actionSelector: new HighestProbabilitySelector() }) });
+  let compatible = false;
+  const f = await fixture({ strategyFactory: () => ({ policy: { checkCompatibility: () => { compatibilityChecks++; return compatible ? { compatible: true } : { compatible: false, reasons: [{ code: 'private', message: 'private diagnostics' }] }; }, evaluate: () => distribution }, actionSelector: new HighestProbabilitySelector() }) });
   try {
     const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); const before = await f.read(t);
     const requested = await (await f.request(t)).json();
@@ -188,6 +195,12 @@ test('a failed evaluation remains a safe failed score dependency without implici
     expect(await (await f.request(t)).json()).toEqual(failure);
     expect(compatibilityChecks).toBe(1);
     expect(await f.read(t)).toEqual(before);
+    compatible = true;
+    const retried = await (await f.post(t, 'analysis/' + requested.requestId + '/retry', {})).json();
+    expect(retried).toMatchObject({ requestId: requested.requestId, scoredDecision: failure.scoredDecision, evaluationSeed: failure.evaluationSeed, selectionSeed: failure.selectionSeed });
+    expect(retried.attemptId).not.toBe(failure.attemptId);
+    await expect.poll(async () => (await (await f.result(t, requested.requestId)).json()).status).toBe('complete');
+    expect(compatibilityChecks).toBe(2);
   } finally { await f.close(); }
 });
 
@@ -202,5 +215,40 @@ test('shutdown releases a waiting score dependency and restart creates no work u
     const fresh = await (await f.request(t)).json(); expect(fresh.requestId).not.toBe(old.requestId);
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(async () => (await (await f.result(t, fresh.requestId)).json()).status).toBe('complete');
+  } finally { await f.close(); }
+});
+
+test('an unavailable evaluation store produces a readable scored error rather than pending work that was never admitted', async () => {
+  const f = await fixture();
+  try {
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await administration.query('ALTER TABLE "' + f.schema + '".analysis_evaluations RENAME TO unavailable_evaluations');
+    let failure;
+    try { failure = await (await f.request(t)).json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'persistence-unavailable' } }); }
+    finally { await administration.query('ALTER TABLE "' + f.schema + '".unavailable_evaluations RENAME TO analysis_evaluations'); }
+    expect(await (await f.result(t, failure.requestId)).json()).toEqual(failure);
+    expect(await (await f.request(t)).json()).toEqual(failure);
+    expect(f.evaluations).toHaveLength(0);
+    const retry = await (await f.post(t, 'analysis/' + failure.requestId + '/retry', {})).json();
+    expect(retry.requestId).toBe(failure.requestId);
+    await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
+    await expect.poll(async () => (await (await f.result(t, failure.requestId)).json()).status).toBe('complete');
+  } finally { await f.close(); }
+});
+
+test('scoring a cached evaluation uses shared bounded capacity and returns an explicit admission error', async () => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 0 } });
+  try {
+    const t = await f.decision(); const evaluation = await (await f.request(t)).json();
+    await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
+    await expect.poll(async () => (await (await f.result(t, evaluation.requestId)).json()).status).toBe('complete');
+    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const other = await f.decision(); await f.request(other); await expect.poll(() => f.evaluations.length).toBe(2);
+    const rejected = await f.request(t); expect(rejected.status).toBe(503);
+    const failure = await rejected.json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'capacity' }, evaluationRequestId: evaluation.requestId });
+    expect(await (await f.result(t, evaluation.requestId)).json()).toMatchObject({ status: 'complete' });
+    f.evaluations[1]!.result.resolve(distribution);
+    expect(await (await f.request(t)).json()).toEqual(failure);
+    expect(f.evaluations).toHaveLength(2);
   } finally { await f.close(); }
 });

@@ -17,7 +17,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string }>();
   const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
   const acceptedDecisions = table?.view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action }))) ?? [];
-  const selectedDecisionId = selection?.tableId === table?.tableSessionId && acceptedDecisions.some(decision => decision.decisionId === selection.decisionId) ? selection.decisionId : '';
+  const selectedDecisionId = selection && selection.tableId === table?.tableSessionId && acceptedDecisions.some(decision => decision.decisionId === selection.decisionId) ? selection.decisionId : '';
   const accepted = acceptedDecisions.find(decision => decision.decisionId === selectedDecisionId);
   const decisionId = selectedDecisionId || (table?.view.state.legalActions.length ? table.view.state.decisionId : undefined);
   const key = table && decisionId ? identity([table.tableSessionId, decisionId, table.trainerConfiguration.referenceStrategy, accepted?.action ?? null]) : '';
@@ -138,7 +138,7 @@ export function DecisionAnalysisControls({ analysis }: { analysis: ReturnType<ty
     {!analysis.canEvaluate && <p className="help">Choose a current or accepted human decision.</p>}
     {(display?.loading || display?.retrying || data?.status === 'pending') && <p role="status">Evaluating the Reference Strategy…</p>}
     {display?.error && <p role="alert" className="error">{display.error}</p>}
-    {data?.status === 'error' && <div><p role="alert" className="error">Evaluation error: {data.error.code}. {data.error.message}</p><button disabled={display?.retrying} onClick={() => void analysis.retry()}>Retry evaluation</button></div>}
+    {data?.status === 'error' && <div><p role="alert" className="error">{data.scoredDecision ? 'Analysis error' : 'Evaluation error'}: {data.error.code}. {data.error.message}</p><button disabled={display?.retrying} onClick={() => void analysis.retry()}>{data.scoredDecision ? 'Retry decision analysis' : 'Retry evaluation'}</button></div>}
     {data?.status === 'complete' && <div className="evaluation-result">
       <p>Reference: {data.referenceStrategy.policy.id} · {data.referenceStrategy.policy.version} + {data.referenceStrategy.selector.id} · {data.referenceStrategy.selector.version}</p>
       {data.scoredDecision && <p><strong>Accepted human action:</strong> {actionLabel(data.scoredDecision.acceptedAction)}</p>}
@@ -147,8 +147,8 @@ export function DecisionAnalysisControls({ analysis }: { analysis: ReturnType<ty
         <div><dt>Action Rank Score</dt><dd>{data.scores.actionRankScore.toFixed(6)}</dd></div>
       </dl>}
       <p><strong>Selected concrete action:</strong> {actionLabel(data.evaluation.selectedAction)}</p>
-      <table className="evaluation-choices"><caption>Action Probabilities</caption><thead><tr><th scope="col">Legal action type</th><th scope="col">Probability</th></tr></thead><tbody>{data.evaluation.actionProbabilities.map(item => <tr key={item.type}><td>{item.type}</td><td>{item.probability.toFixed(6)}</td></tr>)}</tbody></table>
       <table className="evaluation-choices"><caption>Policy distribution · {data.decisionId}</caption><thead><tr><th scope="col">Concrete choice</th><th scope="col">Probability</th></tr></thead><tbody>{data.evaluation.policyResult.choices.map(choice => <tr key={actionLabel(choice.action)}><td>{actionLabel(choice.action)}</td><td>{choice.probability.toFixed(6)}</td></tr>)}</tbody></table>
+      <table className="evaluation-choices"><caption>Action Probabilities</caption><thead><tr><th scope="col">Legal action type</th><th scope="col">Probability</th></tr></thead><tbody>{data.evaluation.actionProbabilities.map(item => <tr key={item.type}><td>{item.type}</td><td>{item.probability.toFixed(6)}</td></tr>)}</tbody></table>
     </div>}
   </section>;
 }
