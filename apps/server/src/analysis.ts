@@ -16,6 +16,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
   const entries = new Map<string, Entry>();
   const byRequest = new Map<string, Entry>();
   const initializing = new Map<string, Promise<Entry>>();
+  const retrying = new Map<string, Promise<Entry>>();
   const completions = new Set<Promise<void>>();
   let stopped = false;
   function notify(entry: Entry) {
@@ -30,6 +31,11 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const entry: Entry = { input: immutableData(input), state: immutableData(state) };
     entries.set(fingerprint, entry); byRequest.set(state.requestId, entry);
     if (state.status === 'complete') return entry;
+    return start(entry, fingerprint);
+  }
+  async function start(entry: Entry, fingerprint: string): Promise<Entry> {
+    const { input, state } = entry;
+    const current = () => !stopped && entry.state.attemptId === state.attemptId;
     const handle = runner.submit('interactive-analysis', input, async (frozen, execution): Promise<ReferenceStrategyEvaluation> => {
       const strategy = strategyFactory(frozen.identity.referenceStrategy);
       if (!(await strategy.policy.checkCompatibility(frozen.view)).compatible) throw new JobFailure('incompatible');
@@ -45,12 +51,12 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     });
     if (!handle.admitted) {
       const rejected = await handle.result;
-      if (!rejected.ok) entry.state = immutableData({ ...state, status: 'error', error: { code: rejected.code, message: 'The computation queue could not admit this evaluation.' } });
-      notify(entry);
+      if (current() && !rejected.ok) entry.state = immutableData({ ...state, status: 'error', error: { code: rejected.code, message: 'The computation queue could not admit this evaluation.' } });
+      if (current()) notify(entry);
       return entry;
     }
     const completion = handle.result.then(async result => {
-      if (stopped) return;
+      if (!current()) return;
       if (!result.ok) {
         entry.state = immutableData({ ...state, status: 'error', error: { code: result.code, message: 'Reference Strategy evaluation could not complete.' } });
         notify(entry);
@@ -59,14 +65,20 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       const complete = immutableData({ ...state, status: 'complete' as const, evaluation: result.value });
       try {
         await db.insert(analysisEvaluations).values({ fingerprint, requestId: state.requestId, tableSessionId: input.identity.tableSessionId, ownerUserId: input.ownerUserId, result: complete });
-        if (!stopped) entry.state = complete;
+        if (current()) entry.state = complete;
       } catch {
-        if (!stopped) entry.state = immutableData({ ...state, status: 'error', error: { code: 'persistence-unavailable', message: 'The evaluation result could not be saved.' } });
+        if (current()) entry.state = immutableData({ ...state, status: 'error', error: { code: 'persistence-unavailable', message: 'The evaluation result could not be saved.' } });
       }
-      notify(entry);
+      if (current()) notify(entry);
     });
     completions.add(completion); void completion.finally(() => completions.delete(completion));
     return entry;
+  }
+  async function read(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
+    const memory = byRequest.get(requestId);
+    if (memory) return memory.input.ownerUserId === ownerUserId && memory.state.tableSessionId === tableSessionId ? memory.state : undefined;
+    const rows = await db.select().from(analysisEvaluations).where(and(eq(analysisEvaluations.requestId, requestId), eq(analysisEvaluations.tableSessionId, tableSessionId), eq(analysisEvaluations.ownerUserId, ownerUserId)));
+    return rows[0]?.result;
   }
   return {
     async getOrStart(input: FrozenEvaluationInput): Promise<DecisionAnalysis> {
@@ -80,13 +92,24 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       }
       return entry.state;
     },
-    async read(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
-      const memory = byRequest.get(requestId);
-      if (memory) return memory.input.ownerUserId === ownerUserId && memory.state.tableSessionId === tableSessionId ? memory.state : undefined;
-      const rows = await db.select().from(analysisEvaluations).where(and(eq(analysisEvaluations.requestId, requestId), eq(analysisEvaluations.tableSessionId, tableSessionId), eq(analysisEvaluations.ownerUserId, ownerUserId)));
-      return rows[0]?.result;
+    read,
+    async retry(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
+      if (stopped) throw new Error('Analysis is closing.');
+      const entry = byRequest.get(requestId);
+      if (!entry) return read(tableSessionId, requestId, ownerUserId);
+      if (entry.input.ownerUserId !== ownerUserId || entry.state.tableSessionId !== tableSessionId) return undefined;
+      let operation = retrying.get(requestId);
+      if (!operation) {
+        if (entry.state.status !== 'error') return entry.state;
+        // Inputs and matching identity remain frozen; only execution gets a new identity.
+        entry.state = immutableData({ ok: true, ...entry.input.identity, requestId, attemptId: randomUUID(), status: 'pending' });
+        const fingerprint = createHash('sha256').update(canonical(entry.input.identity)).digest('hex');
+        operation = start(entry, fingerprint); retrying.set(requestId, operation);
+      }
+      try { return (await operation).state; }
+      finally { if (retrying.get(requestId) === operation) retrying.delete(requestId); }
     },
     stop() { stopped = true; },
-    async close() { stopped = true; await Promise.allSettled([...initializing.values()]); await Promise.allSettled([...completions]); },
+    async close() { stopped = true; await Promise.allSettled([...initializing.values(), ...retrying.values()]); await Promise.allSettled([...completions]); },
   };
 }
