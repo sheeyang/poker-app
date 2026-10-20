@@ -83,7 +83,9 @@
   await transport({ kind: 'replay-analysis', tableSessionId: third, requestId: currentNotice.requestId, attemptId: crypto.randomUUID() });
   await settle();
   const afterReplay = (await transport()).requests;
-  for (const path of Object.keys(afterReplay).filter(path => path.includes('/analysis/'))) check(afterReplay[path] === beforeReplay[path], 'Obsolete notification triggered result replacement/refetch');
+  const currentPath = '/api/table-sessions/' + third + '/analysis/' + currentNotice.requestId;
+  for (const path of Object.keys(afterReplay).filter(path => path.includes('/analysis/'))) check(afterReplay[path] === (beforeReplay[path] ?? 0) + (path === currentPath ? 1 : 0), 'Unknown attempt reconciliation count ' + path + ': ' + beforeReplay[path] + ' -> ' + afterReplay[path]);
+  check(result()?.textContent.includes('Selected concrete action: Fold'), 'Unknown attempt replaced authoritative output');
 
   await transport({ kind: 'hold', tableSessionId: third, responseKind: 'analysis-read' }); click('Evaluate current decision');
   await wait(async () => (await transport()).held.includes(third + ':analysis-read'));

@@ -12,6 +12,7 @@ async function request<T>(path: string, init?: RequestInit, acceptAnalysisError 
   return data as T;
 }
 export const api = {
+  retryAnalysis: (id: string, requestId: string) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis/' + encodeURIComponent(requestId) + '/retry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
   getOrStartAnalysis: (id: string, decisionId: string) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decisionId }) }, true),
   readAnalysis: (id: string, requestId: string) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis/' + encodeURIComponent(requestId)),
   setTrainerConfiguration: (id: string, body: SetTrainerConfigurationRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-trainer-configuration', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
