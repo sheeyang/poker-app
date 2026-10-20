@@ -107,3 +107,9 @@ label input, label select { display: block; margin-top: 6px; font-weight: 400; }
 .bot-strategy-fields button { margin-bottom: 14px; }
 .bot-strategy > p { margin-top: 12px; }
 @media (max-width: 1100px) { .bot-strategy-fields { grid-template-columns: minmax(0, 1fr); gap: 0; } .bot-strategy-fields button { justify-self: start; } }
+.decision-analysis { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
+.decision-analysis > p, .evaluation-result { margin-top: 12px; }
+.evaluation-choices { width: 100%; border-collapse: collapse; margin-top: 16px; font-variant-numeric: tabular-nums; }
+.evaluation-choices caption { text-align: left; color: #53635b; margin-bottom: 8px; overflow-wrap: anywhere; }
+.evaluation-choices th, .evaluation-choices td { text-align: left; padding: 10px 0; border-bottom: 1px solid #e1e7e2; }
+.evaluation-choices th:last-child, .evaluation-choices td:last-child { text-align: right; }

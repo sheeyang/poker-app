@@ -16,7 +16,7 @@ export type JobFailureCode = 'capacity' | 'cancelled' | 'timeout' | 'failed' | '
 export type JobResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: JobFailureCode };
 export class JobFailure extends Error { constructor(readonly code: JobFailureCode) { super(code); } }
 export interface JobRunnerOptions { readonly concurrency?: number; readonly maximumQueued?: number; readonly timeoutMs?: number }
-export interface JobHandle<T> { readonly result: Promise<JobResult<T>>; cancel(): void }
+export interface JobHandle<T> { readonly admitted: boolean; readonly result: Promise<JobResult<T>>; cancel(): void }
 /** One bounded owner for server computation. Logical timeout never releases running capacity. */
 export class JobRunner {
   private readonly concurrency: number;
@@ -32,7 +32,7 @@ export class JobRunner {
     if (![this.concurrency, this.maximumQueued, this.timeoutMs].every(Number.isSafeInteger) || this.concurrency < 1 || this.maximumQueued < 0 || this.timeoutMs < 1) throw new Error('Invalid JobRunner limits.');
   }
   submit<I, O>(purpose: JobPurpose, input: I, execute: (input: I, options: { readonly signal: AbortSignal }) => O | Promise<O>): JobHandle<O> {
-    if (this.stopped || (this.running.size >= this.concurrency && this.waiting.length >= this.maximumQueued)) return { result: Promise.resolve({ ok: false, code: this.stopped ? 'cancelled' : 'capacity' }), cancel() {} };
+    if (this.stopped || (this.running.size >= this.concurrency && this.waiting.length >= this.maximumQueued)) return { admitted: false, result: Promise.resolve({ ok: false, code: this.stopped ? 'cancelled' : 'capacity' }), cancel() {} };
     const snapshot = immutableData(input);
     const output = Promise.withResolvers<JobResult<O>>();
     const controller = new AbortController();
@@ -71,7 +71,7 @@ export class JobRunner {
     if (next < 0) this.waiting.push(task);
     else this.waiting.splice(next, 0, task);
     this.drain();
-    return { result: output.promise, cancel: task.cancel };
+    return { admitted: true, result: output.promise, cancel: task.cancel };
   }
   private drain() { while (!this.stopped && this.running.size < this.concurrency && this.waiting.length) this.waiting.shift()!.start(); }
   async close(): Promise<void> {

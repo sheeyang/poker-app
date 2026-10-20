@@ -11,6 +11,7 @@ import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
+import type { FrozenEvaluationInput } from './analysis.js';
 import { validateTrainerConfiguration } from './validation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
@@ -414,6 +415,23 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await Promise.allSettled([...queue.values()]);
     }
   return {
+    captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
+      const session = await load(id, ownerUserId);
+      const participantId = observer(session, ownerUserId);
+      if (!session || !participantId) return undefined;
+      if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
+      const view = session.game.forParticipant(participantId).getView();
+      if (view.state.actorId !== participantId || view.state.decisionId !== decisionId || !view.state.handId || !view.state.legalActions.length) return null;
+      const masterSeed = session.aggregate.pokerRecord.configuration.seed;
+      return immutableData({ ownerUserId, view, identity: {
+        tableSessionId: id, participantId, handId: view.state.handId, decisionId,
+        referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
+        inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
+        evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
+        selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
+        engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1', evaluationVersion: 'v1',
+      } });
+    }),
     read,
     subscribe,
     configure,

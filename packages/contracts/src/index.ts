@@ -236,3 +236,30 @@ export interface SetTrainerConfigurationRequest {
   readonly trainerConfiguration: TrainerConfiguration;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
+
+/** Reproducible evaluation identity; effective seeds never enter a game view. */
+export interface EvaluationIdentity {
+  readonly tableSessionId: TableSessionId;
+  readonly participantId: ParticipantId;
+  readonly handId: HandId;
+  readonly decisionId: string;
+  readonly referenceStrategy: StrategyDescriptor;
+  readonly inputFingerprint: string;
+  readonly evaluationSeed: string;
+  readonly selectionSeed: string;
+  readonly engineVersion: 'v1';
+  readonly randomVersion: 'v1';
+  readonly evaluationVersion: 'v1';
+}
+export interface ReferenceStrategyEvaluation {
+  readonly policyResult: { readonly choices: readonly { readonly action: ConcreteAction; readonly probability: number }[] };
+  readonly selectedAction: ConcreteAction;
+}
+export type AnalysisFailureCode = 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' | 'persistence-unavailable';
+export interface AnalysisRequestIdentity extends EvaluationIdentity { readonly ok: true; readonly requestId: string; readonly attemptId: string }
+export type DecisionAnalysis = AnalysisRequestIdentity & (
+  | { readonly status: 'pending' }
+  | { readonly status: 'complete'; readonly evaluation: ReferenceStrategyEvaluation }
+  | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
+);
+export interface GetOrStartAnalysisRequest { readonly decisionId: string }

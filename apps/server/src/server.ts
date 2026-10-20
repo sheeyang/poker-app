@@ -1,3 +1,4 @@
+import { createAnalysis } from './analysis.js';
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
 import { loadCompletedHandInspection, inspectCompletedHand } from '@poker/research';
 import { isBaselineStrategy, type Strategy } from '@poker/strategies';
@@ -42,8 +43,9 @@ export async function createServer(options: ServerOptions) {
   const jobRunner = new JobRunner(options.jobRunnerOptions);
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy });
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
-  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); });
-  app.addHook('onClose', async () => { await mutations.close(); await pool.end(); await acceptance.close(); });
+  const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate);
+  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); analysis.stop(); });
+  app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   // The user channel is independent of open table subscriptions. Analysis publishes here
   // only after establishing the request owner's authorization and making HTTP state readable.
@@ -188,6 +190,29 @@ export async function createServer(options: ServerOptions) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The configuration commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The configuration change could not be confirmed. Refresh its committed view.' } });
     }
+  });
+  app.post<{ Params: { id: string }; Body: { decisionId: string } }>('/api/table-sessions/:id/analysis', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || Object.keys(request.body).some(key => key !== 'decisionId')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply only the Decision ID.' } });
+    try {
+      const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
+      if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+      if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose your current decision.' } });
+      const state = await analysis.getOrStart(input);
+      return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
+  });
+  app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/analysis/:requestId', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+    try {
+      const state = await analysis.read(request.params.id, request.params.requestId, userId);
+      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+      return state;
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/inspect-hand', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
