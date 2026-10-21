@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type TableLiveMessage } from '@poker/contracts';
-import { HighestProbabilitySelector, ProbabilitySelector, type PolicyResult } from '@poker/strategies';
+import { baselineStrategy, HighestProbabilitySelector, ProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 
@@ -23,6 +23,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     server = await createServer({ databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
       supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: configured => {
+        if (configured.policy.id === 'uniform-choice') return baselineStrategy(configured);
         let compatibilityView: ObservableGameView;
         const mode = configured.policy.configuration.mode;
         return {
@@ -56,8 +57,9 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   async function command(t: Table, kind: string, contents: object = {}) { const before = await read(t); const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...contents }); expect(response.status).toBe(200); return response.json(); }
   async function configure(t: Table, kind: string, contents: object = {}, requestId: string = randomUUID()) { const before = await read(t); return submit(t, kind, { requestId, expectedSessionRevision: before.sessionRevision, participantId: t.bot, ...contents }); }
   async function botDecision(t: Table) { await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); await command(t, 'act', { participantId: t.human, action: { type: 'call' } }); }
+  async function botOnlyDecision(t: Table) { await command(t, 'seat-participant', { participantId: t.bots[0], seat: 1 }); await command(t, 'seat-participant', { participantId: t.bots[1], seat: 2 }); await command(t, 'start-hand'); }
   function connect(t: Table) { const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/table-sessions/' + t.id + '/live', { headers: { cookie: t.cookie } }); const messages: TableLiveMessage[] = []; socket.on('message', data => messages.push(JSON.parse(data.toString()))); return { socket, messages }; }
-  return { table, read, submit, command, configure, botDecision, connect, evaluations, answerNext: (value: PolicyResult) => futureAnswers.push(value), get commands() { return commands!; }, stop: () => server.close(), async restart(automatic = true) { for (const item of evaluations) item.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await server.close(); evaluations.length = 0; await start(automatic); }, async close() { for (const item of evaluations) item.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
+  return { table, read, submit, command, configure, botDecision, botOnlyDecision, connect, evaluations, answerNext: (value: PolicyResult) => futureAnswers.push(value), get commands() { return commands!; }, stop: () => server.close(), async restart(automatic = true) { for (const item of evaluations) item.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await server.close(); evaluations.length = 0; await start(automatic); }, async close() { for (const item of evaluations) item.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
 }
 const answer = (action: ConcreteAction): PolicyResult => ({ choices: [{ action, probability: 1 }], diagnostics: { information: 'not public' } });
 
@@ -153,23 +155,23 @@ test('timeouts retain executing capacity until late work settles, bounded retrie
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 60 } });
   let socket: WebSocket | undefined;
   try {
-    const t = await f.table(); const live = f.connect(t); socket = live.socket; await f.botDecision(t);
+    const t = await f.table(descriptor(), 2); const live = f.connect(t); socket = live.socket; await f.botOnlyDecision(t);
     await expect.poll(() => live.messages.find(m => m.type === 'table-status' && m.status.code === 'timeout')).toBeDefined();
     const old = f.evaluations[0]!; expect(old.signal?.aborted).toBe(true);
     for (let attempt = 0; attempt < 3; attempt++) expect((await f.configure(t, 'retry-bot')).status).toBe(200);
     expect(f.evaluations.map(e => e.view.state.decisionId)).toEqual([old.view.state.decisionId]);
     expect(await (await f.submit(t, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
-    const other = await f.table(); const secondLive = f.connect(other);
+    const other = await f.table(descriptor(), 2); const secondLive = f.connect(other);
     try {
-      await f.botDecision(other);
+      await f.botOnlyDecision(other);
       await expect.poll(() => secondLive.messages.find(m => m.type === 'table-status' && m.status.code === 'capacity')).toBeDefined();
-      expect(await f.read(other)).toMatchObject({ pokerRevision: 4 });
+      expect(await f.read(other)).toMatchObject({ pokerRevision: 3 });
       f.answerNext(answer({ type: 'fold' }));
       old.result.resolve(answer({ type: 'check' })); await expect.poll(() => f.evaluations.length).toBe(2);
       const fresh = f.evaluations[1]!; expect(fresh.seed).toBe(old.seed);
-      await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
+      await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(4);
       expect(await f.read(t)).toMatchObject({ view: { state: { status: 'completed-hand' } } });
-      expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[4]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });
+      expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[3]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });
     } finally { secondLive.socket.terminate(); }
   } finally { socket?.terminate(); await f.close(); }
 });
@@ -405,13 +407,14 @@ test('waiting Bot decisions run FIFO ahead of earlier interactive inspection wit
     await f.command(completed, 'seat-participant', { participantId: completed.bot, seat: 2 });
     await f.command(completed, 'start-hand');
     await f.command(completed, 'act', { participantId: completed.human, action: { type: 'fold' } });
+    await expect.poll(async () => (await (await f.submit(completed, 'analysis', { decisionId: 'hand-1/decision-1' })).json()).status).toBe('complete');
     const beforeInspection = await f.read(completed);
-    const running = await f.table(); await f.botDecision(running);
+    const running = await f.table(descriptor(), 2); await f.botOnlyDecision(running);
     await expect.poll(() => f.evaluations.length).toBe(1);
     let inspectionFinished = false;
     const inspection = f.submit(completed, 'inspect-hand', { handId: 'hand-1' }).then(response => { inspectionFinished = true; return response; });
-    const first = await f.table(); await f.botDecision(first);
-    const second = await f.table(); await f.botDecision(second);
+    const first = await f.table(descriptor(), 2); await f.botOnlyDecision(first);
+    const second = await f.table(descriptor(), 2); await f.botOnlyDecision(second);
     expect(await (await f.submit(completed, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
     expect(inspectionFinished).toBe(false);
     expect(f.evaluations).toHaveLength(1);
@@ -419,19 +422,19 @@ test('waiting Bot decisions run FIFO ahead of earlier interactive inspection wit
     f.evaluations[0]!.result.resolve(answer({ type: 'fold' }));
     await expect.poll(() => f.evaluations.length).toBe(2);
     expect(f.evaluations[1]!.view.state.actorId).toBe(first.bot);
-    expect(await f.read(first)).toMatchObject({ pokerRevision: 4, runtimeStatus: { phase: 'thinking' } });
+    expect(await f.read(first)).toMatchObject({ pokerRevision: 3, runtimeStatus: { phase: 'thinking' } });
     expect(inspectionFinished).toBe(false);
     f.evaluations[1]!.result.resolve(answer({ type: 'fold' }));
     await expect.poll(() => f.evaluations.length).toBe(3);
     expect(f.evaluations[2]!.view.state.actorId).toBe(second.bot);
-    expect(await f.read(second)).toMatchObject({ pokerRevision: 4, runtimeStatus: { phase: 'thinking' } });
+    expect(await f.read(second)).toMatchObject({ pokerRevision: 3, runtimeStatus: { phase: 'thinking' } });
     expect(inspectionFinished).toBe(false);
     f.evaluations[2]!.result.resolve(answer({ type: 'fold' }));
     const response = await inspection;
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, tableSessionId: completed.id, hand: { handId: 'hand-1' } });
     expect(await f.read(completed)).toEqual(beforeInspection);
-    for (const table of [running, first, second]) await expect.poll(async () => (await f.read(table)).pokerRevision).toBe(5);
+    for (const table of [running, first, second]) await expect.poll(async () => (await f.read(table)).pokerRevision).toBe(4);
   } finally {
     for (let remaining = 0; remaining < 3; remaining++) f.answerNext(answer({ type: 'fold' }));
     await f.close();

@@ -8,7 +8,7 @@
   const click = text => { const item = button(text); check(item && !item.disabled, text + ' unavailable'); item.click(); };
   const request = async (path, body) => { const response = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined); const data = await response.json(); check(response.ok || data.status === 'error', JSON.stringify(data)); return data; };
   const transport = body => request('/api/__transport', body);
-  const strategy = async operation => (await fetch('http://127.0.0.1:3026/' + operation)).json();
+  const strategy = async operation => (await fetch((globalThis.evaluationControl ?? 'http://127.0.0.1:3026') + '/' + operation)).json();
   const read = id => request('/api/table-sessions/' + id);
   const command = async (id, kind, body = {}) => { const table = await read(id); return request('/api/table-sessions/' + id + '/' + kind, { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, ...body }); };
   const result = () => document.querySelector('.evaluation-result');
@@ -99,7 +99,7 @@
   click('Evaluate current decision'); await settle();
   check((await strategy('')).evaluations === failedCount, 'Ordinary error read retried Strategy');
   await command(fourth, 'act', { participantId: (await read(fourth)).bindings[0].participantId, action: { type: 'fold' } });
-  await wait(() => button('Evaluate current decision').disabled && !document.querySelector('.decision-analysis [role="alert"]'), 'advance clears old current analysis');
+  await wait(() => button('Retry decision analysis') && document.querySelector('select[name="analysisDecision"]').value === 'hand-1/decision-1', 'accepted action switches to its automatic scored analysis');
   check((await transport()).connections.length === 1, 'Evaluation added another socket');
   const fifth = await create();
   await strategy('hold'); click('Evaluate current decision');

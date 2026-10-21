@@ -6,7 +6,7 @@ import { baselinePlayingStrategy, type ObservableTableSession, type TableLiveMes
 import { CashGame, type TableSessionRecord } from '@poker/engine';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
-import type { Strategy } from '@poker/strategies';
+import { baselineStrategy, type Strategy } from '@poker/strategies';
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -14,6 +14,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
+const botParticipants = new Set<string>();
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
   server = await createServer({ databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
@@ -25,6 +26,7 @@ async function table(bots = 1) {
   const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
   const result = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: bots }, (_, i) => ({ name: 'Bot ' + i, playingStrategy: baselinePlayingStrategy })) }) });
   const created = await result.json();
+  for (const binding of created.bindings.slice(1)) botParticipants.add(binding.participantId);
   return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bots: created.bindings.slice(1).map((b: { participantId: string }) => b.participantId) as string[] };
 }
 type Table = Awaited<ReturnType<typeof table>>;
@@ -41,6 +43,8 @@ async function completed() {
   await command(t, 'seat-participant', { participantId: t.bots[0], seat: 2 });
   await command(t, 'start-hand');
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  const analysis = await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis', { method: 'POST', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ decisionId: 'hand-1/decision-1' }) })).json();
+  await expect.poll(async () => (await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + analysis.requestId, { headers: { cookie: t.cookie } })).json()).status).toBe('complete');
   return t;
 }
 
@@ -191,7 +195,7 @@ test('queued inspection retains its captured active-Hand rejection after the liv
   const release = Promise.withResolvers<void>();
   const evaluating = Promise.withResolvers<void>();
   const strategy: Strategy = {
-    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async () => { evaluating.resolve(); await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
+    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => { if (!botParticipants.has(view.state.actorId ?? '')) return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution); evaluating.resolve(); await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
     actionSelector: { select: choices => choices[0]!.action },
   };
   server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
@@ -234,7 +238,7 @@ test('inspection shares Bot capacity, waits outside mutation acceptance and reta
   const release = Promise.withResolvers<void>();
   let policyView: unknown;
   const strategy: Strategy = {
-    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async view => { policyView = view; await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
+    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => { if (!botParticipants.has(view.state.actorId ?? '')) return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution); policyView = view; await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
     actionSelector: { select: choices => choices[0]!.action },
   };
   server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });

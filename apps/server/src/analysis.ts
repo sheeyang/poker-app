@@ -4,14 +4,15 @@ import type { AnalysisUpdate, ConcreteAction, DecisionAnalysis, EvaluationIdenti
 import { baselineStrategy, immutableData, validatePolicyResult, PolicyValidationError, type Strategy } from '@poker/strategies';
 import { calculateActionProbabilities, calculateDecisionScores, scoringMethodVersion } from '@poker/research';
 import type { ObservableGameView } from '@poker/contracts';
-import { JobRunner, JobFailure } from './job-runner.js';
+import { JobRunner, JobFailure, type JobPurpose } from './job-runner.js';
 import type { openDatabase } from './db/database.js';
 import { analysisEvaluations, analysisScores } from './db/schema.js';
 import { canonical } from './canonical.js';
 
 export interface FrozenEvaluationInput { readonly ownerUserId: string; readonly identity: EvaluationIdentity; readonly view: ObservableGameView; readonly acceptedAction?: ConcreteAction }
+export type AnalysisPurpose = Extract<JobPurpose, 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis'>;
 type Database = ReturnType<typeof openDatabase>['db'];
-interface Entry { readonly input: FrozenEvaluationInput; state: DecisionAnalysis }
+interface Entry { readonly input: FrozenEvaluationInput; readonly purpose: AnalysisPurpose; state: DecisionAnalysis }
 /** Owns matching, execution and successful retention, independently of connections and poker. */
 export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = baselineStrategy, publish: (ownerUserId: string, update: AnalysisUpdate) => void = () => {}) {
   const entries = new Map<string, Entry>();
@@ -31,11 +32,11 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     terminalWaiters.delete(state.requestId);
     try { publish(entry.input.ownerUserId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }); } catch { /* Delivery cannot change a readable result. */ }
   }
-  async function initialize(input: FrozenEvaluationInput, fingerprint: string): Promise<Entry> {
+  async function initialize(input: FrozenEvaluationInput, fingerprint: string, purpose: AnalysisPurpose): Promise<Entry> {
     const stored = await db.select().from(analysisEvaluations).where(eq(analysisEvaluations.fingerprint, fingerprint));
     if (stopped) throw new Error('Analysis is closing.');
     const state: DecisionAnalysis = stored.at(0)?.result ?? { ok: true, ...input.identity, requestId: randomUUID(), attemptId: randomUUID(), status: 'pending' };
-    const entry: Entry = { input: immutableData(input), state: immutableData(state) };
+    const entry: Entry = { input: immutableData(input), purpose, state: immutableData(state) };
     entries.set(fingerprint, entry); byRequest.set(state.requestId, entry);
     if (state.status === 'complete') return entry;
     return start(entry, fingerprint);
@@ -43,7 +44,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
   async function start(entry: Entry, fingerprint: string): Promise<Entry> {
     const { input, state } = entry;
     const current = () => !stopped && entry.state.attemptId === state.attemptId;
-    const handle = runner.submit('interactive-analysis', input, async (frozen, execution): Promise<ReferenceStrategyEvaluation> => {
+    const handle = runner.submit(entry.purpose, input, async (frozen, execution): Promise<ReferenceStrategyEvaluation> => {
       const strategy = strategyFactory(frozen.identity.referenceStrategy);
       if (!(await strategy.policy.checkCompatibility(frozen.view)).compatible) throw new JobFailure('incompatible');
       const raw = await strategy.policy.evaluate(frozen.view, { evaluationSeed: frozen.identity.evaluationSeed, signal: execution.signal });
@@ -81,11 +82,11 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     completions.add(completion); void completion.finally(() => completions.delete(completion));
     return entry;
   }
-  async function initializeScore(input: FrozenEvaluationInput, fingerprint: string): Promise<Entry> {
+  async function initializeScore(input: FrozenEvaluationInput, fingerprint: string, purpose: AnalysisPurpose): Promise<Entry> {
     const stored = await db.select().from(analysisScores).where(eq(analysisScores.fingerprint, fingerprint));
     if (stopped) throw new Error('Analysis is closing.');
     const state: DecisionAnalysis = stored.at(0)?.result ?? { ok: true, ...input.identity, scoredDecision: { acceptedAction: input.acceptedAction!, scoringMethodVersion }, requestId: randomUUID(), attemptId: randomUUID(), status: 'pending' };
-    const entry: Entry = { input: immutableData(input), state: immutableData(state) };
+    const entry: Entry = { input: immutableData(input), purpose, state: immutableData(state) };
     scores.set(fingerprint, entry); byRequest.set(state.requestId, entry);
     if (state.status === 'complete') return entry;
     return startScore(entry, fingerprint);
@@ -95,7 +96,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const current = () => !stopped && entry.state.attemptId === state.attemptId;
     const { acceptedAction: _action, ...evaluationInput } = entry.input;
     try {
-      let dependency = await operations.getOrStart(evaluationInput);
+      let dependency = await operations.getOrStart(evaluationInput, entry.purpose);
       if (retryFailed && dependency.status === 'error') dependency = (await operations.retry(state.tableSessionId, dependency.requestId, entry.input.ownerUserId))!;
       if (!current()) return entry;
       entry.state = immutableData({ ...state, evaluationRequestId: dependency.requestId });
@@ -126,7 +127,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     if (dependency.status === 'error') { entry.state = immutableData({ ...state, status: 'error', error: dependency.error }); notify(entry); return; }
     if (dependency.status !== 'complete') return;
     const input = entry.input;
-    const handle = runner.submit('interactive-analysis', { view: input.view, choices: dependency.evaluation.policyResult.choices, action: input.acceptedAction! }, frozen => calculateDecisionScores(frozen.view, frozen.choices, frozen.action));
+    const handle = runner.submit(entry.purpose, { view: input.view, choices: dependency.evaluation.policyResult.choices, action: input.acceptedAction! }, frozen => calculateDecisionScores(frozen.view, frozen.choices, frozen.action));
     const result = await handle.result;
     if (!current()) return;
     if (!result.ok) entry.state = immutableData({ ...state, status: 'error', error: { code: result.code, message: 'Decision scoring could not complete.' } });
@@ -148,14 +149,14 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     return scored[0]?.result;
   }
   const operations = {
-    async getOrStart(input: FrozenEvaluationInput): Promise<DecisionAnalysis> {
+    async getOrStart(input: FrozenEvaluationInput, purpose: AnalysisPurpose = 'interactive-analysis'): Promise<DecisionAnalysis> {
       if (stopped) throw new Error('Analysis is closing.');
       if (input.acceptedAction) {
         const fingerprint = createHash('sha256').update(canonical({ ...input.identity, scoredDecision: { acceptedAction: input.acceptedAction, scoringMethodVersion } })).digest('hex');
         let entry = scores.get(fingerprint);
         if (!entry) {
           let operation = initializingScores.get(fingerprint);
-          if (!operation) { operation = initializeScore(input, fingerprint); initializingScores.set(fingerprint, operation); }
+          if (!operation) { operation = initializeScore(input, fingerprint, purpose); initializingScores.set(fingerprint, operation); }
           try { entry = await operation; } finally { if (initializingScores.get(fingerprint) === operation) initializingScores.delete(fingerprint); }
         }
         return entry.state;
@@ -164,7 +165,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       let entry = entries.get(fingerprint);
       if (!entry) {
         let operation = initializing.get(fingerprint);
-        if (!operation) { operation = initialize(input, fingerprint); initializing.set(fingerprint, operation); }
+        if (!operation) { operation = initialize(input, fingerprint, purpose); initializing.set(fingerprint, operation); }
         try { entry = await operation; } finally { if (initializing.get(fingerprint) === operation) initializing.delete(fingerprint); }
       }
       return entry.state;
