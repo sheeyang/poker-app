@@ -1,18 +1,19 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, HandScoreSummary, ScoreSummaryIdentity, StrategyDescriptor } from '@poker/contracts';
+import type { AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, ScoreSummary, ScoreSummaryScope, ScoreSummaryIdentity, StrategyDescriptor } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
 import { calculateScoreSummary, scoringMethodVersion } from '@poker/research';
 import type { createAnalysis, FrozenEvaluationInput } from './analysis.js';
 import type { JobRunner } from './job-runner.js';
 import { canonical } from './canonical.js';
-export interface FrozenHandSummary {
-  readonly ownerUserId: string; readonly tableSessionId: string; readonly handId: string;
+interface FrozenSummaryMetadata {
+  readonly ownerUserId: string; readonly tableSessionId: string;
   readonly capturedPokerRevision: number; readonly referenceStrategy: StrategyDescriptor; readonly decisionIds: readonly string[];
   readonly members: readonly FrozenEvaluationInput[];
 }
+export type FrozenScoreSummary = FrozenSummaryMetadata & ScoreSummaryScope;
 interface Failure { readonly code: AnalysisFailureCode; readonly message: string }
 interface Dependency { readonly input: FrozenEvaluationInput; readonly consumers: Set<Entry>; state?: DecisionAnalysis; failure?: Failure; running: boolean; queued: boolean; retryRequested: boolean; starting: boolean; observedAttempt?: string; readonly settlements: Map<string, Promise<void>> }
-interface Entry { readonly input: FrozenHandSummary; identity: ScoreSummaryIdentity; state: HandScoreSummary; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string }
+interface Entry { readonly input: FrozenScoreSummary; identity: ScoreSummaryIdentity; state: ScoreSummary; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string }
 /** All scopes/owners share this one bounded coordinator and the application's existing runner. */
 export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>, runner: JobRunner, publish: (ownerUserId: string, update: AnalysisUpdate) => void) {
   const requests = new Map<string, Entry>();
@@ -94,7 +95,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
     try { await operation; } finally { if (pumping === operation) pumping = undefined; if (waiting.length && outstanding < maximumOutstanding) schedule(); }
   }
   return {
-    async create(input: FrozenHandSummary): Promise<HandScoreSummary> {
+    async create(input: FrozenScoreSummary): Promise<ScoreSummary> {
       const { ownerUserId: _owner, members: _members, ...metadata } = input;
       const identity = immutableData({ ok: true as const, ...metadata, requestId: randomUUID(), attemptId: randomUUID(), decisionCount: input.decisionIds.length });
       const members = input.members.map(member => {
@@ -105,8 +106,14 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       });
       // Other consumers may have explicitly retried a failed member; analysis owns its current result.
       for (const member of members) {
-        if (member.state && member.state.status !== 'complete') {
+        // A lookup can fail before analysis creates a request. A new explicit snapshot
+        // may look it up again, through the same admission budget as every member.
+        if (!member.state && member.failure && !member.running && !member.queued) {
+          member.failure = undefined; member.queued = true; waiting.push(member);
+        }
+        if (member.state && (member.state.status !== 'complete' || member.failure)) {
           const current = await analysis.read(input.tableSessionId, member.state.requestId, input.ownerUserId);
+          if (current) member.failure = undefined;
           if (current && (current.attemptId !== member.state.attemptId || current.status !== member.state.status)) {
             if (member.running) watch(member, current);
             else {
@@ -121,7 +128,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       if (members.length) { reduce(entry); await pump(); }
       return entry.state;
     },
-    async retry(tableSessionId: string, requestId: string, ownerUserId: string): Promise<HandScoreSummary | undefined> {
+    async retry(tableSessionId: string, requestId: string, ownerUserId: string): Promise<ScoreSummary | undefined> {
       const entry = requests.get(requestId);
       if (!entry || entry.input.ownerUserId !== ownerUserId || entry.state.tableSessionId !== tableSessionId) return undefined;
       if (entry.state.status !== 'error') return entry.state;
