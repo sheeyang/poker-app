@@ -102,7 +102,7 @@ test('historical scoring captures the original safe view after showdown, inspect
   let human = '';
   const reference: StrategyDescriptor = { policy: { id: 'fixture', version: 'v1', configuration: { history: true } }, selector: highestProbabilityPlayingStrategy.selector };
   const f = await fixture({ automaticBots: true, strategyFactory: descriptor => ({ policy: { checkCompatibility: () => ({ compatible: true }), evaluate: view => {
-    if (view.state.actorId === human) inputs.push(view);
+    if (view.state.actorId === human && (descriptor.policy.id === 'fixture' || descriptor.selector.id === 'highest-probability')) inputs.push(view);
     if (descriptor.policy.id === 'fixture') return distribution;
     const passive = view.state.legalActions.find(action => action.type === 'call' || action.type === 'check')!;
     return { choices: [{ action: { type: passive.type as 'call' | 'check' }, probability: 1 }] };
@@ -152,11 +152,12 @@ test('a score persistence failure retains its successful evaluation, is readable
     const t = await f.decision();
     const evaluation = await (await f.request(t)).json(); await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(async () => (await (await f.result(t, evaluation.requestId)).json()).status).toBe('complete');
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
-    const before = await f.read(t); const live = f.connect(t);
+    const live = f.connect(t);
     await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
     await administration.query('CREATE FUNCTION "' + f.schema + '".reject_score() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'private score diagnostic\'; END $$');
     await administration.query('CREATE TRIGGER reject_score BEFORE INSERT ON "' + f.schema + '".analysis_scores FOR EACH ROW EXECUTE FUNCTION "' + f.schema + '".reject_score()');
+    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const before = await f.read(t);
     const requested = await (await f.request(t)).json();
     await expect.poll(() => live.messages.find(message => message.type === 'analysis-update' && message.requestId === requested.requestId)).toMatchObject({ status: 'error' });
     const failure = await (await f.result(t, requested.requestId)).json();
@@ -242,8 +243,8 @@ test('scoring a cached evaluation uses shared bounded capacity and returns an ex
     const t = await f.decision(); const evaluation = await (await f.request(t)).json();
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(async () => (await (await f.result(t, evaluation.requestId)).json()).status).toBe('complete');
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
     const other = await f.decision(); await f.request(other); await expect.poll(() => f.evaluations.length).toBe(2);
+    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
     const rejected = await f.request(t); expect(rejected.status).toBe(503);
     const failure = await rejected.json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'capacity' }, evaluationRequestId: evaluation.requestId });
     expect(await (await f.result(t, evaluation.requestId)).json()).toMatchObject({ status: 'complete' });

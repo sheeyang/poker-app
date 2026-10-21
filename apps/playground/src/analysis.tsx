@@ -10,6 +10,7 @@ function identity(value: unknown): string {
 }
 interface Target {
   readonly key: string; readonly tableId: string; readonly decisionId: string;
+  readonly live: boolean;
   wanted: boolean; dirty: number; signals: number; version: number; retrying: boolean; obsoleteAttempts: Set<string>; fetching: boolean; retired: boolean; data?: DecisionAnalysis;
 }
 /** Reconciliation remembers notifications received while an older HTTP response is in flight. */
@@ -17,11 +18,16 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string }>();
   const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
   const acceptedDecisions = table?.view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action }))) ?? [];
+  const newestAccepted = acceptedDecisions.at(-1)?.decisionId;
+  const currentDecisionId = table?.view.state.legalActions.length ? table.view.state.decisionId : undefined;
+  const liveEnabled = table?.trainerConfiguration.liveAnalysis ?? false;
+  useEffect(() => { if (table && newestAccepted) setSelection({ tableId: table.tableSessionId, decisionId: newestAccepted }); }, [table?.tableSessionId, newestAccepted]);
+  useEffect(() => { if (table && liveEnabled && currentDecisionId) setSelection({ tableId: table.tableSessionId, decisionId: '' }); }, [table?.tableSessionId, liveEnabled, currentDecisionId]);
   const selectedDecisionId = selection && selection.tableId === table?.tableSessionId && acceptedDecisions.some(decision => decision.decisionId === selection.decisionId) ? selection.decisionId : '';
   const accepted = acceptedDecisions.find(decision => decision.decisionId === selectedDecisionId);
-  const decisionId = selectedDecisionId || (table?.view.state.legalActions.length ? table.view.state.decisionId : undefined);
+  const decisionId = selectedDecisionId || currentDecisionId;
   const key = table && decisionId ? identity([table.tableSessionId, decisionId, table.trainerConfiguration.referenceStrategy, accepted?.action ?? null]) : '';
-  const target = useMemo<Target | null>(() => key && table && decisionId ? { key, tableId: table.tableSessionId, decisionId, wanted: false, dirty: 0, signals: 0, version: 0, retrying: false, obsoleteAttempts: new Set(), fetching: false, retired: false } : null, [key]);
+  const target = useMemo<Target | null>(() => key && table && decisionId ? { key, tableId: table.tableSessionId, decisionId, live: !accepted && liveEnabled, wanted: !!accepted || liveEnabled, dirty: 0, signals: 0, version: 0, retrying: false, obsoleteAttempts: new Set(), fetching: false, retired: false } : null, [key, liveEnabled]);
   const current = useRef(target); current.current = target;
   const connection = useRef<number | null>(null);
   const [display, setDisplay] = useState<{ key: string; loading: boolean; retrying?: boolean; data?: DecisionAnalysis; error?: string }>();
@@ -38,7 +44,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
         const signals = active.signals;
         setDisplay({ key: active.key, loading: true, data: active.data });
         try {
-          const data = active.data ? await api.readAnalysis(active.tableId, active.data.requestId) : await api.getOrStartAnalysis(active.tableId, active.decisionId);
+          const data = active.data ? await api.readAnalysis(active.tableId, active.data.requestId) : await api.getOrStartAnalysis(active.tableId, active.decisionId, active.live);
           if (active.retired || current.current !== active) return;
           if (connection.current !== generation) { active.dirty++; continue; }
           if (identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) !== active.key) return;
@@ -62,6 +68,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
       if (active.dirty > 0 && !active.retrying && !active.retired && current.current === active && (connection.current !== null || initialConnection === null)) void reconcile(active);
     }
   }, []);
+  useEffect(() => { if (target?.wanted) void reconcile(target); }, [target, reconcile]);
   const refresh = useCallback(() => {
     const active = current.current;
     if (!active || !active.wanted) return;
@@ -90,7 +97,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
     acceptedDecisions, selectedDecisionId,
     selectDecision: (id: string) => { if (table) setSelection({ tableId: table.tableSessionId, decisionId: id }); },
     canEvaluate: !!target,
-    display: display?.key === key ? display : undefined,
+    display: target?.wanted && display?.key === key ? display : undefined,
     retry: async () => {
       const active = current.current;
       if (!active?.data || active.data.status !== 'error' || active.retrying || active.retired) return;
