@@ -1,5 +1,5 @@
-import { baselineStrategy, isBaselineStrategy, immutableData, validatePolicyResult, PolicyValidationError, type Strategy } from '@poker/strategies';
-import { JobRunner, JobFailure, type JobHandle } from './job-runner.js';
+import { baselineStrategy, isBaselineStrategy, immutableData, type Strategy } from '@poker/strategies';
+import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
@@ -11,10 +11,12 @@ import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
+import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
 import { validateTrainerConfiguration } from './validation.js';
 
+export type AcceptTableJobResult = (tableSessionId: string, ownerUserId: string, accept: () => boolean) => Promise<boolean>;
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export class TableSessionRestorationError extends Error {
@@ -177,17 +179,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     work.set(id, pending);
     publishStatus(id, { phase: 'thinking', participantId: proposed.identity.participantId });
     pending.handle = bots.runner.submit('bot-decision', { view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
-      const strategy = strategyFactory(input.descriptor);
-      const compatibility = await strategy.policy.checkCompatibility(input.view);
-      if (!compatibility.compatible) throw new JobFailure('incompatible');
-      const raw = await strategy.policy.evaluate(input.view, { evaluationSeed: input.evaluationSeed, signal: execution.signal });
-      let result;
-      try { result = validatePolicyResult(raw, input.view); } catch (error) { if (error instanceof PolicyValidationError) throw new JobFailure('invalid-policy'); throw error; }
-      try {
-        const action = strategy.actionSelector.select(result.choices, { selectionSeed: input.selectionSeed });
-        if (!result.choices.some(choice => canonical(choice.action) === canonical(action))) throw new Error('Not a Choice');
-        return action;
-      } catch { throw new JobFailure('selection-failed'); }
+      const { selectedAction } = await executeStrategy(strategyFactory(input.descriptor), input.view, { evaluationSeed: input.evaluationSeed, selectionSeed: input.selectionSeed, signal: execution.signal });
+      return selectedAction;
     });
     void pending.handle.result.then(result => {
       if (stopped) return;
@@ -480,6 +473,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     });
   }
   return {
+    // Historical work validates its frozen request/attempt in this queue; live revision may advance.
+    acceptJobResult: (id: string, ownerUserId: string, accept: () => boolean) => enqueue(id, async () => {
+      if (stopped || committed.get(id)?.aggregate.ownerUserId !== ownerUserId) return false;
+      return accept();
+    }),
     captureHandSummary: (id: string, ownerUserId: string, handId: string) => captureScoreSummary(id, ownerUserId, { scope: 'hand', handId }),
     captureSessionSummary: (id: string, ownerUserId: string) => captureScoreSummary(id, ownerUserId, { scope: 'table-session' }),
     captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {

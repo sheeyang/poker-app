@@ -263,3 +263,51 @@ test('new summary members use priority 2 while a later interactive request keeps
     await expect.poll(async () => (await (await f.summary(target, summary.requestId)).json()).status).toBe('complete');
   } finally { await f.close(); }
 });
+
+test('an already failed member beyond the admission batch immediately outranks two held matching members', async () => {
+  const f = await fixture({ automaticBots: true });
+  try {
+    const t = await f.decision();
+    for (const type of ['call', 'check', 'check'] as const) {
+      await f.command(t, 'act', { participantId: t.human, action: { type } });
+      await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+    }
+    await f.configure(t, reference);
+    const decisions = (await f.read(t)).view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === t.human));
+    expect(decisions).toHaveLength(3);
+    const failed = await (await f.request(t, decisions[2]!.decisionId)).json();
+    await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.reject(new Error('Controlled existing failure'));
+    await expect.poll(async () => (await (await f.result(t, failed.requestId)).json()).status).toBe('error');
+    await f.request(t, decisions[0]!.decisionId); await f.request(t, decisions[1]!.decisionId);
+    await expect.poll(() => f.evaluations.length).toBe(3);
+    const summary = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
+    expect(summary).toMatchObject({ status: 'error', decisionCount: 3, error: { code: 'failed' } });
+    expect(summary).not.toHaveProperty('averages'); expect(f.evaluations).toHaveLength(3);
+    expect((await (await f.result(t, failed.requestId)).json()).attemptId).toBe(failed.attemptId);
+  } finally { await f.close(); }
+});
+
+
+test('a later matching member failure is observed while two missing members occupy the summary budget', async () => {
+  const f = await fixture({ automaticBots: true, jobRunnerOptions: { concurrency: 3 } });
+  try {
+    const t = await f.decision();
+    for (const type of ['call', 'check', 'check'] as const) {
+      await f.command(t, 'act', { participantId: t.human, action: { type } });
+      await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+    }
+    await f.configure(t, reference);
+    const decisions = (await f.read(t)).view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === t.human));
+    const existing = await (await f.request(t, decisions[2]!.decisionId)).json();
+    await expect.poll(() => f.evaluations.length).toBe(1);
+    const summary = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
+    expect(summary.status).toBe('pending');
+    await expect.poll(() => f.evaluations.length).toBe(3);
+    f.evaluations[0]!.result.reject(new Error('Controlled failure after snapshot'));
+    await expect.poll(async () => (await (await f.summary(t, summary.requestId)).json()).status).toBe('error');
+    const failed = await (await f.summary(t, summary.requestId)).json();
+    expect(failed).toMatchObject({ error: { code: 'failed' }, decisionCount: 3 });
+    expect(failed).not.toHaveProperty('averages'); expect(f.evaluations).toHaveLength(3);
+    expect((await (await f.result(t, existing.requestId)).json()).attemptId).toBe(existing.attemptId);
+  } finally { await f.close(); }
+});
