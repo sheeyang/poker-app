@@ -12,6 +12,7 @@ import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 import type { FrozenEvaluationInput } from './analysis.js';
+import type { FrozenHandSummary } from './summaries.js';
 import { validateTrainerConfiguration } from './validation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
@@ -415,6 +416,30 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await Promise.allSettled([...queue.values()]);
     }
   return {
+    captureHandSummary: (id: string, ownerUserId: string, handId: string) => enqueue(id, async (): Promise<FrozenHandSummary | null | undefined> => {
+      const session = await load(id, ownerUserId);
+      const participantId = observer(session, ownerUserId);
+      if (!session || !participantId) return undefined;
+      if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
+      if (!session.game.getHand(handId)) return null;
+      const view = session.game.forParticipant(participantId).getView();
+      const decisionIds = view.history.filter(hand => hand.handId === handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+      const participant = session.game.forParticipant(participantId);
+      const members = decisionIds.map(decisionId => {
+        const view = participant.getView({ at: { decisionId } });
+        const accepted = participant.getView().history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId)!;
+        const masterSeed = session.aggregate.pokerRecord.configuration.seed;
+        return { ownerUserId, view, acceptedAction: accepted.action.action, identity: {
+          tableSessionId: id, participantId, handId, decisionId,
+          referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
+          inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
+          evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
+          selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
+          engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1' as const, evaluationVersion: 'v1' as const,
+        } };
+      });
+      return immutableData({ ownerUserId, tableSessionId: id, handId, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy, decisionIds, members });
+    }),
     captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
       const session = await load(id, ownerUserId);
       const participantId = observer(session, ownerUserId);
