@@ -56,8 +56,8 @@ const relay = http.createServer(async (request, response) => {
     incoming.on('end', () => {
       const send = () => { response.writeHead(incoming.statusCode!, incoming.headers); response.end(Buffer.concat(chunks)); };
       const match = /^\/api\/table-sessions\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname);
-      const analysisRead = /^\/api\/table-sessions\/([^/]+)\/analysis\/[^/]+$/.exec(url.pathname);
-      const key = analysisRead ? keyFor(analysisRead[1]!, 'analysis-read') : match ? keyFor(match[1]!, match[2] ?? 'read') : '';
+      const resourceRead = /^\/api\/table-sessions\/([^/]+)\/(analysis|summaries)\/[^/]+$/.exec(url.pathname);
+      const key = resourceRead ? keyFor(resourceRead[1]!, resourceRead[2] === 'analysis' ? 'analysis-read' : 'summary-read') : match ? keyFor(match[1]!, match[2] ?? 'read') : '';
       if (holds.delete(key)) held.push({ key, send }); else send();
     });
   });

@@ -66,7 +66,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
     if (retry && previous?.status === 'error' && dependency.observedAttempt !== previous.attemptId) { dependency.starting = false; watch(dependency, previous); return; }
     dependency.retryRequested = false;
     try {
-      const state = retry && previous?.status === 'error' ? (await analysis.retry(previous.tableSessionId, previous.requestId, dependency.input.ownerUserId))! : await analysis.getOrStart(dependency.input);
+      const state = retry && previous?.status === 'error' ? (await analysis.retry(previous.tableSessionId, previous.requestId, dependency.input.ownerUserId))! : await analysis.getOrStart(dependency.input, 'summary-analysis');
       dependency.failure = undefined; dependency.starting = false; watch(dependency, state);
     }
     catch { dependency.starting = false; dependency.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be loaded.' }; changed(dependency); await release(dependency); }

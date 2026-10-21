@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type ServerLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type HandScoreSummary, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type ServerLiveMessage } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 
@@ -73,11 +73,14 @@ test('a Hand summary evaluates its accepted human decisions and publishes readab
     const summary = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
     expect(summary).toMatchObject({ status: 'pending', decisionIds: ['hand-1/decision-1'], decisionCount: 1, capturedPokerRevision: before.pokerRevision });
     expect(summary).not.toHaveProperty('averages');
+    const readableAtNotification: Promise<HandScoreSummary>[] = [];
+    live.socket.on('message', raw => { const frame = JSON.parse(raw.toString()); if (frame.resource === 'summary' && frame.requestId === summary.requestId) readableAtNotification.push(f.summary(t, summary.requestId).then(response => response.json())); });
     await expect.poll(() => f.evaluations.length).toBe(1);
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: .25 }, { action: { type: 'call' }, probability: .25 }, { action: { type: 'raise', raiseTo: 40 }, probability: .5 }] });
     await expect.poll(() => live.messages.find(frame => frame.type === 'analysis-update' && frame.resource === 'summary' && frame.requestId === summary.requestId)).toMatchObject({ status: 'complete', attemptId: summary.attemptId });
     const complete = await (await f.summary(t, summary.requestId)).json();
     expect(complete).toMatchObject({ status: 'complete', averages: { decisionScore: .25, actionRankScore: 0 } });
+    expect(await Promise.all(readableAtNotification)).toEqual([expect.objectContaining({ status: 'complete', averages: { decisionScore: .25, actionRankScore: 0 } })]);
     expect(other.messages.some(frame => frame.type === 'analysis-update')).toBe(false);
     const frame = live.messages.find(frame => frame.type === 'analysis-update' && frame.resource === 'summary');
     expect(frame).not.toHaveProperty('averages');
@@ -89,7 +92,7 @@ test('a Hand summary evaluates its accepted human decisions and publishes readab
 test('concurrent overlapping summary requests share a global outstanding bound and continue after completion without reads', async () => {
   const f = await fixture({ jobRunnerOptions: { concurrency: 4, maximumQueued: 16 } });
   try {
-    const tables = [];
+    const tables: Awaited<ReturnType<typeof f.decision>>[] = [];
     for (let count = 0; count < 3; count++) {
       const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference); tables.push(t);
     }
@@ -161,9 +164,9 @@ test('shared runner capacity is an explicit readable summary error and missing w
 test('logical timeout and repeated Retry retain the global summary budget until old physical attempts settle', async () => {
   const f = await fixture({ jobRunnerOptions: { concurrency: 4, maximumQueued: 16, timeoutMs: 1000 } });
   try {
-    const tables = [];
+    const tables: Awaited<ReturnType<typeof f.decision>>[] = [];
     for (let index = 0; index < 3; index++) { const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference); tables.push(t); }
-    const summaries = [];
+    const summaries: HandScoreSummary[] = [];
     for (const t of tables) summaries.push(await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json());
     await expect.poll(() => f.evaluations.length).toBe(2);
     await expect.poll(() => f.evaluations[0]!.signal?.aborted, { timeout: 3000 }).toBe(true);
@@ -240,5 +243,23 @@ test('a new summary follows an active individual Retry without releasing the old
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(4);
     for (const evaluation of f.evaluations.slice(2)) evaluation.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
+  } finally { await f.close(); }
+});
+
+test('new summary members use priority 2 while a later interactive request keeps priority 1', async () => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 8 } });
+  try {
+    const target = await f.decision(); await f.command(target, 'act', { participantId: target.human, action: { type: 'fold' } });
+    const automatic = await (await f.request(target)).json(); await expect.poll(async () => (await (await f.result(target, automatic.requestId)).json()).status).toBe('complete'); await f.configure(target, reference);
+    const blocker = await f.decision(); await f.configure(blocker, reference); await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(1);
+    const summary = await (await f.post(target, 'hand-summaries', { handId: 'hand-1' })).json();
+    const interactive = await f.decision(); await f.configure(interactive, reference); await f.request(interactive);
+    f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    expect(f.evaluations[1]!.view.state.actorId).toBe(interactive.human);
+    f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
+    await expect.poll(() => f.evaluations.length).toBe(3); expect(f.evaluations[2]!.view.state.actorId).toBe(target.human);
+    f.evaluations[2]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
+    await expect.poll(async () => (await (await f.summary(target, summary.requestId)).json()).status).toBe('complete');
   } finally { await f.close(); }
 });
