@@ -209,6 +209,18 @@ export async function createServer(options: ServerOptions) {
     const state = summaries.read(request.params.id, request.params.requestId, userId);
     return state ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
   });
+  app.post<{ Params: { id: string }; Body: Record<string, never> }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request.' } });
+    try {
+      const input = await mutations.captureSessionSummary(request.params.id, userId);
+      if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+      const state = await summaries.create(input);
+      return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
+  });
   app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/hand-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });

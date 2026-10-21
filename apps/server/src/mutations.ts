@@ -12,7 +12,7 @@ import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { FrozenHandSummary } from './summaries.js';
+import type { FrozenScoreSummary } from './summaries.js';
 import { validateTrainerConfiguration } from './validation.js';
 
 type Database = ReturnType<typeof openDatabase>['db'];
@@ -466,18 +466,22 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await bots?.runner.close();
       await Promise.allSettled([...queue.values()]);
     }
-  return {
-    captureHandSummary: (id: string, ownerUserId: string, handId: string) => enqueue(id, async (): Promise<FrozenHandSummary | null | undefined> => {
+  function captureScoreSummary(id: string, ownerUserId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
+    return enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = await load(id, ownerUserId);
       const participantId = observer(session, ownerUserId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      if (!session.game.getHand(handId)) return null;
+      if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
       const view = session.game.forParticipant(participantId).getView();
-      const decisionIds = view.history.filter(hand => hand.handId === handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' || hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
       const members = decisionIds.map(decisionId => captureEvaluation(session, ownerUserId, decisionId)!);
-      return immutableData({ ownerUserId, tableSessionId: id, handId, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy, decisionIds, members });
-    }),
+      return immutableData({ ownerUserId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy, decisionIds, members });
+    });
+  }
+  return {
+    captureHandSummary: (id: string, ownerUserId: string, handId: string) => captureScoreSummary(id, ownerUserId, { scope: 'hand', handId }),
+    captureSessionSummary: (id: string, ownerUserId: string) => captureScoreSummary(id, ownerUserId, { scope: 'table-session' }),
     captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
       const session = await load(id, ownerUserId);
       const participantId = observer(session, ownerUserId);

@@ -12,9 +12,10 @@ async function request<T>(path: string, init?: RequestInit, acceptAnalysisError 
   return data as T;
 }
 export const api = {
-  createHandSummary: (id: string, handId: string) => request<import('@poker/contracts').HandScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/hand-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }, true),
-  readSummary: (id: string, requestId: string) => request<import('@poker/contracts').HandScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/summaries/' + encodeURIComponent(requestId)),
-  retrySummary: (id: string, requestId: string) => request<import('@poker/contracts').HandScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/summaries/' + encodeURIComponent(requestId) + '/retry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
+  createSessionSummary: (id: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/session-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
+  createHandSummary: (id: string, handId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/hand-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }, true),
+  readSummary: (id: string, requestId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/summaries/' + encodeURIComponent(requestId)),
+  retrySummary: (id: string, requestId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/summaries/' + encodeURIComponent(requestId) + '/retry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
   retryAnalysis: (id: string, requestId: string) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis/' + encodeURIComponent(requestId) + '/retry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
   getOrStartAnalysis: (id: string, decisionId: string, live = false) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ decisionId, ...(live ? { live: true } : {}) }) }, true),
   readAnalysis: (id: string, requestId: string) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis/' + encodeURIComponent(requestId)),

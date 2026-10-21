@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 const upstream = new URL(process.env.POKER_API_UPSTREAM ?? 'http://127.0.0.1:4011');
 const frames = new Map<string, unknown[]>();
 const dropped = new Map<string, Set<number>>();
-const sockets = new Map<WebSocket, { id: number; tables: Set<string> }>();
+const sockets = new Map<WebSocket, { id: number; tables: Set<string>; upstream?: WebSocket }>();
 let opened = 0;
 const requests = new Map<string, number>();
 const holds = new Set<string>();
@@ -41,6 +41,7 @@ const relay = http.createServer(async (request, response) => {
         if (!frame) { response.writeHead(404).end('Analysis frame not captured'); return; }
         for (const socket of sockets.keys()) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ ...(frame as object), ...(control.attemptId ? { attemptId: control.attemptId } : {}) }));
       }
+      if (control.kind === 'unsubscribe-table') for (const connection of sockets.values()) if (connection.tables.has(id) && connection.upstream?.readyState === WebSocket.OPEN) connection.upstream.send(JSON.stringify({ type: 'unsubscribe-table', tableSessionId: id, requestId: crypto.randomUUID() }));
       if (control.kind === 'disconnect') for (const [socket, connection] of sockets) if (!id || connection.tables.has(id)) socket.close();
       if (control.kind === 'status') for (const [socket, tableId] of sockets) if (tableId.tables.has(id) && socket.readyState === WebSocket.OPEN)
         socket.send(JSON.stringify({ type: 'table-status', tableSessionId: id, status: control.status }));
@@ -67,9 +68,10 @@ const relay = http.createServer(async (request, response) => {
 relay.on('upgrade', (request, socket, head) => {
   websocket.handleUpgrade(request, socket, head, client => {
     const id = /\/table-sessions\/([^/]+)\/live/.exec(request.url!)?.[1] ?? '';
-    const connection = { id: ++opened, tables: new Set(id ? [id] : []) };
+    const connection: { id: number; tables: Set<string>; upstream?: WebSocket } = { id: ++opened, tables: new Set(id ? [id] : []) };
     sockets.set(client, connection);
     const server = new WebSocket(new URL(request.url!, upstream.href.replace('http:', 'ws:')), { headers: { cookie: request.headers.cookie ?? '' } });
+    connection.upstream = server;
     const pending: string[] = [];
     server.on('open', () => { for (const message of pending) server.send(message); pending.length = 0; });
     client.on('message', data => { if (server.readyState === WebSocket.OPEN) server.send(data.toString()); else if (server.readyState === WebSocket.CONNECTING) pending.push(data.toString()); });
