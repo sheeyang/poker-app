@@ -1,3 +1,4 @@
+import { HandSummaryControls, useHandSummary } from './summaries.js';
 import { DecisionAnalysisControls, useDecisionAnalysis } from './analysis.js';
 import { AttemptRecovery } from './recovery.js';
 import { BotControls, baselineOptions } from './bots.js';
@@ -34,8 +35,12 @@ export function Playground() {
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
   const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: ({ signal }) => api.readSession(selectedId!, signal), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
   const analysis = useDecisionAnalysis(table.data);
-  const live = useTableSynchronization(selectedId, identity.isSuccess, analysis.consumers);
-  useEffect(() => { analysis.connectionChanged(live.userChannel?.generation ?? null); }, [live.userChannel?.generation, analysis.connectionChanged]);
+  const summary = useHandSummary(table.data);
+  const live = useTableSynchronization(selectedId, identity.isSuccess, {
+    onReady: lifecycle => { analysis.consumers.onReady?.(lifecycle); summary.consumers.onReady?.(lifecycle); },
+    onAnalysisUpdate: (update, lifecycle) => { analysis.consumers.onAnalysisUpdate?.(update, lifecycle); summary.consumers.onAnalysisUpdate?.(update, lifecycle); },
+  });
+  useEffect(() => { const generation = live.userChannel?.generation ?? null; analysis.connectionChanged(generation); summary.connectionChanged(generation); }, [live.userChannel?.generation, analysis.connectionChanged, summary.connectionChanged]);
   const runtimeStatus = live.runtimeStatus ?? table.data?.runtimeStatus;
   const creation = useMutation({
     mutationFn: api.createSession,
@@ -147,6 +152,7 @@ export function Playground() {
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
           <TrainerConfigurationControls key={'trainer-configuration-' + table.data.tableSessionId} table={table.data} />
           <DecisionAnalysisControls analysis={analysis} />
+          <HandSummaryControls summary={summary} />
           <BotControls table={table.data} status={runtimeStatus} />
           {live.inspectionCapabilities?.adminMode && <Inspection key={'inspection-' + table.data.tableSessionId + '-' + live.inspectionGeneration} table={table.data} capabilities={live.inspectionCapabilities} />}
           <Seating key={table.data.tableSessionId} table={table.data} />

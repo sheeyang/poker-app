@@ -4,7 +4,7 @@ import type { AnalysisUpdate, ConcreteAction, DecisionAnalysis, EvaluationIdenti
 import { baselineStrategy, immutableData, validatePolicyResult, PolicyValidationError, type Strategy } from '@poker/strategies';
 import { calculateActionProbabilities, calculateDecisionScores, scoringMethodVersion } from '@poker/research';
 import type { ObservableGameView } from '@poker/contracts';
-import { JobRunner, JobFailure, type JobPurpose } from './job-runner.js';
+import { JobRunner, JobFailure, type JobHandle, type JobPurpose } from './job-runner.js';
 import type { openDatabase } from './db/database.js';
 import { analysisEvaluations, analysisScores } from './db/schema.js';
 import { canonical } from './canonical.js';
@@ -20,6 +20,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
   const initializing = new Map<string, Promise<Entry>>();
   const retrying = new Map<string, Promise<Entry>>();
   const completions = new Set<Promise<void>>();
+  const settlements = new Map<string, Promise<void>>();
   const scores = new Map<string, Entry>();
   const initializingScores = new Map<string, Promise<Entry>>();
   const terminalWaiters = new Map<string, Set<(state: DecisionAnalysis) => void>>();
@@ -57,6 +58,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       } catch { throw new JobFailure('selection-failed'); }
       return { policyResult: { choices: policyResult.choices }, selectedAction, actionProbabilities: calculateActionProbabilities(frozen.view, policyResult.choices) };
     });
+    settlements.set(state.attemptId, handle.settled);
     if (!handle.admitted) {
       const rejected = await handle.result;
       if (current() && !rejected.ok) entry.state = immutableData({ ...state, status: 'error', error: { code: rejected.code, message: 'The computation queue could not admit this evaluation.' } });
@@ -100,7 +102,9 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       if (retryFailed && dependency.status === 'error') dependency = (await operations.retry(state.tableSessionId, dependency.requestId, entry.input.ownerUserId))!;
       if (!current()) return entry;
       entry.state = immutableData({ ...state, evaluationRequestId: dependency.requestId });
-      const completion = completeScore(entry, fingerprint, dependency);
+      let physical = Promise.resolve();
+      const completion = completeScore(entry, fingerprint, dependency, handle => { physical = handle.settled; });
+      settlements.set(state.attemptId, completion.then(async () => { await settlements.get(dependency.attemptId); await physical; }));
       completions.add(completion); void completion.finally(() => completions.delete(completion));
     } catch {
       if (current()) {
@@ -119,7 +123,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     try { return await Promise.race([terminal.promise, closing.promise.then(() => undefined)]); }
     finally { waiters.delete(terminal.resolve); if (!waiters.size) terminalWaiters.delete(requestId); }
   }
-  async function completeScore(entry: Entry, fingerprint: string, initial: DecisionAnalysis): Promise<void> {
+  async function completeScore(entry: Entry, fingerprint: string, initial: DecisionAnalysis, admitted: (handle: JobHandle<unknown>) => void): Promise<void> {
     const state = entry.state;
     const current = () => !stopped && entry.state.attemptId === state.attemptId;
     const dependency = initial.status === 'pending' ? await waitForEvaluation(initial.requestId) : initial;
@@ -128,6 +132,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     if (dependency.status !== 'complete') return;
     const input = entry.input;
     const handle = runner.submit(entry.purpose, { view: input.view, choices: dependency.evaluation.policyResult.choices, action: input.acceptedAction! }, frozen => calculateDecisionScores(frozen.view, frozen.choices, frozen.action));
+    admitted(handle);
     const result = await handle.result;
     if (!current()) return;
     if (!result.ok) entry.state = immutableData({ ...state, status: 'error', error: { code: result.code, message: 'Decision scoring could not complete.' } });
@@ -171,6 +176,16 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       return entry.state;
     },
     read,
+    async waitForSettlement(tableSessionId: string, requestId: string, ownerUserId: string, attemptId: string): Promise<void> {
+      const entry = byRequest.get(requestId);
+      if (!entry || entry.input.ownerUserId !== ownerUserId || entry.state.tableSessionId !== tableSessionId) return;
+      await settlements.get(attemptId);
+    },
+    async waitForResult(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
+      const state = await read(tableSessionId, requestId, ownerUserId);
+      if (!state || state.status !== 'pending') return state;
+      return waitForEvaluation(requestId);
+    },
     async retry(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
       if (stopped) throw new Error('Analysis is closing.');
       const entry = byRequest.get(requestId);

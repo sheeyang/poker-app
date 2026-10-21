@@ -1,3 +1,4 @@
+import { createScoreSummaries } from './summaries.js';
 import { createAnalysis } from './analysis.js';
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
 import { loadCompletedHandInspection, inspectCompletedHand } from '@poker/research';
@@ -44,7 +45,8 @@ export async function createServer(options: ServerOptions) {
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis') });
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate);
-  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); analysis.stop(); });
+  const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate);
+  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   // The user channel is independent of open table subscriptions. Analysis publishes here
@@ -190,6 +192,35 @@ export async function createServer(options: ServerOptions) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The configuration commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The configuration change could not be confirmed. Refresh its committed view.' } });
     }
+  });
+  app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/summaries/:requestId/retry', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
+    try {
+      const state = await summaries.retry(request.params.id, request.params.requestId, userId);
+      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+      return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be retried. Read its state before trying again.' } }); }
+  });
+  app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    const state = summaries.read(request.params.id, request.params.requestId, userId);
+    return state ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+  });
+  app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/hand-summaries', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply only the Hand ID.' } });
+    try {
+      const input = await mutations.captureHandSummary(request.params.id, userId, request.body.handId);
+      if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+      if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'hand-unavailable', message: 'Choose an existing Hand.' } });
+      const state = await summaries.create(input);
+      return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
   app.post<{ Params: { id: string }; Body: { decisionId: string; live?: true } }>('/api/table-sessions/:id/analysis', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);

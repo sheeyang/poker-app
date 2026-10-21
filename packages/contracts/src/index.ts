@@ -275,3 +275,17 @@ export type DecisionAnalysis = AnalysisRequestIdentity & (
   | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
 );
 export interface GetOrStartAnalysisRequest { readonly decisionId: string }
+
+/** One immutable, explicitly requested set of accepted human decisions. */
+export interface ScoreSummaryIdentity {
+  readonly ok: true; readonly tableSessionId: TableSessionId; readonly handId: HandId;
+  readonly requestId: string; readonly attemptId: string; readonly capturedPokerRevision: Revision;
+  readonly decisionIds: readonly string[]; readonly decisionCount: number; readonly referenceStrategy: StrategyDescriptor;
+}
+export type HandScoreSummary = ScoreSummaryIdentity & (
+  | { readonly status: 'empty' | 'pending' }
+  | { readonly status: 'complete'; readonly averages: ScoreAverages }
+  | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
+);
+
+export interface ScoreAverages { readonly decisionScore: number; readonly actionRankScore: number }

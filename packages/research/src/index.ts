@@ -53,3 +53,9 @@ export function inspectCompletedHand(input: CompletedHandInspectionInput): Compl
     payouts: facts.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })),
   } };
 }
+
+/** Arithmetic means over the complete declared decision set; an empty set has no score. */
+export function calculateScoreSummary(decisions: readonly Pick<DecisionScores, 'decisionScore' | 'actionRankScore'>[]): import('@poker/contracts').ScoreAverages | undefined {
+  if (!decisions.length) return undefined;
+  return { decisionScore: decisions.reduce((sum, score) => sum + score.decisionScore, 0) / decisions.length, actionRankScore: decisions.reduce((sum, score) => sum + score.actionRankScore, 0) / decisions.length };
+}
