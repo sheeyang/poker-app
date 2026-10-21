@@ -27,6 +27,7 @@ export interface TableSessionControllerCommands {
   readPersistedSession(tableSessionId: string): Promise<PersistedTableSession | undefined>;
 }
 type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot'; identity?: BotIdentity };
+interface AcceptedHumanIntent { readonly ownerUserId: string; readonly decisionId: string; readonly fingerprint: string }
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
@@ -49,12 +50,16 @@ export interface BotRuntimeOptions {
   readonly adminMode?: boolean;
   readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy;
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
+  readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
 }
 export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions) {
   const committed = new Map<string, CommittedSession>();
   const loading = new Map<string, Promise<CommittedSession | undefined>>();
   const queue = new Map<string, Promise<unknown>>();
   const recovering = new Set<string>();
+  // Only this live process remembers an unproven candidate; restart creates no analysis obligation.
+  const uncertainHumanActions = new Map<string, AcceptedHumanIntent>();
+  const actionKey = (id: string, requestId: string) => JSON.stringify([id, requestId]);
   const subscribers = new Map<string, Set<{ ownerUserId: string; publish: (update: TableLiveMessage) => void }>>();
   const statuses = new Map<string, TableRuntimeStatus['status']>();
   const work = new Map<string, { identity: BotIdentity; handle?: JobHandle<ConcreteAction> }>();
@@ -99,11 +104,14 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (fresh || statuses.get(id)?.phase !== 'recovering') publishStatus(id, { phase: 'recovering' });
   }
   async function reconcile(id: string): Promise<boolean> {
-    const attempts = (await acceptance.attempts()).filter(entry => entry.tableSessionId === id && entry.state === 'pending');
+    const attempts = (await acceptance.attempts()).filter(entry => entry.tableSessionId === id);
+    const acceptedHumans: { key: string; intent: AcceptedHumanIntent }[] = [];
     let pending = false;
     for (const attempt of attempts) {
       const status = await acceptance.status(attempt);
       if (status === 'pending') { pending = true; continue; }
+      const key = actionKey(id, attempt.requestId);
+      if (status === 'noncommit') { uncertainHumanActions.delete(key); continue; }
       if (status === 'committed') {
         // The transaction oracle and its outcome are intentionally distinct snapshots.
         const rows = attempt.kind === 'table'
@@ -112,6 +120,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (!rows[0] || rows[0].fingerprint !== attempt.fingerprint) { pending = true; continue; }
         // Restore replaces game, revisions, bindings, assignments and provenance together.
         await restore(id);
+        const intent = uncertainHumanActions.get(key);
+        if (intent && rows[0].fingerprint === intent.fingerprint && rows[0].outcome.ok) acceptedHumans.push({ key, intent });
+        else uncertainHumanActions.delete(key);
         await acceptance.forget(attempt).catch(() => {});
       }
     }
@@ -121,6 +132,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       retire(id); recovering.delete(id);
       publishCommitted(id); publishStatus(id, { phase: 'idle' });
       const session = committed.get(id); if (session) ensureBot(id, session, true);
+    }
+    const session = committed.get(id);
+    for (const { key, intent } of acceptedHumans) {
+      uncertainHumanActions.delete(key);
+      if (session) analyzeAccepted(session, intent.ownerUserId, intent.decisionId);
     }
     return true;
   }
@@ -188,6 +204,32 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   function observer(session: CommittedSession | undefined, ownerUserId: string) {
     if (!session || session.aggregate.ownerUserId !== ownerUserId) return undefined;
     return session.aggregate.bindings.find(b => b.controller.kind === 'human' && b.userId === ownerUserId)?.participantId;
+  }
+  function captureEvaluation(session: CommittedSession, ownerUserId: string, decisionId: string): FrozenEvaluationInput | null {
+    const participantId = observer(session, ownerUserId);
+    if (!participantId) return null;
+    const participant = session.game.forParticipant(participantId);
+    const current = participant.getView();
+    const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
+    let view;
+    try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
+    if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
+    const masterSeed = session.aggregate.pokerRecord.configuration.seed;
+    return immutableData({ ownerUserId, view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
+      tableSessionId: session.aggregate.tableSessionId, participantId, handId: view.state.handId, decisionId,
+      referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
+      inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
+      evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
+      selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
+      engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1', evaluationVersion: 'v1',
+    } });
+  }
+  function analyzeAccepted(session: CommittedSession, ownerUserId: string, decisionId: string) {
+    if (stopped || !bots?.onHumanActionAccepted) return;
+    try {
+      const input = captureEvaluation(session, ownerUserId, decisionId);
+      if (input?.acceptedAction) void Promise.resolve(bots.onHumanActionAccepted(input)).catch(() => {});
+    } catch { /* Derived analysis cannot change a confirmed poker outcome. */ }
   }
   function deliver(id: string, projection: (session: CommittedSession, participantId: string) => TableLiveMessage) {
     const session = committed.get(id);
@@ -281,6 +323,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         session = committed.get(id)!;
         if (authority.kind === 'bot' && authority.identity && !current(id, authority.identity)) return reject('obsolete-bot-work', 'The Bot decision changed.');
         let proposed: CommittedSession | undefined;
+        let acceptedHumanDecision: string | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
         const context = { tableSessionId: id, requestId };
         try {
@@ -315,6 +358,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
               if (!accepted.ok) result = { ok: false, rejection: accepted.rejection };
               else {
                 acceptedEvents = accepted.events;
+                if (authority.kind === 'human' && kind === 'act') acceptedHumanDecision = session.game.forParticipant((request as ActRequest).participantId).getView().state.decisionId ?? undefined;
                 const pokerRecord = working.toRecord();
                 const provenance = authority.kind === 'bot' && authority.identity ? (() => {
                   const { tableSessionId: _table, pokerRevision: _revision, ...identity } = authority.identity;
@@ -330,10 +374,16 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
-          if (proposed) { committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed); }
+          if (proposed) {
+            committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed);
+            if (authority.kind === 'human' && acceptedHumanDecision) analyzeAccepted(proposed, authority.userId, acceptedHumanDecision);
+          }
           return outcome;
         } catch (error) {
-          if (error instanceof CommitOutcomeUnknown) pause(id);
+          if (error instanceof CommitOutcomeUnknown) {
+            if (authority.kind === 'human' && acceptedHumanDecision) uncertainHumanActions.set(actionKey(id, requestId), { ownerUserId: authority.userId, decisionId: acceptedHumanDecision, fingerprint });
+            pause(id);
+          }
           throw error;
         }
     }
@@ -408,6 +458,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     function stop() {
       stopped = true;
       clearInterval(recoveryTimer);
+      uncertainHumanActions.clear();
       for (const id of work.keys()) retire(id);
     }
     async function close() {
@@ -424,20 +475,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (!session.game.getHand(handId)) return null;
       const view = session.game.forParticipant(participantId).getView();
       const decisionIds = view.history.filter(hand => hand.handId === handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
-      const participant = session.game.forParticipant(participantId);
-      const members = decisionIds.map(decisionId => {
-        const view = participant.getView({ at: { decisionId } });
-        const accepted = participant.getView().history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId)!;
-        const masterSeed = session.aggregate.pokerRecord.configuration.seed;
-        return { ownerUserId, view, acceptedAction: accepted.action.action, identity: {
-          tableSessionId: id, participantId, handId, decisionId,
-          referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
-          inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
-          evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
-          selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
-          engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1' as const, evaluationVersion: 'v1' as const,
-        } };
-      });
+      const members = decisionIds.map(decisionId => captureEvaluation(session, ownerUserId, decisionId)!);
       return immutableData({ ownerUserId, tableSessionId: id, handId, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy, decisionIds, members });
     }),
     captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
@@ -445,21 +483,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const participantId = observer(session, ownerUserId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      const participant = session.game.forParticipant(participantId);
-      const current = participant.getView();
-      const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
-      let view;
-      try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
-      if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
-      const masterSeed = session.aggregate.pokerRecord.configuration.seed;
-      return immutableData({ ownerUserId, view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
-        tableSessionId: id, participantId, handId: view.state.handId, decisionId,
-        referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
-        inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
-        evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
-        selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
-        engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1', evaluationVersion: 'v1',
-      } });
+      return captureEvaluation(session, ownerUserId, decisionId);
     }),
     read,
     subscribe,

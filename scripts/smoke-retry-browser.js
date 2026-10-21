@@ -6,7 +6,7 @@
   const click = (text, doc=document) => { const item=button(text,doc); check(item&&!item.disabled,text+' unavailable'); item.click(); };
   const request = async (path,body) => { const response=await fetch(path,body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:undefined); const data=await response.json(); check(response.ok||data.status==='error',JSON.stringify(data)); return data; };
   const transport = body=>request('/api/__transport',body);
-  const control = async kind=>(await fetch('http://127.0.0.1:3036/'+kind)).json();
+  const control = async kind=>(await fetch((globalThis.retryControl ?? 'http://127.0.0.1:3036')+'/'+kind)).json();
   const create = async()=>{ const previous=document.querySelector('.session-id')?.textContent; click('Create Table Session'); await wait(()=>document.querySelector('.session-id')?.textContent&&document.querySelector('.session-id').textContent!==previous&&document.body.textContent.includes('Live updates connected')); const id=document.querySelector('.session-id').textContent; const path='/api/table-sessions/'+id; const table=await request(path); for(const [index,binding] of table.bindings.slice(0,2).entries()) await request(path+'/seat-participant',{requestId:crypto.randomUUID(),expectedPokerRevision:index,participantId:binding.participantId,seat:index+1}); await request(path+'/start-hand',{requestId:crypto.randomUUID(),expectedPokerRevision:2}); await wait(()=>button('Evaluate current decision')&&!button('Evaluate current decision').disabled); return id; };
   const failed = (doc=document)=>doc.querySelector('.decision-analysis [role="alert"]')?.textContent.includes('failed');
   const complete = (doc=document)=>!!doc.querySelector('.evaluation-result');

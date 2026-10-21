@@ -9,7 +9,7 @@ import { createServer, type ServerOptions } from '../src/server.js';
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const administration = new Pool({ connectionString: databaseUrl });
 afterAll(() => administration.end());
-interface Evaluation { readonly view: ObservableGameView; readonly compatibilityView: ObservableGameView; readonly seed: string; readonly signal?: AbortSignal; readonly result: ReturnType<typeof Promise.withResolvers<PolicyResult>> }
+interface Evaluation { readonly view: ObservableGameView; readonly descriptor: StrategyDescriptor; readonly compatibilityView: ObservableGameView; readonly seed: string; readonly signal?: AbortSignal; readonly result: ReturnType<typeof Promise.withResolvers<PolicyResult>> }
 const fixtureStrategy = (mode: string): StrategyDescriptor => ({ policy: { id: 'fixture', version: 'v1', configuration: { mode } }, selector: { id: 'highest-probability', version: 'v1', configuration: {} } });
 async function fixture(options: Partial<ServerOptions> = {}) {
   const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -31,7 +31,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
             if (mode === 'throw') throw new Error('private seed diagnostic');
             if (mode === 'invalid') return { choices: [{ action: { type: 'call' }, probability: .2 }] };
             const result = Promise.withResolvers<PolicyResult>();
-            const evaluation = { view, compatibilityView: compatibilityView!, seed: execution.evaluationSeed, signal: execution.signal, result };
+            const evaluation = { view, descriptor, compatibilityView: compatibilityView!, seed: execution.evaluationSeed, signal: execution.signal, result };
             evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation), () => held.delete(evaluation));
             return result.promise;
           },
@@ -102,7 +102,7 @@ test('concurrent consumers share work and only the owner receives readable compl
     expect((await f.result(t, one.requestId, stranger.cookie)).status).toBe(404);
     expect((await f.result(t, one.requestId, '')).status).toBe(401);
     const atNotification: Promise<unknown>[] = [];
-    ownerLive.socket.on('message', data => { const frame = JSON.parse(data.toString()); if (frame.type === 'analysis-update') atNotification.push(f.result(t, frame.requestId).then(r => r.json())); });
+    ownerLive.socket.on('message', data => { const frame = JSON.parse(data.toString()); if (frame.type === 'analysis-update' && frame.requestId === one.requestId) atNotification.push(f.result(t, frame.requestId).then(r => r.json())); });
     await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
     await f.configure(t, highestProbabilityPlayingStrategy);
     const advanced = await f.read(t);
@@ -248,16 +248,17 @@ test('failed-only Retry preserves its immutable request while concurrent consume
     expect(states[0]).toMatchObject({ ...pending, status: 'pending', attemptId: expect.any(String) });
     expect(states[0].attemptId).not.toBe(pending.attemptId);
     expect(states[0]).not.toHaveProperty('error');
-    await expect.poll(() => f.evaluations.length).toBe(2);
-    expect(f.evaluations[1]!.view).toEqual(original.view); expect(f.evaluations[1]!.seed).toBe(original.seed);
+    await expect.poll(() => f.evaluations.length).toBe(3);
+    const retryEvaluation = f.evaluations.find(evaluation => evaluation !== original && evaluation.descriptor.policy.id === 'fixture')!;
+    expect(retryEvaluation.view).toEqual(original.view); expect(retryEvaluation.seed).toBe(original.seed);
     expect(await (await retry()).json()).toEqual(states[0]);
     const live = f.connect(t); await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
-    f.evaluations[1]!.result.resolve(distribution);
-    await expect.poll(() => live.messages.find(message => message.type === 'analysis-update')).toMatchObject({ requestId: pending.requestId, attemptId: states[0].attemptId, status: 'complete' });
+    for (const evaluation of f.evaluations) evaluation.result.resolve(distribution);
+    await expect.poll(() => live.messages.find(message => message.type === 'analysis-update' && message.requestId === pending.requestId)).toMatchObject({ requestId: pending.requestId, attemptId: states[0].attemptId, status: 'complete' });
     const complete = await (await f.result(t, pending.requestId)).json();
     expect(complete).toMatchObject({ ...states[0], status: 'complete' });
     expect(await (await retry()).json()).toEqual(complete);
-    expect(f.evaluations).toHaveLength(2); expect(await f.read(t)).toEqual(before);
+    expect(f.evaluations).toHaveLength(3); expect(await f.read(t)).toEqual(before);
     await f.restart();
     expect(await (await retry()).json()).toEqual(complete);
     expect(f.evaluations).toHaveLength(0);
