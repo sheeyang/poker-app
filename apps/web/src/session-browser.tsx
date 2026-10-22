@@ -3,32 +3,49 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@poker/client';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, defaultConfiguration } from '@poker/contracts';
 import { Icon } from './icons.js';
+import { chips } from './table-model.js';
 import { useSession, type Command } from './session.js';
 
 export function SessionBrowser({ command, ready, close }: { command: Command; ready: boolean; close?: () => void }) {
-  const [configuration, setConfiguration] = useState({ ...defaultConfiguration, minimumBuyIn: 400, defaultBuyIn: 2000, maximumBuyIn: 4000 });
-  const [players, setPlayers] = useState(6);
-  const [selector, setSelector] = useState('seeded-sampling');
-  const [reopen, setReopen] = useState('');
-  const select = useSession(s => s.select);
+  const [players, setPlayers] = useState(6), [depth, setDepth] = useState(100);
+  const [smallBlind, setSmallBlind] = useState(10), [bigBlind, setBigBlind] = useState(20), [ante, setAnte] = useState(0);
+  const [minimumBB, setMinimumBB] = useState(20), [maximumBB, setMaximumBB] = useState(200);
+  const [selector, setSelector] = useState('seeded-sampling'), [seatChanges, setSeatChanges] = useState(true);
+  const select = useSession(s => s.select), selected = useSession(s => s.selectedId);
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: ready });
   function open(id: string) { select(id); close?.(); }
-  return <main className="session-browser">
-    <div className="session-intro"><Icon name="spade" size={34} /><h1>Take a seat.</h1><p>Your table. Your decisions.<br />Play a hand, then explore the numbers.</p></div>
-    <div className="session-columns"><section className="create-session"><div className="section-heading"><h2>Set up your table</h2>{close && <button className="icon-button" aria-label="Back to table" onClick={close}><Icon name="close" /></button>}</div>
-      <form onSubmit={e => { e.preventDefault(); command.submit({ kind: 'create', body: { requestId: crypto.randomUUID(), configuration: { ...configuration, seatCount: players }, bots: Array.from({ length: players - 1 }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: selector === 'highest-probability' ? highestProbabilityPlayingStrategy : baselinePlayingStrategy })) } }); }}>
-        <fieldset disabled={command.busy || !ready}><label>Players at the table<select value={players} onChange={e => setPlayers(Number(e.target.value))}>{Array.from({ length: 8 }, (_, i) => <option value={i + 2} key={i}>{i + 2} players · you + {i + 1} {i ? 'bots' : 'bot'}</option>)}</select></label>
-          <div className="form-pair"><label>Small blind<input type="number" required min="1" step="1" value={configuration.smallBlind} onChange={e => setConfiguration({ ...configuration, smallBlind: Number(e.target.value) })} /></label><label>Big blind<input type="number" required min={configuration.smallBlind} step="1" value={configuration.bigBlind} onChange={e => setConfiguration({ ...configuration, bigBlind: Number(e.target.value) })} /></label></div>
-          <label>Buy-in · chips<input type="number" min={configuration.minimumBuyIn} max={configuration.maximumBuyIn} step="1" required value={configuration.defaultBuyIn} onChange={e => setConfiguration({ ...configuration, defaultBuyIn: Number(e.target.value) })} /></label>
-          <details className="advanced"><summary>Table rules & bot strategies</summary><div className="details-content"><div className="form-pair"><label>Minimum buy-in<input type="number" min="1" max={configuration.defaultBuyIn} required value={configuration.minimumBuyIn} onChange={e => setConfiguration({ ...configuration, minimumBuyIn: Number(e.target.value) })} /></label><label>Maximum buy-in<input type="number" min={configuration.defaultBuyIn} required value={configuration.maximumBuyIn} onChange={e => setConfiguration({ ...configuration, maximumBuyIn: Number(e.target.value) })} /></label></div><label>Ante<input type="number" min="0" required value={configuration.ante} onChange={e => setConfiguration({ ...configuration, ante: Number(e.target.value) })} /></label><label>Bot Playing Strategy<select value={selector} onChange={e => setSelector(e.target.value)}><option value="seeded-sampling">Uniform Choice · Probability Selector</option><option value="highest-probability">Uniform Choice · Highest Probability</option></select></label><label className="check-label"><input type="checkbox" checked={configuration.allowSeatChanges} onChange={e => setConfiguration({ ...configuration, allowSeatChanges: e.target.checked })} />Allow seat changes between hands</label><p className="muted">Uniform Choice is a testing baseline. It makes no claim of poker expertise.</p></div></details>
-          <button className="primary create-button" type="submit">Create table <Icon name="arrow" /></button>
+  const valid = [smallBlind, bigBlind, ante, depth, minimumBB, maximumBB].every(Number.isSafeInteger) && smallBlind > 0 && bigBlind >= smallBlind && ante >= 0 && depth >= minimumBB && minimumBB > 0 && depth <= maximumBB && Number.isSafeInteger(bigBlind * maximumBB);
+  return <main id="main-table" className="practice-home">
+    <div className="practice-heading"><div><h1>Let’s play a hand.</h1><p>Choose your table. Make your decisions. Review when you’re ready.</p></div>{close && <button className="quiet-button" onClick={close}>Back to your hand <Icon name="arrow" size={17} /></button>}</div>
+    <div className="practice-layout"><section className="practice-config" aria-labelledby="new-practice-title">
+      <h2 id="new-practice-title">Start a practice</h2>
+      <form onSubmit={e => { e.preventDefault(); if (!valid) return; command.launch({ requestId: crypto.randomUUID(), configuration: { ...defaultConfiguration, seatCount: players, smallBlind, bigBlind, ante, minimumBuyIn: bigBlind * minimumBB, defaultBuyIn: bigBlind * depth, maximumBuyIn: bigBlind * maximumBB, allowSeatChanges: seatChanges }, bots: Array.from({ length: players - 1 }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: selector === 'highest-probability' ? highestProbabilityPlayingStrategy : baselinePlayingStrategy })) }); }}>
+        <fieldset disabled={command.busy || !ready}>
+          <fieldset className="format-picker"><legend>Table size</legend><div className="format-options">{[{ n: 2, title: 'Heads-up', text: 'You + 1 bot' }, { n: 6, title: '6-max', text: 'You + 5 bots' }, { n: 9, title: 'Full ring', text: 'You + 8 bots' }].map(f => <label key={f.n} className={players === f.n ? 'format-selected' : ''}><input type="radio" name="format" checked={players === f.n} onChange={() => setPlayers(f.n)} /><strong>{f.title}</strong><span>{f.text}</span></label>)}</div></fieldset>
+          <fieldset className="depth-picker"><legend>Starting stack</legend><div className="depth-options">{[50, 100, 200].map(n => <button type="button" key={n} aria-pressed={depth === n} onClick={() => setDepth(n)}>{n} BB</button>)}</div></fieldset>
+          <details className="practice-custom"><summary>Customize table & bots</summary><div className="details-content"><div className="form-pair"><label>Players<select value={players} onChange={e => setPlayers(Number(e.target.value))}>{Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 2}>{i + 2} players</option>)}</select></label><label>Starting stack · BB<input required type="number" min={minimumBB} max={maximumBB} step="1" value={depth} onChange={e => setDepth(Number(e.target.value))} /></label></div><div className="form-pair"><label>Small blind<input required type="number" min="1" step="1" value={smallBlind} onChange={e => setSmallBlind(Number(e.target.value))} /></label><label>Big blind<input required type="number" min={smallBlind} step="1" value={bigBlind} onChange={e => setBigBlind(Number(e.target.value))} /></label></div><div className="form-pair"><label>Minimum buy-in · BB<input required type="number" min="1" max={depth} step="1" value={minimumBB} onChange={e => setMinimumBB(Number(e.target.value))} /></label><label>Maximum buy-in · BB<input required type="number" min={depth} step="1" value={maximumBB} onChange={e => setMaximumBB(Number(e.target.value))} /></label></div><label>Ante<input required type="number" min="0" step="1" value={ante} onChange={e => setAnte(Number(e.target.value))} /></label><label>Bot action selection<select value={selector} onChange={e => setSelector(e.target.value)}><option value="seeded-sampling">Sample the probability distribution</option><option value="highest-probability">Choose the highest probability</option></select></label><label className="check-label"><input type="checkbox" checked={seatChanges} onChange={e => setSeatChanges(e.target.checked)} />Allow seat changes between hands</label></div></details>
+          <div className="practice-preview"><span>No-limit Hold’em · {players} players</span><strong>{chips(bigBlind * depth)} chips each <span>· {chips(smallBlind)} / {chips(bigBlind)} blinds</span></strong><p>Everyone is seated for you. Starts the first hand.</p></div>
+          <button className="primary start-practice" type="submit" disabled={!valid}>{command.busy ? 'Preparing your table…' : 'Start practice'}<Icon name="arrow" size={19} /></button>
         </fieldset>
-      </form><p className="form-note">No-limit Texas Hold’em · Chip amounts are integer units.</p>
+      </form>
+      <p className="baseline-note"><Icon name="info" size={16} /><span>Bots use the Uniform Choice testing strategy. Scores compare your play with a reference; they don’t measure poker skill.</span></p>
     </section>
-    <section className="saved-sessions"><h2>Return to a table</h2><p className="muted">Seats and stacks stay with your Table Session.</p>{sessions.isLoading && <div className="skeleton" role="status">Loading your tables…</div>}{sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
-      {sessions.data?.tableSessionIds.length === 0 && <div className="empty-sessions"><Icon name="tables" size={30} /><strong>Your first table starts here.</strong><p>Create a table and come back to it anytime in this browser.</p></div>}
-      <ul className="session-list">{sessions.data?.tableSessionIds.map((id, i) => <li key={id}><button onClick={() => open(id)}><span><strong>Table Session {i + 1}</strong><small>{id.slice(-12)}</small></span><Icon name="arrow" size={18} /></button></li>)}</ul>
-      <form className="reopen-form" onSubmit={e => { e.preventDefault(); if (reopen.trim()) open(reopen.trim()); }}><label>Reopen with a Table Session ID<input placeholder="Paste your session ID" value={reopen} onChange={e => setReopen(e.target.value)} /></label><button type="submit" disabled={!ready || !reopen.trim()}>Open table</button></form>
+    <section className="practice-return" aria-labelledby="return-title"><h2 id="return-title">Pick up where you left off</h2><p className="muted">Your cards, seats and stacks are saved in this browser.</p>
+      {sessions.isLoading && <p className="muted" role="status">Finding your tables…</p>}
+      {sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
+      {sessions.data?.tableSessionIds.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>Your first hand is ahead of you.</h3><p>Start a practice. Come back here to continue any time.</p></div>}
+      <ul className="return-list">{sessions.data?.tableSessionIds.map(id => <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
+      <p className="return-note">Leaving the table pauses your play. You can return to an unfinished hand.</p>
     </section></div>
   </main>;
+}
+
+function SavedTable({ id, selected, open }: { id: string; selected: boolean; open: () => void }) {
+  const table = useQuery({ queryKey: ['table-session', id], queryFn: ({ signal }) => api.readSession(id, signal) });
+  const data = table.data;
+  if (!data) return <li className="saved-table"><p className="muted">{table.isError ? 'This saved table couldn’t be read.' : 'Reading saved table…'}</p>{table.isError && <button className="text-button" onClick={() => void table.refetch()}>Retry</button>}</li>;
+  const human = data.bindings.find(b => b.controller.kind === 'human');
+  const participant = data.view.state.participants.find(p => p.participantId === human?.participantId);
+  const size = data.view.configuration.seatCount;
+  return <li className="saved-table"><button onClick={open}><span className="saved-table-copy"><strong>{size === 2 ? 'Heads-up' : `${size}-player`} Hold’em{selected && <small>Current table</small>}</strong><span>{chips(data.view.configuration.smallBlind)} / {chips(data.view.configuration.bigBlind)} blinds · {data.view.history.filter(h => h.result).length} {data.view.history.filter(h => h.result).length === 1 ? 'hand' : 'hands'} completed</span><span className="saved-table-state">{data.view.state.status === 'active-hand' ? 'Hand in progress' : 'Between hands'}{participant && ` · Your stack ${chips(participant.stack)}`}</span></span><span className="resume-label">Continue <Icon name="arrow" size={17} /></span></button></li>;
 }

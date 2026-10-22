@@ -16,14 +16,14 @@ export function PokerTable({ table, events, animate, eventCount, openSettings }:
   const boardDeal = animate && events.some(e => e.type === 'board-dealt');
   const payouts = state.payouts ?? [];
   const winners = payouts.map(p => `${table.bindings.find(b => b.participantId === p.participantId)?.controller.kind === 'human' ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name} +${chips(p.amount)}`);
-  return <section className="table-stage" aria-label="Poker table">
+  return <section className={`table-stage ${count > 6 ? 'dense-table' : ''}`} aria-label="Poker table">
     <div className="table-felt" aria-hidden="true"><div className="felt-inset" /></div>
     <div className="table-center">
       <div className="table-wordmark"><Icon name="spade" size={18} /><span>NO-LIMIT HOLD’EM</span></div>
       {hasHand ? <>
         <div className="pot-label">{state.status === 'completed-hand' ? 'Settled pot' : 'Total pot'} <strong>{chips(potTotal(state))}</strong><span>chips</span></div>
         <div className="board" aria-label="Community cards">{Array.from({ length: 5 }, (_, i) => state.board[i] ? <Card key={`${state.handId}-${i}-${boardDeal ? eventCount : 0}`} card={state.board[i]} dealing={boardDeal} /> : <span key={i} className="card-slot" aria-hidden="true" />)}</div>
-        {state.pots.length > 1 && <div className="side-pots">{state.pots.map((p, i) => <span key={i}>{i === 0 ? 'Main' : `Side ${i}`} {chips(p.amount)}</span>)}</div>}
+        {state.pots.length > 1 && (state.status === 'completed-hand' || state.participants.some(p => p.allIn) && state.pots.reduce((sum, p) => sum + p.amount, 0) === potTotal(state)) && <div className="side-pots">{state.pots.map((p, i) => <span key={i}>{i === 0 ? 'Main' : `Side ${i}`} {chips(p.amount)}</span>)}</div>}
         <div className="deck-area" aria-label="Deck and face-down burn pile"><Card small /><span className="burn-pile">{state.board.length > 0 && <Card small />}</span>{burn && <span key={eventCount} className="burn-moving"><Card small /></span>}</div>
         {winners.length > 0 && <p className="payout-label" role="status">{winners.join(' · ')}</p>}
       </> : <div className="table-ready"><strong>A place at the table.</strong><p>Seat your players, then deal the first hand.</p></div>}

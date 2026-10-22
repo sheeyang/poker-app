@@ -44,3 +44,40 @@ motion uses safe events and never controls confirmed state or legal actions.
 Local review captures are in `.impeccable/review/` (ignored development evidence).
 ADR-0028 records the product interaction and authority decisions. The design
 system is captured separately in root `DESIGN.md` and `.impeccable/design.json`.
+
+## UX revision
+
+The user rejected the initial interface as a styled Playground. The original
+visual review above did not establish that the product journey was sufficient.
+ADR-0028 now records the revised choose → play → review → continue sequence.
+
+Start practice seats the full lineup and explicitly deals its first Hand from one
+player gesture. Saved tables use observable game metadata rather than IDs. A
+visible completed-Hand recap leads into street-specific review with safe cards;
+manual selections remain pinned as subsequent Hands advance. Reference settings
+sit below the comparison. Rebuy & deal identifies and restores empty human/Bot
+stacks while preserving intentionally removed or sitting-out opponents. Advanced
+table administration stays outside the normal play loop.
+
+Revision verification:
+
+- Web TypeScript check, production build and workspace boundaries pass.
+- Two frontend test files pass: eight tests, including resumed seating,
+  duplicate-deal prevention, busted-opponent recovery and sitting-out behavior.
+- Real server: Start practice reaches a playable six-player Hand without manual
+  seating; Fold produces a visible recap and complete numerical summary.
+- Rebuy & deal replenishes a busted opponent and starts Hand 2 while Hand 1 review
+  stays pinned with its original cards and action.
+- At 390×844, active betting controls occupy y=520–744 and the document has no
+  horizontal overflow. Opening review focuses the panel at y=12; closing it returns
+  to play. Nine-player seating also completes from Start practice.
+- Desktop and mobile lobby, active play, completed Hand and contextual review
+  captures are stored under `.impeccable/review/` as local development evidence.
+- One mechanical scan exited 0 with advisory design-system documentation drift
+  (color, font-size and radius values); its verbose output was truncated. This is
+  not a claim of a clean scan. No second scan or unrelated drift repair was done.
+- Independent UX verdict: **ship** for the seven scored fixes (first run,
+  Hand completion, decision context, mobile use, repeat play, resumption and
+  numerical meaning). This verdict covers that fix list, not a new whole-product
+  usability study. DESIGN.md and the local schema2 sidecar now document the
+  revised patterns while preserving the incumbent tokens.

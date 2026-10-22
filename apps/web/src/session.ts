@@ -20,6 +20,8 @@ interface SessionState {
   pending: Attempt | null;
   analysisOpen: boolean;
   animations: boolean;
+  setup: { requestId: string; tableId?: string; paused?: string; afterHandId?: string | null } | null;
+  setSetup: (setup: SessionState['setup']) => void;
   select: (id: string | null) => void;
   setPending: (pending: Attempt | null) => void;
   toggleAnalysis: () => void;
@@ -27,7 +29,8 @@ interface SessionState {
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  selectedId: null, pending: null, analysisOpen: false, animations: true,
+  selectedId: null, pending: null, analysisOpen: false, animations: true, setup: null,
+  setSetup: setup => set({ setup }),
   select: selectedId => set({ selectedId }),
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
@@ -60,6 +63,8 @@ export function useCommand() {
     onSuccess: async (result, attempt) => {
       setPending(null);
       if (attempt.kind === 'create') {
+        const setup = useSession.getState().setup;
+        if (setup?.requestId === attempt.body.requestId) useSession.getState().setSetup({ ...setup, tableId: result.tableSessionId });
         select(result.tableSessionId);
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       }
@@ -74,6 +79,12 @@ export function useCommand() {
     pending, error: mutation.error, busy: mutation.isPending || !!pending, sending: mutation.isPending,
     submit: (attempt: Attempt) => {
       if (useSession.getState().pending || mutation.isPending) return;
+      setPending(attempt); mutation.mutate(attempt);
+    },
+    launch: (body: CreateTableSessionRequest) => {
+      if (useSession.getState().pending || mutation.isPending) return;
+      useSession.getState().setSetup({ requestId: body.requestId });
+      const attempt: Attempt = { kind: 'create', body };
       setPending(attempt); mutation.mutate(attempt);
     },
     run: async (attempt: Attempt) => {

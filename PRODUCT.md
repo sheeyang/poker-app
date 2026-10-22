@@ -47,8 +47,10 @@ claim of poker expertise or Solver quality.
 
 ## Operating Context
 
-- Create or reopen an owned Table Session, choose its Observable Game Configuration
-  and Bot Playing Strategies, and seat the human and Bots with valid buy-ins.
+- Start practice from table-size and starting-stack presets; the explicit gesture
+  creates the Table Session, seats the human and Bots and starts its first Hand.
+  Custom rules and Bot Playing Strategies remain available through progressive
+  disclosure. Reopen saved tables using observable stakes, stack and play state.
 - Explicitly start each Hand. Submit the human's legal Fold, Check, Call, Bet-to or
   Raise-to action; the authoritative server runs Bot decisions.
 - Observe cards, stacks, turn, bets, pots, showdown and payouts. Manage Participants
@@ -57,9 +59,9 @@ claim of poker expertise or Solver quality.
 - Select a complete Reference Strategy independently of Bot assignments. Optional
   Live Analysis exposes its numerical outputs before the human acts; Live Analysis
   defaults to off. Every accepted human decision triggers nonblocking analysis.
-- Review post-action results. The established M3 intent is a Hand summary after a
-  Hand ends and a Table Session summary when the user finishes the session; the
-  precise product interactions and feedback timing remain to be designed.
+- Review the visible Hand recap after completion, then choose a street-labeled
+  decision to inspect its captured cards and numerical reference. Manual reviews
+  stay selected as play advances. Finish & review captures a Table Session summary.
 - Retain confirmed state through loading, failure, uncertain outcomes, reload and
   reconnect. Offer specific recovery actions and explicit Retry where supported.
 

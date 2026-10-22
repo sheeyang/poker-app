@@ -50,3 +50,25 @@ and the user's animation preference disable motion without changing gameplay.
 General historical navigation, replay, counterfactual comparison, range and equity
 tools remain M4. This decision extends ADR-0017, ADR-0022 and ADR-0026; earlier
 milestone numbers in those documents do not change the current six-milestone plan.
+
+## UX revision after product feedback
+
+The first implementation retained too much engineering workflow. The user rejected
+it as a styled copy of Playground. The revised task sequence is **choose a table →
+play → review → continue**. Classic materials and table-led composition remain.
+
+- Start practice provides table-size and BB stack presets. The one explicit gesture
+  authorizes creation, default seating and the first Start Hand. The durable setup
+  intent resumes from confirmed state and never deals twice after reload.
+- Repeat play identifies exhausted stacks and offers a focused Rebuy & deal;
+  intentionally removed/sitting-out opponents are preserved. Every following Hand
+  still requires an explicit deal gesture.
+- Completed-Hand review is visible outside the collapsed panel, next to continuation.
+  Decisions carry Hand/street/action and the safe cards at that decision. A manual
+  selection remains pinned as play advances; Return to latest restores following.
+- Saved tables show observable stakes, players, completed-Hand count, progress and
+  the human stack. Session IDs are secondary details, not navigation labels.
+- The mobile table is composed around seeing cards and actions together. Review
+  focuses/scrolls to analysis, and closing review returns to the play controls.
+- Table administration and reference settings remain accessible through progressive
+  disclosure. Shared transport does not determine the product journey.
