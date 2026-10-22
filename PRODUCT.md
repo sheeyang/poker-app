@@ -1,73 +1,175 @@
-# Poker Playground product context
+# Poker product context
 
-## Purpose and audience
+<!-- impeccable:product-schema 1 -->
 
-Poker Playground is the enduring engineering interface for exercising the Poker
-Engine and authoritative server before their separate Trainer and Research Lab
-experiences are designed. Its M1 audience is a developer or local Table Owner
-validating poker rules, participant visibility, persistence, recovery and Bot
-behavior. It is an Operate interface: users perform explicit operations and inspect
-the resulting confirmed state.
+## Platform
 
-The product thesis is to let a local Table Owner exercise authoritative poker
-behavior and understand confirmed state and actionable failures. Scope comes from
-the [M1 specification](docs/specs/m1-playable-engine-server-playground.md), the
-[current milestone plan](docs/milestones.md), [ADR-0022](docs/adr/0022-maintain-an-independent-playground.md)
-and the terminology in [GLOSSARY.md](GLOSSARY.md). The [README](README.md) describes
-local setup and protocols.
+web
 
-## M1 workflow
+## Users
 
-1. Establish a local browser identity and create or reopen an owned Table Session.
-2. Choose fixed observable configuration and baseline Bot Playing Strategies, then
-   seat the human and Bots with valid buy-ins.
-3. Explicitly Start Hand. Submit the human's current legal Fold, Check, Call,
-   Bet-to or Raise-to; the server runs the acting Bot's Strategy when needed.
-4. Observe committed cards, stacks, pots, payouts and poker/session revisions.
-   Complete views synchronize reads, reloads and live reconnects.
-5. Manage Participants between Hands: sit out/return, move, cash out/reseat,
-   top up/rebuy, and select the next button. Explicitly start each next Hand.
-6. When an attempt is uncertain, retain confirmed state and explicitly check its
-   outcome. Confirmed noncommit permits a deliberate new attempt; Bot failures
-   offer Retry or a Playing Strategy change.
-7. In enabled Admin Mode, explicitly select and reveal one completed Hand's deal
-   and payout facts independently of current play.
+The primary users are poker players studying their decisions on desktop and
+mobile browsers. They play Texas Hold'em against Bots and examine numerical
+outputs from a selected Reference Strategy. This audience and both device classes
+were confirmed during M3 initialization; a specific skill level or need for
+instruction in poker basics has not been established.
 
-The local Fastify server and PostgreSQL own authorization, accepted mutations,
-durable outcomes and restoration. The browser identity cookie establishes Table
-Ownership; browser storage only remembers the selected session. Baseline
-Strategies are testing controls with no claim of poker expertise.
+Developers validate platform capabilities through the independent
+[Playground UI](apps/playground/PRODUCT.md), whose engineering context lives in
+its own app. Playground controls and visual conventions do not determine the
+participant-facing Trainer experience.
 
-## Information and interaction constraints
+## Product Purpose
 
-Normal views, historical observations, presentation events and Policy inputs stay
-Participant-safe. A missed Hand does not enter an absent Participant's normal
-history or event stream after rejoining. Privileged inspection requires Table
-Ownership, enabled Admin Mode and Hand completion; it never expands earlier
-observations or Policy inputs. Hidden seeds and authoritative game objects remain
-server-side.
+Let a human play no-limit Hold'em Cash Game Hands against strategy-controlled
+Participants and study how their concrete decisions align with a chosen Reference
+Strategy. The Trainer supplies numerical evidence for the player's interpretation
+without prescribing an action or labeling a decision good or bad.
 
-Keep confirmed state visible during loading, failure and recovery. Use clear
-labels, legal bounds, visible disabled states and specific next actions. Status
-feedback can change independently of committed gameplay revisions. Presentation
-events support optional rendering; the complete view remains the synchronization
-authority.
+M3 introduces the main product interface in `apps/web` for capabilities established
+through M1 and M2. Success means the player can configure and continue a Table
+Session, play legal actions, understand confirmed table state, and inspect Strategy
+outputs and alignment results on desktop and mobile. Analysis and presentation
+must not delay gameplay or make its correctness depend on an animation.
 
-## Established interface
+## Positioning
 
-Preserve the incumbent neutral engineering UI: system sans text, a light gray-green
-ground (`#f3f5f2`), white work surfaces, dark green actions (`#19553e`), and labeled
-native inputs/selects. Cards use concise rank/suit text as data. This records the
-existing M1 interface and does not establish a new brand or visual direction.
+Bot Playing Strategies and the human-selected Reference Strategy are independent.
+Players can study a Reference Strategy's complete Policy distribution, concrete
+sizings and selected action alongside their own accepted decision. A sampled
+Reference action is distinct from the distribution and need not have its highest
+probability.
 
-The desktop first viewport contains the title and identity status, configuration
-and reopen controls, and the Table Session work area. Narrow screens stack these
-in document order. The work area groups the current Hand and legal actions before
-Bot configuration, completed-Hand inspection, seating and between-Hand management.
-Prioritize legible hierarchy, responsive reflow and safe information separation.
+Decision Score and Action Rank Score measure Policy alignment. They do not measure
+EV, regret, accuracy, objective strategic quality or long-run frequency calibration.
+The currently implemented baseline Strategies are testing controls and support no
+claim of poker expertise or Solver quality.
 
-M1 is local development with one authoritative server process. Product accounts,
-online multiplayer, publication/deployment and multi-server coordination are outside
-its scope. The main product interface, polished product UX and animations are
-deferred to M3 in the current milestone plan. Trainer analysis, deeper replay and
-Research, Solver execution and mass simulation follow their later milestones.
+## Operating Context
+
+- Create or reopen an owned Table Session, choose its Observable Game Configuration
+  and Bot Playing Strategies, and seat the human and Bots with valid buy-ins.
+- Explicitly start each Hand. Submit the human's legal Fold, Check, Call, Bet-to or
+  Raise-to action; the authoritative server runs Bot decisions.
+- Observe cards, stacks, turn, bets, pots, showdown and payouts. Manage Participants
+  and stacks between Hands, including sit out/return, seat changes, top-ups and
+  rebuys when permitted by the configuration.
+- Select a complete Reference Strategy independently of Bot assignments. Optional
+  Live Analysis exposes its numerical outputs before the human acts; Live Analysis
+  defaults to off. Every accepted human decision triggers nonblocking analysis.
+- Review post-action results. The established M3 intent is a Hand summary after a
+  Hand ends and a Table Session summary when the user finishes the session; the
+  precise product interactions and feedback timing remain to be designed.
+- Retain confirmed state through loading, failure, uncertain outcomes, reload and
+  reconnect. Offer specific recovery actions and explicit Retry where supported.
+
+The existing implementation runs locally with Fastify and PostgreSQL. A
+server-issued browser identity establishes Table Ownership; browser storage only
+remembers the selected session. The current setup is documented in
+[README.md](README.md) and [local development](docs/local-development.md).
+Desktop and mobile browser support is the M3 product target; remote access,
+deployment and account requirements have not been established by this init.
+
+## Capabilities and Constraints
+
+### Product and engineering boundaries
+
+`apps/web` is the planned M3 product app and is not yet scaffolded. The existing
+browser app uses React/Vite, TanStack Router and Query, Zustand and Tailwind in a
+pnpm/TypeScript workspace. This init does not choose a different stack or create
+the app. Both browser apps consume safe Contracts from the authoritative server;
+they must not import the Poker Engine or server-only Research implementations.
+
+The Playground remains an enduring, independent engineering interface. Later
+capabilities are validated there before their product experiences are introduced.
+Use the terms in [GLOSSARY.md](GLOSSARY.md).
+
+### Play, visibility and presentation
+
+- Complete Observable Game Views synchronize the interface. Participant-safe
+  presentation events support animations without becoming authoritative state.
+- M3 includes card-dealing and face-down burn animations. Opponents' hidden cards
+  and burn-card identities remain hidden. Skipped or missed animations must still
+  leave the client synchronized, including after reconnect.
+- Hidden seeds, authoritative game objects and privileged information remain
+  server-side. Completed-Hand inspection requires Table Ownership, enabled Admin
+  Mode and Hand completion, and does not expand ordinary Participant observations
+  or Policy inputs.
+- Legal Bet-to and Raise-to amounts are exact integer total commitments for the
+  current betting street. The interface must respect server-provided legality and
+  bounds, including all-ins and reopening rules.
+- Analysis and feedback never gate acceptance of a legal human action. Every normal
+  next Hand still requires an explicit Start Hand operation.
+
+### Trainer analysis
+
+- Preserve [ADR-0008's presentation contract](docs/adr/0008-derive-trainer-scoring-from-policy.md):
+  an always-expanded action tree with aggregated action probabilities and exact
+  Bet/Raise sizing children showing unconditional Choice probabilities. Show the
+  Policy distribution alongside the Action Selector's selected concrete action.
+- Display probabilities as `0.00–1.00` and scores as `/100`, with Decision Score
+  primary and Action Rank Score secondary. The frontend presents server-computed
+  results rather than implementing another scoring formula.
+- Hand and Table Session summaries freeze a decision set and one complete
+  Reference Strategy. Show complete averages only after all required analyses
+  succeed. Pending and failed results never become zero or a partial average;
+  failure takes precedence over pending. No human decisions means no score.
+- Keep results associated with the decision and Reference Strategy that produced
+  them as play advances or preferences change. Explicit failed-only Retry preserves
+  the original inputs and seeds; changing the reference creates a different request.
+- HTTP supplies numerical results and summaries. The shared browser WebSocket
+  supplies authorized table updates and analysis notifications; initial readiness
+  and reconnect reconcile relevant state without normal-operation polling.
+
+### Milestone scope
+
+The [current milestone plan](docs/milestones.md) places the full Trainer interface,
+feedback timing, loading/error/retry states and dealing/burn presentation in M3.
+General history navigation, action-by-action replay, counterfactual comparison,
+Range Visualizer, Equity / Poker Math Overlay and overall-history summaries belong
+to M4. Solver work belongs to M5; mass simulation and benchmarking belong to M6.
+
+Some older ADRs use an earlier milestone numbering scheme. Use the current
+six-milestone plan for delivery order while preserving their underlying decisions.
+M3 still needs its product UI/UX and animation extension ADR during specification;
+this product record does not replace that decision record.
+
+## Evidence on Hand
+
+- [Current milestone plan](docs/milestones.md): M3 scope and subsequent milestones.
+- [M2 specification](docs/specs/m2-numerical-trainer-analysis.md): existing Trainer
+  behavior and the boundaries of product presentation work.
+- [ADR-0006](docs/adr/0006-treat-analysis-as-derived-data.md),
+  [ADR-0008](docs/adr/0008-derive-trainer-scoring-from-policy.md) and
+  [ADR-0026](docs/adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md):
+  derived analysis, numerical meaning, presentation requirements and summaries.
+- [ADR-0017](docs/adr/0017-bind-observability-with-participant-cash-game.md) and
+  [ADR-0022](docs/adr/0022-maintain-an-independent-playground.md): safe views and
+  events, and the independent Playground.
+- [Existing Playground code](apps/playground/src/main.tsx) and server/contracts:
+  implemented behavior and testable data, rather than a final product visual system.
+- The M3 init confirms the audience, desktop/mobile use, and separation of root
+  product context from Playground context. No primary user research, usability
+  findings, market claims or product brand assets were established in this init.
+
+## Product Principles
+
+1. Preserve player agency: present numerical Strategy evidence without advice or
+   evaluative judgments.
+2. Keep play authoritative and continuous: confirmed server state governs the
+   table, independently of animation and analysis completion.
+3. Make analysis interpretable: distinguish probabilities, selected actions,
+   scores, references and incomplete results.
+4. Protect information boundaries in every state, including animation, recovery
+   and completed-Hand inspection.
+5. Support the complete play-and-study workflow on desktop and mobile while
+   keeping engineering validation independent of the product experience.
+
+## Open Decisions
+
+- Final product name, voice and binding brand assets or commitments.
+- Exact post-action feedback timing and the product interaction for finishing a
+  Table Session and viewing its summary, within existing nonblocking constraints.
+- Depth of terminology help and onboarding for the intended poker-player audience.
+- Specific accessibility requirements or conformance targets beyond the existing
+  requirement that optional presentation must not govern gameplay correctness.
