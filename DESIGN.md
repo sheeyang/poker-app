@@ -1,0 +1,224 @@
+---
+name: Poker Trainer
+description: A classic cardroom for focused play and numerical study.
+colors:
+  ground: "#141e1b"
+  surface: "#1b2824"
+  raised: "#25342e"
+  line: "#35453d"
+  muted: "#a4b5a9"
+  text: "#e8ede7"
+  gold: "#ddc28b"
+  gold-hover: "#ecd7ab"
+  gold-active: "#c5a96f"
+  primary-text: "#243025"
+  felt: "#205b46"
+  field: "#17231e"
+  control-line: "#46594d"
+  control-hover: "#304238"
+  control-active: "#3b4d42"
+  card-paper: "#f5f2e7"
+  card-ink: "#1b2b24"
+  card-red: "#b13c36"
+  probability-call: "#90b8c9"
+  probability-fold: "#c8a79a"
+  probability-check: "#a4c3b0"
+  probability-aggression: "#d5bc88"
+  seat: "#202e27"
+  tag: "#2d4031"
+  tag-text: "#c1cfb9"
+typography:
+  display:
+    fontFamily: '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif'
+    fontSize: "2.7rem"
+    fontWeight: 500
+    letterSpacing: "-.025em"
+  headline:
+    fontFamily: '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif'
+    fontSize: "1.7rem"
+    fontWeight: 650
+    letterSpacing: "-.025em"
+  title:
+    fontFamily: '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif'
+    fontSize: "1.25rem"
+    fontWeight: 600
+    letterSpacing: "-.015em"
+  body:
+    fontFamily: '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif'
+    fontSize: "1rem"
+    fontWeight: 400
+    lineHeight: 1.6
+  label:
+    fontFamily: '"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif'
+    fontSize: ".86rem"
+    fontWeight: 600
+  card-index:
+    fontFamily: 'Georgia, "Times New Roman", serif'
+    fontSize: "1.25rem"
+    fontWeight: 700
+    lineHeight: .9
+rounded:
+  tag: "4px"
+  card: "5px"
+  field: "7px"
+  control: "8px"
+  container: "12px"
+  dialog: "16px"
+  round: "50%"
+spacing:
+  compact: "4px"
+  xs: "8px"
+  sm: "12px"
+  md: "16px"
+  section: "20px"
+  lg: "24px"
+  xl: "32px"
+  page: "36px"
+components:
+  button-primary:
+    backgroundColor: "{colors.gold}"
+    textColor: "{colors.primary-text}"
+    rounded: "{rounded.control}"
+    padding: "9px 16px"
+  button-primary-hover:
+    backgroundColor: "{colors.gold-hover}"
+    textColor: "#162119"
+  button-primary-active:
+    backgroundColor: "{colors.gold-active}"
+  button-secondary:
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.control}"
+    padding: "9px 16px"
+  button-secondary-hover:
+    backgroundColor: "{colors.control-hover}"
+  button-quiet:
+    backgroundColor: "transparent"
+    textColor: "{colors.text}"
+    rounded: "{rounded.control}"
+    padding: "9px 16px"
+  button-text:
+    backgroundColor: "transparent"
+    textColor: "{colors.gold}"
+    padding: "4px 0"
+  field:
+    backgroundColor: "{colors.field}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.field}"
+    padding: "10px 12px"
+  navigation:
+    backgroundColor: "transparent"
+    textColor: "{colors.muted}"
+    padding: "0 2px"
+  tag:
+    backgroundColor: "{colors.tag}"
+    textColor: "{colors.tag-text}"
+    rounded: "{rounded.tag}"
+    padding: "3px 6px"
+  seat:
+    backgroundColor: "{colors.seat}"
+    textColor: "{colors.text}"
+    rounded: "{rounded.container}"
+    padding: "11px"
+  playing-card:
+    backgroundColor: "{colors.card-paper}"
+    textColor: "{colors.card-ink}"
+    rounded: "{rounded.card}"
+    width: "55px"
+    height: "78px"
+---
+
+# Design System: Poker Trainer
+
+## Overview
+
+**Creative North Star: "The Classic Cardroom"**
+
+Green felt, a charcoal-green shell, ivory cards and brass controls establish a familiar poker room. Compact interface typography and restrained material detail keep the experience focused and legible. The cards are the brightest objects; surrounding surfaces recede.
+
+This system belongs to the participant-facing Trainer. Its visual authority is the implemented `apps/web` interface and the confirmed classic poker-room direction in PRODUCT.md. The independent Playground has its own design context.
+
+**Key Characteristics:**
+
+- Dark green tonal surfaces with warm brass interaction accents.
+- Ivory playing cards with conventional serif indices and suit colors.
+- Compact system typography, clear borders and tabular numerical data.
+- Shallow material depth and brief, optional presentation motion.
+
+## Colors
+
+The palette combines subdued cardroom greens with warm controls and differentiated numerical data. Frontmatter values are normative; the sidecar supplies display metadata and preview ramps.
+
+### Primary
+
+- **Brass:** `gold`, `gold-hover` and `gold-active` identify primary controls, active navigation and focus. Dark primary text preserves their solid, tactile appearance.
+- **Cardroom Felt:** `felt` supplies the playing surface, distinct from the darker surrounding shell.
+
+### Secondary
+
+- **Probability accents:** cool blue for Call/default, dusty rose for Fold, pale sage for Check and muted brass for Bet/Raise. These distinguish action types without declaring a preferred choice.
+
+### Neutral
+
+- **Charcoal green:** `ground`, `surface` and `raised` separate shell, containers and controls; `line` provides quiet structure.
+- **Soft ivory and sage:** `text` carries primary content; `muted` carries supporting context.
+- **Playing-card stock:** `card-paper` carries dark indices; `card-red` differentiates hearts and diamonds. Reserve the light stock for physical card surfaces.
+- **Control surfaces:** `field`, `control-line`, `control-hover` and `control-active` distinguish editable and interactive elements. Seat and tag tones remain within the same green family.
+
+**The Brightest Object Rule.** Keep large surrounding surfaces dark so ivory playing cards retain the strongest light contrast.
+
+## Typography
+
+**Body and interface font:** Segoe UI with platform system sans fallbacks. **Card font:** Georgia with Times New Roman and serif fallbacks. No downloaded font is required.
+
+The pairing is compact and familiar: neutral interface text surrounds conventional printed card indices. The root size is (14px); prose uses a relaxed line height and a maximum width of (70ch).
+
+- **Display:** entry-page heading; reduces to (2.2rem) on small screens.
+- **Headline / title:** page and section headings, using the frontmatter's slightly tightened spacing.
+- **Body / label:** readable prose and semibold field labels; supporting metadata uses smaller, quieter text.
+- **Card index:** bold serif rank above its suit, with a mirrored lower index on full-size cards.
+- **Numerical emphasis:** stacks, pots, probabilities and scores use tabular numerals. Main scores use (2.7rem), weight (500), line height (1.2); small `/100` denominators stay subordinate.
+
+## Layout
+
+Use compact control groups and consistent gaps from the extracted spacing scale. Distinguish sections with tonal surfaces or fine borders. Allow labels, summaries and forms to wrap; keep ordinary prose within its readable measure.
+
+The implemented shell caps its width at (1720px). Large screens increase lateral padding at (1500px); controls condense at (1200px). At (1000px), adjacent study content becomes a following section. At (650px), forms stack, shell padding shrinks and action buttons become shallower horizontal groups. The narrow-screen adjustment at (370px) reduces card and seat dimensions; the supported body minimum is (320px). These are observed product breakpoints, not a separate grid framework.
+
+## Elevation & Depth
+
+Most interface surfaces use tonal layering and one-pixel borders. Shadows express physical separation for the felt rail and playing cards, and elevation for modal dialogs. Do not apply them indiscriminately to every container. Exact shadow values live in the sidecar.
+
+Card dealing lasts (360ms) and face-down burn presentation lasts (500ms), sharing an easing curve of `cubic-bezier(.16,1,.3,1)`. Control color changes and the analysis switch use (150ms) transitions. Reduced-motion preference removes animations and transitions. Presentation motion never determines when a legal action becomes available.
+
+## Shapes
+
+Use compact rounded rectangles: tags and small cards, card stock, fields, controls, containers and dialogs follow their extracted radii. Seat bodies and action containers share gently curved corners. Dialogs reduce to the container radius on small screens. Circles belong to avatars, dealer markers and chips. The felt retains its elliptical silhouette and dark structural rail; avoid extending that silhouette to ordinary interface panels.
+
+## Components
+
+- **Buttons:** solid brass for primary operations; raised green for standard actions; transparent bordered controls for quiet actions; brass text for subordinate links. Default controls have a minimum height of (40px), semibold labels and the frontmatter padding. Disabled buttons use opacity (.45). Hover changes fill and border; active states deepen the fill.
+- **Focus:** buttons, fields, selects, summaries and links use a brass outline (2px) with an offset of (4px). Retain it across all variants.
+- **Fields:** dark inset fill, a fine control border, full available width and a minimum height of (42px). Labels sit above with an (8px) gap. Checkboxes and range controls use brass accents; the Live Analysis switch uses a compact sliding thumb.
+- **Navigation:** plain-text controls with muted inactive labels. The selected destination uses brass text and a brass bottom rule. Small screens retain labels while removing navigation icons.
+- **Tags:** small green status labels with soft sage text. The separate accepted-action marker uses a warm accent and identifies the player's action without grading it.
+- **Containers and seats:** bordered green surfaces with modest padding. The acting seat receives a brass border and explicit caption; the human seat uses a distinct green tone. Folded cards are subdued without hiding the seat's identity.
+- **Playing cards:** ivory stock, dark or red suits, small corners and a short shadow. Face-down cards use a green back with pale inset linework. Compact variants remove the central suit and mirrored index.
+- **Probability tree:** thin action-colored meters, right-aligned tabular probabilities and permanently expanded sizing children. A quiet vertical rule connects sizing rows. Selected reference action and accepted player action have distinct labels.
+- **Dialogs and notices:** dialogs use the surface tone, a structural border, dark backdrop and elevated shadow. Recovery notices use warm brown surfaces with pale text and explicit controls. Pending analysis uses static tonal placeholders, preserving visible confirmed play.
+
+## Do's and Don'ts
+
+### Do:
+
+- **Do** keep cards brighter than the surrounding shell and felt.
+- **Do** use brass consistently for primary operations, active state and keyboard focus.
+- **Do** preserve tabular numerals and clear labels for probabilities, totals and scores.
+- **Do** preserve reduced-motion behavior and keep presentation independent of gameplay.
+
+### Don't:
+
+- **Don't** import the independent Playground's visual conventions into the Trainer.
+- **Don't** turn numerical alignment or action colors into advice, quality grades or celebratory judgments.
+- **Don't** replace conventional card indices and suit distinctions with decorative symbols.
+- **Don't** spread card and modal shadows across ordinary containers.

@@ -74,7 +74,8 @@ deployment and account requirements have not been established by this init.
 
 ### Product and engineering boundaries
 
-`apps/web` is the planned M3 product app and is not yet scaffolded. The existing
+`apps/web` is the M3 product Trainer, with a table-first interface and a collapsible
+analysis panel. The existing
 browser app uses React/Vite, TanStack Router and Query, Zustand and Tailwind in a
 pnpm/TypeScript workspace. This init does not choose a different stack or create
 the app. Both browser apps consume safe Contracts from the authoritative server;
@@ -167,9 +168,14 @@ this product record does not replace that decision record.
 
 ## Open Decisions
 
+The user selected the classic poker-room direction for M3: green oval felt, dark
+rail and shell, ivory cards and familiar betting controls. The table leads;
+analysis opens beside it on desktop and below play on mobile. Visual details were
+delegated to the implementer. Accepted-decision results update without interrupting
+play; completed Hands request a Hand summary, and **Finish session** explicitly
+captures a session summary without removing the continuing table. See ADR-0028.
+
 - Final product name, voice and binding brand assets or commitments.
-- Exact post-action feedback timing and the product interaction for finishing a
-  Table Session and viewing its summary, within existing nonblocking constraints.
 - Depth of terminology help and onboarding for the intended poker-player audience.
 - Specific accessibility requirements or conformance targets beyond the existing
   requirement that optional presentation must not govern gameplay correctness.

@@ -9,6 +9,7 @@ The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreS
 | Command | Default database lifecycle |
 | --- | --- |
 | `pnpm dev:playground` / `pnpm dev` | Start the persistent development database before the apps; gracefully stop it when the command ends. |
+| `pnpm dev:trainer` | Start the same managed database and API with the product Trainer at `127.0.0.1:5174`. |
 | `pnpm db:init` | Start the development database, initialize the schema, then stop while retaining data. |
 | `pnpm test [filters/options]` | Start a fresh test database on a separate port; stop and remove temporary data afterward. |
 | `pnpm check` | Run the checks; its test step manages a fresh test database. |

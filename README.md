@@ -1,8 +1,16 @@
-# Poker Playground
+# Poker Trainer & Playground
 
 An authoritative local no-limit Texas Hold'em workspace. M1 includes continuing owned Table Sessions, complete Hold'em play, durable recovery, baseline Bots, between-Hand management, live synchronization, and authorized completed-Hand inspection. The Playground is the engineering interface defined in [the M1 spec](docs/specs/m1-playable-engine-server-playground.md).
 
 ## Local startup
+
+The M3 product interface is the [Trainer](http://127.0.0.1:5174). Run
+`pnpm dev:trainer` to start it with the API and managed local database. Create a
+table, open **Table settings → Seat all players**, then **Deal first hand**.
+**Analysis** opens the collapsible study panel. **Finish session** captures a
+numerical summary between Hands; the continuing table stays saved.
+
+The independent Playground remains available through the command below.
 
 Install Node.js 24 or newer and pnpm 11.25.0, then from the repository root:
 

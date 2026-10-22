@@ -19,7 +19,9 @@ function reachable(name, seen = new Set()) {
   }
   return seen;
 }
-for (const name of reachable('@poker/playground')) if (forbidden.has(name)) throw new Error('Browser dependency reaches authoritative package: ' + name);
+for (const browser of ['@poker/client', '@poker/playground', '@poker/web']) {
+  for (const name of reachable(browser)) if (forbidden.has(name)) throw new Error(browser + ' reaches authoritative package: ' + name);
+}
 for (const name of reachable('@poker/engine')) if (['@poker/strategies', '@poker/research'].includes(name)) throw new Error('Engine depends on ' + name);
 for (const name of ['@poker/strategies', '@poker/solver', '@poker/simulation']) if (reachable(name).has('@poker/research')) throw new Error(name + ' depends on Research');
 for (const name of reachable('@poker/contracts')) if (forbidden.has(name)) throw new Error('Safe contracts reach ' + name);

@@ -35,6 +35,9 @@ importers:
 
   apps/playground:
     dependencies:
+      '@poker/client':
+        specifier: workspace:*
+        version: link:../../packages/client
       '@poker/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -112,6 +115,59 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+
+  apps/web:
+    dependencies:
+      '@poker/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@poker/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@tanstack/react-query':
+        specifier: 5.104.1
+        version: 5.104.1(react@19.3.0)
+      '@tanstack/react-router':
+        specifier: 1.170.41
+        version: 1.170.41(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      react:
+        specifier: 19.3.0
+        version: 19.3.0
+      react-dom:
+        specifier: 19.3.0
+        version: 19.3.0(react@19.3.0)
+      zustand:
+        specifier: 5.0.15
+        version: 5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
+    devDependencies:
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: 19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: 6.1.2
+        version: 6.1.2(vite@8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+      vite:
+        specifier: 8.3.3
+        version: 8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
+
+  packages/client:
+    dependencies:
+      '@poker/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@tanstack/react-query':
+        specifier: 5.104.1
+        version: 5.104.1(react@19.3.0)
+      react:
+        specifier: 19.3.0
+        version: 19.3.0
+    devDependencies:
+      '@types/react':
+        specifier: 19.3.0
+        version: 19.3.0
 
   packages/contracts: {}
 
