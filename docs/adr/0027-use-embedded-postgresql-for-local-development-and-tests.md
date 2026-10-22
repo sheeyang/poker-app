@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Use Embedded PostgreSQL for Local Development and Tests
@@ -27,5 +27,3 @@ Start with a fresh development database. Leave the existing temporary database u
 Shut down owned database processes gracefully on Ctrl+C and handled errors, preserving development data and cleaning up temporary test data. Cleanup after crashes or forced termination is the developer's responsibility, supported by brief troubleshooting instructions. Do not implement a dedicated recovery command or automatically reset development data.
 
 Retain the existing pre-release schema initialization policy rather than introducing migration tooling in this work. [ADR-0014](0014-allow-pre-release-record-breaking-changes.md) continues to govern record compatibility and requires a compatibility policy before real user data is treated as durable.
-
-The workflow decisions are settled. This ADR remains proposed until the user confirms shared understanding before implementation.

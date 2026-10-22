@@ -4,19 +4,18 @@ An authoritative local no-limit Texas Hold'em workspace. M1 includes continuing 
 
 ## Local startup
 
-Install Node.js 24 or newer, pnpm 11.25.0, and Docker Desktop (or an existing PostgreSQL 17 server). Start Docker Desktop, then from the repository root:
+Install Node.js 24 or newer and pnpm 11.25.0, then from the repository root:
 
 ```powershell
-docker compose up -d --wait
-Copy-Item .env.example .env
 pnpm install --frozen-lockfile
-pnpm db:init
 pnpm dev:playground
 ```
 
-On macOS/Linux use `cp .env.example .env` for the copy step. Open [the Playground](http://127.0.0.1:5173). `pnpm dev:playground` starts the Playground and API server together; `pnpm dev` starts all apps. Vite proxies `/api` to the Fastify server at `127.0.0.1:3001`, so cookies and requests use the same browser origin. Keep both development processes running. The PostgreSQL service listens only on `127.0.0.1:54329`; its named Docker volume survives process/container restarts.
+Open [the Playground](http://127.0.0.1:5173). The command starts and initializes a real local PostgreSQL 18.4 server, the API server, and the Playground. No `.env` file or manual database initialization is required. `pnpm dev` starts all apps with the same database management. Vite proxies `/api` to the Fastify server at `127.0.0.1:3001`, so cookies and requests use the same browser origin.
 
-For an existing PostgreSQL installation, create separate `poker` and `poker_test` databases and update `DATABASE_URL` and `TEST_DATABASE_URL` in `.env`. The server and database initialization scripts load the root `.env`; environment variables already supplied by the shell take precedence. Initialization is idempotent and also runs when the server starts.
+Keep the terminal running. Ctrl+C gracefully stops the owned database; development data persists in the ignored `.local/postgres` directory. The database listens only on `127.0.0.1:54329`; set `POKER_POSTGRES_PORT` to change that port. An occupied port is an error, and startup does not take over another database.
+
+An explicit `DATABASE_URL` uses an externally managed PostgreSQL database instead. An explicit `TEST_DATABASE_URL` does the same independently for tests. Optional settings can go in a root `.env`; shell values take precedence. Configured connection failures are reported without switching databases. See [local development](docs/local-development.md) for platform support, browser fixtures, and troubleshooting.
 
 The example database password is for local development. The identity is an opaque server-issued HttpOnly, SameSite=Strict cookie; retaining that browser cookie retains ownership after reload or server restart. Browser storage remembers the selected Table Session, but it does not establish permission. Clearing the identity cookie creates a different local user.
 
@@ -24,12 +23,13 @@ The example database password is for local development. The identity is an opaqu
 
 ```powershell
 pnpm check
+# After pnpm build, with DATABASE_URL configured:
 pnpm --filter @poker/server start
 ```
 
-`pnpm check` typechecks all packages, runs public engine and real localhost HTTP/WebSocket/PostgreSQL tests, builds the server and Playground, and checks workspace dependency directions. Tests require `TEST_DATABASE_URL` and create/drop a uniquely named PostgreSQL schema per test file; they do not modify development Table Sessions. The compiled server includes its SQL initialization asset and can run with `pnpm --filter @poker/server start` after `pnpm build`.
+`pnpm check` typechecks the scripts and packages, runs public engine and real localhost HTTP/WebSocket/PostgreSQL tests, builds the server and Playground, and checks workspace dependency directions. Without `TEST_DATABASE_URL`, each `pnpm test` invocation starts a fresh PostgreSQL instance on its own port, then removes its temporary data on completion. Fixtures also create/drop a uniquely named PostgreSQL schema; they do not modify development Table Sessions. The compiled server includes its SQL initialization asset and requires `DATABASE_URL`; it never starts embedded PostgreSQL.
 
-The frontend development command is `pnpm --filter @poker/playground dev`; the backend command is `pnpm --filter @poker/server dev`. Stop development with Ctrl+C. To stop PostgreSQL while keeping its persisted data, use `docker compose stop`.
+The frontend-only command is `pnpm --filter @poker/playground dev`; the backend-only command is `pnpm --filter @poker/server dev` with `DATABASE_URL` configured. Use the root development commands for automatic database management. `pnpm db:init` also manages its database and retains the initialized development data after exiting.
 
 ## Workspace
 
@@ -94,7 +94,7 @@ An aborted ambiguous attempt retains a `commit-not-applied` tombstone. Checking 
 
 Startup loads recovery gates before restoring sessions or resuming Bots. HTTP reads, initial live snapshots and transient `table-status` feedback expose recovery while keeping last confirmed gameplay facts; status can change without a revision increment. A pre-close lifecycle gate invalidates waiting callbacks before HTTP drains. Test fixtures can hold actual terminal SQL on independently owned PostgreSQL clients through restart; production exposes no fault routes or engine mutation bypasses.
 
-Run the real recovery checks with `pnpm test apps/server/test/recovery.test.ts`, or all checks with `pnpm check`. The isolated browser fixture is `apps/server/test/fixtures/recovery-browser.ts`; its stdin commands `hold-next`, `commit`, `rollback`, `restart`, and `stop` control real SQL/lifecycle timing. Start it with `pnpm exec tsx apps/server/test/fixtures/recovery-browser.ts` and `TEST_DATABASE_URL` set, then use Vite port 5185 with `POKER_API_TARGET=http://127.0.0.1:3015`. `stop` closes its owned resources and removes its unique schema. [M1-15 evidence](docs/specs/m1-15-implementation.md) records the combined browser flow and recovery checks.
+Run the real recovery checks with `pnpm test apps/server/test/recovery.test.ts`, or all checks with `pnpm check`. The isolated browser fixture is `apps/server/test/fixtures/recovery-browser.ts`; its stdin commands `hold-next`, `commit`, `rollback`, `restart`, and `stop` control real SQL/lifecycle timing. Start it with `pnpm db:with-test -- node --import tsx apps/server/test/fixtures/recovery-browser.ts`, then use Vite port 5185 with `POKER_API_TARGET=http://127.0.0.1:3015`. `stop` closes the fixture and its schema; the wrapper then stops PostgreSQL and removes its temporary data. [M1-15 evidence](docs/specs/m1-15-implementation.md) records the combined browser flow and recovery checks.
 
 ## Live synchronization
 
