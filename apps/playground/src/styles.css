@@ -89,7 +89,7 @@ label input, label select { display: block; margin-top: 6px; font-weight: 400; }
 @media (min-width: 1000px) { .connection-status { position: absolute; right: 0; top: 10px; margin-top: 0; } }
 @media (max-width: 850px) { .app-shell { padding: 20px; } .workspace { grid-template-columns: 1fr; gap: 28px; } .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; } .reopen { margin: 0; padding: 0; border-top: 0; } .table-view { min-height: 400px; padding: 20px; } }
 @media (max-width: 550px) { .controls { grid-template-columns: 1fr; } .reopen { border-top: 1px solid #c4cec7; padding-top: 24px; } .seats { grid-template-columns: 1fr 1fr; } .bindings li { grid-template-columns: 1fr; } .bindings code { grid-column: 1; } }
-.bot-controls { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
+.bot-controls, .trainer-configuration { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
 .inspection-controls { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
 .inspection-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
 .inspection-fields button { margin-bottom: 14px; }
@@ -107,3 +107,9 @@ label input, label select { display: block; margin-top: 6px; font-weight: 400; }
 .bot-strategy-fields button { margin-bottom: 14px; }
 .bot-strategy > p { margin-top: 12px; }
 @media (max-width: 1100px) { .bot-strategy-fields { grid-template-columns: minmax(0, 1fr); gap: 0; } .bot-strategy-fields button { justify-self: start; } }
+.decision-analysis { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #d3ddd5; }
+.decision-analysis > p, .evaluation-result { margin-top: 12px; }
+.evaluation-choices { width: 100%; border-collapse: collapse; margin-top: 16px; font-variant-numeric: tabular-nums; }
+.evaluation-choices caption { text-align: left; color: #53635b; margin-bottom: 8px; overflow-wrap: anywhere; }
+.evaluation-choices th, .evaluation-choices td { text-align: left; padding: 10px 0; border-bottom: 1px solid #e1e7e2; }
+.evaluation-choices th:last-child, .evaluation-choices td:last-child { text-align: right; }

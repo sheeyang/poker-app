@@ -52,6 +52,7 @@ The server sends a separately constructed update to each authorized participant,
 
 ```typescript
 interface ObservableTableUpdate {
+  readonly type: "table-update";
   readonly tableSessionId: TableSessionId;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
@@ -62,4 +63,32 @@ interface ObservableTableUpdate {
 
 The backend supplies both pokerRevision and sessionRevision from the committed aggregate and obtains only the complete view and projected presentation events from the committed game's participant facade. The revisions and projection must describe the same committed aggregate; publish only after durable commit. Revision metadata stays in the server-owned update envelope rather than becoming part of ObservableGameView or Policy input. The view is the synchronization authority; presentationEvents may be empty and never need to be applied to reconstruct state.
 
-Order updates within each Table Session by sessionRevision, which also advances for committed controller or Trainer configuration changes even when pokerRevision is unchanged. Ignore older updates and do not replay presentation events from an already processed revision. A newer complete view can be accepted despite missing intermediate revisions. On reconnect, send the latest complete participant-safe view with both revisions; missed presentation events need not be replayed. Use pokerRevision for expectedPokerRevision on poker mutations and sessionRevision for expectedSessionRevision on application configuration mutations. These expectations belong to server request metadata, not CashGame method arguments.
+Order updates within each Table Session by sessionRevision, which also advances for committed controller or Trainer configuration changes even when pokerRevision is unchanged. Ignore older updates and do not replay presentation events from an already processed revision. A newer complete view can be accepted despite missing intermediate revisions. On initial table subscription or resubscription after reconnect, send the latest complete participant-safe view with both revisions; missed presentation events need not be replayed. Use pokerRevision for expectedPokerRevision on poker mutations and sessionRevision for expectedSessionRevision on application configuration mutations. These expectations belong to server request metadata, not CashGame method arguments.
+
+## Shared browser connection and live-message contracts
+
+M2 extends the existing connection modules to open one shared WebSocket per browser tab after local identity is established and keep it connected while the app is open. The server authenticates the identity cookie and automatically enables a user-scoped channel for analysis and summary notifications the user is authorized to access. A server-originated readiness signal identifies when that channel is active, independently of any live table subscription.
+
+Opening a Table Session subscribes to its live views and runtime status; closing it unsubscribes without replacing the socket. The server authorizes every subscription and correlates its acceptance, rejection, or removal with the client's request. Closing the connection cleans up all its table subscriptions and user-channel delivery. Historical analysis needs no live table subscription: HTTP returns cached results or starts missing work, and the user-scoped channel notifies when work completes or fails.
+
+`packages/contracts` owns the canonical shared server and client message unions, used by both connection modules rather than locally duplicated message types. Retain the session-related payload union and compose it with connection/subscription control messages:
+
+```typescript
+type TableLiveMessage =
+  | ObservableTableUpdate // type: 'table-update'
+  | TableRuntimeStatus   // type: 'table-status'
+  | AnalysisUpdate;      // type: 'analysis-update'
+
+type ServerLiveMessage =
+  | UserChannelReady
+  | TableSubscriptionResult
+  | TableLiveMessage;
+
+type ClientLiveMessage = SubscribeTable | UnsubscribeTable;
+```
+
+Every session-related message carries `tableSessionId`. `AnalysisUpdate` is a completion/failure notification identifying the exact immutable analysis request and execution attempt; numerical results and summary averages are fetched over HTTP. Successful results must be persisted and readable through HTTP before completion is notified, and failures must be recorded before their notifications. Clients ignore obsolete requests/attempts and refresh only relevant results. Analysis notifications do not advance pokerRevision or sessionRevision and must not pass through gameplay-revision filtering.
+
+Relevant notifications trigger HTTP refreshes without normal polling. If a notification arrives during an HTTP request, the client must still reconcile afterward; an older pending response cannot hide the completed or failed state. Discard responses from retired connections and guard table snapshots by sessionRevision while guarding analysis by its exact request and execution attempt.
+
+After user-channel readiness on the initial connection, refresh relevant analysis over HTTP to recover work that finished before the socket connected. On reconnect, restore the desired live table subscriptions and refresh currently relevant table and analysis state over HTTP. This handles missed notifications and transient queued/running/failure state being lost on server restart without requiring a durable event backlog or a live table subscription for analysis. Extend the existing modules for delivery, typed dispatch, cleanup, and reconnection without a new connection class; scheduling, caching, deduplication, and retry remain in the analysis module.

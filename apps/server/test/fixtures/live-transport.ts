@@ -5,7 +5,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 const upstream = new URL(process.env.POKER_API_UPSTREAM ?? 'http://127.0.0.1:4011');
 const frames = new Map<string, unknown[]>();
 const dropped = new Map<string, Set<number>>();
-const sockets = new Map<WebSocket, string>();
+const sockets = new Map<WebSocket, { id: number; tables: Set<string>; upstream?: WebSocket }>();
+let opened = 0;
+const requests = new Map<string, number>();
 const holds = new Set<string>();
 const held: { key: string; send: () => void }[] = [];
 const keyFor = (id: string, kind: string) => id + ':' + kind;
@@ -32,22 +34,31 @@ const relay = http.createServer(async (request, response) => {
       if (control.kind === 'replay') {
         const frame = frames.get(id)?.find(value => (value as { sessionRevision: number }).sessionRevision === control.revision);
         if (!frame) { response.writeHead(404).end('Frame not captured'); return; }
-        for (const [socket, tableId] of sockets) if (tableId === id && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
+        for (const [socket, tableId] of sockets) if (tableId.tables.has(id) && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(frame));
       }
-      if (control.kind === 'status') for (const [socket, tableId] of sockets) if (tableId === id && socket.readyState === WebSocket.OPEN)
+      if (control.kind === 'replay-analysis') {
+        const frame = frames.get(id)?.find(value => (value as { requestId?: string; type?: string }).type === 'analysis-update' && (value as { requestId?: string }).requestId === control.requestId);
+        if (!frame) { response.writeHead(404).end('Analysis frame not captured'); return; }
+        for (const socket of sockets.keys()) if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ ...(frame as object), ...(control.attemptId ? { attemptId: control.attemptId } : {}) }));
+      }
+      if (control.kind === 'unsubscribe-table') for (const connection of sockets.values()) if (connection.tables.has(id) && connection.upstream?.readyState === WebSocket.OPEN) connection.upstream.send(JSON.stringify({ type: 'unsubscribe-table', tableSessionId: id, requestId: crypto.randomUUID() }));
+      if (control.kind === 'disconnect') for (const [socket, connection] of sockets) if (!id || connection.tables.has(id)) socket.close();
+      if (control.kind === 'status') for (const [socket, tableId] of sockets) if (tableId.tables.has(id) && socket.readyState === WebSocket.OPEN)
         socket.send(JSON.stringify({ type: 'table-status', tableSessionId: id, status: control.status }));
     }
     response.setHeader('content-type', 'application/json');
-    response.end(JSON.stringify({ held: held.map(entry => entry.key), sockets: [...sockets.values()] }));
+    response.end(JSON.stringify({ held: held.map(entry => entry.key), sockets: [...sockets.values()].flatMap(connection => [...connection.tables]), requests: Object.fromEntries(requests), frames: Object.fromEntries(frames), connections: [...sockets.values()].map(connection => ({ id: connection.id, tableSessionIds: [...connection.tables] })), opened }));
     return;
   }
+  requests.set(url.pathname, (requests.get(url.pathname) ?? 0) + 1);
   const outgoing = http.request(new URL(request.url!, upstream), { method: request.method, headers: request.headers }, incoming => {
     const chunks: Buffer[] = [];
     incoming.on('data', chunk => chunks.push(chunk));
     incoming.on('end', () => {
       const send = () => { response.writeHead(incoming.statusCode!, incoming.headers); response.end(Buffer.concat(chunks)); };
       const match = /^\/api\/table-sessions\/([^/]+)(?:\/([^/]+))?$/.exec(url.pathname);
-      const key = match ? keyFor(match[1]!, match[2] ?? 'read') : '';
+      const resourceRead = /^\/api\/table-sessions\/([^/]+)\/(analysis|summaries)\/[^/]+$/.exec(url.pathname);
+      const key = resourceRead ? keyFor(resourceRead[1]!, resourceRead[2] === 'analysis' ? 'analysis-read' : 'summary-read') : match ? keyFor(match[1]!, match[2] ?? 'read') : '';
       if (holds.delete(key)) held.push({ key, send }); else send();
     });
   });
@@ -57,14 +68,25 @@ const relay = http.createServer(async (request, response) => {
 relay.on('upgrade', (request, socket, head) => {
   websocket.handleUpgrade(request, socket, head, client => {
     const id = /\/table-sessions\/([^/]+)\/live/.exec(request.url!)?.[1] ?? '';
-    sockets.set(client, id);
+    const connection: { id: number; tables: Set<string>; upstream?: WebSocket } = { id: ++opened, tables: new Set(id ? [id] : []) };
+    sockets.set(client, connection);
     const server = new WebSocket(new URL(request.url!, upstream.href.replace('http:', 'ws:')), { headers: { cookie: request.headers.cookie ?? '' } });
+    connection.upstream = server;
+    const pending: string[] = [];
+    server.on('open', () => { for (const message of pending) server.send(message); pending.length = 0; });
+    client.on('message', data => { if (server.readyState === WebSocket.OPEN) server.send(data.toString()); else if (server.readyState === WebSocket.CONNECTING) pending.push(data.toString()); });
     server.on('message', data => {
       const frame = JSON.parse(data.toString());
+      if (frame.type === 'table-subscription-result') {
+        if (frame.status === 'subscribed') connection.tables.add(frame.tableSessionId);
+        if (frame.status === 'unsubscribed' || frame.status === 'rejected') connection.tables.delete(frame.tableSessionId);
+      }
+      const id = frame.tableSessionId ?? '';
       const captured = frames.get(id) ?? [];
       captured.push(frame); frames.set(id, captured);
       const send = () => { if (!dropped.get(id)?.has(frame.sessionRevision) && client.readyState === WebSocket.OPEN) client.send(data.toString()); };
-      if (holds.has(keyFor(id, 'live'))) held.push({ key: keyFor(id, 'live'), send }); else send();
+      const kind = frame.type === 'analysis-update' ? 'analysis-live' : frame.type === 'user-channel-ready' ? 'ready' : 'live';
+      if (holds.has(keyFor(id, kind))) held.push({ key: keyFor(id, kind), send }); else send();
     });
     server.on('close', () => client.close());
     server.on('error', () => client.close());

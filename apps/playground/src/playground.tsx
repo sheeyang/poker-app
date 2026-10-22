@@ -1,6 +1,8 @@
+import { HandSummaryControls, useHandSummary, TableSessionSummaryControls, useTableSessionSummary } from './summaries.js';
+import { DecisionAnalysisControls, useDecisionAnalysis } from './analysis.js';
 import { AttemptRecovery } from './recovery.js';
 import { BotControls, baselineOptions } from './bots.js';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { defaultConfiguration, baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameConfiguration } from '@poker/contracts';
 import { api, RequestFailure } from './api.js';
@@ -10,6 +12,7 @@ import { Hand } from './hand.js';
 import { retainNewestTable, useTableSynchronization } from './live.js';
 import { Management } from './management.js';
 import { Inspection } from './inspection.js';
+import { TrainerConfigurationControls } from './trainer-configuration.js';
 
 const chipFields = [
   ['smallBlind', 'Small blind'], ['bigBlind', 'Big blind'], ['ante', 'Ante'],
@@ -30,8 +33,15 @@ export function Playground() {
   const [reopenId, setReopenId] = useState('');
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity, staleTime: Infinity });
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
-  const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: () => api.readSession(selectedId!), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
-  const live = useTableSynchronization(selectedId, identity.isSuccess);
+  const table = useQuery({ queryKey: ['table-session', selectedId], queryFn: ({ signal }) => api.readSession(selectedId!, signal), enabled: identity.isSuccess && !!selectedId, structuralSharing: retainNewestTable });
+  const analysis = useDecisionAnalysis(table.data);
+  const summary = useHandSummary(table.data);
+  const sessionSummary = useTableSessionSummary(table.data);
+  const live = useTableSynchronization(selectedId, identity.isSuccess, {
+    onReady: lifecycle => { analysis.consumers.onReady?.(lifecycle); summary.consumers.onReady?.(lifecycle); sessionSummary.consumers.onReady?.(lifecycle); },
+    onAnalysisUpdate: (update, lifecycle) => { analysis.consumers.onAnalysisUpdate?.(update, lifecycle); summary.consumers.onAnalysisUpdate?.(update, lifecycle); sessionSummary.consumers.onAnalysisUpdate?.(update, lifecycle); },
+  });
+  useEffect(() => { const generation = live.userChannel?.generation ?? null; analysis.connectionChanged(generation); summary.connectionChanged(generation); sessionSummary.connectionChanged(generation); }, [live.userChannel?.generation, analysis.connectionChanged, summary.connectionChanged, sessionSummary.connectionChanged]);
   const runtimeStatus = live.runtimeStatus ?? table.data?.runtimeStatus;
   const creation = useMutation({
     mutationFn: api.createSession,
@@ -111,7 +121,7 @@ export function Playground() {
         {table.isFetching && <p role="status">Loading Table Session…</p>}
         <ErrorMessage error={table.error} />
         {table.data ? <>
-          <div className="table-heading"><h2>Table Session</h2><button onClick={() => void table.refetch()}>Refresh view</button></div>
+          <div className="table-heading"><h2>Table Session</h2><button onClick={() => select(null)}>Close Table Session</button><button onClick={() => void table.refetch()}>Refresh view</button></div>
           <p className="session-id">{table.data.tableSessionId}</p>
           <div className="live-connection">
             <p role="status">{live.connection === 'connected' ? 'Live updates connected' : live.connection === 'disconnected' ? 'Live updates disconnected. Refresh the view or reconnect.' : live.connection === 'reconnecting' ? 'Reconnecting live updates… The table will refresh automatically.' : 'Connecting live updates…'}</p>
@@ -141,6 +151,10 @@ export function Playground() {
             </>}</li>;
           })}</ol>
           <Hand key={'hand-' + table.data.tableSessionId} table={table.data} />
+          <TrainerConfigurationControls key={'trainer-configuration-' + table.data.tableSessionId} table={table.data} />
+          <DecisionAnalysisControls analysis={analysis} />
+          <HandSummaryControls summary={summary} />
+          <TableSessionSummaryControls summary={sessionSummary} />
           <BotControls table={table.data} status={runtimeStatus} />
           {live.inspectionCapabilities?.adminMode && <Inspection key={'inspection-' + table.data.tableSessionId + '-' + live.inspectionGeneration} table={table.data} capabilities={live.inspectionCapabilities} />}
           <Seating key={table.data.tableSessionId} table={table.data} />

@@ -1,4 +1,4 @@
-import type { ParticipantBinding, StrategyDescriptor } from '@poker/contracts';
+import type { ParticipantBinding, StrategyDescriptor, TrainerConfiguration } from '@poker/contracts';
 import type { TableSessionRecord } from '@poker/engine';
 export type PersistedBinding = ParticipantBinding & { readonly userId?: string; readonly assignmentId?: string };
 export interface BotActionProvenance {
@@ -19,6 +19,7 @@ export interface PersistedTableSession {
   readonly ownerUserId: string;
   readonly pokerRecord: TableSessionRecord;
   readonly bindings: readonly PersistedBinding[];
+  readonly trainerConfiguration: TrainerConfiguration;
   readonly pokerRevision: number;
   readonly sessionRevision: number;
   readonly adminMode: boolean;

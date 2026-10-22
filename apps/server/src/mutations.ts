@@ -1,9 +1,9 @@
-import { baselineStrategy, isBaselineStrategy, immutableData, validatePolicyResult, PolicyValidationError, type Strategy } from '@poker/strategies';
-import { JobRunner, JobFailure, type JobHandle } from './job-runner.js';
+import { baselineStrategy, isBaselineStrategy, immutableData, type Strategy } from '@poker/strategies';
+import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
-import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import type { PersistedTableSession, BotActionProvenance } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, processedRequests, tableSessions } from './db/schema.js';
@@ -11,7 +11,12 @@ import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
+import { executeStrategy } from './strategy-execution.js';
+import type { FrozenEvaluationInput } from './analysis.js';
+import type { FrozenScoreSummary } from './summaries.js';
+import { validateTrainerConfiguration } from './validation.js';
 
+export type AcceptTableJobResult = (tableSessionId: string, ownerUserId: string, accept: () => boolean) => Promise<boolean>;
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export class TableSessionRestorationError extends Error {
@@ -24,6 +29,7 @@ export interface TableSessionControllerCommands {
   readPersistedSession(tableSessionId: string): Promise<PersistedTableSession | undefined>;
 }
 type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot'; identity?: BotIdentity };
+interface AcceptedHumanIntent { readonly ownerUserId: string; readonly decisionId: string; readonly fingerprint: string }
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
@@ -46,12 +52,16 @@ export interface BotRuntimeOptions {
   readonly adminMode?: boolean;
   readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy;
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
+  readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
 }
 export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions) {
   const committed = new Map<string, CommittedSession>();
   const loading = new Map<string, Promise<CommittedSession | undefined>>();
   const queue = new Map<string, Promise<unknown>>();
   const recovering = new Set<string>();
+  // Only this live process remembers an unproven candidate; restart creates no analysis obligation.
+  const uncertainHumanActions = new Map<string, AcceptedHumanIntent>();
+  const actionKey = (id: string, requestId: string) => JSON.stringify([id, requestId]);
   const subscribers = new Map<string, Set<{ ownerUserId: string; publish: (update: TableLiveMessage) => void }>>();
   const statuses = new Map<string, TableRuntimeStatus['status']>();
   const work = new Map<string, { identity: BotIdentity; handle?: JobHandle<ConcreteAction> }>();
@@ -96,11 +106,14 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (fresh || statuses.get(id)?.phase !== 'recovering') publishStatus(id, { phase: 'recovering' });
   }
   async function reconcile(id: string): Promise<boolean> {
-    const attempts = (await acceptance.attempts()).filter(entry => entry.tableSessionId === id && entry.state === 'pending');
+    const attempts = (await acceptance.attempts()).filter(entry => entry.tableSessionId === id);
+    const acceptedHumans: { key: string; intent: AcceptedHumanIntent }[] = [];
     let pending = false;
     for (const attempt of attempts) {
       const status = await acceptance.status(attempt);
       if (status === 'pending') { pending = true; continue; }
+      const key = actionKey(id, attempt.requestId);
+      if (status === 'noncommit') { uncertainHumanActions.delete(key); continue; }
       if (status === 'committed') {
         // The transaction oracle and its outcome are intentionally distinct snapshots.
         const rows = attempt.kind === 'table'
@@ -109,6 +122,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (!rows[0] || rows[0].fingerprint !== attempt.fingerprint) { pending = true; continue; }
         // Restore replaces game, revisions, bindings, assignments and provenance together.
         await restore(id);
+        const intent = uncertainHumanActions.get(key);
+        if (intent && rows[0].fingerprint === intent.fingerprint && rows[0].outcome.ok) acceptedHumans.push({ key, intent });
+        else uncertainHumanActions.delete(key);
         await acceptance.forget(attempt).catch(() => {});
       }
     }
@@ -118,6 +134,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       retire(id); recovering.delete(id);
       publishCommitted(id); publishStatus(id, { phase: 'idle' });
       const session = committed.get(id); if (session) ensureBot(id, session, true);
+    }
+    const session = committed.get(id);
+    for (const { key, intent } of acceptedHumans) {
+      uncertainHumanActions.delete(key);
+      if (session) analyzeAccepted(session, intent.ownerUserId, intent.decisionId);
     }
     return true;
   }
@@ -157,18 +178,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const pending: { identity: BotIdentity; handle?: JobHandle<ConcreteAction> } = { identity: proposed.identity };
     work.set(id, pending);
     publishStatus(id, { phase: 'thinking', participantId: proposed.identity.participantId });
-    pending.handle = bots.runner.submit({ view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
-      const strategy = strategyFactory(input.descriptor);
-      const compatibility = await strategy.policy.checkCompatibility(input.view);
-      if (!compatibility.compatible) throw new JobFailure('incompatible');
-      const raw = await strategy.policy.evaluate(input.view, { evaluationSeed: input.evaluationSeed, signal: execution.signal });
-      let result;
-      try { result = validatePolicyResult(raw, input.view); } catch (error) { if (error instanceof PolicyValidationError) throw new JobFailure('invalid-policy'); throw error; }
-      try {
-        const action = strategy.actionSelector.select(result.choices, { selectionSeed: input.selectionSeed });
-        if (!result.choices.some(choice => canonical(choice.action) === canonical(action))) throw new Error('Not a Choice');
-        return action;
-      } catch { throw new JobFailure('selection-failed'); }
+    pending.handle = bots.runner.submit('bot-decision', { view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
+      const { selectedAction } = await executeStrategy(strategyFactory(input.descriptor), input.view, { evaluationSeed: input.evaluationSeed, selectionSeed: input.selectionSeed, signal: execution.signal });
+      return selectedAction;
     });
     void pending.handle.result.then(result => {
       if (stopped) return;
@@ -185,6 +197,32 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   function observer(session: CommittedSession | undefined, ownerUserId: string) {
     if (!session || session.aggregate.ownerUserId !== ownerUserId) return undefined;
     return session.aggregate.bindings.find(b => b.controller.kind === 'human' && b.userId === ownerUserId)?.participantId;
+  }
+  function captureEvaluation(session: CommittedSession, ownerUserId: string, decisionId: string): FrozenEvaluationInput | null {
+    const participantId = observer(session, ownerUserId);
+    if (!participantId) return null;
+    const participant = session.game.forParticipant(participantId);
+    const current = participant.getView();
+    const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
+    let view;
+    try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
+    if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
+    const masterSeed = session.aggregate.pokerRecord.configuration.seed;
+    return immutableData({ ownerUserId, view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
+      tableSessionId: session.aggregate.tableSessionId, participantId, handId: view.state.handId, decisionId,
+      referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
+      inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
+      evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
+      selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
+      engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1', evaluationVersion: 'v1',
+    } });
+  }
+  function analyzeAccepted(session: CommittedSession, ownerUserId: string, decisionId: string) {
+    if (stopped || !bots?.onHumanActionAccepted) return;
+    try {
+      const input = captureEvaluation(session, ownerUserId, decisionId);
+      if (input?.acceptedAction) void Promise.resolve(bots.onHumanActionAccepted(input)).catch(() => {});
+    } catch { /* Derived analysis cannot change a confirmed poker outcome. */ }
   }
   function deliver(id: string, projection: (session: CommittedSession, participantId: string) => TableLiveMessage) {
     const session = committed.get(id);
@@ -232,6 +270,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
     const aggregate = rows[0]?.aggregate;
     if (!aggregate) return undefined;
+    if (validateTrainerConfiguration(aggregate.trainerConfiguration, supportsStrategy)) throw new TableSessionRestorationError();
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new TableSessionRestorationError();
     const session = { aggregate, game: restored.game };
@@ -277,6 +316,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         session = committed.get(id)!;
         if (authority.kind === 'bot' && authority.identity && !current(id, authority.identity)) return reject('obsolete-bot-work', 'The Bot decision changed.');
         let proposed: CommittedSession | undefined;
+        let acceptedHumanDecision: string | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
         const context = { tableSessionId: id, requestId };
         try {
@@ -311,6 +351,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
               if (!accepted.ok) result = { ok: false, rejection: accepted.rejection };
               else {
                 acceptedEvents = accepted.events;
+                if (authority.kind === 'human' && kind === 'act') acceptedHumanDecision = session.game.forParticipant((request as ActRequest).participantId).getView().state.decisionId ?? undefined;
                 const pokerRecord = working.toRecord();
                 const provenance = authority.kind === 'bot' && authority.identity ? (() => {
                   const { tableSessionId: _table, pokerRevision: _revision, ...identity } = authority.identity;
@@ -326,17 +367,23 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
-          if (proposed) { committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed); }
+          if (proposed) {
+            committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed);
+            if (authority.kind === 'human' && acceptedHumanDecision) analyzeAccepted(proposed, authority.userId, acceptedHumanDecision);
+          }
           return outcome;
         } catch (error) {
-          if (error instanceof CommitOutcomeUnknown) pause(id);
+          if (error instanceof CommitOutcomeUnknown) {
+            if (authority.kind === 'human' && acceptedHumanDecision) uncertainHumanActions.set(actionKey(id, requestId), { ownerUserId: authority.userId, decisionId: acceptedHumanDecision, fingerprint });
+            pause(id);
+          }
           throw error;
         }
     }
     function submit(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest) {
       return enqueue(id, () => accept(id, authority, kind, request));
     }
-    async function configure(id: string, ownerUserId: string, kind: 'set-playing-strategy' | 'retry-bot', request: SetPlayingStrategyRequest | RetryBotRequest): Promise<MutationOutcome> {
+    async function configure(id: string, ownerUserId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest): Promise<MutationOutcome> {
       return enqueue(id, async () => {
         let session = await load(id, ownerUserId);
         if (!session || session.aggregate.ownerUserId !== ownerUserId) return reject('not-found', 'This Table Session is unavailable to this local identity.');
@@ -351,17 +398,27 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
           const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async tx => {
             const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
             if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
-            const fields = ['requestId', 'expectedSessionRevision', 'participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])];
+            const trainer = kind === 'set-trainer-configuration';
+            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])])];
             let result: MutationOutcome | undefined;
-            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject('invalid-controller-request', 'Supply supported controller fields and a nonnegative expectedSessionRevision.');
-            if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new controller request.');
-            const binding = session.aggregate.bindings.find(binding => binding.participantId === request.participantId);
-            if (!result && binding?.controller.kind !== 'bot') result = reject('participant-not-bot', 'Choose a bound Bot.');
+            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
+            if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
+            const binding = !trainer && session.aggregate.bindings.find(binding => binding.participantId === (request as RetryBotRequest).participantId);
+            if (!result && !trainer && (!binding || binding.controller.kind !== 'bot')) result = reject('participant-not-bot', 'Choose a bound Bot.');
             if (!result && kind === 'set-playing-strategy' && !supportsStrategy((request as SetPlayingStrategyRequest).playingStrategy)) result = reject('unsupported-strategy', 'Choose a supported complete Playing Strategy.');
-            if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== request.participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
+            if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== (request as RetryBotRequest).participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
+            if (!result && trainer) {
+              const configuration = (request as SetTrainerConfigurationRequest).trainerConfiguration;
+              result = validateTrainerConfiguration(configuration, supportsStrategy);
+              if (!result) {
+                const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, trainerConfiguration: immutableData(configuration) };
+                proposed = { aggregate, game: session.game };
+                await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
+              }
+            }
             if (!result && kind === 'set-playing-strategy') {
               const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
-                bindings: session.aggregate.bindings.map(item => item.participantId === request.participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
+                bindings: session.aggregate.bindings.map(item => item.participantId === (request as SetPlayingStrategyRequest).participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
               proposed = { aggregate, game: session.game };
               await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
             }
@@ -371,7 +428,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve() });
           if (proposed) { committed.set(id, proposed); publishCommitted(id); }
-          if (fresh && outcome.ok) ensureBot(id, proposed ?? session, kind === 'retry-bot');
+          if (fresh && outcome.ok && kind !== 'set-trainer-configuration') ensureBot(id, proposed ?? session, kind === 'retry-bot');
           return outcome;
         } catch (error) {
           if (error instanceof CommitOutcomeUnknown) pause(id);
@@ -383,7 +440,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
       const aggregate = rows[0]?.aggregate;
       if (!aggregate) return undefined;
-      if (!CashGame.fromRecord(aggregate.pokerRecord).ok) throw new TableSessionRestorationError();
+      if (validateTrainerConfiguration(aggregate.trainerConfiguration, supportsStrategy) || !CashGame.fromRecord(aggregate.pokerRecord).ok) throw new TableSessionRestorationError();
       return immutableData(aggregate);
     }
     async function resumeBots() {
@@ -394,6 +451,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     function stop() {
       stopped = true;
       clearInterval(recoveryTimer);
+      uncertainHumanActions.clear();
       for (const id of work.keys()) retire(id);
     }
     async function close() {
@@ -401,7 +459,34 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await bots?.runner.close();
       await Promise.allSettled([...queue.values()]);
     }
+  function captureScoreSummary(id: string, ownerUserId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
+    return enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
+      const session = await load(id, ownerUserId);
+      const participantId = observer(session, ownerUserId);
+      if (!session || !participantId) return undefined;
+      if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
+      if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
+      const view = session.game.forParticipant(participantId).getView();
+      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' || hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+      const members = decisionIds.map(decisionId => captureEvaluation(session, ownerUserId, decisionId)!);
+      return immutableData({ ownerUserId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy, decisionIds, members });
+    });
+  }
   return {
+    // Historical work validates its frozen request/attempt in this queue; live revision may advance.
+    acceptJobResult: (id: string, ownerUserId: string, accept: () => boolean) => enqueue(id, async () => {
+      if (stopped || committed.get(id)?.aggregate.ownerUserId !== ownerUserId) return false;
+      return accept();
+    }),
+    captureHandSummary: (id: string, ownerUserId: string, handId: string) => captureScoreSummary(id, ownerUserId, { scope: 'hand', handId }),
+    captureSessionSummary: (id: string, ownerUserId: string) => captureScoreSummary(id, ownerUserId, { scope: 'table-session' }),
+    captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
+      const session = await load(id, ownerUserId);
+      const participantId = observer(session, ownerUserId);
+      if (!session || !participantId) return undefined;
+      if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
+      return captureEvaluation(session, ownerUserId, decisionId);
+    }),
     read,
     subscribe,
     configure,

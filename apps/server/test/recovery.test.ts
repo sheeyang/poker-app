@@ -4,7 +4,7 @@ import { Client, Pool } from 'pg';
 import { createServer, type ServerOptions } from '../src/server.js';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy } from '@poker/contracts';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
-import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
+import { baselineStrategy, HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 async function fixture(options: Partial<ServerOptions> = {}) {
@@ -14,6 +14,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let heldId: string | undefined;
   let terminal: ReturnType<typeof Promise.withResolvers<'COMMIT' | 'ROLLBACK'>> | undefined;
   const targets = new Set<Promise<void>>();
+  const humans = new Set<string>();
   let commands: TableSessionControllerCommands;
   let server: Awaited<ReturnType<typeof createServer>>;
   let base = '';
@@ -34,7 +35,11 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     },
   };
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options, onControllerCommandsReady: ready => { commands = ready; } } as ServerOptions);
+    server = await createServer({ databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
+      strategyFactory: options.strategyFactory && (descriptor => {
+        const controlled = options.strategyFactory!(descriptor); const reference = baselineStrategy(descriptor);
+        return { ...controlled, policy: { ...controlled.policy, evaluate: (view, execution) => humans.has(view.state.actorId ?? '') ? reference.policy.evaluate(view, execution) : controlled.policy.evaluate(view, execution) } };
+      }), onControllerCommandsReady: ready => { commands = ready; } } as ServerOptions);
     base = await server.listen({ host: '127.0.0.1', port: 0 });
   }
   await start();
@@ -44,7 +49,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   }
   async function table() {
     const response = await post('/table-sessions', { requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] });
-    expect(response.status).toBe(201); return response.json();
+    expect(response.status).toBe(201); const created = await response.json(); humans.add(created.bindings[0].participantId); return created;
   }
   const read = async (id: string) => (await fetch(base + '/api/table-sessions/' + id, { headers: { cookie } })).json();
   const list = async () => (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tableSessionIds;

@@ -24,3 +24,20 @@ export const processedRequests = pgTable('processed_requests', {
   fingerprint: text('fingerprint').notNull(),
   outcome: jsonb('outcome').$type<MutationOutcome>().notNull(),
 }, table => [primaryKey({ columns: [table.tableSessionId, table.requestId] })]);
+
+/** Successful derived evaluations are independent of authoritative poker records. */
+export const analysisEvaluations = pgTable('analysis_evaluations', {
+  fingerprint: text('fingerprint').primaryKey(),
+  requestId: uuid('request_id').notNull().unique(),
+  tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),
+  result: jsonb('result').$type<Extract<import('@poker/contracts').DecisionAnalysis, { status: 'complete' }>>().notNull(),
+});
+/** Successful scores retain their evaluation identity without entering poker records. */
+export const analysisScores = pgTable('analysis_scores', {
+  fingerprint: text('fingerprint').primaryKey(),
+  requestId: uuid('request_id').notNull().unique(),
+  tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
+  ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),
+  result: jsonb('result').$type<Extract<import('@poker/contracts').DecisionAnalysis, { status: 'complete' }>>().notNull(),
+});

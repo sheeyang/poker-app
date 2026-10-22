@@ -33,3 +33,17 @@ CREATE TABLE IF NOT EXISTS acceptance_attempts (
   table_session_id uuid,
   PRIMARY KEY(scope_kind, scope_id, request_id)
 );
+CREATE TABLE IF NOT EXISTS analysis_evaluations (
+  fingerprint text PRIMARY KEY,
+  request_id uuid NOT NULL UNIQUE,
+  table_session_id uuid NOT NULL REFERENCES table_sessions(id),
+  owner_user_id uuid NOT NULL REFERENCES local_users(id),
+  result jsonb NOT NULL
+);
+CREATE TABLE IF NOT EXISTS analysis_scores (
+  fingerprint text PRIMARY KEY,
+  request_id uuid NOT NULL UNIQUE,
+  table_session_id uuid NOT NULL REFERENCES table_sessions(id),
+  owner_user_id uuid NOT NULL REFERENCES local_users(id),
+  result jsonb NOT NULL
+);

@@ -93,6 +93,11 @@ export interface StrategyDescriptor {
   readonly policy: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
   readonly selector: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
 }
+/** Table Owner preferences, independent of every Bot's Playing Strategy. */
+export interface TrainerConfiguration {
+  readonly referenceStrategy: StrategyDescriptor;
+  readonly liveAnalysis: boolean;
+}
 export type ControllerDescriptor =
   | { readonly kind: 'human' }
   | { readonly kind: 'bot'; readonly playingStrategy: StrategyDescriptor };
@@ -174,6 +179,7 @@ export interface ObservableTableSession {
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
+  readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
@@ -190,7 +196,26 @@ export interface TableRuntimeStatus {
   readonly tableSessionId: TableSessionId;
   readonly status: { readonly phase: 'idle' | 'thinking' | 'failed' | 'recovering'; readonly participantId?: ParticipantId; readonly message?: string; readonly code?: 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' | 'persistence-unavailable' };
 }
-export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus;
+/** Results remain HTTP resources; live analysis delivery only invalidates a request/attempt. */
+export interface AnalysisUpdate {
+  readonly type: 'analysis-update';
+  readonly tableSessionId: TableSessionId;
+  readonly resource: 'analysis' | 'summary';
+  readonly requestId: string;
+  readonly attemptId: string;
+  readonly status: 'complete' | 'error';
+}
+export interface UserChannelReady { readonly type: 'user-channel-ready' }
+export interface SubscribeTable { readonly type: 'subscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
+export interface UnsubscribeTable { readonly type: 'unsubscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
+export type ClientLiveMessage = SubscribeTable | UnsubscribeTable;
+export type TableSubscriptionResult = {
+  readonly type: 'table-subscription-result';
+  readonly requestId: string;
+  readonly tableSessionId: TableSessionId;
+} & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
+export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate;
+export type ServerLiveMessage = UserChannelReady | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
   minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,
@@ -200,8 +225,72 @@ export const baselinePlayingStrategy: StrategyDescriptor = Object.freeze({
   policy: Object.freeze({ id: 'uniform-choice', version: 'v1', configuration: Object.freeze({}) }),
   selector: Object.freeze({ id: 'seeded-sampling', version: 'v1', configuration: Object.freeze({}) }),
 });
+export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({ referenceStrategy: baselinePlayingStrategy, liveAnalysis: false });
 
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
 export interface RetryBotRequest extends ControllerMutationMetadata {}
+export interface SetTrainerConfigurationRequest {
+  readonly requestId: string;
+  readonly expectedSessionRevision: Revision;
+  readonly trainerConfiguration: TrainerConfiguration;
+}
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
+
+/** Reproducible evaluation identity; effective seeds never enter a game view. */
+export interface EvaluationIdentity {
+  readonly tableSessionId: TableSessionId;
+  readonly participantId: ParticipantId;
+  readonly handId: HandId;
+  readonly decisionId: string;
+  readonly referenceStrategy: StrategyDescriptor;
+  readonly inputFingerprint: string;
+  readonly evaluationSeed: string;
+  readonly selectionSeed: string;
+  readonly engineVersion: 'v1';
+  readonly randomVersion: 'v1';
+  readonly evaluationVersion: 'v1';
+}
+export interface ReferenceStrategyEvaluation {
+  readonly policyResult: { readonly choices: readonly { readonly action: ConcreteAction; readonly probability: number }[] };
+  readonly selectedAction: ConcreteAction;
+  readonly actionProbabilities: readonly ActionProbability[];
+}
+export interface ActionProbability { readonly type: ConcreteAction['type']; readonly probability: number }
+export interface DecisionScores {
+  readonly decisionScore: number;
+  readonly actionRankScore: number;
+  readonly actionProbabilities: readonly ActionProbability[];
+}
+export type AnalysisFailureCode = 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed' | 'persistence-unavailable';
+export interface ScoredDecision { readonly acceptedAction: ConcreteAction; readonly scoringMethodVersion: 'v1' }
+export interface AnalysisRequestIdentity extends EvaluationIdentity {
+  readonly ok: true; readonly requestId: string; readonly attemptId: string;
+  readonly scoredDecision?: ScoredDecision;
+  readonly evaluationRequestId?: string;
+}
+export type DecisionAnalysis = AnalysisRequestIdentity & (
+  | { readonly status: 'pending' }
+  | { readonly status: 'complete'; readonly evaluation: ReferenceStrategyEvaluation; readonly scores?: DecisionScores }
+  | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
+);
+export interface GetOrStartAnalysisRequest { readonly decisionId: string }
+
+/** One immutable, explicitly requested set of accepted human decisions. */
+interface ScoreSummaryMetadata {
+  readonly ok: true; readonly tableSessionId: TableSessionId;
+  readonly requestId: string; readonly attemptId: string; readonly capturedPokerRevision: Revision;
+  readonly decisionIds: readonly string[]; readonly decisionCount: number; readonly referenceStrategy: StrategyDescriptor;
+}
+export type ScoreSummaryScope = { readonly scope: 'hand'; readonly handId: HandId } | { readonly scope: 'table-session' };
+export type ScoreSummaryIdentity = ScoreSummaryMetadata & ScoreSummaryScope;
+export type ScoreSummary = ScoreSummaryIdentity & (
+  | { readonly status: 'empty' | 'pending' }
+  | { readonly status: 'complete'; readonly averages: ScoreAverages }
+  | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
+);
+
+export type HandScoreSummary = ScoreSummary & { readonly scope: 'hand'; readonly handId: HandId };
+export type TableSessionScoreSummary = ScoreSummary & { readonly scope: 'table-session' };
+
+export interface ScoreAverages { readonly decisionScore: number; readonly actionRankScore: number }
