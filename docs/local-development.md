@@ -1,6 +1,6 @@
 # Local development
 
-Install Node.js 24 or newer and pnpm 11.25.0. Run `pnpm install --frozen-lockfile`, then `pnpm dev:playground`. The first dependency installation downloads the platform's PostgreSQL binaries. Keep optional dependencies and the approved package installation scripts enabled; neither a global PostgreSQL installation nor an `.env` file is required.
+Install Node.js 24 or newer and pnpm 11.25.0. Run `pnpm install --frozen-lockfile`, then `pnpm dev:trainer`. The first dependency installation downloads the platform's PostgreSQL binaries. Keep optional dependencies and the approved package installation scripts enabled; neither a global PostgreSQL installation nor an `.env` file is required.
 
 The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreSQL 18.4 binaries. Its prerelease suffix describes the Node package. Available platforms are Windows x64, macOS x64/arm64, and Linux x64/arm/arm64/ia32/ppc64. Windows is verified initially; the other available platforms are assumed compatible. Native Windows ARM64 is not supplied. On Unix, run as a normal unprivileged user, as required by PostgreSQL.
 
@@ -8,8 +8,7 @@ The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreS
 
 | Command | Default database lifecycle |
 | --- | --- |
-| `pnpm dev:playground` / `pnpm dev` | Start the persistent development database before the apps; gracefully stop it when the command ends. |
-| `pnpm dev:trainer` | Start the same managed database and API with the product Trainer at `127.0.0.1:5174`. |
+| `pnpm dev:trainer` / `pnpm dev` | Start the persistent development database, API and Trainer at `127.0.0.1:5174`; gracefully stop the database when the command ends. |
 | `pnpm db:init` | Start the development database, initialize the schema, then stop while retaining data. |
 | `pnpm test [filters/options]` | Start a fresh test database on a separate port; stop and remove temporary data afterward. |
 | `pnpm check` | Run the checks; its test step manages a fresh test database. |

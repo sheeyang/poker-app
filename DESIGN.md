@@ -136,7 +136,7 @@ components:
 
 Green felt, a charcoal-green shell, ivory cards and brass controls establish a familiar poker room. Compact interface typography and restrained material detail keep the experience focused and legible. The cards are the brightest objects; surrounding surfaces recede.
 
-This system belongs to the participant-facing Trainer. Its visual authority is the implemented `apps/web` interface and the confirmed classic poker-room direction in PRODUCT.md. The independent Playground has its own design context.
+This system belongs to the participant-facing Trainer. Its visual authority is the implemented `apps/web` interface and the confirmed classic poker-room direction in PRODUCT.md.
 
 **Key Characteristics:**
 
@@ -228,7 +228,6 @@ Use compact rounded rectangles: tags and small cards, card stock, fields, contro
 
 ### Don't:
 
-- **Don't** import the independent Playground's visual conventions into the Trainer.
 - **Don't** turn numerical alignment or action colors into advice, quality grades or celebratory judgments.
 - **Don't** replace conventional card indices and suit distinctions with decorative symbols.
 - **Don't** spread card and modal shadows across ordinary containers.

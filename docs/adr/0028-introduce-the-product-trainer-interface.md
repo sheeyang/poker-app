@@ -1,9 +1,10 @@
 # Introduce the Product Trainer Interface
 
-M3 introduces `apps/web` as the participant-facing Trainer. `apps/playground`
-remains the independent engineering interface. Both consume safe Contracts and
-share HTTP, live synchronization and analysis-resource reconciliation through
-`packages/client`; neither browser app imports authoritative implementations.
+M3 introduces `apps/web` as the participant-facing Trainer. It consumes safe
+Contracts and shares HTTP, live synchronization and analysis-resource
+reconciliation through `packages/client`; browser code does not import
+authoritative implementations. The original independent Playground requirement
+was retired by [ADR-0029](0029-retire-the-playground.md).
 
 ## Play and study
 

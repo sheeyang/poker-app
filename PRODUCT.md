@@ -14,11 +14,6 @@ outputs from a selected Reference Strategy. This audience and both device classe
 were confirmed during M3 initialization; a specific skill level or need for
 instruction in poker basics has not been established.
 
-Developers validate platform capabilities through the independent
-[Playground UI](apps/playground/PRODUCT.md), whose engineering context lives in
-its own app. Playground controls and visual conventions do not determine the
-participant-facing Trainer experience.
-
 ## Product Purpose
 
 Let a human play no-limit Hold'em Cash Game Hands against strategy-controlled
@@ -76,15 +71,13 @@ deployment and account requirements have not been established by this init.
 
 ### Product and engineering boundaries
 
-`apps/web` is the M3 product Trainer, with a table-first interface and a collapsible
-analysis panel. The existing
-browser app uses React/Vite, TanStack Router and Query, Zustand and Tailwind in a
-pnpm/TypeScript workspace. This init does not choose a different stack or create
-the app. Both browser apps consume safe Contracts from the authoritative server;
-they must not import the Poker Engine or server-only Research implementations.
-
-The Playground remains an enduring, independent engineering interface. Later
-capabilities are validated there before their product experiences are introduced.
+`apps/web` is the product Trainer, with a table-first interface and a collapsible
+analysis panel. It uses React/Vite, TanStack Router and Query, and Zustand in a
+pnpm/TypeScript workspace. The browser consumes safe Contracts and shared client
+transport from `packages/client`; it must not import the Poker Engine or
+server-only Research implementations. Platform capabilities are validated through
+automated tests and the relevant product interface. See
+[ADR-0029](docs/adr/0029-retire-the-playground.md).
 Use the terms in [GLOSSARY.md](GLOSSARY.md).
 
 ### Play, visibility and presentation
@@ -146,14 +139,12 @@ this product record does not replace that decision record.
   [ADR-0008](docs/adr/0008-derive-trainer-scoring-from-policy.md) and
   [ADR-0026](docs/adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md):
   derived analysis, numerical meaning, presentation requirements and summaries.
-- [ADR-0017](docs/adr/0017-bind-observability-with-participant-cash-game.md) and
-  [ADR-0022](docs/adr/0022-maintain-an-independent-playground.md): safe views and
-  events, and the independent Playground.
-- [Existing Playground code](apps/playground/src/main.tsx) and server/contracts:
-  implemented behavior and testable data, rather than a final product visual system.
-- The M3 init confirms the audience, desktop/mobile use, and separation of root
-  product context from Playground context. No primary user research, usability
-  findings, market claims or product brand assets were established in this init.
+- [ADR-0017](docs/adr/0017-bind-observability-with-participant-cash-game.md): safe views and events.
+- [Trainer code](apps/web/src/main.tsx), shared client, and server/contracts:
+  implemented behavior and testable data.
+- The M3 init confirms the audience and desktop/mobile use. No primary user
+  research, usability findings, market claims or product brand assets were
+  established in this init.
 
 ## Product Principles
 
@@ -165,8 +156,7 @@ this product record does not replace that decision record.
    scores, references and incomplete results.
 4. Protect information boundaries in every state, including animation, recovery
    and completed-Hand inspection.
-5. Support the complete play-and-study workflow on desktop and mobile while
-   keeping engineering validation independent of the product experience.
+5. Support the complete play-and-study workflow on desktop and mobile.
 
 ## Open Decisions
 
