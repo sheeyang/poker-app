@@ -10,6 +10,8 @@ ADR-0028, without introducing a historical replay workspace.
 - Only accepted human decisions appear as review rows. Each collapsed row names
   the action. Preflop, Flop, Turn and River labels and their community cards belong
   inside the expanded detail, not in separate list headings.
+- The Your decisions heading and all rows share one bordered, rounded box, matching
+  mockup B. Row dividers and a distinct expanded surface keep the group readable.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection remains
   pinned as live play advances; Return to latest decision restores following.

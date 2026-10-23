@@ -39,7 +39,7 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
     <div className="panel-heading"><div><Icon name="chart" /><h2>{selected ? `Hand ${selected.handNumber} review` : 'Live reference'}</h2></div><button className="icon-button" aria-label="Return to table" onClick={close}><Icon name="close" size={18} /></button></div>
     {analysis.pinned && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Return to latest decision <Icon name="arrow" size={15} /></button>}
     {!selected && <section className="decision-section"><div className="section-heading"><h3>{configuration.liveAnalysis ? 'Current decision' : 'Decision analysis'}</h3><span className="subtle-tag">{configuration.liveAnalysis ? 'Live' : 'Live off'}</span></div>{content}</section>}
-    {handDecisions.length > 0 && <section className="decision-section"><div className="section-heading"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
+    {handDecisions.length > 0 && <section className="decision-section decision-review"><div className="section-heading"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
       <ol aria-label="Your decisions in this hand" className="review-decision-list">{handDecisions.map(d => {
         const open = d.decisionId === expandedDecisionId;
         return <li key={d.decisionId}><details className="review-decision" open={open}>
