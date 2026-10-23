@@ -35,6 +35,7 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
   const reference = data?.referenceStrategy ?? configuration.referenceStrategy;
   const street = context.street ?? 'decision';
   const content = <>
+    {data?.status === 'complete' && data.scores && <div className="decision-scores"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     <div className="decision-context"><span>{selected ? `${street[0]!.toUpperCase()}${street.slice(1)} · Before your action` : configuration.liveAnalysis ? 'Current table state' : 'Reference appears after you act'}</span>{humanId && (selected || configuration.liveAnalysis) && <DecisionSituation state={context} humanId={humanId} bindings={table.bindings} earlierActions={earlierActions} seatCount={table.view.configuration.seatCount} />}</div>
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
     {(analysis.display?.loading && !data || data?.status === 'pending') && <p className="review-analysis-status" role="status">Loading reference actions…</p>}
@@ -67,7 +68,6 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
 function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
   const accepted = data.scoredDecision?.acceptedAction;
   return <>
-    {data.scores && <div className="decision-scores"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     <div className="distribution-heading"><h3>Reference actions</h3><span>Probability</span></div>
     <ul className="probability-tree" aria-label="Reference Policy distribution">{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
       {(parent.type === 'raise' || parent.type === 'bet') && <ul>{data.evaluation.policyResult.choices.filter(c => c.action.type === parent.type).map(choice => <li key={actionLabel(choice.action)}><span>{actionLabel(choice.action)}{accepted && JSON.stringify(accepted) === JSON.stringify(choice.action) && <span className="you-marker">You</span>}</span><strong>{choice.probability.toFixed(2)}</strong></li>)}</ul>}

@@ -59,6 +59,7 @@ describe('decision situation', () => {
     expect(header.replace(/<[^>]*>/g, '')).toBe('Call');
     expect(header).not.toContain('review-row-scores');
     expect(html).toContain('class="decision-scores"');
+    expect(html.indexOf('class="decision-scores"')).toBeLessThan(html.indexOf('class="decision-context"'));
     expect(html).toContain('72.0<small>/100</small>');
     expect(html).toContain('80.0<small>/100</small>');
     for (const removed of ['Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);

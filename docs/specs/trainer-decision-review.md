@@ -34,7 +34,7 @@ ADR-0028, without introducing a historical replay workspace.
 - The full Reference Strategy distribution, concrete sizing choices, selected
   reference action, scores, loading/error states and retry controls remain tied
   to the selected decision. The snapshot remains useful while analysis is pending.
-- Expanded content follows this order: street and frozen situation, large scores, Reference
+- Expanded content follows this order: large scores, street and frozen situation, Reference
   actions and full sizing tree, one-line sampled/selected action, Earlier actions,
   Analysis details. The latter contains sampling explanations and Policy/Selector
   versions. Repeated You labels, accepted-action blocks and instructional captions
