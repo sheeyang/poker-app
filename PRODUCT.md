@@ -21,7 +21,7 @@ Participants and study how their concrete decisions align with a chosen Referenc
 Strategy. The Trainer supplies numerical evidence for the player's interpretation
 without prescribing an action or labeling a decision good or bad.
 
-M3 introduces the main product interface in `apps/web` for capabilities established
+M3 delivered the main product interface in `apps/web` for capabilities established
 through M1 and M2. Success means the player can configure and continue a Table
 Session, play legal actions, understand confirmed table state, and inspect Strategy
 outputs and alignment results on desktop and mobile. Analysis and presentation
@@ -56,7 +56,7 @@ claim of poker expertise or Solver quality.
   defaults to off. Every accepted human decision triggers nonblocking analysis.
 - Review the visible Hand recap after completion, then choose a street-labeled
   decision to inspect its captured cards and numerical reference. Manual reviews
-  stay selected as play advances. Finish & review captures a Table Session summary.
+  stay selected as play advances. Session summary captures a Table Session summary.
 - Retain confirmed state through loading, failure, uncertain outcomes, reload and
   reconnect. Offer specific recovery actions and explicit Retry where supported.
 
@@ -119,16 +119,19 @@ Use the terms in [GLOSSARY.md](GLOSSARY.md).
 
 ### Milestone scope
 
-The [current milestone plan](docs/milestones.md) places the full Trainer interface,
-feedback timing, loading/error/retry states and dealing/burn presentation in M3.
-General history navigation, action-by-action replay, counterfactual comparison,
-Range Visualizer, Equity / Poker Math Overlay and overall-history summaries belong
-to M4. Solver work belongs to M5; mass simulation and benchmarking belong to M6.
+M3 is complete as of 24 October 2026. It delivered the full Trainer interface,
+feedback timing, loading/error/retry states and basic dealing/burn presentation.
+[ADR-0028](docs/adr/0028-introduce-the-product-trainer-interface.md) records the
+product interaction and authority decisions; [ADR-0029](docs/adr/0029-retire-the-playground.md)
+records retirement of the Playground.
 
-Some older ADRs use an earlier milestone numbering scheme. Use the current
-six-milestone plan for delivery order while preserving their underlying decisions.
-M3 still needs its product UI/UX and animation extension ADR during specification;
-this product record does not replace that decision record.
+The [current eight-milestone plan](docs/milestones.md) makes M4 — Shared gameplay
+foundation the current focus. Elaborate animations belong to M5. General history
+navigation, action-by-action replay, counterfactual comparison, Range Visualizer,
+Equity / Poker Math Overlay and overall-history summaries belong to M6. Solver
+work belongs to M7; mass simulation and benchmarking belong to M8. Older ADR
+milestone numbers retain their historical meaning; use the current plan for
+delivery order.
 
 ## Evidence on Hand
 
@@ -164,7 +167,7 @@ The user selected the classic poker-room direction for M3: green oval felt, dark
 rail and shell, ivory cards and familiar betting controls. The table leads;
 analysis opens beside it on desktop and below play on mobile. Visual details were
 delegated to the implementer. Accepted-decision results update without interrupting
-play; completed Hands request a Hand summary, and **Finish session** explicitly
+play; completed Hands request a Hand summary, and **Session summary** explicitly
 captures a session summary without removing the continuing table. See ADR-0028.
 
 - Final product name, voice and binding brand assets or commitments.

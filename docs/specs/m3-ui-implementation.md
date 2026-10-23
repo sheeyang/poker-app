@@ -2,7 +2,7 @@
 
 The product Trainer now lives in `apps/web` and runs at `127.0.0.1:5174`.
 `pnpm dev:trainer` starts it with the authoritative API and managed development
-PostgreSQL. The separate engineering Playground remains at port 5173.
+PostgreSQL. The engineering Playground was retired by ADR-0029.
 
 The user selected a classic poker room and confirmed that the table should lead,
 with analysis in a collapsible side panel. The interface implements green oval
@@ -19,7 +19,7 @@ import authoritative implementations. Mutation attempts are retained before
 transmission and remain recoverable after uncertain responses. Dealing and burn
 motion uses safe events and never controls confirmed state or legal actions.
 
-## Verification
+## Initial implementation verification
 
 - Workspace typecheck passes.
 - All application production builds and dependency-boundary checks pass.
@@ -55,7 +55,7 @@ Start practice seats the full lineup and explicitly deals its first Hand from on
 player gesture. Saved tables use observable game metadata rather than IDs. A
 visible completed-Hand recap leads into street-specific review with safe cards;
 manual selections remain pinned as subsequent Hands advance. Reference settings
-sit below the comparison. Rebuy & deal identifies and restores empty human/Bot
+are available from the analysis panel’s settings control. Rebuy & deal identifies and restores empty human/Bot
 stacks while preserving intentionally removed or sitting-out opponents. Advanced
 table administration stays outside the normal play loop.
 
@@ -81,3 +81,41 @@ Revision verification:
   numerical meaning). This verdict covers that fix list, not a new whole-product
   usability study. DESIGN.md and the local schema2 sidecar now document the
   revised patterns while preserving the incumbent tokens.
+
+## Completion — 24 October 2026
+
+The user accepted M3 as complete after the final Trainer UI cleanup in commit
+`1e37264`. M4 — Shared gameplay foundation is now the current focus. The current
+eight-milestone roadmap defers elaborate animations to M5 and historical replay
+and deeper analysis to M6; these are not outstanding M3 requirements.
+
+The final interface includes a shared expandable decision box with aligned
+collapsed scores, large scores first inside expanded details, and frozen
+participant-safe situations with preceding opponent actions. The review header
+keeps its size when toggled. Analysis settings and explanations use progressive
+disclosure; complete numerical distributions, exact sizing choices and recovery
+controls remain available.
+
+The main table removes repeated labels and save messages, combines Hand/street
+status, and keeps legal betting controls and mobile stack context. The compact
+post-Hand recap retains both mean scores, with Review hand and Deal next hand
+together. Rebuy/return explanations remain conditional. Setup and table options
+use shorter copy, and Session summary names its actual behavior.
+
+Final verification (performed for the implementation, not rerun for this status
+update):
+
+- Full repository suite: **44 files passed; 362 tests passed, one skipped** using
+  `pnpm test --maxWorkers=2` with a temporary PostgreSQL database.
+- All **16 frontend tests** passed; web TypeScript, production build and workspace
+  dependency-boundary checks passed.
+- Real browser checks confirmed a six-player Hand, automatic post-action and Hand
+  scores, the relocated Review hand control opening its selected decision, and
+  explicit Deal next hand reaching Hand 2.
+- Desktop and 390×844 mobile checks confirmed the compact recap, paired actions,
+  visible single save indicator, mobile stack context and no horizontal overflow.
+- Layout detector returned no findings. Standards and Spec reviews had no
+  remaining findings after the mobile save indicator was corrected.
+
+Latest local screenshots are in `.scratch/ui-cleanup/` (ignored development
+evidence). Earlier verification sections retain their historical scope and counts.
