@@ -498,6 +498,14 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .review-decision > summary > span { color: var(--muted); }
 .review-decision > summary > strong { font-variant-numeric: tabular-nums; }
 .review-decision > summary > svg { margin-left: auto; color: var(--muted); }
+.review-decision > summary > .review-row-scores { display: flex; gap: 16px; margin-left: auto; font-size: .7rem; text-align: right; }
+.review-row-scores > span { display: flex; flex-direction: column; gap: 4px; }
+.review-row-scores strong { color: var(--text); font-size: .9rem; font-variant-numeric: tabular-nums; }
+.review-row-scores small { color: var(--muted); font-size: .7rem; font-weight: 400; }
+@media (max-width: 650px) {
+  .review-decision > summary { flex-wrap: wrap; gap: 8px 12px; }
+  .review-decision > summary > .review-row-scores { order: 1; flex-basis: 100%; justify-content: flex-end; }
+}
 .review-decision > summary:hover { background: var(--raised); }
 .review-decision[open] > summary { background: #2b382c; color: var(--gold); }
 .review-decision[open] > summary > svg { transform: rotate(90deg); color: var(--gold); }

@@ -22,6 +22,18 @@ const decision: ObservableCashGameState = {
 };
 
 describe('decision situation', () => {
+  it('shows separate scores for collapsed decisions', () => {
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const analysis = {
+      acceptedDecisions: ['d1', 'd2', 'd3'].map(decisionId => ({ decisionId, handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } })),
+      selectedDecisionId: 'd1', expandedDecisionId: '', pinned: true,
+      rowAnalyses: { d1: { status: 'complete', scores: { decisionScore: .72, actionRankScore: .8 } }, d2: { status: 'complete', scores: { decisionScore: .35, actionRankScore: .5 } } },
+    } as unknown as Props['analysis'];
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
+    const summaries = [...html.matchAll(/<summary[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, '')).filter(text => text.startsWith('You'));
+    expect(summaries).toEqual(['YouCallDecision Score72.0/100Action Rank Score80.0/100', 'YouCallDecision Score35.0/100Action Rank Score50.0/100', 'YouCallScores pending']);
+  });
   it('lists only human decisions as expandable actions, with the street inside the selected detail', () => {
     const accepted = [
       { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' as const } },
@@ -32,7 +44,7 @@ describe('decision situation', () => {
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('<ol aria-label="Your decisions in this hand"');
     const actionSummaries = [...html.matchAll(/<summary[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, '')).filter(text => text.startsWith('You'));
-    expect(actionSummaries).toEqual(['YouCall', 'YouCheck']);
+    expect(actionSummaries).toEqual(['YouCall', 'YouCheckScores pending']);
     expect(html).toContain('At your flop decision');
     expect(html).not.toContain('At your river decision');
   });

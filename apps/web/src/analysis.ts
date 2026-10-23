@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ConcreteAction } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource, type LiveConsumers } from '@poker/client';
 
@@ -18,6 +19,29 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const selectedDecisionId = pinned ? selection!.decisionId : liveEnabled && currentDecisionId ? '' : newestAccepted ?? '';
   const expandedDecisionId = pinned && selection!.collapsed ? '' : selectedDecisionId;
   const accepted = acceptedDecisions.find(decision => decision.decisionId === selectedDecisionId);
+  const [rowRevision, setRowRevision] = useState(0);
+  const rowGeneration = useRef<number | null>(null);
+  const confirmedRows = useRef(new Map<string, DecisionAnalysis>());
+  const reviewDecisions = acceptedDecisions.filter(decision => decision.handId === (accepted?.handId ?? table?.view.state.handId));
+  const rowKeys = reviewDecisions.map(decision => identity([table!.tableSessionId, decision.decisionId, table!.trainerConfiguration.referenceStrategy, decision.action]));
+  // A fresh generation also covers completion notifications that race an initial HTTP read.
+  // Keep confirmed values under their full identity while that read is refreshed.
+  const rowQueries = useQueries({ queries: reviewDecisions.map((decision, index) => {
+    const rowKey = rowKeys[index]!;
+    return { queryKey: ['decision-row-analysis', rowKey, rowRevision], staleTime: Infinity, placeholderData: confirmedRows.current.get(rowKey), queryFn: async () => {
+      const data = await api.getOrStartAnalysis(table!.tableSessionId, decision.decisionId);
+      if (identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) !== rowKey) throw new Error('Analysis does not match this decision.');
+      return data;
+    } };
+  }) });
+  const rowAnalyses = Object.fromEntries(reviewDecisions.map((decision, index) => [decision.decisionId, rowQueries[index]!.data ?? confirmedRows.current.get(rowKeys[index]!)]));
+  useEffect(() => {
+    confirmedRows.current = new Map(rowKeys.flatMap((key, index) => {
+      const data = rowQueries[index]!.data ?? confirmedRows.current.get(key);
+      return data?.status === 'complete' ? [[key, data] as const] : [];
+    }));
+  });
+  const rowErrors = Object.fromEntries(reviewDecisions.map((decision, index) => [decision.decisionId, rowQueries[index]!.isError]));
   const decisionId = selectedDecisionId || currentDecisionId;
   const key = table && decisionId ? identity([table.tableSessionId, decisionId, table.trainerConfiguration.referenceStrategy, accepted?.action ?? null]) : '';
   const target = useMemo(() => key && table && decisionId ? createAnalysisTarget<DecisionAnalysis>({
@@ -38,11 +62,11 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   }) : null, [backgroundKey]);
   const background = useAnalysisResource(backgroundTarget);
   const consumers: LiveConsumers = {
-    onReady: lifecycle => { resource.consumers.onReady?.(lifecycle); background.consumers.onReady?.(lifecycle); },
-    onAnalysisUpdate: (update, lifecycle) => { resource.consumers.onAnalysisUpdate?.(update, lifecycle); background.consumers.onAnalysisUpdate?.(update, lifecycle); },
+    onReady: lifecycle => { rowGeneration.current = lifecycle.generation; setRowRevision(value => value + 1); resource.consumers.onReady?.(lifecycle); background.consumers.onReady?.(lifecycle); },
+    onAnalysisUpdate: (update, lifecycle) => { if (update.resource === 'analysis' && update.tableSessionId === table?.tableSessionId && lifecycle.generation === rowGeneration.current) setRowRevision(value => value + 1); resource.consumers.onAnalysisUpdate?.(update, lifecycle); background.consumers.onAnalysisUpdate?.(update, lifecycle); },
   };
   const connectionChanged = useCallback((generation: number | null) => { resource.connectionChanged(generation); background.connectionChanged(generation); }, [resource.connectionChanged, background.connectionChanged]);
-  return { ...resource, consumers, connectionChanged, acceptedDecisions, selectedDecisionId, expandedDecisionId, pinned,
+  return { ...resource, consumers, connectionChanged, acceptedDecisions, rowAnalyses, rowErrors, selectedDecisionId, expandedDecisionId, pinned,
     selectDecision: (id: string) => { if (table) setSelection(id ? { tableId: table.tableSessionId, decisionId: id } : undefined); },
     collapseDecision: () => { if (table && selectedDecisionId) setSelection({ tableId: table.tableSessionId, decisionId: selectedDecisionId, collapsed: true }); },
     canEvaluate: !!target, evaluate: () => resource.request() };

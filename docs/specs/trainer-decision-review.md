@@ -12,6 +12,8 @@ ADR-0028, without introducing a historical replay workspace.
   inside the expanded detail, not in separate list headings.
 - The Your decisions heading and all rows share one bordered, rounded box, matching
   mockup B. Row dividers and a distinct expanded surface keep the group readable.
+- Collapsed decisions show their own Decision Score and Action Rank Score out of
+  100 for the current Reference Strategy, with explicit pending/unavailable states.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection remains
   pinned as live play advances; Return to latest decision restores following.

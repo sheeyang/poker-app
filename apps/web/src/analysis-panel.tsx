@@ -42,8 +42,9 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
     {handDecisions.length > 0 && <section className="decision-section decision-review"><div className="section-heading"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
       <ol aria-label="Your decisions in this hand" className="review-decision-list">{handDecisions.map(d => {
         const open = d.decisionId === expandedDecisionId;
+        const rowData = analysis.rowAnalyses?.[d.decisionId] ?? (data?.decisionId === d.decisionId ? data : undefined);
         return <li key={d.decisionId}><details className="review-decision" open={open}>
-          <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><span>You</span><strong>{actionLabel(d.action)}</strong><Icon name="chevron" size={17} /></summary>
+          <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-describedby={!open ? `decision-scores-${d.decisionId}` : undefined} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><span>You</span><strong>{actionLabel(d.action)}</strong>{!open && <span id={`decision-scores-${d.decisionId}`} className="review-row-scores">{rowData?.status === 'complete' && rowData.scores ? <><span>Decision Score<strong>{(rowData.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></span><span>Action Rank Score<strong>{(rowData.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></span></> : <span>{rowData?.status === 'error' || analysis.rowErrors?.[d.decisionId] ? 'Scores unavailable' : 'Scores pending'}</span>}</span>}<Icon name="chevron" size={17} /></summary>
           {open && <div className="review-decision-content">{content}</div>}
         </details></li>;
       })}</ol>
