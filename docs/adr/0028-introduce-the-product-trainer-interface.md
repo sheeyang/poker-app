@@ -1,5 +1,7 @@
 # Introduce the Product Trainer Interface
 
+**Roadmap scope:** [M3](../milestones.md) remains the current Trainer UI and UX milestone. Existing basic motion stays; [M4 — Shared gameplay foundation](../milestones.md#m4--shared-gameplay-foundation) adds server-controlled presentation windows, deadlines, and automatic online dealing before M5 adds elaborate animations. M4's extension ADR must revisit the immediate-presentation policy below while keeping complete-view recovery and animation completion independent of action validity. Trainer retains explicit subsequent Hand starts.
+
 M3 introduces `apps/web` as the participant-facing Trainer. It consumes safe
 Contracts and shares HTTP, live synchronization and analysis-resource
 reconciliation through `packages/client`; browser code does not import
@@ -49,8 +51,8 @@ animations never replay state transitions or gate legal actions. Reduced motion
 and the user's animation preference disable motion without changing gameplay.
 
 General historical navigation, replay, counterfactual comparison, range and equity
-tools remain M4. This decision extends ADR-0017, ADR-0022 and ADR-0026; earlier
-milestone numbers in those documents do not change the current six-milestone plan.
+tools remain M6. This decision extends ADR-0017, ADR-0022 and ADR-0026; earlier
+milestone numbers in those documents do not change the current eight-milestone roadmap.
 
 ## UX revision after product feedback
 

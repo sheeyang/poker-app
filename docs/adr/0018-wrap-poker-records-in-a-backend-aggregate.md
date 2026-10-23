@@ -1,5 +1,7 @@
 # Wrap Poker Records in a Backend-Owned Aggregate
 
+**Planned online extension:** [M4 — Shared gameplay foundation](../milestones.md#m4--shared-gameplay-foundation) introduces timed online turns, durable schedules, timeout actions, and automatic successive online Hands. Its extension ADR must explicitly revisit the reconnect and explicit-dealing policies below; Trainer remains untimed by default with explicit dealing.
+
 The backend will persist each Table Session as a logical PersistedTableSession aggregate containing the engine-owned TableSessionRecord plus participant controllers and Trainer configuration, independently of how PostgreSQL normalizes it. CashGame restores only the nested poker record and remains unaware of Bots, Strategies, preferences, or database infrastructure; recorded Bot actions replay as accepted poker commands without rerunning Strategies. This preserves a reusable engine while retaining the application state required to resume a session after restart.
 
 A Bot Strategy failure remains an application-level controller outcome and submits no poker command or implicit fallback. The unchanged decision may be retried with the same declared inputs and derived seed, or the Table Owner may explicitly replace the Strategy before evaluation resumes.
