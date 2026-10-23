@@ -16,7 +16,9 @@ ADR-0028, without introducing a historical replay workspace.
   in fixed columns, aligned across actions and values of different lengths. An
   expanded header shows only the action and chevron; the large Decision Score and
   secondary Action Rank Score appear inside its detail. The action header stays
-  visible while its detail scrolls. Pending/unavailable states remain explicit.
+  visible while its detail scrolls. Its grid and reserved score space stay the
+  same size when toggled; expanded header scores are visually hidden and excluded
+  from assistive technology. Pending/unavailable states remain explicit.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection remains
   pinned as live play advances. Latest decision restores following when reviewing

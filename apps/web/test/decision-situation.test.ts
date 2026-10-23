@@ -44,7 +44,8 @@ describe('decision situation', () => {
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('<ol aria-label="Your decisions in this hand"');
     const actionSummaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
-    expect(actionSummaries).toEqual(['Call', 'CheckScores pending']);
+    expect(actionSummaries).toEqual(['CallScores pending', 'CheckScores pending']);
+    expect(html).toContain('id="decision-scores-d1" aria-hidden="true"');
     expect(html).toContain('Flop · Before your action');
     expect(html).not.toContain('River · Before your action');
   });
@@ -56,8 +57,9 @@ describe('decision situation', () => {
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1', pinned: true, display: { data }, rowAnalyses: { d1: data } } as unknown as Props['analysis'];
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
     const header = html.match(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/)![1];
-    expect(header.replace(/<[^>]*>/g, '')).toBe('Call');
-    expect(header).not.toContain('review-row-scores');
+    expect(header).toContain('class="review-row-action">Call</strong>');
+    expect(header).toContain('aria-hidden="true"');
+    expect(header).toContain('review-row-scores');
     expect(html).toContain('class="decision-scores"');
     expect(html.indexOf('class="decision-scores"')).toBeLessThan(html.indexOf('class="decision-context"'));
     expect(html).toContain('72.0<small>/100</small>');

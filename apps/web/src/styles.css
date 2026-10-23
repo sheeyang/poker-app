@@ -513,7 +513,8 @@ meter::-moz-meter-bar { background: var(--probability-color); }
   .review-decision > summary > .review-row-scores { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
 }
 .review-decision > summary:hover { background: var(--raised); }
-.review-decision[open] > summary { grid-template-columns: minmax(0, 1fr) 17px; background: #2b382c; color: var(--gold); }
+.review-decision[open] > summary { background: #2b382c; color: var(--gold); }
+.review-decision[open] > summary > .review-row-scores { visibility: hidden; }
 .review-decision[open] > summary { position: sticky; top: 0; z-index: 4; }
 .review-row-action { min-width: 0; overflow-wrap: anywhere; }
 .review-row-scores > span:last-child:not(:first-child) strong { color: var(--muted); }
