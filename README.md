@@ -57,6 +57,8 @@ Browser code uses the shared Client and participant-safe Contracts. The dependen
 
 `GET /api/identity` establishes the local identity. `POST /api/table-sessions` accepts `requestId`, optional observable `configuration` overrides, and optional Bot name/Playing Strategy intentions. It allocates one stable human Participant binding and the configured Bots without seating them. All hidden fields and supplied ownership/Participant identifiers are rejected. The baseline Policy is `uniform-choice/v1`, paired with `seeded-sampling/v1` or `highest-probability/v1`; each has empty configuration.
 
+New practice tables use **Simple Heuristic** (`simple-heuristic/v1`) with Probability Selector for Bots and the Reference Strategy. It uses basic hand strength, modest bets, draws and occasional bluffs; see [the strategy rules](docs/specs/simple-heuristic.md). Both Policies support both Action Selectors and have fixed versioned rules with empty configuration. Uniform Choice remains available. Saved tables and captured analyses retain their original Strategies.
+
 `GET /api/table-sessions` lists only the authenticated user's owned session identifiers. `GET /api/table-sessions/:id` restores or reads the committed game and returns a freshly mapped safe view with application-owned revisions and bindings.
 
 Defaults are six seats, blinds 10/20, ante 0, minimum/default/maximum buy-in 1000, and seat changes enabled. Configuration is immutable. The server generates the hidden master seed. CashGame receives explicit trusted configuration; its version-1 record contains that configuration and accepted commands, without server revisions. A fresh session has zero accepted commands and both revisions at zero.

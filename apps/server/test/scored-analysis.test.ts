@@ -19,7 +19,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false, supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice'].includes((value as StrategyDescriptor).policy?.id), strategyFactory: () => ({
+    server = await createServer({ databaseUrl, schema, automaticBots: false, supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id), strategyFactory: () => ({
       policy: { checkCompatibility: () => ({ compatible: true }), evaluate: (view, execution) => { const result = Promise.withResolvers<PolicyResult>(); const evaluation = { view, seed: execution.evaluationSeed, signal: execution.signal, result }; evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation)); return result.promise; } }, actionSelector: new HighestProbabilitySelector(),
     }), ...options });
     base = await server.listen({ host: '127.0.0.1', port: 0 });

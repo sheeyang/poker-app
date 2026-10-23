@@ -1,5 +1,7 @@
 import type { ConcreteAction, ObservableGameView, StrategyDescriptor } from '@poker/contracts';
 import { createRandomSource } from '@poker/engine';
+import { SimpleHeuristicPolicy } from './simple-heuristic.js';
+export { SimpleHeuristicPolicy };
 
 export interface Choice { readonly action: ConcreteAction; readonly probability: number }
 export interface PolicyResult { readonly choices: readonly Choice[]; readonly diagnostics?: Readonly<Record<string, unknown>> }
@@ -89,12 +91,20 @@ export class HighestProbabilitySelector implements ActionSelector {
     return selected.action;
   }
 }
-export function isBaselineStrategy(value: unknown): value is StrategyDescriptor {
+export function isSupportedStrategy(value: unknown): value is StrategyDescriptor {
   if (!object(value) || Object.keys(value).length !== 2) return false;
   const valid = (descriptor: unknown, ids: readonly string[]) => object(descriptor) && Object.keys(descriptor).length === 3 && ids.includes(descriptor.id as string) && descriptor.version === 'v1' && object(descriptor.configuration) && Object.keys(descriptor.configuration).length === 0;
-  return valid(value.policy, ['uniform-choice']) && valid(value.selector, ['seeded-sampling', 'highest-probability']);
+  return valid(value.policy, ['uniform-choice', 'simple-heuristic']) && valid(value.selector, ['seeded-sampling', 'highest-probability']);
+}
+export function createStrategy(descriptor: StrategyDescriptor): Strategy {
+  if (!isSupportedStrategy(descriptor)) throw new Error('Unsupported Strategy descriptor.');
+  return { policy: descriptor.policy.id === 'simple-heuristic' ? new SimpleHeuristicPolicy() : new UniformChoicePolicy(), actionSelector: descriptor.selector.id === 'highest-probability' ? new HighestProbabilitySelector() : new ProbabilitySelector() };
+}
+/** Uniform Choice entry points retained for callers that explicitly request the baseline. */
+export function isBaselineStrategy(value: unknown): value is StrategyDescriptor {
+  return isSupportedStrategy(value) && value.policy.id === 'uniform-choice';
 }
 export function baselineStrategy(descriptor: StrategyDescriptor): Strategy {
-  if (!isBaselineStrategy(descriptor)) throw new Error('Unsupported Strategy descriptor.');
-  return { policy: new UniformChoicePolicy(), actionSelector: descriptor.selector.id === 'highest-probability' ? new HighestProbabilitySelector() : new ProbabilitySelector() };
+  if (!isBaselineStrategy(descriptor)) throw new Error('Unsupported baseline Strategy descriptor.');
+  return createStrategy(descriptor);
 }

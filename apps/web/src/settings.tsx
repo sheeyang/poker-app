@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '@poker/client';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableSession, type ParticipantBinding } from '@poker/contracts';
+import type { ObservableTableSession, ParticipantBinding } from '@poker/contracts';
+import { StrategySelect } from './strategy-select.js';
 import { Dialog } from './dialog.js';
 import { CommandFeedback } from './controls.js';
 import { chips } from './table-model.js';
@@ -54,6 +55,6 @@ function PlayerSettings({ table, binding, command, disabled }: { table: Observab
       <form className="inline-form" onSubmit={e => { e.preventDefault(); command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'top-up-to', body: { ...metadata(), targetStack: topUp } }); }}><label>{p.stack === 0 ? 'Rebuy to · chips' : 'Top up to · chips'}<input type="number" step="1" min={Math.max(p.stack + 1, table.view.configuration.minimumBuyIn)} max={max} value={target} required disabled={disabled || p.stack >= max} onChange={e => setTarget(e.target.value)} /></label><button disabled={disabled || p.stack >= max || topUp <= p.stack || topUp > max}>{p.stack === 0 ? 'Rebuy' : 'Top up'}</button></form>
       {table.view.configuration.allowSeatChanges && emptySeats.length > 0 && <form className="inline-form" onSubmit={e => { e.preventDefault(); if (chosenSeat) command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'move-participant', body: { ...metadata(), seat: chosenSeat } }); }}><label>Move to seat<select value={chosenSeat ?? ''} disabled={disabled} onChange={e => setSeat(e.target.value)}>{emptySeats.map(s => <option key={s}>{s}</option>)}</select></label><button disabled={disabled}>Move seat</button></form>}
     </>}
-    {binding.controller.kind === 'bot' && <label>Playing Strategy<select disabled={disabled} value={binding.controller.playingStrategy.selector.id} onChange={e => command.submit({ tableId: table.tableSessionId, kind: 'strategy', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, participantId: binding.participantId, playingStrategy: e.target.value === 'highest-probability' ? highestProbabilityPlayingStrategy : baselinePlayingStrategy } })}><option value="seeded-sampling">Uniform Choice · Probability Selector</option><option value="highest-probability">Uniform Choice · Highest Probability</option></select></label>}
+    {binding.controller.kind === 'bot' && <label>Playing Strategy<StrategySelect disabled={disabled} value={binding.controller.playingStrategy} onChange={playingStrategy => command.submit({ tableId: table.tableSessionId, kind: 'strategy', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, participantId: binding.participantId, playingStrategy } })} /></label>}
   </div></details>;
 }

@@ -1,13 +1,13 @@
-import { isBaselineStrategy } from '@poker/strategies';
+import { isSupportedStrategy } from '@poker/strategies';
 import { defaultConfiguration, type ApplicationRejection, type CreateTableSessionRequest } from '@poker/contracts';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-export function validateTrainerConfiguration(value: unknown, supportsStrategy: (descriptor: unknown) => boolean = isBaselineStrategy): ApplicationRejection | undefined {
+export function validateTrainerConfiguration(value: unknown, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   if (!object(value) || Object.keys(value).some(key => !['referenceStrategy', 'liveAnalysis'].includes(key)) || typeof value.liveAnalysis !== 'boolean')
     return { ok: false, rejection: { code: 'invalid-trainer-configuration', message: 'Supply a complete Reference Strategy and a boolean Live Analysis setting.' } };
   if (!supportsStrategy(value.referenceStrategy))
     return { ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Reference Strategy.' } };
 }
-export function validateCreationRequest(request: CreateTableSessionRequest, supportsStrategy: (descriptor: unknown) => boolean = isBaselineStrategy): ApplicationRejection | undefined {
+export function validateCreationRequest(request: CreateTableSessionRequest, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   const reject = (field: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code: 'invalid-creation-settings', field, message } });
   for (const key of Object.keys(request)) {
     if (!['requestId', 'configuration', 'bots'].includes(key)) return reject(key, 'Creation accepts only observable configuration and Bot controller intentions.');

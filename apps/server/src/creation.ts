@@ -1,4 +1,4 @@
-import { isBaselineStrategy } from '@poker/strategies';
+import { isSupportedStrategy } from '@poker/strategies';
 import { validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
@@ -14,7 +14,7 @@ export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
 export interface CreationTransactionFaults extends AcceptanceFaults { readonly beforeCommit?: () => Promise<void>; readonly afterCommit?: () => Promise<void> }
-export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isBaselineStrategy) {
+export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy) {
   const queue = new Map<string, Promise<unknown>>();
   return async (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => {
     const prior = queue.get(ownerUserId) ?? Promise.resolve();

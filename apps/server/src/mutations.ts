@@ -1,4 +1,4 @@
-import { baselineStrategy, isBaselineStrategy, immutableData, type Strategy } from '@poker/strategies';
+import { createStrategy, isSupportedStrategy, immutableData, type Strategy } from '@poker/strategies';
 import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
@@ -68,8 +68,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   let stopped = false;
   let recoveryTimer: ReturnType<typeof setInterval> | undefined;
   const scheduledRecovery = new Set<string>();
-  const strategyFactory = bots?.strategyFactory ?? baselineStrategy;
-  const supportsStrategy = bots?.supportsStrategy ?? isBaselineStrategy;
+  const strategyFactory = bots?.strategyFactory ?? createStrategy;
+  const supportsStrategy = bots?.supportsStrategy ?? isSupportedStrategy;
   function enqueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const previous = queue.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(operation);

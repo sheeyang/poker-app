@@ -1,5 +1,5 @@
-import type { DecisionAnalysis, ObservableTableSession, ScoreSummary } from '@poker/contracts';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy } from '@poker/contracts';
+import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
+import { policyName, StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { actionLabel } from './table-model.js';
 import type { useDecisionAnalysis } from './analysis.js';
@@ -15,8 +15,8 @@ type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 export function AnalysisPanel({ table, analysis, command, close }: { table: ObservableTableSession; analysis: Analysis; command: Command; close: () => void }) {
   const data = analysis.display?.data;
   const configuration = table.trainerConfiguration;
-  function configure(selector: string, liveAnalysis: boolean) {
-    command.submit({ tableId: table.tableSessionId, kind: 'trainer', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, trainerConfiguration: { referenceStrategy: selector === 'highest-probability' ? highestProbabilityPlayingStrategy : baselinePlayingStrategy, liveAnalysis } } });
+  function configure(referenceStrategy: StrategyDescriptor, liveAnalysis: boolean) {
+    command.submit({ tableId: table.tableSessionId, kind: 'trainer', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis } } });
   }
   const accepted = analysis.acceptedDecisions;
   const selected = accepted.find(d => d.decisionId === analysis.selectedDecisionId);
@@ -35,8 +35,8 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
       {data?.status === 'complete' && <DecisionResult data={data} />}
       {!data && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{configuration.liveAnalysis ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{configuration.liveAnalysis ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
     </section>
-    <details className="reference-settings"><summary>Reference & feedback settings</summary><div className="details-content"><label>Reference action selection<select value={configuration.referenceStrategy.selector.id} disabled={command.busy} onChange={e => configure(e.target.value, configuration.liveAnalysis)}><option value="seeded-sampling">Uniform Choice · Probability Selector</option><option value="highest-probability">Uniform Choice · Highest Probability</option></select></label><p className="muted">The reference compares your decisions. It does not change how the bots play.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy} checked={configuration.liveAnalysis} onChange={e => configure(configuration.referenceStrategy.selector.id, e.target.checked)} /></label></div></details>
-    <details className="analysis-explainer"><summary><Icon name="info" size={16} />What do these numbers mean?</summary><div className="details-content"><p>Decision Score measures alignment with the reference Policy, including bet sizing. Action Rank Score measures the rank of the action type’s probability.</p><p>These scores are not EV, accuracy or a judgment of strategic quality. Uniform Choice is a testing baseline.</p><p>Probability is displayed from 0.00 to 1.00. Bet and raise children show their original, unconditional probabilities.</p></div></details>
+    <details className="reference-settings"><summary>Reference & feedback settings</summary><div className="details-content"><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">The reference compares your decisions. It does not change how the bots play.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy} checked={configuration.liveAnalysis} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label></div></details>
+    <details className="analysis-explainer"><summary><Icon name="info" size={16} />What do these numbers mean?</summary><div className="details-content"><p>Decision Score measures alignment with the reference Policy, including bet sizing. Action Rank Score measures the rank of the action type’s probability.</p><p>These scores are not EV, accuracy or a judgment of strategic quality. Simple Heuristic uses basic rules; Uniform Choice is a testing baseline.</p><p>Probability is displayed from 0.00 to 1.00. Bet and raise children show their original, unconditional probabilities.</p></div></details>
   </aside>;
 }
 
@@ -44,7 +44,7 @@ function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'c
   const accepted = data.scoredDecision?.acceptedAction;
   return <>
     {data.scores && <div className="decision-scores"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
-    {data.scores && <p className="score-meaning">Alignment with Uniform Choice, a testing baseline. This isn’t a measure of poker skill or profit.</p>}
+    {data.scores && <p className="score-meaning">Alignment with {policyName(data.referenceStrategy)}. This isn’t a measure of poker skill or profit.</p>}
     {accepted && <div className="accepted-action"><span>Your accepted action</span><strong>{actionLabel(accepted)}</strong></div>}
     <div className="distribution-heading"><h3>Reference distribution</h3><span>Probability</span></div>
     <ul className="probability-tree" aria-label="Reference Policy distribution">{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
@@ -63,7 +63,7 @@ export function SummaryResult({ summary, compact = false }: { summary: HandSumma
     {data?.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message}</p><button disabled={display?.retrying} onClick={() => void summary.retry()}>{display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {data?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
     {data?.status === 'complete' && <div className="summary-averages"><div><span>Mean Decision Score</span><strong>{(data.averages.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{(data.averages.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
-    {data && <p className="analysis-provenance">{compact ? 'Policy alignment · Uniform Choice baseline' : <>{data.decisionCount} {data.decisionCount === 1 ? 'decision' : 'decisions'} · Fixed reference: {data.referenceStrategy.policy.id} + {data.referenceStrategy.selector.id}<br />This summary retains its original decision set and reference.</>}</p>}
+    {data && <p className="analysis-provenance">{compact ? `Policy alignment · ${policyName(data.referenceStrategy)}` : <>{data.decisionCount} {data.decisionCount === 1 ? 'decision' : 'decisions'} · Fixed reference: {policyName(data.referenceStrategy)} + {data.referenceStrategy.selector.id}<br />This summary retains its original decision set and reference.</>}</p>}
   </>;
 }
 

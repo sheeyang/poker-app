@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselineStrategy } from '@poker/strategies';
+import { createStrategy } from '@poker/strategies';
 import { createServer } from '../../src/server.js';
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'browser_evaluation_' + randomUUID().replaceAll('-', '');
@@ -15,7 +15,7 @@ let failed = false;
 let evaluations = 0;
 async function start() {
   const server = await createServer({ databaseUrl, schema, automaticBots: false, strategyFactory: descriptor => {
-    const strategy = baselineStrategy(descriptor);
+    const strategy = createStrategy(descriptor);
     return { ...strategy, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, execution) => {
       evaluations++;
       const captured = gate;

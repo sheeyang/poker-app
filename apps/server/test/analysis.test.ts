@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type ServerLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type ServerLiveMessage } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 
@@ -21,7 +21,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let base: string;
   async function start() {
     server = await createServer({ databaseUrl, schema, automaticBots: false,
-      supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice'].includes((value as StrategyDescriptor).policy?.id),
+      supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: descriptor => {
         let compatibilityView: ObservableGameView;
         const mode = descriptor.policy.configuration.mode;
@@ -65,7 +65,7 @@ test('explicit evaluation freezes the current human decision, returns numerical 
   try {
     const t = await f.decision(); const before = await f.read(t);
     const response = await f.request(t); expect(response.status).toBe(200);
-    const pending = await response.json(); expect(pending).toMatchObject({ ok: true, status: 'pending', tableSessionId: t.id, decisionId: 'hand-1/decision-1', referenceStrategy: baselinePlayingStrategy });
+    const pending = await response.json(); expect(pending).toMatchObject({ ok: true, status: 'pending', tableSessionId: t.id, decisionId: 'hand-1/decision-1', referenceStrategy: defaultPlayingStrategy });
     await expect.poll(() => f.evaluations.length).toBe(1);
     const evaluation = f.evaluations[0]!;
     expect(evaluation.view).toBe(evaluation.compatibilityView);
@@ -108,11 +108,11 @@ test('concurrent consumers share work and only the owner receives readable compl
     const advanced = await f.read(t);
     f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(() => ownerLive.messages.find(m => m.type === 'analysis-update')).toEqual({ type: 'analysis-update', resource: 'analysis', tableSessionId: t.id, requestId: one.requestId, attemptId: one.attemptId, status: 'complete' });
-    expect(await Promise.all(atNotification)).toEqual([expect.objectContaining({ status: 'complete', requestId: one.requestId, referenceStrategy: baselinePlayingStrategy })]);
+    expect(await Promise.all(atNotification)).toEqual([expect.objectContaining({ status: 'complete', requestId: one.requestId, referenceStrategy: defaultPlayingStrategy })]);
     expect(otherLive.messages.some(m => m.type === 'analysis-update')).toBe(false);
     expect(await f.read(t)).toEqual(advanced);
     await f.restart();
-    expect(await (await f.result(t, one.requestId)).json()).toMatchObject({ status: 'complete', requestId: one.requestId, referenceStrategy: baselinePlayingStrategy });
+    expect(await (await f.result(t, one.requestId)).json()).toMatchObject({ status: 'complete', requestId: one.requestId, referenceStrategy: defaultPlayingStrategy });
     expect(f.evaluations).toHaveLength(0);
   } finally { await f.close(); }
 });
@@ -160,7 +160,7 @@ test('complete Policy and selector descriptors distinguish evaluations while mat
   const f = await fixture();
   try {
     const t = await f.decision();
-    const descriptors: StrategyDescriptor[] = [baselinePlayingStrategy, highestProbabilityPlayingStrategy, fixtureStrategy('hold'), { ...fixtureStrategy('hold'), policy: { ...fixtureStrategy('hold').policy, version: 'v2' } }, { ...fixtureStrategy('hold'), policy: { ...fixtureStrategy('hold').policy, configuration: { mode: 'hold', precision: 2 } } }, { ...fixtureStrategy('hold'), selector: { ...fixtureStrategy('hold').selector, version: 'v2' } }, { ...fixtureStrategy('hold'), selector: { ...fixtureStrategy('hold').selector, configuration: { tie: 'first' } } }];
+    const descriptors: StrategyDescriptor[] = [baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, fixtureStrategy('hold'), { ...fixtureStrategy('hold'), policy: { ...fixtureStrategy('hold').policy, version: 'v2' } }, { ...fixtureStrategy('hold'), policy: { ...fixtureStrategy('hold').policy, configuration: { mode: 'hold', precision: 2 } } }, { ...fixtureStrategy('hold'), selector: { ...fixtureStrategy('hold').selector, version: 'v2' } }, { ...fixtureStrategy('hold'), selector: { ...fixtureStrategy('hold').selector, configuration: { tie: 'first' } } }];
     const requests: string[] = [];
     for (const [index, reference] of descriptors.entries()) {
       await f.configure(t, reference);
@@ -240,7 +240,7 @@ test('failed-only Retry preserves its immutable request while concurrent consume
     const retry = () => f.post(t, 'analysis/' + pending.requestId + '/retry', {});
     expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', {}, stranger.cookie)).status).toBe(404);
     expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', {}, '')).status).toBe(401);
-    expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', { referenceStrategy: baselinePlayingStrategy })).status).toBe(400);
+    expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', { referenceStrategy: defaultPlayingStrategy })).status).toBe(400);
     const responses = await Promise.all([retry(), retry(), retry()]);
     expect(responses.map(response => response.status)).toEqual([200, 200, 200]);
     const states = await Promise.all(responses.map(response => response.json()));
