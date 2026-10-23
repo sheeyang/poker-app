@@ -12,9 +12,11 @@ ADR-0028, without introducing a historical replay workspace.
   inside the expanded detail, not in separate list headings.
 - The Your decisions heading and all rows share one bordered, rounded box, matching
   mockup B. Row dividers and a distinct expanded surface keep the group readable.
-- Every decision header shows its own Decision Score and Action Rank Score out of
-  100 in both expanded and collapsed states. The expanded header stays visible
-  while its detail scrolls. Pending/unavailable states remain explicit.
+- Collapsed decision headers show Decision Score and Action Rank Score out of 100
+  in fixed columns, aligned across actions and values of different lengths. An
+  expanded header shows only the action and chevron; the large Decision Score and
+  secondary Action Rank Score appear inside its detail. The action header stays
+  visible while its detail scrolls. Pending/unavailable states remain explicit.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection remains
   pinned as live play advances. Latest decision restores following when reviewing
@@ -32,7 +34,7 @@ ADR-0028, without introducing a historical replay workspace.
 - The full Reference Strategy distribution, concrete sizing choices, selected
   reference action, scores, loading/error states and retry controls remain tied
   to the selected decision. The snapshot remains useful while analysis is pending.
-- Expanded content follows this order: street and frozen situation, Reference
+- Expanded content follows this order: street and frozen situation, large scores, Reference
   actions and full sizing tree, one-line sampled/selected action, Earlier actions,
   Analysis details. The latter contains sampling explanations and Policy/Selector
   versions. Repeated You labels, accepted-action blocks and instructional captions

@@ -14,7 +14,7 @@ type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
 export function AnalysisPanel({ table, analysis, command, close }: { table: ObservableTableSession; analysis: Analysis; command: Command; close: () => void }) {
-  const data = analysis.display?.data;
+  const data = analysis.display?.data ?? analysis.rowAnalyses?.[analysis.selectedDecisionId];
   const configuration = table.trainerConfiguration;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -55,7 +55,7 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
         const open = d.decisionId === expandedDecisionId;
         const rowData = analysis.rowAnalyses?.[d.decisionId] ?? (data?.decisionId === d.decisionId ? data : undefined);
         return <li key={d.decisionId}><details className="review-decision" open={open}>
-          <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-describedby={`decision-scores-${d.decisionId}`} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><strong className="review-row-action">{actionLabel(d.action)}</strong><span id={`decision-scores-${d.decisionId}`} className="review-row-scores">{rowData?.status === 'complete' && rowData.scores ? <><span>Decision Score<strong>{(rowData.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></span><span>Action Rank Score<strong>{(rowData.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></span></> : <span>{rowData?.status === 'error' || analysis.rowErrors?.[d.decisionId] ? 'Scores unavailable' : 'Scores pending'}</span>}</span><Icon name="chevron" size={17} /></summary>
+          <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-describedby={!open ? `decision-scores-${d.decisionId}` : undefined} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><strong className="review-row-action">{actionLabel(d.action)}</strong>{!open && <span id={`decision-scores-${d.decisionId}`} className="review-row-scores">{rowData?.status === 'complete' && rowData.scores ? <><span>Decision Score<strong>{(rowData.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></span><span>Action Rank Score<strong>{(rowData.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></span></> : <span className="review-row-status">{rowData?.status === 'error' || analysis.rowErrors?.[d.decisionId] ? 'Scores unavailable' : 'Scores pending'}</span>}</span>}<Icon name="chevron" size={17} /></summary>
           {open && <div className="review-decision-content">{content}</div>}
         </details></li>;
       })}</ol>
@@ -67,6 +67,7 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
 function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
   const accepted = data.scoredDecision?.acceptedAction;
   return <>
+    {data.scores && <div className="decision-scores"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     <div className="distribution-heading"><h3>Reference actions</h3><span>Probability</span></div>
     <ul className="probability-tree" aria-label="Reference Policy distribution">{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
       {(parent.type === 'raise' || parent.type === 'bet') && <ul>{data.evaluation.policyResult.choices.filter(c => c.action.type === parent.type).map(choice => <li key={actionLabel(choice.action)}><span>{actionLabel(choice.action)}{accepted && JSON.stringify(accepted) === JSON.stringify(choice.action) && <span className="you-marker">You</span>}</span><strong>{choice.probability.toFixed(2)}</strong></li>)}</ul>}

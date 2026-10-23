@@ -44,19 +44,24 @@ describe('decision situation', () => {
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('<ol aria-label="Your decisions in this hand"');
     const actionSummaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
-    expect(actionSummaries).toEqual(['CallScores pending', 'CheckScores pending']);
+    expect(actionSummaries).toEqual(['Call', 'CheckScores pending']);
     expect(html).toContain('Flop · Before your action');
     expect(html).not.toContain('River · Before your action');
   });
 
-  it('keeps scores in the expanded header and removes repeated facts and instructions', () => {
+  it('shows large scores inside the expanded detail without repeating them in its header', () => {
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const data = { decisionId: 'd1', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, scoredDecision: { acceptedAction: { type: 'call' } }, scores: { decisionScore: .72, actionRankScore: .8 }, evaluation: { actionProbabilities: [{ type: 'call', probability: .6 }, { type: 'raise', probability: .4 }], policyResult: { choices: [{ action: { type: 'call' }, probability: .6 }, { action: { type: 'raise', raiseTo: 150 }, probability: .4 }] }, selectedAction: { type: 'call' } } };
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1', pinned: true, display: { data }, rowAnalyses: { d1: data } } as unknown as Props['analysis'];
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
-    expect(html).toMatch(/<summary[^>]*>[\s\S]*?Decision Score[\s\S]*?72.0[\s\S]*?Action Rank Score[\s\S]*?80.0[\s\S]*?<\/summary>/);
-    for (const removed of ['class="decision-scores"', 'Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);
+    const header = html.match(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/)![1];
+    expect(header.replace(/<[^>]*>/g, '')).toBe('Call');
+    expect(header).not.toContain('review-row-scores');
+    expect(html).toContain('class="decision-scores"');
+    expect(html).toContain('72.0<small>/100</small>');
+    expect(html).toContain('80.0<small>/100</small>');
+    for (const removed of ['Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);
     expect(html).toContain('aria-label="Analysis settings"');
     expect(html).toContain('About these scores');
     expect(html).toContain('Reference actions');
@@ -65,6 +70,10 @@ describe('decision situation', () => {
     expect(html).toContain('Sampled action');
     expect(html).toContain('Analysis details');
     expect(html.indexOf('Reference actions')).toBeLessThan(html.indexOf('Earlier actions'));
+    const cachedHtml = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { ...analysis, display: undefined }, command: { busy: false } as Props['command'], close: () => {} }));
+    expect(cachedHtml).toContain('class="decision-scores"');
+    expect(cachedHtml).toContain('72.0<small>/100</small>');
+    expect(cachedHtml).not.toContain('Loading reference actions');
   });
 
   it('offers follow navigation only for older reviews or an available live decision', () => {
