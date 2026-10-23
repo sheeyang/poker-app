@@ -15,17 +15,14 @@ export function PokerTable({ table, events, animate, eventCount, openSettings }:
   const burn = animate && events.some(e => e.type === 'card-burned');
   const boardDeal = animate && events.some(e => e.type === 'board-dealt');
   const payouts = state.payouts ?? [];
-  const winners = payouts.map(p => `${table.bindings.find(b => b.participantId === p.participantId)?.controller.kind === 'human' ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name} +${chips(p.amount)}`);
   return <section className={`table-stage ${count > 6 ? 'dense-table' : ''}`} aria-label="Poker table">
     <div className="table-felt" aria-hidden="true"><div className="felt-inset" /></div>
     <div className="table-center">
-      <div className="table-wordmark"><Icon name="spade" size={18} /><span>NO-LIMIT HOLD’EM</span></div>
       {hasHand ? <>
         <div className="pot-label">{state.status === 'completed-hand' ? 'Settled pot' : 'Total pot'} <strong>{chips(potTotal(state))}</strong><span>chips</span></div>
         <div className="board" aria-label="Community cards">{Array.from({ length: 5 }, (_, i) => state.board[i] ? <Card key={`${state.handId}-${i}-${boardDeal ? eventCount : 0}`} card={state.board[i]} dealing={boardDeal} /> : <span key={i} className="card-slot" aria-hidden="true" />)}</div>
         {state.pots.length > 1 && (state.status === 'completed-hand' || state.participants.some(p => p.allIn) && state.pots.reduce((sum, p) => sum + p.amount, 0) === potTotal(state)) && <div className="side-pots">{state.pots.map((p, i) => <span key={i}>{i === 0 ? 'Main' : `Side ${i}`} {chips(p.amount)}</span>)}</div>}
         <div className="deck-area" aria-label="Deck and face-down burn pile"><Card small /><span className="burn-pile">{state.board.length > 0 && <Card small />}</span>{burn && <span key={eventCount} className="burn-moving"><Card small /></span>}</div>
-        {winners.length > 0 && <p className="payout-label" role="status">{winners.join(' · ')}</p>}
       </> : <div className="table-ready"><strong>A place at the table.</strong><p>Seat your players, then deal the first hand.</p></div>}
     </div>
     {Array.from({ length: count }, (_, index) => {
@@ -42,7 +39,7 @@ export function PokerTable({ table, events, animate, eventCount, openSettings }:
         {participant ? <>
           {!!participant.cardCount && <div className="hole-cards">{Array.from({ length: participant.cardCount }, (_, i) => <Card key={`${state.handId}-${i}-${dealing ? eventCount : 0}`} card={participant.holeCards?.[i]} small={!hero} dealing={dealing} />)}</div>}
           <div className="seat-body"><span className={`avatar avatar-${index % 4}`} aria-hidden="true">{hero ? 'Y' : binding?.name.replace('Bot ', '').slice(0, 2)}</span><span className="seat-copy"><strong>{label}</strong><span>{chips(participant.stack)} <small>chips</small></span></span>{state.buttonSeat === seat && <span className="dealer-marker" title="Dealer button">D</span>}</div>
-          <div className="seat-caption">{state.status === 'completed-hand' && payout > 0 ? `Won ${chips(payout)}` : state.status === 'completed-hand' && participant.stack === 0 ? 'Rebuy to play' : participant.sittingOut ? 'Sitting out' : actor ? hero ? 'Your turn' : 'Thinking…' : participant.allIn ? 'All-in' : participant.folded ? 'Folded' : recentAction ? actionLabel(recentAction) : hero ? 'Your seat' : 'Bot'}</div>
+          <div className="seat-caption">{state.status === 'completed-hand' && payout > 0 ? `Won ${chips(payout)}` : state.status === 'completed-hand' && participant.stack === 0 ? 'Rebuy to play' : participant.sittingOut ? 'Sitting out' : actor ? hero ? 'Your turn' : 'Thinking…' : participant.allIn ? 'All-in' : participant.folded ? 'Folded' : recentAction ? actionLabel(recentAction) : ''}</div>
           {(participant.wager ?? 0) > 0 && <span className={`seat-wager wager-${index}`}><i aria-hidden="true" />{chips(participant.wager!)}{state.smallBlindParticipantId === participant.participantId ? <small>SB</small> : state.bigBlindParticipantId === participant.participantId ? <small>BB</small> : null}</span>}
         </> : <button className="empty-seat" onClick={openSettings} aria-label={`Manage empty seat ${seat}`}><span>Seat {seat}</span><small>Open</small></button>}
       </div>;
