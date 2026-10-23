@@ -43,16 +43,15 @@ export function DecisionSituation({ state, humanId, bindings, earlierActions = [
         </div>;
       })}
     </section>
-    <p className="decision-mini-caption">Each seat shows the latest action before your decision. Earlier streets are labeled.</p>
-    <p className="situation-note">Before your action · amounts in chips</p>
     <dl className="situation-facts" aria-label="Situation before your action">
-      <div><dt>Total pot</dt><dd>{chips(potTotal(state))}</dd></div>
       <div><dt>To call</dt><dd>{(state.amountToCall ?? 0) > 0 ? chips(state.amountToCall!) : 'No bet to call'}</dd></div>
-      <div><dt>Your stack</dt><dd>{chips(human.stack)}</dd></div>
       <div><dt>Your position</dt><dd>Seat {human.handSeat ?? human.seat}<small>{position(state, human)}</small></dd></div>
     </dl>
-    <details className="situation-players"><summary>Earlier actions</summary>
-      {earlierActions.length ? <ol>{earlierActions.map(action => <li key={action.decisionId}><span>{action.state.street}</span><strong>{name(action.action.participantId)}</strong><span>{actionLabel(action.action.action)}</span></li>)}</ol> : <p className="muted">No earlier player actions are available for this decision.</p>}
-    </details>
   </div>;
+}
+
+export function EarlierActions({ actions, humanId, bindings }: { actions: ObservableHistoryEntry['decisions']; humanId: string; bindings: readonly ParticipantBinding[] }) {
+  return <details className="situation-players"><summary>Earlier actions</summary>
+    {actions.length ? <ol>{actions.map(action => <li key={action.decisionId}><span>{action.state.street}</span><strong>{action.action.participantId === humanId ? 'You' : bindings.find(binding => binding.participantId === action.action.participantId)?.name ?? 'Participant'}</strong><span>{actionLabel(action.action.action)}</span></li>)}</ol> : <p className="muted">No earlier player actions are available for this decision.</p>}
+  </details>;
 }

@@ -197,6 +197,11 @@ summary { cursor: pointer; }
 .panel-heading h2 { font-size: 1.04rem; }
 .panel-heading svg { color: #bdc8b9; }
 .panel-heading .icon-button { min-width: 30px; min-height: 30px; padding: 4px; }
+.panel-actions { flex-shrink: 0; }
+.analysis-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin: -8px 0 20px; color: var(--muted); font-size: .78rem; }
+.analysis-meta strong { color: var(--text); }
+.analysis-settings { padding: 20px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 16px; background: var(--surface); }
+.analysis-settings .live-toggle { margin-top: 0; }
 .reference-settings { border-bottom: 1px solid var(--line); padding-bottom: 22px; }
 .reference-settings select { font-size: .8rem; padding-left: 10px; }
 .live-toggle { flex-direction: row; justify-content: space-between; align-items: center; margin-top: 20px; }
@@ -238,7 +243,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .probability-tree ul { padding: 6px 0 0 13px; margin: 8px 0 0 2px; border-left: 1px solid #53634e; }
 .probability-tree ul li { font-size: .77rem; padding: 6px 0; display: flex; justify-content: space-between; gap: 10px; color: #bdcbb6; }
 .you-marker { color: #e6cca0; background: #3b4931; padding: 2px 5px; border-radius: 3px; font-size: .59rem; margin-left: 8px; vertical-align: 1px; }
-.reference-selected { margin-top: 24px; padding: 15px 0; border-block: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.reference-selected { margin: 20px 0; padding: 12px 0; border-block: 1px solid var(--line); display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
 .reference-selected > span { font-size: .74rem; color: #acc3ca; }
 .reference-selected > strong { font-size: .93rem; color: #b9d9e4; }
 .reference-selected > small { color: #aebfaf; font-size: .72rem; line-height: 1.5; }
@@ -486,7 +491,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .next-hand p { max-width: 55ch; }
 .analysis-panel:focus { outline: none; }
 .analysis-panel { scroll-margin-top: 12px; }
-.follow-play { margin-bottom: 18px; }
+.follow-play { margin-bottom: 0; }
 .decision-review { margin-top: 24px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .decision-review > .section-heading { padding: 20px; border-bottom: 1px solid var(--line); }
 .review-decision-list { list-style: none; margin: 0; padding: 0; }
@@ -508,6 +513,9 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 }
 .review-decision > summary:hover { background: var(--raised); }
 .review-decision[open] > summary { background: #2b382c; color: var(--gold); }
+.review-decision[open] > summary { position: sticky; top: 0; z-index: 4; }
+.review-row-action { overflow-wrap: anywhere; }
+.review-row-scores > span:last-child:not(:first-child) strong { color: var(--muted); }
 .review-decision[open] > summary > svg { transform: rotate(90deg); color: var(--gold); }
 .review-decision-content { padding: 0 20px 20px; background: #202f27; border-top: 1px solid var(--line); }
 .review-decision-list > li:last-child .review-decision-content { border-radius: 0 0 12px 12px; }
@@ -541,7 +549,11 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .reference-settings > summary { font-size: .85rem; color: #c3d3c6; }
 .reference-settings .details-content { display: grid; gap: 18px; }
 .reference-settings .live-toggle { margin-top: 0; }
-.analysis-provenance > p { padding-top: 10px; }
+.review-decision-content .analysis-provenance { border-top: 1px solid var(--line); margin-top: 0; font-size: .8rem; }
+.review-decision-content .analysis-provenance > summary { padding: 12px 0; min-height: 40px; color: var(--text); }
+.review-decision-content .analysis-provenance .details-content { padding: 0 0 12px; }
+.analysis-explainer { margin-top: 24px; }
+.review-analysis-status { padding: 16px 0; font-size: .85rem; color: var(--muted); }
 .play-controls:focus { outline: none; }
 @media (max-width: 1000px) {
   .practice-layout { gap: 36px; }
