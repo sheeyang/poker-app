@@ -1,6 +1,6 @@
 import type { ObservableTableSession } from '@poker/contracts';
 import { Icon } from './icons.js';
-import { chips, actionLabel } from './table-model.js';
+import { chips } from './table-model.js';
 import { SummaryResult } from './analysis-panel.js';
 import type { useHandSummary } from './summaries.js';
 
@@ -13,6 +13,6 @@ export function HandReview({ table, summary, review }: { table: ObservableTableS
   const stack = state.participants.find(p => p.participantId === humanId)?.stack ?? 0;
   return <section className="hand-review" aria-labelledby="hand-review-title">
     <div className="hand-review-top"><div><h2 id="hand-review-title">{payout ? `You received ${chips(payout)} chips.` : 'Hand complete.'}</h2><p>Your stack: {chips(stack)} chips · {decisions.length} {decisions.length === 1 ? 'decision' : 'decisions'} to review</p></div><button className="quiet-button" disabled={!decisions.length} onClick={() => review(decisions.at(-1)?.decisionId)}>Review hand <Icon name="chart" size={17} /></button></div>
-    <div className="hand-review-body"><div className="hand-decision-list">{decisions.map(d => <button key={d.decisionId} onClick={() => review(d.decisionId)} aria-label={`Review ${d.state.street} ${actionLabel(d.action.action)}`}><span>{d.state.street}</span><strong>{actionLabel(d.action.action)}</strong><Icon name="arrow" size={14} /></button>)}{!decisions.length && <p className="muted">You had no decisions in this hand. There’s no score to review.</p>}</div><div className="hand-score"><SummaryResult summary={summary} compact /></div></div>
+    <div className="hand-review-body">{!decisions.length && <p className="muted">You had no decisions in this hand. There’s no score to review.</p>}<div className="hand-score"><SummaryResult summary={summary} compact /></div></div>
   </section>;
 }

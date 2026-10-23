@@ -8,7 +8,7 @@ function identity(value: unknown): string {
   return JSON.stringify(value);
 }
 export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
-  const [selection, setSelection] = useState<{ tableId: string; decisionId: string }>();
+  const [selection, setSelection] = useState<{ tableId: string; decisionId: string; collapsed?: boolean }>();
   const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
   const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
   const newestAccepted = acceptedDecisions.at(-1)?.decisionId;
@@ -16,6 +16,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const liveEnabled = table?.trainerConfiguration.liveAnalysis ?? false;
   const pinned = selection?.tableId === table?.tableSessionId && acceptedDecisions.some(decision => decision.decisionId === selection?.decisionId);
   const selectedDecisionId = pinned ? selection!.decisionId : liveEnabled && currentDecisionId ? '' : newestAccepted ?? '';
+  const expandedDecisionId = pinned && selection!.collapsed ? '' : selectedDecisionId;
   const accepted = acceptedDecisions.find(decision => decision.decisionId === selectedDecisionId);
   const decisionId = selectedDecisionId || currentDecisionId;
   const key = table && decisionId ? identity([table.tableSessionId, decisionId, table.trainerConfiguration.referenceStrategy, accepted?.action ?? null]) : '';
@@ -41,5 +42,8 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
     onAnalysisUpdate: (update, lifecycle) => { resource.consumers.onAnalysisUpdate?.(update, lifecycle); background.consumers.onAnalysisUpdate?.(update, lifecycle); },
   };
   const connectionChanged = useCallback((generation: number | null) => { resource.connectionChanged(generation); background.connectionChanged(generation); }, [resource.connectionChanged, background.connectionChanged]);
-  return { ...resource, consumers, connectionChanged, acceptedDecisions, selectedDecisionId, pinned, selectDecision: (id: string) => { if (table) setSelection(id ? { tableId: table.tableSessionId, decisionId: id } : undefined); }, canEvaluate: !!target, evaluate: () => resource.request() };
+  return { ...resource, consumers, connectionChanged, acceptedDecisions, selectedDecisionId, expandedDecisionId, pinned,
+    selectDecision: (id: string) => { if (table) setSelection(id ? { tableId: table.tableSessionId, decisionId: id } : undefined); },
+    collapseDecision: () => { if (table && selectedDecisionId) setSelection({ tableId: table.tableSessionId, decisionId: selectedDecisionId, collapsed: true }); },
+    canEvaluate: !!target, evaluate: () => resource.request() };
 }
