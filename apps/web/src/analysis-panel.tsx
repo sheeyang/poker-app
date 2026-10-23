@@ -14,16 +14,18 @@ type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
 export function AnalysisPanel({ table, analysis, command, close }: { table: ObservableTableSession; analysis: Analysis; command: Command; close: () => void }) {
-  const data = analysis.display?.data ?? analysis.rowAnalyses?.[analysis.selectedDecisionId];
   const configuration = table.trainerConfiguration;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButton = useRef<HTMLButtonElement>(null);
   function configure(referenceStrategy: StrategyDescriptor, liveAnalysis: boolean) {
     command.submit({ tableId: table.tableSessionId, kind: 'trainer', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis } } });
   }
-  const accepted = analysis.acceptedDecisions;
+  const accepted = analysis.acceptedDecisions.filter(d => d.handId === table.view.state.handId);
   const selected = accepted.find(d => d.decisionId === analysis.selectedDecisionId);
-  const handDecisions = accepted.filter(d => d.handId === (selected?.handId ?? table.view.state.handId));
+  const handDecisions = accepted;
+  const candidate = analysis.display?.data;
+  const data = candidate && candidate.decisionId === (selected?.decisionId ?? table.view.state.decisionId) ? candidate : selected ? analysis.rowAnalyses?.[selected.decisionId] : undefined;
+  const handNumber = table.view.history.findIndex(hand => hand.handId === table.view.state.handId) + 1;
   const context = selected?.state ?? table.view.state;
   const handActions = table.view.history.find(hand => hand.handId === context.handId)?.decisions ?? [];
   const selectedActionIndex = selected ? handActions.findIndex(action => action.decisionId === selected.decisionId) : -1;
@@ -46,7 +48,7 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
     {!data && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{configuration.liveAnalysis ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{configuration.liveAnalysis ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
   </>;
   return <aside id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis">
-    <div className="panel-heading"><div><Icon name="chart" /><h2>{selected ? `Hand ${selected.handNumber} review` : 'Live reference'}</h2></div><div className="panel-actions"><button ref={settingsButton} className="icon-button" aria-label="Analysis settings" title="Analysis settings" aria-expanded={settingsOpen} aria-controls="analysis-settings" onClick={() => setSettingsOpen(!settingsOpen)}><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Return to table" onClick={close}><Icon name="close" size={18} /></button></div></div>
+    <div className="panel-heading"><div><Icon name="chart" /><h2>{handNumber > 0 ? `Hand ${handNumber} review` : selected ? `Hand ${selected.handNumber} review` : 'Current hand'}</h2></div><div className="panel-actions"><button ref={settingsButton} className="icon-button" aria-label="Analysis settings" title="Analysis settings" aria-expanded={settingsOpen} aria-controls="analysis-settings" onClick={() => setSettingsOpen(!settingsOpen)}><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Return to table" onClick={close}><Icon name="close" size={18} /></button></div></div>
     <div className="analysis-meta"><span>Reference: <strong>{policyName(reference)}</strong></span><span>Amounts in chips</span></div>
     {settingsOpen && <section id="analysis-settings" className="analysis-settings" aria-label="Analysis settings" onKeyDown={event => { if (event.key === 'Escape') { setSettingsOpen(false); settingsButton.current?.focus(); } }}><h3>Analysis settings</h3><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">Changing the reference recalculates your scores. Bot strategies stay the same.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy} checked={configuration.liveAnalysis} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label></section>}
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>{liveDecision ? 'Live decision' : 'Latest decision'} <Icon name="arrow" size={15} /></button>}

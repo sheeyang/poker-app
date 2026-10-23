@@ -20,8 +20,11 @@ ADR-0028, without introducing a historical replay workspace.
   same size when toggled; expanded header scores are visually hidden and excluded
   from assistive technology. Pending/unavailable states remain explicit.
 - One decision is expanded at a time. The selected row can collapse, and opening
-  it again restores its matching situation and analysis. Manual selection remains
-  pinned as live play advances. Latest decision restores following when reviewing
+  it again restores its matching situation and analysis. Manual selection applies
+  within the current Hand until another human action is
+  accepted. A new Hand clears the previous review immediately and the sidebar
+  follows the current Hand and newest accepted decision. Latest decision restores
+  following when reviewing
   an older action; collapsing the newest action does not add that control. With
   Live Analysis enabled, Live decision restores the current live reference.
 - The detail shows a static participant-safe poker table before the selected

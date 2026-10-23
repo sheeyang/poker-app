@@ -55,8 +55,9 @@ claim of poker expertise or Solver quality.
   Live Analysis exposes its numerical outputs before the human acts; Live Analysis
   defaults to off. Every accepted human decision triggers nonblocking analysis.
 - Review the visible Hand recap after completion, then choose a street-labeled
-  decision to inspect its captured cards and numerical reference. Manual reviews
-  stay selected as play advances. Session summary captures a Table Session summary.
+  decision to inspect its captured cards and numerical reference. Reviews stay
+  within the current Hand and follow the newest accepted decision
+  as play advances. Session summary captures a Table Session summary.
 - Retain confirmed state through loading, failure, uncertain outcomes, reload and
   reconnect. Offer specific recovery actions and explicit Retry where supported.
 

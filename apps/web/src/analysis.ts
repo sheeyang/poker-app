@@ -9,13 +9,13 @@ function identity(value: unknown): string {
   return JSON.stringify(value);
 }
 export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
-  const [selection, setSelection] = useState<{ tableId: string; decisionId: string; collapsed?: boolean }>();
+  const [selection, setSelection] = useState<{ tableId: string; decisionId: string; handId?: string; newestAccepted?: string; collapsed?: boolean }>();
   const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
-  const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
+  const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.handId !== table.view.state.handId ? [] : hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
   const newestAccepted = acceptedDecisions.at(-1)?.decisionId;
   const currentDecisionId = table?.view.state.legalActions.length ? table.view.state.decisionId : undefined;
   const liveEnabled = table?.trainerConfiguration.liveAnalysis ?? false;
-  const pinned = selection?.tableId === table?.tableSessionId && acceptedDecisions.some(decision => decision.decisionId === selection?.decisionId);
+  const pinned = selection?.tableId === table?.tableSessionId && selection?.handId === table?.view.state.handId && selection?.newestAccepted === newestAccepted && acceptedDecisions.some(decision => decision.decisionId === selection?.decisionId);
   const selectedDecisionId = pinned ? selection!.decisionId : liveEnabled && currentDecisionId ? '' : newestAccepted ?? '';
   const expandedDecisionId = pinned && selection!.collapsed ? '' : selectedDecisionId;
   const accepted = acceptedDecisions.find(decision => decision.decisionId === selectedDecisionId);
@@ -51,7 +51,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
     accepts: data => identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === key,
   }) : null, [key, liveEnabled]);
   const resource = useAnalysisResource(target);
-  // A pinned review must not stop evaluation of decisions accepted during play.
+  // Reviewing an earlier decision must not stop evaluation of the latest action.
   const newest = acceptedDecisions.at(-1);
   const backgroundKey = table && newest && selectedDecisionId !== newest.decisionId ? identity([table.tableSessionId, newest.decisionId, table.trainerConfiguration.referenceStrategy, newest.action]) : '';
   const backgroundTarget = useMemo(() => backgroundKey && table && newest ? createAnalysisTarget<DecisionAnalysis>({
@@ -67,7 +67,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   };
   const connectionChanged = useCallback((generation: number | null) => { resource.connectionChanged(generation); background.connectionChanged(generation); }, [resource.connectionChanged, background.connectionChanged]);
   return { ...resource, consumers, connectionChanged, acceptedDecisions, rowAnalyses, rowErrors, selectedDecisionId, expandedDecisionId, pinned,
-    selectDecision: (id: string) => { if (table) setSelection(id ? { tableId: table.tableSessionId, decisionId: id } : undefined); },
-    collapseDecision: () => { if (table && selectedDecisionId) setSelection({ tableId: table.tableSessionId, decisionId: selectedDecisionId, collapsed: true }); },
+    selectDecision: (id: string) => { if (table) setSelection(id ? { tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: id } : undefined); },
+    collapseDecision: () => { if (table && selectedDecisionId) setSelection({ tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: selectedDecisionId, collapsed: true }); },
     canEvaluate: !!target, evaluate: () => resource.request() };
 }

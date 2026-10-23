@@ -89,26 +89,25 @@ describe('decision situation', () => {
     expect(render([accepted], true)).toContain('>Live decision');
   });
 
-  it('keeps a pinned decision tied to its saved pot, stacks and seats as the live table advances', () => {
+  it('shows the current hand instead of a pinned review from the previous hand', () => {
     const table: ObservableTableSession = {
       tableSessionId: 'table', pokerRevision: 20, sessionRevision: 20, bindings,
       trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
       view: {
         configuration: defaultConfiguration,
         state: { ...decision, handId: 'hand-2', board: [], buttonSeat: 4, amountToCall: 900, participants: decision.participants.map(p => ({ ...p, seat: 4, handSeat: 4, stack: 9000, contribution: 5000 })) },
-        history: [],
+        history: [{ handId: 'hand-1', description: 'Hand 1', decisions: [] }, { handId: 'hand-2', description: 'Hand 2', decisions: [] }],
       },
     };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', pinned: true } as Props['analysis'];
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
-    expect(html).toContain('Pot <strong>300</strong>');
-    expect(html).toContain('To call</dt><dd>75</dd>');
-    expect(html).toContain('750 behind');
-    expect(html).toContain('Your position</dt><dd>Seat 6');
-    expect(html).toContain('825 behind');
-    expect(html).not.toContain('9,000');
-    expect(html).not.toContain('999 behind');
+    expect(html).toContain('Hand 2 review');
+    expect(html).not.toContain('Hand 1 review');
+    expect(html).not.toContain('Review your flop Call');
+    expect(html).not.toContain('750 behind');
+    expect(html).not.toContain('825 behind');
+    expect(html).toContain('Play first. Explore after.');
   });
 
   it('shows the prior participant action on the mini table without later actions or revealed cards', () => {
