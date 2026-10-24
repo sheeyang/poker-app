@@ -22,6 +22,24 @@ const decision: ObservableCashGameState = {
 };
 
 describe('decision situation', () => {
+  it('shows live reference actions without duplicating the table, while keeping completed decision snapshots', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
+    const data = { decisionId: 'live', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, evaluation: { actionProbabilities: [{ type: 'call', probability: 1 }], policyResult: { choices: [{ action: { type: 'call' }, probability: 1 }] }, selectedAction: { type: 'call' } } };
+    const render = (review: boolean) => renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: review ? [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }] : [], selectedDecisionId: review ? 'd1' : '', display: { data: { ...data, decisionId: review ? 'd1' : 'live' } } } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+    const live = render(false);
+    expect(live).toContain('Reference actions');
+    expect(live).toContain('1.00');
+    expect(live).not.toContain('Current table state');
+    expect(live).not.toContain('Poker table before your');
+    expect(live).not.toContain('750 behind');
+    const review = render(true);
+    expect(review).toContain('Flop · Before your action');
+    expect(review).toContain('Poker table before your flop decision');
+    expect(review).toContain('750 behind');
+    expect(review).toContain('Reference actions');
+  });
+
   it('shows separate scores for collapsed decisions', () => {
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     type Props = ComponentProps<typeof AnalysisPanel>;

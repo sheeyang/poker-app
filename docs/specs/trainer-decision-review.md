@@ -31,6 +31,9 @@ ADR-0028, without introducing a historical replay workspace.
   action: original seats, stacks, dealer, human cards and community cards. It
   shows the pot and stacks on the mini table, with amount to call and seat/blind
   context beneath it. These facts are not repeated in extra score/action blocks.
+- The live Current decision shows reference actions directly, without a duplicate
+  table snapshot or Current table state label. Frozen snapshots remain available
+  when reviewing an accepted decision, including with Live Analysis enabled.
 - Each other Participant shows their latest earlier action, with an earlier-street
   label when relevant. Folded and all-in states remain visible. The selected action
   and later actions never supply these captions. Opponent cards are not revealed.
