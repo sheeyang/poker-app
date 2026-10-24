@@ -194,7 +194,11 @@ summary { cursor: pointer; }
 .panel-actions { flex-shrink: 0; }
 .analysis-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin: -8px 0 20px; color: var(--muted); font-size: .78rem; }
 .analysis-meta strong { color: var(--text); }
-.analysis-settings { padding: 20px; margin-bottom: 20px; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 16px; background: var(--surface); }
+.analysis-settings-trigger { anchor-name: --analysis-settings; }
+.analysis-settings { position: fixed; position-anchor: --analysis-settings; position-area: bottom span-left; position-try-fallbacks: flip-block, flip-inline; inset: auto; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; margin: 8px 0; border: 1px solid var(--line); border-radius: 12px; gap: 16px; background: var(--raised); color: var(--text); }
+.analysis-settings:popover-open { display: grid; }
+.analysis-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.analysis-settings-heading h3 { font-size: 1rem; }
 .analysis-settings .live-toggle { margin-top: 0; }
 .reference-settings { border-bottom: 1px solid var(--line); padding-bottom: 22px; }
 .reference-settings select { font-size: .8rem; padding-left: 10px; }
@@ -396,6 +400,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
   .below-table > .text-button { font-size: .73rem; }
   .analysis-panel { padding: 24px; }
   .panel-heading h2 { font-size: 1.1rem; }
+  .analysis-settings { position-area: none; top: anchor(bottom); left: 16px; right: 16px; width: auto; }
   .analysis-panel select { font-size: .85rem; }
   .dialog { max-height: calc(100svh - 24px); width: calc(100% - 20px); border-radius: 12px; }
   .dialog-heading, .dialog-content { padding: 20px; }

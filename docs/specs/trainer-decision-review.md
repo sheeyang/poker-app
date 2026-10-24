@@ -44,8 +44,10 @@ ADR-0028, without introducing a historical replay workspace.
   Analysis details. The latter contains sampling explanations and Policy/Selector
   versions. Repeated You labels, accepted-action blocks and instructional captions
   are removed. The Reference Strategy name and chip units appear once at panel level.
-- Analysis settings is a header control revealing the Reference Strategy and Live
-  Analysis controls on request. One About these scores disclosure explains the
+- Analysis settings is a header control opening a nonmodal popover anchored to
+  its button, with the Reference Strategy and Live Analysis controls. It overlays
+  the review without moving its content and closes with Escape, an outside click
+  or its close control. One About these scores disclosure explains the
   scores and their limitations. Settings support keyboard activation and Escape.
 - The completed-Hand recap has one Review hand entry point and its summary; it
   does not duplicate the decision list. Live Analysis and gameplay remain available.
