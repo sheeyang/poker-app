@@ -50,13 +50,13 @@ export function Trainer() {
     if (id) analysis.selectDecision(id);
     else if (handDecisions.length) analysis.selectView('hand');
     useSession.setState({ analysisOpen: true });
-    requestAnimationFrame(() => { const panel = document.getElementById('analysis-panel'); panel?.focus({ preventScroll: true }); if (window.innerWidth <= 1000) panel?.scrollIntoView({ block: 'start' }); });
+    requestAnimationFrame(() => document.getElementById('analysis-panel')?.focus({ preventScroll: true }));
   }
   function closeAnalysis() {
     useSession.setState({ analysisOpen: false });
-    requestAnimationFrame(() => { const controls = document.getElementById('play-controls'); controls?.focus({ preventScroll: true }); if (window.innerWidth <= 1000) controls?.scrollIntoView({ block: 'end' }); });
+    requestAnimationFrame(() => document.getElementById('play-controls')?.focus({ preventScroll: true }));
   }
-  return <div className="app-shell">
+  return <div className={`app-shell${selected && !browse ? ' table-active' : ''}`}>
     <a className="skip-link" href="#main-table">Skip to table</a>
     <header className="app-header"><button className="brand" onClick={() => setBrowse(true)} aria-label="Poker Trainer · practice"><span className="brand-mark"><Icon name="spade" size={23} /></span><strong>Poker<span className="brand-divider" /> <span>Trainer</span></strong></button><nav aria-label="Practice navigation"><button className={browse || !selected ? 'nav-active' : ''} onClick={() => setBrowse(true)}><Icon name="tables" size={18} /><span>Practice</span></button>{selected && <button onClick={() => setBrowse(false)} className={!browse ? 'nav-active' : ''}><Icon name="cards" size={18} /><span>Your table</span></button>}</nav><span className="identity-status">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span></header>
     <CommandFeedback command={command} />

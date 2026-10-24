@@ -7,6 +7,14 @@ ADR-0028, without introducing a historical replay workspace.
 
 ## Accepted behavior
 
+- The table workspace fits the viewport and does not scroll with analysis. The
+  sidebar has its own vertical scroll area with contained overscroll. At widths
+  up to 1000px, it fills the workspace below the app header; the covered table is
+  hidden from interaction. Closing returns focus to play without moving the page.
+- Short phone screens place the three action buttons together and keep sizing
+  controls below them. Human cards sit beside the human seat to keep the board
+  clear within the available table height. Hand activity scrolls inside its open
+  disclosure; practice setup and saved-table browsing retain normal page scrolling.
 - Only accepted human decisions appear as review rows. Each collapsed row names
   the action. Preflop, Flop, Turn and River labels and their community cards belong
   inside the expanded detail, not in separate list headings.

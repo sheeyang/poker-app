@@ -71,6 +71,17 @@ summary { cursor: pointer; }
 .offline-dot { background: var(--gold); }
 .play-workspace { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 1720px; margin: auto; }
 .play-workspace.with-analysis { grid-template-columns: minmax(0, 1fr) minmax(420px, 42%); }
+/* The table stays in the viewport; analysis owns its scroll position. */
+body:has(.table-active) { overflow: hidden; }
+.table-active { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.table-active > :not(.play-workspace) { flex-shrink: 0; }
+.table-active .play-workspace { position: relative; flex: 1; min-height: 0; width: 100%; overflow: hidden; }
+.table-active .play-area { display: flex; flex-direction: column; min-height: 0; }
+.table-active .play-area > * { flex-shrink: 0; }
+.table-active .play-area > .table-stage { flex: 1 1 auto; min-height: 0; max-height: 550px; }
+.table-active .play-controls, .table-active .below-table, .table-active .table-footer, .table-active .hand-review { width: 100%; }
+.table-active .analysis-panel { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; scrollbar-color: #607866 #1a2721; }
+.table-active .hand-activity[open] { max-height: 18dvh; overflow-y: auto; }
 .play-area { min-width: 0; padding: 26px 36px 16px; }
 .table-toolbar, .toolbar-actions, .hand-status, .table-footer, .section-heading, .below-table, .dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .table-toolbar { min-height: 50px; margin-bottom: 20px; }
@@ -324,6 +335,10 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 @media (min-width: 1500px) { .play-area { padding-inline: 52px; } .play-workspace.with-analysis { grid-template-columns: minmax(0, 1fr) minmax(480px, 40%); } .analysis-panel { padding-inline: 28px; } }
 @media (max-width: 1200px) { .play-area { padding-inline: 24px; } .table-title { flex-direction: column; gap: 6px; } .play-workspace.with-analysis { grid-template-columns: minmax(0, 1fr) minmax(420px, 42%); } .analysis-panel { padding-inline: 20px; } .with-analysis .table-seat { width: 120px; } .with-analysis .seat-body { padding: 8px; gap: 7px; } .with-analysis .avatar { width: 26px; height: 26px; } .with-analysis .action-tray { gap: 14px; padding-inline: 16px; } .with-analysis .sizing { grid-template-columns: minmax(120px,1fr) 85px; gap: 0 10px; } .with-analysis .sizing-tools { grid-template-columns: 1fr; gap: 6px; } .with-analysis .amount-field { grid-row: 1; } .with-analysis .presets button { padding-inline: 5px; } .with-analysis .quick-actions { padding-bottom: 22px; } .with-analysis .playing-card, .with-analysis .card-slot { width: 44px; height: 64px; } .with-analysis .card-small { width: 27px; height: 38px; } .with-analysis .hero-seat .hole-cards .playing-card { width: 45px; height: 64px; } }
 @media (max-width: 1000px) { .play-workspace.with-analysis { grid-template-columns: 1fr; } .analysis-panel { border-left: 0; border-top: 1px solid var(--line); padding: 28px max(24px, calc((100vw - 650px)/2)); } .app-header { padding-inline: 24px; gap: 32px; } .table-stage { max-width: 850px; } .with-analysis .table-seat { width: 146px; } .with-analysis .avatar { width: 33px; height: 33px; } .with-analysis .seat-body { padding: 11px; gap: 10px; } .with-analysis .sizing { grid-template-columns: minmax(130px,1fr) 110px; } .with-analysis .sizing-tools { grid-template-columns: 1fr 88px; } .with-analysis .amount-field { grid-row: auto; } .with-analysis .playing-card, .with-analysis .card-slot { width: 55px; height: 78px; } .with-analysis .card-small { width: 29px; height: 41px; } .table-title { flex-direction: row; align-items: baseline; gap: 14px; } }
+@media (max-width: 1000px) {
+  .table-active .with-analysis:has(.analysis-panel) > .play-area { visibility: hidden; }
+  .table-active .analysis-panel { position: absolute; inset: 0; border: 0; }
+}
 @media (max-width: 650px) {
   .app-header { height: auto; display: grid; grid-template-columns: auto 1fr; grid-template-rows: 54px auto; padding: 0 16px 8px; gap: 0 24px; }
   .brand strong { font-size: 1.2rem; gap: 8px; }
@@ -653,6 +668,21 @@ meter::-moz-meter-bar { background: var(--probability-color); }
   .dense-table .table-seat:has(.seat-wager) .seat-caption { visibility: hidden; }
   .dense-table .seat-wager { top: calc(100% - 17px); left: 50%; right: auto; transform: translateX(-50%); gap: 3px; font-size: .6rem; }
   .dense-table .seat-wager i { width: 8px; height: 8px; border-width: 1px; }
+}
+@media (max-width: 650px) and (max-height: 740px) {
+  .table-active .play-area { padding-block: 10px; }
+  .table-active .table-toolbar { margin-bottom: 6px; }
+  .table-active .action-tray:has(.sizing) { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 6px 10px; }
+  .table-active .action-tray > .sizing { display: contents; }
+  .table-active .quick-actions { grid-column: 1; grid-row: 2; }
+  .table-active .sizing > .action-button { grid-column: 2; grid-row: 2; flex-direction: row; min-height: 42px; }
+  .table-active .sizing-tools { grid-column: 1 / -1; grid-row: 3; grid-template-columns: minmax(0, 1fr) 95px; }
+  .table-active .sizing-tools > .amount-field { grid-row: auto; }
+  .table-active .sizing-hint { margin-top: 0; }
+  .table-active .below-table { margin-top: 6px; }
+  .table-active .table-footer { margin-top: 4px; }
+  .table-active .hero-seat .hole-cards { left: calc(100% + 6px); bottom: 12px; transform: none; }
+  .table-active .hero-seat .hole-cards .playing-card { width: 30px; height: 43px; }
 }
 
 /* A decision's table is a static participant-safe snapshot, independent of live play. */

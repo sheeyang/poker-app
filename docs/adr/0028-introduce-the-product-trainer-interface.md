@@ -12,7 +12,8 @@ was retired by [ADR-0029](0029-retire-the-playground.md).
 
 The table leads. A collapsible analysis panel presents the complete Reference
 Strategy independently of Bot Playing Strategies. On desktop it sits beside the
-table; smaller screens place it below the table and legal action controls. Live
+table; at widths up to 1000px, opening it fills the workspace below the app header.
+The table workspace stays within the viewport and analysis scrolls independently. Live
 Analysis defaults to off. Accepted decisions are analyzed without delaying play,
 and remain labeled with their captured Reference Strategy. Probabilities use
 `0.00–1.00`; scores use `/100`. Sized choices remain expanded and show original
@@ -74,6 +75,7 @@ play → review → continue**. Classic materials and table-led composition rema
 - Saved tables show observable stakes, players, completed-Hand count, progress and
   the human stack. Session IDs are secondary details, not navigation labels.
 - The mobile table is composed around seeing cards and actions together. Review
-  focuses/scrolls to analysis, and closing review returns to the play controls.
+  focuses analysis, and closing review returns focus to the play controls without
+  scrolling the page.
 - Table administration and reference settings remain accessible through progressive
   disclosure. Shared transport does not determine the product journey.
