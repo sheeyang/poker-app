@@ -194,6 +194,11 @@ summary { cursor: pointer; }
 .panel-actions { flex-shrink: 0; }
 .analysis-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin: -8px 0 20px; color: var(--muted); font-size: .78rem; }
 .analysis-meta strong { color: var(--text); }
+.analysis-view-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); margin-top: 20px; }
+.analysis-view-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 12px; color: var(--muted); }
+.analysis-view-tabs button[aria-selected="true"] { color: var(--gold); border-bottom-color: var(--gold); }
+.analysis-view-tabs button > span { color: var(--muted); font-size: .75rem; margin-left: 3px; }
+.analysis-mode-line { min-height: 45px; display: flex; align-items: center; color: var(--muted); font-size: .78rem; border-bottom: 1px solid var(--line); }
 .analysis-settings-trigger { anchor-name: --analysis-settings; }
 .analysis-settings { position: fixed; position-anchor: --analysis-settings; position-area: bottom span-left; position-try-fallbacks: flip-block, flip-inline; inset: auto; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; margin: 8px 0; border: 1px solid var(--line); border-radius: 12px; gap: 16px; background: var(--raised); color: var(--text); }
 .analysis-settings:popover-open { display: grid; }
@@ -504,8 +509,11 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .review-row-scores strong { color: var(--text); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .review-row-scores small { color: var(--muted); font-size: .7rem; font-weight: 400; }
 @media (max-width: 650px) {
-  .review-decision > summary { grid-template-columns: minmax(0, 1fr) 17px; gap: 8px 12px; }
-  .review-decision > summary > .review-row-scores { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+  .review-decision > summary { grid-template-columns: minmax(0, 1fr) 128px 17px; gap: 8px; padding: 12px; min-height: 64px; }
+  .review-decision > summary > .review-row-scores { width: 128px; gap: 9px; font-size: .64rem; }
+  .review-row-scores > span > span { line-height: 1.25; }
+  .review-row-scores strong { font-size: .83rem; }
+  .review-row-scores small { font-size: .65rem; }
 }
 .review-decision > summary:hover { background: var(--raised); }
 .review-decision[open] > summary { background: #2b382c; color: var(--gold); }

@@ -48,6 +48,7 @@ export function Trainer() {
   const handDecisions = analysis.acceptedDecisions.filter(d => d.handId === current?.view.state.handId);
   function review(id?: string) {
     if (id) analysis.selectDecision(id);
+    else if (handDecisions.length) analysis.selectView('hand');
     useSession.setState({ analysisOpen: true });
     requestAnimationFrame(() => { const panel = document.getElementById('analysis-panel'); panel?.focus({ preventScroll: true }); if (window.innerWidth <= 1000) panel?.scrollIntoView({ block: 'start' }); });
   }

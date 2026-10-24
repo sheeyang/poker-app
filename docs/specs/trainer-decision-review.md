@@ -19,14 +19,26 @@ ADR-0028, without introducing a historical replay workspace.
   visible while its detail scrolls. Its grid and reserved score space stay the
   same size when toggled; expanded header scores are visually hidden and excluded
   from assistive technology. Pending/unavailable states remain explicit.
+- At phone widths the action, both score columns and chevron share one compact
+  grid row, at least 64px high. Expanded scores remain hidden in that same row;
+  no second score line is reserved. Desktop score columns keep their alignment.
+- The stable Hand N analysis heading has separate Live and This hand tabs. The
+  chosen view stays in place as play advances. Tabs support arrow keys, Home/End
+  and normal keyboard activation. Live shows only the current human decision;
+  This hand contains the shared human decision box. Review hand/Review decisions
+  opens This hand. Closing and reopening the sidebar retains the view unless a
+  review entry point explicitly selects This hand. A different table initializes
+  to Live when Live Analysis is enabled, otherwise This hand. Selecting Live never
+  enables Live Analysis: the disabled view offers an explicit enable control.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection applies
   within the current Hand until another human action is
   accepted. A new Hand clears the previous review immediately and the sidebar
   follows the current Hand and newest accepted decision. Latest decision restores
   following when reviewing
-  an older action; collapsing the newest action does not add that control. With
-  Live Analysis enabled, Live decision restores the current live reference.
+  an older action; collapsing the newest action does not add that control. The
+  Live tab restores the current live reference without discarding the Hand review
+  selection. New accepted actions still follow the latest review within This hand.
 - The detail shows a static participant-safe poker table before the selected
   action: original seats, stacks, dealer, human cards and community cards. It
   shows the pot and stacks on the mini table, with amount to call and seat/blind
@@ -42,8 +54,8 @@ ADR-0028, without introducing a historical replay workspace.
 - The full Reference Strategy distribution, concrete sizing choices, selected
   reference action, scores, loading/error states and retry controls remain tied
   to the selected decision. The snapshot remains useful while analysis is pending.
-- Expanded content follows this order: large scores, street and frozen situation, Reference
-  actions and full sizing tree, one-line sampled/selected action, Earlier actions,
+- Expanded content follows this order: large scores, Reference actions and full
+  sizing tree, one-line sampled/selected action, street and frozen situation, Earlier actions,
   Analysis details. The latter contains sampling explanations and Policy/Selector
   versions. Repeated You labels, accepted-action blocks and instructional captions
   are removed. The Reference Strategy name and chip units appear once at panel level.
@@ -63,3 +75,13 @@ ADR-0028, without introducing a historical replay workspace.
 The user agreed to tests through the rendered AnalysisPanel and DecisionSituation
 interfaces, with browser verification for interactions. The review baseline is
 commit a32cd074fee76d0a9ad38a0a0da4679bd14a6ae0.
+
+## Selected comparison changes
+
+The user selected changes 1 (separate views), 2 (reference before situation) and
+4 (compact mobile header) from the React/Vite sidebar comparison prototype.
+Its source is retained on branch `codex/sidebar-review-prototype`, under
+`.scratch/sidebar-review-prototype`, against the pre-implementation UI.
+Changes 3 (numbered decisions/count wording) and 5 (local score/sampling help) are
+excluded. Existing action labels, Your decisions count wording, About these scores,
+Analysis details, numerical meanings and anchored settings remain as before.

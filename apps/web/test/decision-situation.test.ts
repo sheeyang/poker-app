@@ -26,10 +26,13 @@ describe('decision situation', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
     const data = { decisionId: 'live', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, evaluation: { actionProbabilities: [{ type: 'call', probability: 1 }], policyResult: { choices: [{ action: { type: 'call' }, probability: 1 }] }, selectedAction: { type: 'call' } } };
-    const render = (review: boolean) => renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: review ? [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }] : [], selectedDecisionId: review ? 'd1' : '', display: { data: { ...data, decisionId: review ? 'd1' : 'live' } } } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+    const render = (review: boolean) => renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { view: review ? 'hand' : 'live', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', display: { data: { ...data, decisionId: review ? 'd1' : 'live' } } } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     const live = render(false);
     expect(live).toContain('Reference actions');
     expect(live).toContain('1.00');
+    expect(live).toContain('role="tablist" aria-label="Analysis view"');
+    expect(live).toContain('id="analysis-live-tab" role="tab" aria-selected="true"');
+    expect(live).not.toContain('Review your flop Call');
     expect(live).not.toContain('Current table state');
     expect(live).not.toContain('Poker table before your');
     expect(live).not.toContain('750 behind');
@@ -38,6 +41,8 @@ describe('decision situation', () => {
     expect(review).toContain('Poker table before your flop decision');
     expect(review).toContain('750 behind');
     expect(review).toContain('Reference actions');
+    expect(review).toContain('id="analysis-hand-tab" role="tab" aria-selected="true"');
+    expect(review).not.toContain('Current decision');
   });
 
   it('shows separate scores for collapsed decisions', () => {
@@ -80,6 +85,8 @@ describe('decision situation', () => {
     expect(header).toContain('review-row-scores');
     expect(html).toContain('class="decision-scores"');
     expect(html.indexOf('class="decision-scores"')).toBeLessThan(html.indexOf('class="decision-context"'));
+    expect(html.indexOf('class="decision-scores"')).toBeLessThan(html.indexOf('Reference actions'));
+    expect(html.indexOf('Reference actions')).toBeLessThan(html.indexOf('class="decision-context"'));
     expect(html).toContain('72.0<small>/100</small>');
     expect(html).toContain('80.0<small>/100</small>');
     for (const removed of ['Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);
@@ -97,14 +104,15 @@ describe('decision situation', () => {
     expect(cachedHtml).not.toContain('Loading reference actions');
   });
 
-  it('offers follow navigation only for older reviews or an available live decision', () => {
+  it('offers Latest decision only for older reviews, with Live available as a separate view', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     const accepted = { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } };
     const render = (acceptedDecisions = [accepted], live = false) => renderToStaticMarkup(createElement(AnalysisPanel, { table: live ? { ...table, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, view: { ...table.view, state: { ...decision, decisionId: 'current' } } } : table, analysis: { acceptedDecisions, selectedDecisionId: 'd1', expandedDecisionId: '', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(render()).not.toContain('>Latest decision');
     expect(render([accepted, { ...accepted, decisionId: 'd2' }])).toContain('>Latest decision');
-    expect(render([accepted], true)).toContain('>Live decision');
+    expect(render([accepted], true)).not.toContain('>Live decision');
+    expect(render([accepted], true)).toContain('id="analysis-live-tab"');
   });
 
   it('shows the current hand instead of a pinned review from the previous hand', () => {
@@ -120,8 +128,8 @@ describe('decision situation', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', pinned: true } as Props['analysis'];
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
-    expect(html).toContain('Hand 2 review');
-    expect(html).not.toContain('Hand 1 review');
+    expect(html).toContain('Hand 2 analysis');
+    expect(html).not.toContain('Hand 1 analysis');
     expect(html).not.toContain('Review your flop Call');
     expect(html).not.toContain('750 behind');
     expect(html).not.toContain('825 behind');
