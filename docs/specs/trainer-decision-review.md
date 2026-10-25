@@ -28,8 +28,11 @@ ADR-0028, without introducing a historical replay workspace.
   same size when toggled; expanded header scores are visually hidden and excluded
   from assistive technology. Pending/unavailable states remain explicit.
 - At phone widths the action, both score columns and chevron share one compact
-  grid row, at least 64px high. Expanded scores remain hidden in that same row;
-  no second score line is reserved. Desktop score columns keep their alignment.
+  grid row, at least 75px high, with a 152px score grid. The full score labels use
+  0.72rem, values 1rem and denominators 0.8rem. Probability labels, You markers
+  and panel metadata are larger for legibility. Expanded scores remain hidden in
+  that same row; no second score line is reserved. Desktop score columns keep
+  their alignment.
 - The stable Hand N analysis heading has separate Live and This hand tabs. The
   chosen view stays in place as play advances. Tabs support arrow keys, Home/End
   and normal keyboard activation. Live shows only the current human decision;
@@ -38,6 +41,11 @@ ADR-0028, without introducing a historical replay workspace.
   review entry point explicitly selects This hand. A different table initializes
   to Live when Live Analysis is enabled, otherwise This hand. Selecting Live never
   enables Live Analysis: the disabled view offers an explicit enable control.
+- Only Live/This hand tabs stay pinned as the sidebar scrolls. The title,
+  Reference Strategy caption and settings/return controls scroll away. The open
+  decision header stays below the tabs using their measured height; keyboard
+  scrolling reserves room for the pinned navigation. This hand omits the
+  redundant Reviewing this hand line; Live keeps its current status messages.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection applies
   within the current Hand until another human action is
@@ -66,7 +74,10 @@ ADR-0028, without introducing a historical replay workspace.
   sizing tree, one-line sampled/selected action, street and frozen situation, Earlier actions,
   Analysis details. The latter contains sampling explanations and Policy/Selector
   versions. Repeated You labels, accepted-action blocks and instructional captions
-  are removed. The Reference Strategy name and chip units appear once at panel level.
+  are removed. The full Reference Strategy name and chip units appear once at
+  panel level. The name shows Policy followed by Action Selector, with the exact
+  labels used by Analysis settings (for example, Simple Heuristic · Probability
+  Selector), and may wrap naturally on narrow screens.
 - Analysis settings is a header control opening a nonmodal popover anchored to
   its button, with the Reference Strategy and Live Analysis controls. It overlays
   the review without moving its content and closes with Escape, an outside click
@@ -93,3 +104,12 @@ Its source is retained on branch `codex/sidebar-review-prototype`, under
 Changes 3 (numbered decisions/count wording) and 5 (local score/sampling help) are
 excluded. Existing action labels, Your decisions count wording, About these scores,
 Analysis details, numerical meanings and anchored settings remain as before.
+
+The subsequent usability comparison selected changes 1 (tabs-only sticky
+navigation), 2 (larger phone text, with the revised smaller score labels) and
+4 (full reference name matching settings), plus removal of Reviewing this hand.
+Change 3 (larger settings/return tap targets) is excluded. Source is retained on
+branch `codex/sidebar-usability-prototype`, under
+`.scratch/sidebar-usability-prototype`, against implementation baseline eb9cb68.
+Current-Hand behavior, independent sidebar scrolling, score order, full sizing
+trees, frozen snapshots and the existing settings/help behavior stay unchanged.

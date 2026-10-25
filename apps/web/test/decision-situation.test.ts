@@ -1,7 +1,7 @@
 import { createElement, type ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, type ObservableCashGameState, type ObservableTableSession } from '@poker/contracts';
 import { AnalysisPanel } from '../src/analysis-panel.js';
 import { DecisionSituation } from '../src/decision-situation.js';
 
@@ -22,6 +22,20 @@ const decision: ObservableCashGameState = {
 };
 
 describe('decision situation', () => {
+  it('identifies both the reference Policy and Action Selector in the panel caption', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    for (const [selector, expected] of [
+      [defaultTrainerConfiguration.referenceStrategy.selector, 'Simple Heuristic · Probability Selector'],
+      [highestProbabilityPlayingStrategy.selector, 'Simple Heuristic · Highest Probability'],
+    ] as const) {
+      const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: { ...defaultTrainerConfiguration.referenceStrategy, selector } }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+      const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: [], selectedDecisionId: '' } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+      const caption = html.match(/<div class="analysis-meta">([\s\S]*?)<\/div>/)![1].replace(/<[^>]*>/g, '');
+      expect(caption).toContain(expected);
+      expect(html).toContain(`>${expected}</option>`);
+    }
+  });
+
   it('shows live reference actions without duplicating the table, while keeping completed decision snapshots', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
@@ -32,6 +46,7 @@ describe('decision situation', () => {
     expect(live).toContain('1.00');
     expect(live).toContain('role="tablist" aria-label="Analysis view"');
     expect(live).toContain('id="analysis-live-tab" role="tab" aria-selected="true"');
+    expect(live).toContain('Live · Flop · Your turn');
     expect(live).not.toContain('Review your flop Call');
     expect(live).not.toContain('Current table state');
     expect(live).not.toContain('Poker table before your');
@@ -43,6 +58,8 @@ describe('decision situation', () => {
     expect(review).toContain('Reference actions');
     expect(review).toContain('id="analysis-hand-tab" role="tab" aria-selected="true"');
     expect(review).not.toContain('Current decision');
+    expect(review).not.toContain('Reviewing this hand');
+    expect(review).not.toContain('class="analysis-mode-line"');
   });
 
   it('shows separate scores for collapsed decisions', () => {

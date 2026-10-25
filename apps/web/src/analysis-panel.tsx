@@ -1,5 +1,6 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
-import { policyName, StrategySelect } from './strategy-select.js';
+import { policyName, strategyName, StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { actionLabel } from './table-model.js';
 import type { useDecisionAnalysis } from './analysis.js';
@@ -13,6 +14,17 @@ type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
 export function AnalysisPanel({ table, analysis, command, close }: { table: ObservableTableSession; analysis: Analysis; command: Command; close: () => void }) {
+  const panel = useRef<HTMLElement>(null), viewTabs = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = panel.current, tabs = viewTabs.current;
+    if (!root || !tabs) return;
+    // Keep the decision header below the tabs, including when their text wraps.
+    const measure = () => root.style.setProperty('--analysis-tabs-height', `${tabs.getBoundingClientRect().height}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(tabs);
+    return () => observer.disconnect();
+  }, []);
   const configuration = table.trainerConfiguration;
   function configure(referenceStrategy: StrategyDescriptor, liveAnalysis: boolean) {
     command.submit({ tableId: table.tableSessionId, kind: 'trainer', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis } } });
@@ -46,15 +58,15 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
     {data?.status === 'complete' && <AnalysisDetails data={data} />}
     {!data && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{liveView ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{liveView ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
   </>;
-  return <aside id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis">
+  return <aside ref={panel} id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis">
     <div className="panel-heading"><div><Icon name="chart" /><h2>{handNumber > 0 ? `Hand ${handNumber} analysis` : selected ? `Hand ${selected.handNumber} analysis` : 'Current hand'}</h2></div><div className="panel-actions"><button className="icon-button analysis-settings-trigger" aria-label="Analysis settings" title="Analysis settings" aria-haspopup="dialog" popoverTarget="analysis-settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Return to table" onClick={close}><Icon name="close" size={18} /></button></div></div>
-    <div className="analysis-meta"><span>Reference: <strong>{policyName(reference)}</strong></span><span>Amounts in chips</span></div>
+    <div className="analysis-meta"><span>Reference: <strong>{strategyName(reference)}</strong></span><span>Amounts in chips</span></div>
     <section id="analysis-settings" popover="auto" role="dialog" className="analysis-settings" onToggle={event => { if (event.newState === 'open') event.currentTarget.querySelector<HTMLButtonElement>('button')?.focus(); }} aria-labelledby="analysis-settings-title"><div className="analysis-settings-heading"><h3 id="analysis-settings-title">Analysis settings</h3><button className="icon-button" aria-label="Close analysis settings" popoverTarget="analysis-settings" popoverTargetAction="hide"><Icon name="close" size={18} /></button></div><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">Changing the reference recalculates your scores. Bot strategies stay the same.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy} checked={configuration.liveAnalysis} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label></section>
-    <div className="analysis-view-tabs" role="tablist" aria-label="Analysis view" onKeyDown={event => {
+    <div ref={viewTabs} className="analysis-view-tabs" role="tablist" aria-label="Analysis view" onKeyDown={event => {
       const next = event.key === 'Home' ? 'live' : event.key === 'End' ? 'hand' : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? liveView ? 'hand' : 'live' : undefined;
       if (next) { event.preventDefault(); analysis.selectView(next); event.currentTarget.querySelector<HTMLButtonElement>(`#analysis-${next}-tab`)?.focus(); }
     }}><button id="analysis-live-tab" role="tab" aria-selected={liveView} aria-controls="analysis-live-panel" tabIndex={liveView ? 0 : -1} onClick={() => analysis.selectView('live')}>Live</button><button id="analysis-hand-tab" role="tab" aria-selected={!liveView} aria-controls="analysis-hand-panel" tabIndex={liveView ? -1 : 0} onClick={() => analysis.selectView('hand')}>This hand <span>{handDecisions.length}</span></button></div>
-    <div className="analysis-mode-line">{liveView ? !configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn' : `Reviewing this hand · ${handDecisions.length} ${handDecisions.length === 1 ? 'decision' : 'decisions'}`}</div>
+    {liveView && <div className="analysis-mode-line">{!configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn'}</div>}
     <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={!liveView}>{liveView && (configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
     <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={liveView}>{!liveView && <>
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
