@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
+import { hashKey } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
 import { policyName, strategyName, StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
@@ -13,7 +14,7 @@ type Analysis = ReturnType<typeof useDecisionAnalysis>;
 type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
-export function AnalysisPanel({ table, analysis, command, close }: { table: ObservableTableSession; analysis: Analysis; command: Command; close: () => void }) {
+export function AnalysisPanel({ table, analysis, summary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; command: Command; close: () => void }) {
   const panel = useRef<HTMLElement>(null), viewTabs = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = panel.current, tabs = viewTabs.current;
@@ -47,6 +48,7 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
   const showFollow = !liveView && analysis.pinned && selected?.decisionId !== accepted.at(-1)?.decisionId;
   const reference = data?.referenceStrategy ?? configuration.referenceStrategy;
   const street = context.street ?? 'decision';
+  const handSummary = table.view.state.status === 'completed-hand' && summary.handId === table.view.state.handId ? summary : undefined;
   const content = <>
     {data?.status === 'complete' && data.scores && <div className="decision-scores"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
@@ -70,16 +72,18 @@ export function AnalysisPanel({ table, analysis, command, close }: { table: Obse
     <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={!liveView}>{liveView && (configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
     <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={liveView}>{!liveView && <>
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
-    {handDecisions.length === 0 && content}
-    {handDecisions.length > 0 && <section className="decision-section decision-review"><div className="section-heading"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
-      <ol aria-label="Your decisions in this hand" className="review-decision-list">{handDecisions.map(d => {
+    {handDecisions.length === 0 && !handSummary && content}
+    {(handDecisions.length > 0 || handSummary) && <section className="decision-section decision-review"><div className={`section-heading${handSummary ? ' hand-summary-heading' : ''}`}><div className="decision-heading-copy"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
+      {handSummary && <div className="hand-averages" role="region" aria-label="Hand averages"><SummaryResult summary={handSummary} currentReference={configuration.referenceStrategy} /></div>}
+      </div>
+      {handDecisions.length > 0 && <ol aria-label="Your decisions in this hand" className="review-decision-list">{handDecisions.map(d => {
         const open = d.decisionId === expandedDecisionId;
         const rowData = analysis.rowAnalyses?.[d.decisionId] ?? (data?.decisionId === d.decisionId ? data : undefined);
         return <li key={d.decisionId}><details className="review-decision" open={open}>
           <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-describedby={!open ? `decision-scores-${d.decisionId}` : undefined} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><strong className="review-row-action">{actionLabel(d.action)}</strong><span id={`decision-scores-${d.decisionId}`} aria-hidden={open || undefined} className="review-row-scores">{rowData?.status === 'complete' && rowData.scores ? <><span><span>Decision Score</span><strong>{(rowData.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></span><span><span>Action Rank Score</span><strong>{(rowData.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></span></> : <span className="review-row-status">{rowData?.status === 'error' || analysis.rowErrors?.[d.decisionId] ? 'Scores unavailable' : 'Scores pending'}</span>}</span><Icon name="chevron" size={17} /></summary>
           {open && <div className="review-decision-content">{content}</div>}
         </details></li>;
-      })}</ol>
+      })}</ol>}
     </section>}
     </>}</section>
     <details className="analysis-explainer"><summary><Icon name="info" size={16} />About these scores</summary><div className="details-content"><p>Scores compare your play with the Reference Strategy. They do not measure poker skill, EV or profit.</p><p>Decision Score measures alignment with the reference Policy, including bet sizing. Action Rank Score measures the rank of your action type’s probability.</p><p>Probabilities run from 0.00 to 1.00. Bet and raise sizes show their original probabilities. Simple Heuristic uses basic rules; Uniform Choice is a testing baseline.</p></div></details>
@@ -101,15 +105,16 @@ function AnalysisDetails({ data }: { data: Extract<DecisionAnalysis, { status: '
   return <details className="analysis-provenance"><summary>Analysis details</summary><div className="details-content"><p>{data.referenceStrategy.selector.id === 'seeded-sampling' ? 'The sampled action is a reproducible draw from the full distribution. It may differ from the most likely action.' : 'The selected action is chosen by the configured Action Selector.'}</p><p>Policy: {data.referenceStrategy.policy.id} · {data.referenceStrategy.policy.version}<br />Selector: {data.referenceStrategy.selector.id} · {data.referenceStrategy.selector.version}</p></div></details>;
 }
 
-export function SummaryResult({ summary, compact = false }: { summary: HandSummary | SessionSummary; compact?: boolean }) {
+export function SummaryResult({ summary, currentReference }: { summary: HandSummary | SessionSummary; currentReference?: StrategyDescriptor }) {
   const display = summary.display, data: ScoreSummary | undefined = display?.data;
+  const differentReference = data && currentReference && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
   return <>
     {(display?.loading || data?.status === 'pending') && <p className="muted" role="status">Preparing the complete summary…</p>}
     {display?.error && <div className="notice-error" role="alert"><p>{display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message}</p><button disabled={display?.retrying} onClick={() => void summary.retry()}>{display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {data?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
     {data?.status === 'complete' && <div className="summary-averages"><div><span>Mean Decision Score</span><strong>{(data.averages.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{(data.averages.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
-    {data && <p className="analysis-provenance">{compact ? `Policy alignment · ${policyName(data.referenceStrategy)}` : <>{data.decisionCount} {data.decisionCount === 1 ? 'decision' : 'decisions'} · Fixed reference: {policyName(data.referenceStrategy)} + {data.referenceStrategy.selector.id}<br />This summary retains its original decision set and reference.</>}</p>}
+    {data && (currentReference ? differentReference && <p className="analysis-provenance">Reference Strategy: <strong>{strategyName(data.referenceStrategy)}</strong></p> : <p className="analysis-provenance">{data.decisionCount} {data.decisionCount === 1 ? 'decision' : 'decisions'} · Fixed reference: {policyName(data.referenceStrategy)} + {data.referenceStrategy.selector.id}<br />This summary retains its original decision set and reference.</p>)}
   </>;
 }
 

@@ -83,8 +83,20 @@ ADR-0028, without introducing a historical replay workspace.
   the review without moving its content and closes with Escape, an outside click
   or its close control. One About these scores disclosure explains the
   scores and their limitations. Settings support keyboard activation and Escape.
-- The completed-Hand recap has one Review hand entry point and its summary; it
-  does not duplicate the decision list. Live Analysis and gameplay remain available.
+- The completed-Hand recap keeps its outcome, decision count, Review hand entry
+  point and Deal next hand controls. Its averages appear only in This hand, within
+  the shared Your decisions box. A two-tier header has title/count first and two
+  mean columns beneath. Mean Decision Score uses a stronger label and a larger
+  value than Mean Action Rank Score; the expanded individual Decision Score stays
+  larger still. The header scrolls away with the list; only the existing tabs and
+  expanded action header stick. No averages appear before the current Hand ends
+  or for a previously selected Hand. Pending, failed, retry and empty states stay
+  explicit, without partial averages. A summary keeps its recorded decision set,
+  Reference Strategy and values when settings change. When its full reference
+  descriptor differs from the current configuration, its caption reads Reference
+  Strategy followed by Policy and Action Selector, using the settings labels. The
+  caption is omitted when they match; there is no retention sentence. Live Analysis
+  and the Table Session summary remain unchanged.
 - Desktop and mobile use the same expandable list. The mini table supports the
   configured two through nine seats, including sparse seats, without horizontal
   scrolling. Disclosure controls work with keyboard activation.
@@ -113,3 +125,12 @@ branch `codex/sidebar-usability-prototype`, under
 `.scratch/sidebar-usability-prototype`, against implementation baseline eb9cb68.
 Current-Hand behavior, independent sidebar scrolling, score order, full sizing
 trees, frozen snapshots and the existing settings/help behavior stay unchanged.
+
+The hand-summary comparison selected all three changes: averages in the Your
+decisions heading using the Two-tier layout, primary Mean Decision Score emphasis,
+and the conditional Reference Strategy caption. Source is retained on branch
+`codex/hand-summary-prototype`, commit `1ee1dcf8a18f8200711ec1430007ad999e867db7`,
+under `.scratch/hand-summary-prototype`. Its parent and this implementation's
+review baseline are `19f9c0c33d48acc78d271d47b3dc28d04bd01666`. Other placements and
+header variations were not selected. The mockup's caption was revised to Reference
+Strategy, without the extra sentence about retaining the original reference.

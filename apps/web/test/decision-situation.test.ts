@@ -9,6 +9,7 @@ const bindings: ObservableTableSession['bindings'] = [
   { participantId: 'you', name: 'You', controller: { kind: 'human' } },
   { participantId: 'bot', name: 'Bot 1', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } },
 ];
+const unrequestedSummary = { handId: 'hand-1' } as ComponentProps<typeof AnalysisPanel>['summary'];
 const decision: ObservableCashGameState = {
   status: 'active-hand', handId: 'hand-1', street: 'flop', buttonSeat: 6,
   actorId: 'you', amountToCall: 75, legalActions: [{ type: 'call' }],
@@ -22,6 +23,28 @@ const decision: ObservableCashGameState = {
 };
 
 describe('decision situation', () => {
+  it('shows completed current-Hand means in the decision heading before its rows', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
+    const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
+    const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
+    const render = (current = table, view: 'hand' | 'live' = 'hand', handSummary = summary) => renderToStaticMarkup(createElement(AnalysisPanel, { table: current, analysis: { ...analysis, view }, summary: handSummary, command: { busy: false } as Props['command'], close: () => {} }));
+    const html = render();
+    expect(html).toContain('Your decisions');
+    expect(html).toContain('1 to review');
+    expect(html).toContain('Mean Decision Score');
+    expect(html).toContain('66.7<small>/100</small>');
+    expect(html).toContain('Mean Action Rank Score');
+    expect(html).toContain('83.3<small>/100</small>');
+    expect(html.indexOf('Your decisions')).toBeLessThan(html.indexOf('Mean Decision Score'));
+    expect(html.indexOf('Mean Action Rank Score')).toBeLessThan(html.indexOf('aria-label="Your decisions in this hand"'));
+    expect(html.match(/Mean Decision Score/g)).toHaveLength(1);
+    expect(render(table, 'live')).not.toContain('Mean Decision Score');
+    expect(render({ ...table, view: { ...table.view, state: decision } })).not.toContain('Mean Decision Score');
+    expect(render({ ...table, view: { ...table.view, state: { ...table.view.state, handId: 'hand-2' } } })).not.toContain('Mean Decision Score');
+    expect(render(table, 'hand', { ...summary, handId: 'hand-0' })).not.toContain('Mean Decision Score');
+  });
+
   it('identifies both the reference Policy and Action Selector in the panel caption', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     for (const [selector, expected] of [
@@ -29,10 +52,55 @@ describe('decision situation', () => {
       [highestProbabilityPlayingStrategy.selector, 'Simple Heuristic · Highest Probability'],
     ] as const) {
       const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: { ...defaultTrainerConfiguration.referenceStrategy, selector } }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
-      const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: [], selectedDecisionId: '' } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+      const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { acceptedDecisions: [], selectedDecisionId: '' } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
       const caption = html.match(/<div class="analysis-meta">([\s\S]*?)<\/div>/)![1].replace(/<[^>]*>/g, '');
       expect(caption).toContain(expected);
       expect(html).toContain(`>${expected}</option>`);
+    }
+  });
+
+  it('identifies the recorded Reference Strategy for hand means only when it differs from the current strategy', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const recorded = { ...defaultTrainerConfiguration.referenceStrategy, policy: { ...defaultTrainerConfiguration.referenceStrategy.policy, configuration: { limits: { minimum: 1, maximum: 2 } } } };
+    for (const [referenceStrategy, changed] of [
+      [recorded, false],
+      [{ ...recorded, policy: { ...recorded.policy, configuration: { limits: { maximum: 2, minimum: 1 } } } }, false],
+      [{ ...recorded, selector: highestProbabilityPlayingStrategy.selector }, true],
+      [{ ...recorded, policy: baselinePlayingStrategy.policy }, true],
+      [{ ...recorded, policy: { ...recorded.policy, version: 'next' } }, true],
+      [{ ...recorded, policy: { ...recorded.policy, configuration: { limits: { minimum: 1, maximum: 3 } } } }, true],
+    ] as const) {
+      const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
+      const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', referenceStrategy: recorded, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
+      const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
+      const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, command: { busy: false } as Props['command'], close: () => {} }));
+      expect(html.includes('Reference Strategy: <strong>Simple Heuristic · Probability Selector</strong>')).toBe(changed);
+      expect(html).toContain('66.7<small>/100</small>');
+      expect(html).not.toContain('Summary reference');
+      expect(html).not.toContain('This summary retains');
+      expect(html).not.toContain('Policy alignment ·');
+    }
+  });
+
+  it('keeps pending, failed and empty Hand summaries explicit without showing partial averages', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
+    const accepted = { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } };
+    for (const [display, expected, empty] of [
+      [{ loading: true }, 'Preparing the complete summary…', false],
+      [{ data: { status: 'pending' } }, 'Preparing the complete summary…', false],
+      [{ data: { status: 'error', error: { message: 'Reference evaluation failed.' } } }, 'Retry summary', false],
+      [{ error: 'Connection unavailable.' }, 'Request summary again', false],
+      [{ data: { status: 'empty' } }, 'No accepted human decisions in this summary.', true],
+    ] as const) {
+      const summary = { handId: 'hand-1', display: { ...display, ...('data' in display ? { data: { ...display.data, referenceStrategy: defaultTrainerConfiguration.referenceStrategy } } : {}) } } as Props['summary'];
+      const analysis = { view: 'hand', acceptedDecisions: empty ? [] : [accepted], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
+      const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, command: { busy: false } as Props['command'], close: () => {} }));
+      expect(html).toContain(expected);
+      expect(html).toContain(empty ? '0 to review' : '1 to review');
+      expect(html).not.toContain('Mean Decision Score');
+      expect(html).not.toContain('Mean Action Rank Score');
+      if (!empty) expect(html).toContain('Review your flop Call');
     }
   });
 
@@ -40,7 +108,7 @@ describe('decision situation', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
     const data = { decisionId: 'live', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, evaluation: { actionProbabilities: [{ type: 'call', probability: 1 }], policyResult: { choices: [{ action: { type: 'call' }, probability: 1 }] }, selectedAction: { type: 'call' } } };
-    const render = (review: boolean) => renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { view: review ? 'hand' : 'live', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', display: { data: { ...data, decisionId: review ? 'd1' : 'live' } } } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+    const render = (review: boolean) => renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { view: review ? 'hand' : 'live', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', display: { data: { ...data, decisionId: review ? 'd1' : 'live' } } } as unknown as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     const live = render(false);
     expect(live).toContain('Reference actions');
     expect(live).toContain('1.00');
@@ -70,7 +138,7 @@ describe('decision situation', () => {
       selectedDecisionId: 'd1', expandedDecisionId: '', pinned: true,
       rowAnalyses: { d1: { status: 'complete', scores: { decisionScore: .72, actionRankScore: .8 } }, d2: { status: 'complete', scores: { decisionScore: .35, actionRankScore: .5 } } },
     } as unknown as Props['analysis'];
-    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
     const summaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
     expect(summaries).toEqual(['CallDecision Score72.0/100Action Rank Score80.0/100', 'CallDecision Score35.0/100Action Rank Score50.0/100', 'CallScores pending']);
   });
@@ -81,7 +149,7 @@ describe('decision situation', () => {
     ];
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('<ol aria-label="Your decisions in this hand"');
     const actionSummaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
     expect(actionSummaries).toEqual(['CallScores pending', 'CheckScores pending']);
@@ -95,7 +163,7 @@ describe('decision situation', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const data = { decisionId: 'd1', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, scoredDecision: { acceptedAction: { type: 'call' } }, scores: { decisionScore: .72, actionRankScore: .8 }, evaluation: { actionProbabilities: [{ type: 'call', probability: .6 }, { type: 'raise', probability: .4 }], policyResult: { choices: [{ action: { type: 'call' }, probability: .6 }, { action: { type: 'raise', raiseTo: 150 }, probability: .4 }] }, selectedAction: { type: 'call' } } };
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1', pinned: true, display: { data }, rowAnalyses: { d1: data } } as unknown as Props['analysis'];
-    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
     const header = html.match(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/)![1];
     expect(header).toContain('class="review-row-action">Call</strong>');
     expect(header).toContain('aria-hidden="true"');
@@ -115,7 +183,7 @@ describe('decision situation', () => {
     expect(html).toContain('Sampled action');
     expect(html).toContain('Analysis details');
     expect(html.indexOf('Reference actions')).toBeLessThan(html.indexOf('Earlier actions'));
-    const cachedHtml = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { ...analysis, display: undefined }, command: { busy: false } as Props['command'], close: () => {} }));
+    const cachedHtml = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { ...analysis, display: undefined }, command: { busy: false } as Props['command'], close: () => {} }));
     expect(cachedHtml).toContain('class="decision-scores"');
     expect(cachedHtml).toContain('72.0<small>/100</small>');
     expect(cachedHtml).not.toContain('Loading reference actions');
@@ -125,7 +193,7 @@ describe('decision situation', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     const accepted = { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } };
-    const render = (acceptedDecisions = [accepted], live = false) => renderToStaticMarkup(createElement(AnalysisPanel, { table: live ? { ...table, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, view: { ...table.view, state: { ...decision, decisionId: 'current' } } } : table, analysis: { acceptedDecisions, selectedDecisionId: 'd1', expandedDecisionId: '', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
+    const render = (acceptedDecisions = [accepted], live = false) => renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table: live ? { ...table, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, view: { ...table.view, state: { ...decision, decisionId: 'current' } } } : table, analysis: { acceptedDecisions, selectedDecisionId: 'd1', expandedDecisionId: '', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(render()).not.toContain('>Latest decision');
     expect(render([accepted, { ...accepted, decisionId: 'd2' }])).toContain('>Latest decision');
     expect(render([accepted], true)).not.toContain('>Live decision');
@@ -144,7 +212,7 @@ describe('decision situation', () => {
     };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', pinned: true } as Props['analysis'];
-    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('Hand 2 analysis');
     expect(html).not.toContain('Hand 1 analysis');
     expect(html).not.toContain('Review your flop Call');
@@ -165,7 +233,7 @@ describe('decision situation', () => {
     };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', pinned: true } as Props['analysis'];
-    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('aria-label="Poker table before your flop decision"');
     expect(html).toContain('Raise-to 175');
     expect(html).toContain('preflop');

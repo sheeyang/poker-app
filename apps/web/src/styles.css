@@ -498,10 +498,6 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .hand-review h2 { font-size: 1.2rem; margin-bottom: 8px; }
 .hand-review-top p { font-size: .8rem; color: var(--muted); }
 .hand-review-body { margin-top: 12px; }
-.hand-score .summary-averages { margin: 0; }
-.hand-score .summary-averages > div { padding: 0; }
-.hand-score .analysis-provenance { margin: 12px 0 0; }
-.hand-score .summary-averages strong { font-size: 1.5rem; }
 .next-hand { margin-top: 16px; flex-direction: column; align-items: stretch; min-height: 0; }
 .next-hand-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 12px; }
 .next-hand-actions > button { flex: 0 1 auto; }
@@ -511,6 +507,17 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .follow-play { margin-bottom: 0; }
 .decision-review { margin-top: 24px; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .decision-review > .section-heading { padding: 20px; border-bottom: 1px solid var(--line); }
+.decision-heading-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; width: 100%; }
+.decision-review > .hand-summary-heading { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
+.hand-averages .summary-averages { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: end; gap: 24px; margin: 0; }
+.hand-averages .summary-averages > div { min-width: 0; }
+.hand-averages .summary-averages strong { font-size: 2.4rem; line-height: 1.2; white-space: nowrap; }
+.hand-averages .summary-averages > div:first-child > span { color: var(--text); font-size: .85rem; font-weight: 600; }
+.hand-averages .summary-averages > div:nth-child(2) > span { font-size: .8rem; }
+.hand-averages .summary-averages > div:nth-child(2) strong { color: var(--muted); font-size: 1.25rem; }
+.hand-averages .summary-averages small { color: var(--muted); font-size: .8rem; }
+.hand-averages .analysis-provenance { margin-top: 16px; color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.hand-averages .analysis-provenance strong { color: var(--text); font-weight: 500; }
 .review-decision-list { list-style: none; margin: 0; padding: 0; }
 .review-decision-list > li:last-child > .review-decision { border-bottom: 0; border-radius: 0 0 12px 12px; }
 .review-decision-list > li:last-child > .review-decision:not([open]) > summary { border-radius: 0 0 12px 12px; }
@@ -526,6 +533,8 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .review-row-scores strong { color: var(--text); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .review-row-scores small { color: var(--muted); font-size: .7rem; font-weight: 400; }
 @media (max-width: 650px) {
+  .hand-averages .summary-averages { gap: 16px; }
+  .hand-averages .summary-averages > div:first-child strong { font-size: 2.2rem; }
   .review-decision > summary { grid-template-columns: minmax(0, 1fr) 152px 17px; gap: 8px; padding: 12px; min-height: 75px; }
   .review-decision > summary > .review-row-scores { width: 152px; gap: 10px; font-size: .8rem; }
   .review-row-scores > span > span { font-size: .72rem; line-height: 1.2; }
@@ -636,9 +645,6 @@ meter::-moz-meter-bar { background: var(--probability-color); }
   .hand-review h2 { font-size: 1.05rem; }
   .hand-review-top p { font-size: .73rem; }
   .hand-review-body { gap: 16px; grid-template-columns: 1fr; margin-top: 16px; }
-  .hand-score .summary-averages { display: flex; gap: 28px; }
-  .hand-score .summary-averages strong { font-size: 1.3rem; }
-  .hand-score .analysis-provenance { margin-top: 8px; }
   .next-hand { margin-top: 14px; }
   .next-hand-actions { gap: 8px; }
   .next-hand-actions > button { flex: 1 1 0; min-width: 0; padding-inline: 10px; }
@@ -659,8 +665,6 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 
 /* Completion keeps its recap unobscured; stickiness belongs to active betting. */
 .card-small .card-suit { display: block; font-size: .9rem; top: 66%; }
-.hand-score .summary-averages { grid-template-columns: 1fr 1fr; gap: 20px; }
-.hand-score .summary-averages span { font-size: .75rem; }
 .settings-section > summary { font-size: 1rem; font-weight: 600; }
 .settings-section[open] > summary { margin-bottom: 18px; }
 @media (min-width: 651px) {
