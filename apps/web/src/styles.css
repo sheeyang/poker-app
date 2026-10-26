@@ -512,8 +512,8 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .hand-averages .summary-averages { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: end; gap: 24px; margin: 0; }
 .hand-averages .summary-averages > div { min-width: 0; }
 .hand-averages .summary-averages strong { font-size: 2.4rem; line-height: 1.2; white-space: nowrap; }
-.hand-averages .summary-averages > div:first-child > span { color: var(--text); font-size: .85rem; font-weight: 600; }
-.hand-averages .summary-averages > div:nth-child(2) > span { font-size: .8rem; }
+.hand-averages .summary-averages > div:first-child > span { color: #ede0bf; font-size: .85rem; font-weight: 600; }
+.hand-averages .summary-averages > div:nth-child(2) > span { color: var(--muted); font-size: .8rem; }
 .hand-averages .summary-averages > div:nth-child(2) strong { color: var(--muted); font-size: 1.25rem; }
 .hand-averages .summary-averages small { color: var(--muted); font-size: .8rem; }
 .hand-averages .analysis-provenance { margin-top: 16px; color: var(--muted); font-size: .8rem; line-height: 1.5; }
