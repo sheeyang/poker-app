@@ -232,14 +232,16 @@ body:has(.table-active) { overflow: hidden; }
 .subtle-tag { padding: 3px 6px; border-radius: 4px; background: #2d4031; color: #c1cfb9; font-size: .65rem; }
 .decision-picker { margin-top: 16px; font-size: .74rem; }
 .decision-picker select { font-size: .78rem; min-height: 36px; padding: 7px 9px; }
+.decision-scores, .hand-averages .summary-averages { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); align-items: end; gap: 24px; }
 .decision-scores { padding: 24px 0 18px; }
+.decision-scores > div { min-width: 0; }
 .score-main { display: flex; flex-direction: column; gap: 6px; }
-.score-main > span { font-size: .8rem; color: #c5d1bf; }
-.score-main > strong { font-size: 2.7rem; color: #f1e4c3; font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; }
-.score-main small, .summary-averages small { font-size: .9rem; color: #b3c2ac; margin-left: 6px; font-weight: 400; }
-.score-secondary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; font-size: .8rem; color: #bacbb5; }
-.score-secondary strong { font-size: 1rem; color: #dce6d4; font-weight: 500; }
-.score-secondary small { margin-left: 4px; font-size: .73rem; color: #a8baa2; }
+.score-main > span { font-size: .85rem; font-weight: 600; color: #f1e4c3; }
+.score-main > strong { font-size: 2.5rem; color: #f1e4c3; font-weight: 500; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.summary-averages small { font-size: .9rem; color: #b3c2ac; margin-left: 6px; font-weight: 400; }
+.score-main small, .score-secondary small { font-size: .8rem; color: var(--muted); margin-left: 6px; font-weight: 400; }
+.score-secondary { display: flex; flex-direction: column; align-items: start; gap: 6px; font-size: .8rem; color: var(--muted); }
+.score-secondary strong { font-size: 1.4rem; color: var(--muted); font-weight: 500; line-height: 1.2; white-space: nowrap; }
 .accepted-action { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-block: 1px solid var(--line); padding: 12px 0; font-size: .77rem; color: #bacbb5; }
 .accepted-action strong { color: #e8d3a5; }
 .distribution-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 22px 0 20px; }
@@ -509,9 +511,9 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .decision-review > .section-heading { padding: 20px; border-bottom: 1px solid var(--line); }
 .decision-heading-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; width: 100%; }
 .decision-review > .hand-summary-heading { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
-.hand-averages .summary-averages { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: end; gap: 24px; margin: 0; }
+.hand-averages .summary-averages { margin: 0; }
 .hand-averages .summary-averages > div { min-width: 0; }
-.hand-averages .summary-averages strong { font-size: 2.4rem; line-height: 1.2; white-space: nowrap; }
+.hand-averages .summary-averages strong { font-size: 1.7rem; line-height: 1.2; white-space: nowrap; }
 .hand-averages .summary-averages > div:first-child > span { color: #ede0bf; font-size: .85rem; font-weight: 600; }
 .hand-averages .summary-averages > div:nth-child(2) > span { color: var(--muted); font-size: .8rem; }
 .hand-averages .summary-averages > div:nth-child(2) strong { color: var(--muted); font-size: 1.25rem; }
@@ -533,8 +535,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .review-row-scores strong { color: var(--text); font-size: .9rem; font-variant-numeric: tabular-nums; }
 .review-row-scores small { color: var(--muted); font-size: .7rem; font-weight: 400; }
 @media (max-width: 650px) {
-  .hand-averages .summary-averages { gap: 16px; }
-  .hand-averages .summary-averages > div:first-child strong { font-size: 2.2rem; }
+  .decision-scores, .hand-averages .summary-averages { gap: 16px; }
   .review-decision > summary { grid-template-columns: minmax(0, 1fr) 152px 17px; gap: 8px; padding: 12px; min-height: 75px; }
   .review-decision > summary > .review-row-scores { width: 152px; gap: 10px; font-size: .8rem; }
   .review-row-scores > span > span { font-size: .72rem; line-height: 1.2; }

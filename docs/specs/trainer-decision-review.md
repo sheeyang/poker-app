@@ -104,8 +104,8 @@ ADR-0028, without introducing a historical replay workspace.
 ## Verification boundaries
 
 The user agreed to tests through the rendered AnalysisPanel and DecisionSituation
-interfaces, with browser verification for interactions. The review baseline is
-commit a32cd074fee76d0a9ad38a0a0da4679bd14a6ae0.
+interfaces, with browser verification for interactions. The score-hierarchy
+implementation review baseline is commit d48dba4d9c58f59207af29e648764b57588a2f58.
 
 ## Selected comparison changes
 
@@ -134,3 +134,20 @@ under `.scratch/hand-summary-prototype`. Its parent and this implementation's
 review baseline are `19f9c0c33d48acc78d271d47b3dc28d04bd01666`. Other placements and
 header variations were not selected. The mockup's caption was revised to Reference
 Strategy, without the extra sentence about retaining the original reference.
+
+The score-hierarchy comparison selected only option 2, Matching score pairs.
+Hand means and expanded decision scores use the same two columns (1.45fr / 1fr),
+Decision Score left and Action Rank Score right, with full labels above values.
+Hand means use 23.8px / 17.5px; expanded decisions use 35px / 19.6px at the 14px
+root size. Labels match their value colors, while all four denominators remain
+muted at 0.8rem, weight 400, with 6px separation. The 24px column gap becomes
+16px at 650px without changing the numeric sizes. Options 1 and 3 are excluded.
+This selected arrangement supersedes only ADR-0008's older presentation wording
+that places Action Rank Score underneath; all its numerical rules remain intact.
+The two-tier heading/count, completed current-Hand scope, recorded-reference
+identity, summary states, collapsed rows and all existing review behavior remain
+unchanged. Source is retained on branch `codex/score-hierarchy-prototype`, commit
+`a48af7e49ad8b4632c6550915a7102b77b25e1bc`, under
+`.scratch/score-hierarchy-prototype`, with parent baseline
+`d48dba4d9c58f59207af29e648764b57588a2f58`. The prototype uses illustrative data,
+without an API or user data, and stays off the production branch.
