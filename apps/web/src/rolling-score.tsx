@@ -6,14 +6,20 @@ export function RollingScore({ value, memory, identity }: { value?: number; memo
   const localMemory = useRef(new Map<string, string>()).current;
   const seen = memory ?? localMemory;
   const [transition, setTransition] = useState<{ from: string; to: string; sequence: number }>();
+  const pending = useRef<{ identity: string; memory: Map<string, string>; animation: NonNullable<typeof transition> }>(undefined);
   const sequence = useRef(0);
   useLayoutEffect(() => {
-    if (!next) { setTransition(undefined); return; }
+    if (!next) { pending.current = undefined; setTransition(undefined); return; }
     const from = seen.get(identity) ?? '\u2007'.repeat(5);
+    // StrictMode replays effect setup on mount. Resume this component's entrance,
+    // while a genuine reopen has fresh refs and still respects the shared memory.
+    const continuing = pending.current?.identity === identity && pending.current.memory === seen && pending.current.animation.to === next;
+    if (from === next && !continuing) { setTransition(undefined); return; }
+    const animation = continuing ? pending.current!.animation : { from, to: next, sequence: ++sequence.current };
+    pending.current = { identity, memory: seen, animation };
     seen.set(identity, next);
-    if (from === next) { setTransition(undefined); return; }
-    setTransition({ from, to: next, sequence: ++sequence.current });
-    const timer = setTimeout(() => setTransition(undefined), 300);
+    setTransition(animation);
+    const timer = setTimeout(() => { pending.current = undefined; setTransition(undefined); }, 300);
     return () => clearTimeout(timer);
   }, [next, identity, seen]);
   if (!next) return <>—</>;
