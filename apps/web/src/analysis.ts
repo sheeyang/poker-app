@@ -9,8 +9,6 @@ function identity(value: unknown): string {
   return JSON.stringify(value);
 }
 export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
-  const motionScope = table ? `${table.tableSessionId}/${table.view.state.handId}` : '';
-  const scoreMotion = useMemo(() => new Map<string, string>(), [motionScope]);
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string; handId?: string; newestAccepted?: string; collapsed?: boolean }>();
   const [viewSelection, setViewSelection] = useState<{ tableId: string; view: 'live' | 'hand' }>();
   const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
@@ -73,7 +71,7 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
     onAnalysisUpdate: (update, lifecycle) => { if (update.resource === 'analysis' && update.tableSessionId === table?.tableSessionId && lifecycle.generation === rowGeneration.current) setRowRevision(value => value + 1); resource.consumers.onAnalysisUpdate?.(update, lifecycle); background.consumers.onAnalysisUpdate?.(update, lifecycle); },
   };
   const connectionChanged = useCallback((generation: number | null) => { resource.connectionChanged(generation); background.connectionChanged(generation); }, [resource.connectionChanged, background.connectionChanged]);
-  return { ...resource, scoreMotion, consumers, connectionChanged, acceptedDecisions, rowAnalyses, rowErrors, selectedDecisionId, expandedDecisionId, pinned, view,
+  return { ...resource, consumers, connectionChanged, acceptedDecisions, rowAnalyses, rowErrors, selectedDecisionId, expandedDecisionId, pinned, view,
     selectView: (view: 'live' | 'hand') => { if (table) setViewSelection({ tableId: table.tableSessionId, view }); },
     selectDecision: (id: string) => { if (table) { setViewSelection({ tableId: table.tableSessionId, view: 'hand' }); setSelection(id ? { tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: id } : undefined); } },
     collapseDecision: () => { if (table && selectedDecisionId) setSelection({ tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: selectedDecisionId, collapsed: true }); },

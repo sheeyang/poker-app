@@ -8,7 +8,6 @@ import type { useDecisionAnalysis } from './analysis.js';
 import type { useHandSummary, useTableSessionSummary } from './summaries.js';
 import type { Command } from './session.js';
 import { Dialog } from './dialog.js';
-import { RollingScore } from './rolling-score.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
 
 type Analysis = ReturnType<typeof useDecisionAnalysis>;
@@ -51,7 +50,7 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   const street = context.street ?? 'decision';
   const handSummary = summary.handId === table.view.state.handId ? summary : undefined;
   const content = <>
-    {data?.status === 'complete' && data.scores && <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong><RollingScore value={data.scores.decisionScore} memory={analysis.scoreMotion} identity={`${data.decisionId}/decision`} /><small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong><RollingScore value={data.scores.actionRankScore} memory={analysis.scoreMotion} identity={`${data.decisionId}/rank`} /><small>/100</small></strong></div></div>}
+    {data?.status === 'complete' && data.scores && <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
     {(analysis.display?.loading && !data || data?.status === 'pending') && <p className="review-analysis-status" role="status">Loading reference actions…</p>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{data.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
@@ -112,7 +111,7 @@ function HandMeans({ summary, currentReference }: { summary: HandSummary; curren
   const differentReference = data && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
   const retainedCount = data ? ` The mean shown covers ${data.decisionCount} ${data.decisionCount === 1 ? 'decision' : 'decisions'}.` : '';
   return <>
-    <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong><RollingScore value={data?.averages.decisionScore} memory={summary.scoreMotion} identity="mean/decision" /><small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong><RollingScore value={data?.averages.actionRankScore} memory={summary.scoreMotion} identity="mean/rank" /><small>/100</small></strong></div></div>
+    <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong>{data ? (data.averages.decisionScore * 100).toFixed(1) : '—'}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{data ? (data.averages.actionRankScore * 100).toFixed(1) : '—'}<small>/100</small></strong></div></div>
     {summary.display?.error && <div className="notice-error" role="alert"><p>{summary.display.error}{retainedCount}</p><button onClick={summary.request}>Request summary again</button></div>}
     {candidate?.status === 'error' && <div className="notice-error" role="alert"><p>{candidate.error.message}{retainedCount}</p><button disabled={summary.display?.retrying} onClick={() => void summary.retry()}>{summary.display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {candidate?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}

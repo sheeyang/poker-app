@@ -743,23 +743,3 @@ meter::-moz-meter-bar { background: var(--probability-color); }
   .decision-mini-dense .decision-mini-action { font-size: .75rem; }
   .decision-mini-dense .decision-mini-board .playing-card, .decision-mini-dense .decision-mini-slot { width: 20px; height: 31px; }
 }
-
-/* Confirmed scores move once; labels, decimal points and denominators stay still. */
-.hand-averages .summary-averages strong, .decision-scores strong { display: inline-flex; align-items: baseline; }
-:is(.summary-averages, .decision-scores) strong .rolling-number { display: inline-flex; color: inherit; font: inherit; line-height: 1.2; font-variant-numeric: tabular-nums; }
-:is(.summary-averages, .decision-scores) strong .score-digit { display: inline-grid; width: 1ch; height: 1.2em; overflow: clip; color: inherit; font: inherit; line-height: 1.2; }
-:is(.summary-averages, .decision-scores) strong .score-digit.decimal { width: .5ch; }
-:is(.summary-averages, .decision-scores) strong .score-digit > span { grid-area: 1 / 1; color: inherit; font: inherit; line-height: 1.2; }
-.score-digit.changing .digit-static { visibility: hidden; }
-.score-digit .digit-out { animation: score-out 300ms cubic-bezier(.16,1,.3,1) both; }
-.score-digit .digit-in { animation: score-in 300ms cubic-bezier(.16,1,.3,1) both; }
-@keyframes score-out { from { transform: translateY(0); } to { transform: translateY(-100%); } }
-@keyframes score-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes score-fade-out { from { opacity: 1; } to { opacity: 0; } }
-@keyframes score-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) {
-  .score-digit .digit-out { animation: score-fade-out 120ms ease-out both !important; }
-  .score-digit .digit-in { animation: score-fade-in 120ms ease-out both !important; }
-}
-
-.visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip-path: inset(50%) !important; white-space: nowrap !important; border: 0 !important; }

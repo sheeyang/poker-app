@@ -104,15 +104,10 @@ ADR-0028, without introducing a historical replay workspace.
   Settings changes alone retain the recorded summary; the next accepted human
   decision captures a new snapshot against the then-current reference. A differing
   recorded reference adds the existing full Policy and Action Selector caption.
-- Both mean values and both expanded individual scores roll upward once over
-  300ms on first appearance and changed confirmed results, for increases and
-  decreases alike. First appearance starts blank. Labels, decimal points and /100
-  stay still; there are no random values, loops or sound. New results supersede
-  stale transitions. Unchanged individual results do not replay when reopening a
-  decision or sidebar within the Hand. Reduced motion uses a brief 120ms crossfade;
-  each score pair exposes one final contextual update to assistive technology,
-  with decorative digit transitions hidden. Live and Table Session summary
-  behavior otherwise remains unchanged.
+- Both mean values and both expanded individual scores appear immediately when
+  confirmed results arrive, without rolling digits or crossfade animation. Each
+  score pair exposes one final contextual update to assistive technology. Live
+  and Table Session summary behavior otherwise remains unchanged.
 - Desktop and mobile use the same expandable list. The mini table supports the
   configured two through nine seats, including sparse seats, without horizontal
   scrolling. Disclosure controls work with keyboard activation.
@@ -179,3 +174,6 @@ are excluded. Source is archived on `codex/mean-feedback-prototype`, commit
 `.scratch/mean-feedback-prototype`, parented at implementation/review baseline
 `e7f0e10eb7dced1a9c19d8491b5395c45b2b5598`. The prototype contains illustrative
 fixtures only and is not tracked on the production branch.
+
+The subsequent accepted refinement removes score rolling and its reduced-motion
+crossfade. Compact mean rows, running summaries and silent pending updates remain.
