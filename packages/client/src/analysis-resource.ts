@@ -17,7 +17,7 @@ export function createAnalysisTarget<T>(options: ResourceOptions<T>): Target<T> 
 export function useAnalysisResource<T extends ResourceState>(target: Target<T> | null) {
   const current = useRef(target); current.current = target;
   const connection = useRef<number | null>(null);
-  const [display, setDisplay] = useState<{ key: string; loading: boolean; retrying?: boolean; data?: T; error?: string }>();
+  const [display, setDisplay] = useState<{ key: string; loading: boolean; retrying?: boolean; data?: T; error?: string; errorCode?: string }>();
   useEffect(() => { if (target) target.retired = false; return () => { if (target) target.retired = true; }; }, [target]);
   const reconcile = useCallback(async (active: Target<T>): Promise<void> => {
     if (active.fetching || active.retrying || active.retired || current.current !== active || !active.wanted || active.blocked && !active.data) return;
@@ -47,7 +47,7 @@ export function useAnalysisResource<T extends ResourceState>(target: Target<T> |
           if (version !== active.version || signals !== active.signals) { active.dirty++; continue; }
           if (error instanceof RequestFailure && error.code === 'not-found' && active.data && active.recoverMissing) { active.data = undefined; active.dirty++; continue; }
           if (!active.recoverMissing && !active.data) active.blocked = true;
-          setDisplay({ key: active.key, loading: false, ...(active.recoverMissing ? { data: active.data } : {}), error: error instanceof Error ? error.message : 'The analysis could not be read. Try requesting it again.' });
+          setDisplay({ key: active.key, loading: false, ...(active.recoverMissing ? { data: active.data } : {}), errorCode: error instanceof RequestFailure ? error.code : undefined, error: error instanceof Error ? error.message : 'The analysis could not be read. Try requesting it again.' });
         }
       } while (active.dirty > 0 && (connection.current !== null || initialConnection === null) && !active.retrying && !active.retired && current.current === active);
     } finally {

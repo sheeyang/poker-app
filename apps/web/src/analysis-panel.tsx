@@ -110,10 +110,11 @@ function HandMeans({ summary, currentReference }: { summary: HandSummary; curren
   const candidate = summary.display?.data;
   const data = candidate?.status === 'complete' ? candidate : summary.complete;
   const differentReference = data && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
+  const retainedCount = data ? ` The mean shown covers ${data.decisionCount} ${data.decisionCount === 1 ? 'decision' : 'decisions'}.` : '';
   return <>
     <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong><RollingScore value={data?.averages.decisionScore} memory={summary.scoreMotion} identity="mean/decision" /><small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong><RollingScore value={data?.averages.actionRankScore} memory={summary.scoreMotion} identity="mean/rank" /><small>/100</small></strong></div></div>
-    {summary.display?.error && <div className="notice-error" role="alert"><p>{summary.display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
-    {candidate?.status === 'error' && <div className="notice-error" role="alert"><p>{candidate.error.message}{data && ` The mean shown covers ${data.decisionCount} ${data.decisionCount === 1 ? 'decision' : 'decisions'}.`}</p><button disabled={summary.display?.retrying} onClick={() => void summary.retry()}>{summary.display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
+    {summary.display?.error && <div className="notice-error" role="alert"><p>{summary.display.error}{retainedCount}</p><button onClick={summary.request}>Request summary again</button></div>}
+    {candidate?.status === 'error' && <div className="notice-error" role="alert"><p>{candidate.error.message}{retainedCount}</p><button disabled={summary.display?.retrying} onClick={() => void summary.retry()}>{summary.display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {candidate?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
     {differentReference && <p className="analysis-provenance">Reference Strategy: <strong>{strategyName(data.referenceStrategy)}</strong></p>}
   </>;

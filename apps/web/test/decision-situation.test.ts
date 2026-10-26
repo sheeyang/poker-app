@@ -50,17 +50,18 @@ describe('decision situation', () => {
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 4, sessionRevision: 4, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: highestProbabilityPlayingStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     const complete = { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', decisionCount: 1, referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: .667, actionRankScore: .833 } };
     const analysis = { view: 'hand', acceptedDecisions: ['d1', 'd2'].map(decisionId => ({ decisionId, handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } })), expandedDecisionId: '' } as unknown as Props['analysis'];
-    for (const status of ['pending', 'error'] as const) {
-      const summary = { handId: 'hand-1', complete, display: { data: { status, decisionCount: 2, referenceStrategy: highestProbabilityPlayingStrategy, error: { message: 'Reference failed.' } } } } as Props['summary'];
+    for (const status of ['pending', 'error', 'transport-error'] as const) {
+      const display = status === 'transport-error' ? { error: 'Connection unavailable.' } : { data: { status, decisionCount: 2, referenceStrategy: highestProbabilityPlayingStrategy, error: { message: 'Reference failed.' } } };
+      const summary = { handId: 'hand-1', complete, display } as Props['summary'];
       const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, command: { busy: false } as Props['command'], close: () => {} }));
       expect(html.replace(/<[^>]*>/g, '')).toContain('66.7/100');
       expect(html.replace(/<[^>]*>/g, '')).toContain('83.3/100');
       expect(html).toContain('Reference Strategy: <strong>Simple Heuristic · Probability Selector</strong>');
       expect(html).not.toContain('Preparing');
       expect(html).not.toContain('aria-busy');
-      if (status === 'error') {
+      if (status !== 'pending') {
         expect(html).toContain('The mean shown covers 1 decision.');
-        expect(html).toContain('Retry summary');
+        expect(html).toContain(status === 'error' ? 'Retry summary' : 'Request summary again');
       }
     }
   });

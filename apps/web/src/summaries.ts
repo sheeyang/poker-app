@@ -21,7 +21,8 @@ export function useHandSummary(table: ObservableTableSession | undefined) {
   const complete = candidate?.status === 'complete' ? candidate : settled?.scope === scope ? settled.data : undefined;
   useEffect(() => { if (candidate?.status === 'complete') setSettled({ scope, data: candidate }); }, [candidate, scope]);
   const scoreMotion = useMemo(() => new Map<string, string>(), [scope]);
-  return { ...resource, handId, complete, scoreMotion, canRequest: !!target, request: () => resource.request(true) };
+  // A read failure keeps its immutable request; only a missing/unknown identity needs a new snapshot.
+  return { ...resource, handId, complete, scoreMotion, canRequest: !!target, request: () => resource.request(!target?.data || resource.display?.errorCode === 'not-found') };
 }
 export function useTableSessionSummary(table: ObservableTableSession | undefined) {
   const key = table?.tableSessionId ?? '';
