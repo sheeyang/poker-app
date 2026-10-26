@@ -84,19 +84,35 @@ ADR-0028, without introducing a historical replay workspace.
   or its close control. One About these scores disclosure explains the
   scores and their limitations. Settings support keyboard activation and Escape.
 - The completed-Hand recap keeps its outcome, decision count, Review hand entry
-  point and Deal next hand controls. Its averages appear only in This hand, within
-  the shared Your decisions box. A two-tier header has title/count first and two
-  mean columns beneath. Mean Decision Score uses a stronger label and a larger
-  value than Mean Action Rank Score; the expanded individual Decision Score stays
-  larger still. The header scrolls away with the list; only the existing tabs and
-  expanded action header stick. No averages appear before the current Hand ends
-  or for a previously selected Hand. Pending, failed, retry and empty states stay
-  explicit, without partial averages. A summary keeps its recorded decision set,
-  Reference Strategy and values when settings change. When its full reference
-  descriptor differs from the current configuration, its caption reads Reference
-  Strategy followed by Policy and Action Selector, using the settings labels. The
-  caption is omitted when they match; there is no retention sentence. Live Analysis
-  and the Table Session summary remain unchanged.
+  point and Deal next hand controls. Hand means appear only in This hand, inside
+  the shared Your decisions header. Title/count wording stays unchanged. Compact
+  rows place each full label left and its value right; Mean Decision Score uses
+  22.4px and Mean Action Rank Score 17.5px at the 14px root. Expanded individual
+  scores retain their two-column pair and 35px / 19.6px values.
+- After each accepted human decision, request a new server-computed current-Hand
+  summary. Each immutable snapshot freezes its whole accepted human decision set
+  and one complete Reference Strategy for every member. Publish both means only
+  after every required analysis succeeds. Never calculate scores or averages in
+  the browser. Keep the last complete snapshot, including its recorded decision
+  count and reference, while a newer request is pending or failed. Before the first
+  success use em dashes, never zero. New Hands clear the means. Late responses and
+  obsolete attempts cannot replace the current target; reconnect reconciles HTTP
+  state without polling. Explicit Retry retains the failed snapshot's inputs.
+- Routine mean updates have no caption about decision count, status sentence,
+  spinner, pulse or processing indicator. Real errors and Retry remain visible;
+  failure text identifies the older snapshot's decision count when one is shown.
+  Settings changes alone retain the recorded summary; the next accepted human
+  decision captures a new snapshot against the then-current reference. A differing
+  recorded reference adds the existing full Policy and Action Selector caption.
+- Both mean values and both expanded individual scores roll upward once over
+  300ms on first appearance and changed confirmed results, for increases and
+  decreases alike. First appearance starts blank. Labels, decimal points and /100
+  stay still; there are no random values, loops or sound. New results supersede
+  stale transitions. Unchanged individual results do not replay when reopening a
+  decision or sidebar within the Hand. Reduced motion uses a brief 120ms crossfade;
+  each score pair exposes one final contextual update to assistive technology,
+  with decorative digit transitions hidden. Live and Table Session summary
+  behavior otherwise remains unchanged.
 - Desktop and mobile use the same expandable list. The mini table supports the
   configured two through nine seats, including sparse seats, without horizontal
   scrolling. Disclosure controls work with keyboard activation.
@@ -151,3 +167,15 @@ unchanged. Source is retained on branch `codex/score-hierarchy-prototype`, commi
 `.scratch/score-hierarchy-prototype`, with parent baseline
 `d48dba4d9c58f59207af29e648764b57588a2f58`. The prototype uses illustrative data,
 without an API or user data, and stays off the production branch.
+
+The running-means and feedback comparison selected compact label/value rows,
+server-computed running means, upward score rolls and silent routine updates.
+This explicitly supersedes the end-of-Hand presentation timing in ADR-0026 and
+ADR-0028 while preserving their numerical contracts and frozen summary inputs.
+It also supersedes the prior matching-column layout only for Hand means; expanded
+individual scores keep their two-column pair. All other prototype alternatives
+are excluded. Source is archived on `codex/mean-feedback-prototype`, commit
+`de5a4becf1b2e7c3a6c7f10cbe4f8d8c37cb13d2`, under
+`.scratch/mean-feedback-prototype`, parented at implementation/review baseline
+`e7f0e10eb7dced1a9c19d8491b5395c45b2b5598`. The prototype contains illustrative
+fixtures only and is not tracked on the production branch.

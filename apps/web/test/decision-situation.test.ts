@@ -23,7 +23,7 @@ const decision: ObservableCashGameState = {
 };
 
 describe('decision situation', () => {
-  it('shows completed current-Hand means in the decision heading before its rows', () => {
+  it('shows complete running current-Hand means in the decision heading before its rows', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
     const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
@@ -33,16 +33,36 @@ describe('decision situation', () => {
     expect(html).toContain('Your decisions');
     expect(html).toContain('1 to review');
     expect(html).toContain('Mean Decision Score');
-    expect(html).toContain('66.7<small>/100</small>');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('66.7/100');
     expect(html).toContain('Mean Action Rank Score');
-    expect(html).toContain('83.3<small>/100</small>');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('83.3/100');
     expect(html.indexOf('Your decisions')).toBeLessThan(html.indexOf('Mean Decision Score'));
     expect(html.indexOf('Mean Action Rank Score')).toBeLessThan(html.indexOf('aria-label="Your decisions in this hand"'));
     expect(html.match(/Mean Decision Score/g)).toHaveLength(1);
     expect(render(table, 'live')).not.toContain('Mean Decision Score');
-    expect(render({ ...table, view: { ...table.view, state: decision } })).not.toContain('Mean Decision Score');
+    expect(render({ ...table, view: { ...table.view, state: decision } })).toContain('Mean Decision Score');
     expect(render({ ...table, view: { ...table.view, state: { ...table.view.state, handId: 'hand-2' } } })).not.toContain('Mean Decision Score');
     expect(render(table, 'hand', { ...summary, handId: 'hand-0' })).not.toContain('Mean Decision Score');
+  });
+
+  it('retains the last complete Hand snapshot and its recorded reference while newer work is pending or failed', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 4, sessionRevision: 4, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: highestProbabilityPlayingStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const complete = { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', decisionCount: 1, referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: .667, actionRankScore: .833 } };
+    const analysis = { view: 'hand', acceptedDecisions: ['d1', 'd2'].map(decisionId => ({ decisionId, handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } })), expandedDecisionId: '' } as unknown as Props['analysis'];
+    for (const status of ['pending', 'error'] as const) {
+      const summary = { handId: 'hand-1', complete, display: { data: { status, decisionCount: 2, referenceStrategy: highestProbabilityPlayingStrategy, error: { message: 'Reference failed.' } } } } as Props['summary'];
+      const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, command: { busy: false } as Props['command'], close: () => {} }));
+      expect(html.replace(/<[^>]*>/g, '')).toContain('66.7/100');
+      expect(html.replace(/<[^>]*>/g, '')).toContain('83.3/100');
+      expect(html).toContain('Reference Strategy: <strong>Simple Heuristic · Probability Selector</strong>');
+      expect(html).not.toContain('Preparing');
+      expect(html).not.toContain('aria-busy');
+      if (status === 'error') {
+        expect(html).toContain('The mean shown covers 1 decision.');
+        expect(html).toContain('Retry summary');
+      }
+    }
   });
 
   it('identifies both the reference Policy and Action Selector in the panel caption', () => {
@@ -75,7 +95,7 @@ describe('decision situation', () => {
       const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
       const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, command: { busy: false } as Props['command'], close: () => {} }));
       expect(html.includes('Reference Strategy: <strong>Simple Heuristic · Probability Selector</strong>')).toBe(changed);
-      expect(html).toContain('66.7<small>/100</small>');
+      expect(html.replace(/<[^>]*>/g, '')).toContain('66.7/100');
       expect(html).not.toContain('Summary reference');
       expect(html).not.toContain('This summary retains');
       expect(html).not.toContain('Policy alignment ·');
@@ -87,8 +107,8 @@ describe('decision situation', () => {
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
     const accepted = { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } };
     for (const [display, expected, empty] of [
-      [{ loading: true }, 'Preparing the complete summary…', false],
-      [{ data: { status: 'pending' } }, 'Preparing the complete summary…', false],
+      [{ loading: true }, 'Mean Decision Score', false],
+      [{ data: { status: 'pending' } }, 'Mean Decision Score', false],
       [{ data: { status: 'error', error: { message: 'Reference evaluation failed.' } } }, 'Retry summary', false],
       [{ error: 'Connection unavailable.' }, 'Request summary again', false],
       [{ data: { status: 'empty' } }, 'No accepted human decisions in this summary.', true],
@@ -98,8 +118,10 @@ describe('decision situation', () => {
       const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, command: { busy: false } as Props['command'], close: () => {} }));
       expect(html).toContain(expected);
       expect(html).toContain(empty ? '0 to review' : '1 to review');
-      expect(html).not.toContain('Mean Decision Score');
-      expect(html).not.toContain('Mean Action Rank Score');
+      expect(html).toContain('Mean Decision Score');
+      expect(html).toContain('Mean Action Rank Score');
+      expect(html).toContain('\u2014');
+      expect(html).not.toContain('Preparing the complete summary');
       if (!empty) expect(html).toContain('Review your flop Call');
     }
   });
@@ -172,8 +194,8 @@ describe('decision situation', () => {
     expect(html.indexOf('class="decision-scores"')).toBeLessThan(html.indexOf('class="decision-context"'));
     expect(html.indexOf('class="decision-scores"')).toBeLessThan(html.indexOf('Reference actions'));
     expect(html.indexOf('Reference actions')).toBeLessThan(html.indexOf('class="decision-context"'));
-    expect(html).toContain('72.0<small>/100</small>');
-    expect(html).toContain('80.0<small>/100</small>');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('72.0/100');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('80.0/100');
     for (const removed of ['Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);
     expect(html).toContain('aria-label="Analysis settings"');
     expect(html).toContain('About these scores');
@@ -185,7 +207,7 @@ describe('decision situation', () => {
     expect(html.indexOf('Reference actions')).toBeLessThan(html.indexOf('Earlier actions'));
     const cachedHtml = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { ...analysis, display: undefined }, command: { busy: false } as Props['command'], close: () => {} }));
     expect(cachedHtml).toContain('class="decision-scores"');
-    expect(cachedHtml).toContain('72.0<small>/100</small>');
+    expect(cachedHtml.replace(/<[^>]*>/g, '')).toContain('72.0/100');
     expect(cachedHtml).not.toContain('Loading reference actions');
   });
 

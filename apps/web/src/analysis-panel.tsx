@@ -8,6 +8,7 @@ import type { useDecisionAnalysis } from './analysis.js';
 import type { useHandSummary, useTableSessionSummary } from './summaries.js';
 import type { Command } from './session.js';
 import { Dialog } from './dialog.js';
+import { RollingScore } from './rolling-score.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
 
 type Analysis = ReturnType<typeof useDecisionAnalysis>;
@@ -48,9 +49,9 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   const showFollow = !liveView && analysis.pinned && selected?.decisionId !== accepted.at(-1)?.decisionId;
   const reference = data?.referenceStrategy ?? configuration.referenceStrategy;
   const street = context.street ?? 'decision';
-  const handSummary = table.view.state.status === 'completed-hand' && summary.handId === table.view.state.handId ? summary : undefined;
+  const handSummary = summary.handId === table.view.state.handId ? summary : undefined;
   const content = <>
-    {data?.status === 'complete' && data.scores && <div className="decision-scores"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
+    {data?.status === 'complete' && data.scores && <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong><RollingScore value={data.scores.decisionScore} memory={analysis.scoreMotion} identity={`${data.decisionId}/decision`} /><small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong><RollingScore value={data.scores.actionRankScore} memory={analysis.scoreMotion} identity={`${data.decisionId}/rank`} /><small>/100</small></strong></div></div>}
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
     {(analysis.display?.loading && !data || data?.status === 'pending') && <p className="review-analysis-status" role="status">Loading reference actions…</p>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{data.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
@@ -74,7 +75,7 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
     {handDecisions.length === 0 && !handSummary && content}
     {(handDecisions.length > 0 || handSummary) && <section className="decision-section decision-review"><div className={`section-heading${handSummary ? ' hand-summary-heading' : ''}`}><div className="decision-heading-copy"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
-      {handSummary && <div className="hand-averages" role="region" aria-label="Hand averages"><SummaryResult summary={handSummary} currentReference={configuration.referenceStrategy} /></div>}
+      {handSummary && <div className="hand-averages" role="region" aria-label="Hand averages"><HandMeans summary={handSummary} currentReference={configuration.referenceStrategy} /></div>}
       </div>
       {handDecisions.length > 0 && <ol aria-label="Your decisions in this hand" className="review-decision-list">{handDecisions.map(d => {
         const open = d.decisionId === expandedDecisionId;
@@ -103,6 +104,19 @@ function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'c
 
 function AnalysisDetails({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
   return <details className="analysis-provenance"><summary>Analysis details</summary><div className="details-content"><p>{data.referenceStrategy.selector.id === 'seeded-sampling' ? 'The sampled action is a reproducible draw from the full distribution. It may differ from the most likely action.' : 'The selected action is chosen by the configured Action Selector.'}</p><p>Policy: {data.referenceStrategy.policy.id} · {data.referenceStrategy.policy.version}<br />Selector: {data.referenceStrategy.selector.id} · {data.referenceStrategy.selector.version}</p></div></details>;
+}
+
+function HandMeans({ summary, currentReference }: { summary: HandSummary; currentReference: StrategyDescriptor }) {
+  const candidate = summary.display?.data;
+  const data = candidate?.status === 'complete' ? candidate : summary.complete;
+  const differentReference = data && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
+  return <>
+    <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong><RollingScore value={data?.averages.decisionScore} memory={summary.scoreMotion} identity="mean/decision" /><small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong><RollingScore value={data?.averages.actionRankScore} memory={summary.scoreMotion} identity="mean/rank" /><small>/100</small></strong></div></div>
+    {summary.display?.error && <div className="notice-error" role="alert"><p>{summary.display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
+    {candidate?.status === 'error' && <div className="notice-error" role="alert"><p>{candidate.error.message}{data && ` The mean shown covers ${data.decisionCount} ${data.decisionCount === 1 ? 'decision' : 'decisions'}.`}</p><button disabled={summary.display?.retrying} onClick={() => void summary.retry()}>{summary.display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
+    {candidate?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
+    {differentReference && <p className="analysis-provenance">Reference Strategy: <strong>{strategyName(data.referenceStrategy)}</strong></p>}
+  </>;
 }
 
 export function SummaryResult({ summary, currentReference }: { summary: HandSummary | SessionSummary; currentReference?: StrategyDescriptor }) {

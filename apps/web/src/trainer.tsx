@@ -32,13 +32,6 @@ export function Trainer() {
   const lastSelected = useRef(selected);
   useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setFinish(false); useSession.setState({ analysisOpen: false }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
   useEffect(() => { if (browse) window.scrollTo({ top: 0 }); }, [browse]);
-  const summarized = useRef('');
-  useEffect(() => {
-    if (!table.data || table.data.view.state.status !== 'completed-hand') return;
-    const key = `${table.data.tableSessionId}/${table.data.view.state.handId}`;
-    if (summarized.current === key) return;
-    summarized.current = key; summary.request();
-  }, [table.data?.tableSessionId, table.data?.view.state.status, table.data?.view.state.handId, summary.request]);
   const runtime = live.runtimeStatus ?? table.data?.runtimeStatus;
   const current = table.data && runtime ? { ...table.data, runtimeStatus: runtime } : table.data;
   const handIndex = current ? current.view.history.findIndex(h => h.handId === current.view.state.handId) : -1;
