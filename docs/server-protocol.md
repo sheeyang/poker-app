@@ -7,6 +7,13 @@ routes live in [`apps/server/src/server.ts`](../apps/server/src/server.ts).
 See [the workspace map](architecture.md) for package responsibilities and
 [local development](local-development.md) for running the server and its fixtures.
 
+Hosted entrypoints expose `/healthz` for listener liveness and `/readyz` for
+restored application readiness and the deployed Git revision. Application routes
+return HTTP 503 during handoff; the frontend retains unresolved mutation attempts
+on these transient failures. See
+[ADR-0030](adr/0030-handoff-hosted-authority-after-listener-readiness.md) and the
+[deployment guide](deployment_guide.md) for the hosted startup lifecycle.
+
 ## Identity and routes
 
 `GET /api/identity` establishes an opaque server-issued `poker_local` cookie with

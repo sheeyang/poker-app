@@ -3,7 +3,7 @@ import { createAnalysis } from './analysis.js';
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
 import { loadCompletedHandInspection, inspectCompletedHand } from '@poker/research';
 import { isSupportedStrategy, type Strategy } from '@poker/strategies';
-import Fastify, { type FastifyRequest, type FastifyReply } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
 import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -15,13 +15,12 @@ import { createTableSessionMutations, TableSessionRestorationError, type Mutatio
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false });
   let closing = false;
   app.addHook('onSend', async (_request, reply) => { if (closing) reply.header('connection', 'close'); });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
-  await initializeDatabase(pool);
   await app.register(cookie);
   await app.register(websocket);
   const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
@@ -36,7 +35,7 @@ export async function createServer(options: ServerOptions) {
     const token = randomBytes(32).toString('base64url');
     const id = randomUUID();
     await db.insert(localUsers).values({ id, tokenHash: tokenHash(token) });
-    reply.setCookie('poker_local', token, { httpOnly: true, sameSite: 'strict', path: '/', maxAge: 31536000 });
+    reply.setCookie('poker_local', token, { httpOnly: true, sameSite: 'strict', secure: options.secureCookies ?? false, path: '/', maxAge: 31536000 });
     return id;
   }
   const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema);
@@ -292,7 +291,16 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Hand could not be read. Try revealing it again.' } });
     }
   });
-  await mutations.startRecovery();
-  await mutations.resumeBots();
-  return app;
+  try {
+    // Hosted transports may bind with gated routes while waiting for authority.
+    // No schema work, restoration, or Bot work is allowed before this gate.
+    await options.beforeInitialize?.(app);
+    await initializeDatabase(pool);
+    await mutations.startRecovery();
+    await mutations.resumeBots();
+    return app;
+  } catch (error) {
+    await app.close().catch(() => {});
+    throw error;
+  }
 }
