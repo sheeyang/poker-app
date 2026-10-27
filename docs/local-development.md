@@ -1,6 +1,6 @@
 # Local development
 
-Install Node.js 24 or newer and pnpm 11.25.0. Run `pnpm install --frozen-lockfile`, then `pnpm dev:playground`. The first dependency installation downloads the platform's PostgreSQL binaries. Keep optional dependencies and the approved package installation scripts enabled; neither a global PostgreSQL installation nor an `.env` file is required.
+Install Node.js 24 or newer and pnpm 11.25.0. Run `pnpm install --frozen-lockfile`, then `pnpm dev:trainer`. The first dependency installation downloads the platform's PostgreSQL binaries. Keep optional dependencies and the approved package installation scripts enabled; neither a global PostgreSQL installation nor an `.env` file is required.
 
 The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreSQL 18.4 binaries. Its prerelease suffix describes the Node package. Available platforms are Windows x64, macOS x64/arm64, and Linux x64/arm/arm64/ia32/ppc64. Windows is verified initially; the other available platforms are assumed compatible. Native Windows ARM64 is not supplied. On Unix, run as a normal unprivileged user, as required by PostgreSQL.
 
@@ -8,12 +8,21 @@ The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreS
 
 | Command | Default database lifecycle |
 | --- | --- |
-| `pnpm dev:playground` / `pnpm dev` | Start the persistent development database before the apps; gracefully stop it when the command ends. |
+| `pnpm dev:trainer` / `pnpm dev` | Start the persistent development database, API and Trainer at `127.0.0.1:5174`; gracefully stop the database when the command ends. |
 | `pnpm db:init` | Start the development database, initialize the schema, then stop while retaining data. |
 | `pnpm test [filters/options]` | Start a fresh test database on a separate port; stop and remove temporary data afterward. |
 | `pnpm check` | Run the checks; its test step manages a fresh test database. |
 | `pnpm db:with-test -- <command> [arguments]` | Run a browser fixture or other command against its own temporary test database. |
 | `pnpm --filter @poker/server start` | Connect to a configured `DATABASE_URL`; never start a local database. |
+
+`pnpm dev` starts all apps; `pnpm dev:trainer` selects the API and Trainer.
+Vite proxies `/api`, including WebSocket traffic, to `http://127.0.0.1:3001`,
+so browser cookies and requests use the Trainer's origin.
+
+For separate frontend or backend development, use `pnpm --filter @poker/web dev`
+or `pnpm --filter @poker/server dev`. The backend-only command requires an
+already running database and a configured `DATABASE_URL`; use the root development
+commands for automatic database management.
 
 Development data is under `.local/postgres/data`, resolved relative to this checkout. Its parent holds the server log and command ownership file. The database binds only to `127.0.0.1`; its default port is 54329, configurable through `POKER_POSTGRES_PORT`. The default local database and credentials are `poker` / `poker` / `poker`, intended only for local development.
 
@@ -26,6 +35,77 @@ pnpm db:with-test -- node --import tsx apps/server/test/fixtures/session-summary
 ```
 
 Keep the wrapper running while using the fixture. Use the fixture's documented stop control or Ctrl+C to finish. Older implementation evidence names `TEST_DATABASE_URL` explicitly; the wrapper supplies that value automatically for the same fixture commands.
+
+## Checks and compiled startup
+
+```powershell
+pnpm check
+```
+
+This typechecks scripts and packages, runs public engine and real localhost
+HTTP/WebSocket/PostgreSQL tests, builds the server and Trainer, and checks
+workspace dependency directions. To run only the recovery tests:
+
+```powershell
+pnpm test apps/server/test/recovery.test.ts
+```
+
+To run the compiled server, configure `DATABASE_URL` for an already running
+database, then run:
+
+```powershell
+pnpm build
+pnpm --filter @poker/server start
+```
+
+The build includes the SQL initialization asset. Compiled startup requires
+`DATABASE_URL` and never starts embedded PostgreSQL.
+
+## Server and proxy settings
+
+Set `PORT` for the API listener and `POKER_API_TARGET` for the Vite proxy target.
+Use Vite's `--port` option for another frontend port. Concurrent checkouts also
+need distinct `POKER_POSTGRES_PORT` values when using managed development
+databases.
+
+Admin Mode defaults on locally. Set `POKER_ADMIN_MODE=false` before starting the
+server to disable completed-Hand hidden-information reveal.
+
+For the package map and dependency checks, see [workspace architecture](architecture.md).
+For identity, endpoints, fingerprints, and recovery mechanics, see
+[the server protocol reference](server-protocol.md).
+
+## Recovery browser fixture
+
+Start the isolated fixture in one terminal:
+
+```powershell
+pnpm db:with-test -- node --import tsx apps/server/test/fixtures/recovery-browser.ts
+```
+
+In a second PowerShell terminal, start the Trainer against that fixture:
+
+```powershell
+$env:POKER_API_TARGET = 'http://127.0.0.1:3015'
+pnpm --filter @poker/web dev --port 5185
+```
+
+Open [the fixture Trainer](http://127.0.0.1:5185). The fixture's stdin accepts:
+
+| Command | Effect |
+| --- | --- |
+| `hold-next` | Hold the next acceptance's terminal SQL and report lost confirmation. |
+| `commit` / `rollback` | Resolve the held real PostgreSQL transaction. |
+| `restart` | Restart the fixture server while retaining its isolated schema. |
+| `restart-off` | Restart with Admin Mode disabled. |
+| `stop` | Roll back any held transaction, close the fixture, and remove its schema. |
+
+After `stop`, the wrapper stops PostgreSQL and removes its temporary data. Stop
+Vite with Ctrl+C; remove the proxy override with `Remove-Item Env:POKER_API_TARGET`
+before using that terminal for normal development. See
+[M1-15 implementation evidence](specs/m1-15-implementation.md) for the combined
+browser flow and recovery checks. These controls are fixture-only; production
+exposes no fault routes or engine mutation bypasses.
 
 ## External PostgreSQL
 

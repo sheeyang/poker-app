@@ -12,10 +12,6 @@ _Avoid_: Game backend, table UI
 A continuing no-limit Texas Hold'em game governed by one Game Configuration, with participant stacks and seats persisting across Hands.
 _Avoid_: Tournament, individual Hand
 
-**Playground UI**:
-The enduring engineering interface for exercising and validating platform capabilities before their product experiences are designed. It is independent of the participant-facing Trainer and Research Lab experiences.
-_Avoid_: Trainer, final product UI, disposable prototype
-
 **Trainer**:
 The interactive experience in which a human plays hands against strategy-controlled participants and examines numerical Strategy outputs and alignment scores for their decisions.
 _Avoid_: Poker game, practice mode, advice engine

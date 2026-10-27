@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter=./apps/* dev",
-    "dev:playground": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter @poker/server --filter @poker/playground dev",
+    "dev:trainer": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter @poker/server --filter @poker/web dev",
     "test": "node --import tsx scripts/with-database.ts test -- node node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc -p scripts/tsconfig.json && pnpm -r --if-present typecheck",
     "build": "pnpm -r --if-present build",

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type TableLiveMessage } from '@poker/contracts';
-import { baselineStrategy, HighestProbabilitySelector, ProbabilitySelector, type PolicyResult } from '@poker/strategies';
+import { createStrategy, HighestProbabilitySelector, ProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 
@@ -21,9 +21,9 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let base: string;
   const start = async (automaticBots = true) => {
     server = await createServer({ databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
-      supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice'].includes((value as StrategyDescriptor).policy?.id),
+      supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: configured => {
-        if (configured.policy.id === 'uniform-choice') return baselineStrategy(configured);
+        if (configured.policy.id !== 'fixture') return createStrategy(configured);
         let compatibilityView: ObservableGameView;
         const mode = configured.policy.configuration.mode;
         return {

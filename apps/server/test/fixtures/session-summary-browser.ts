@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselineStrategy, type PolicyResult } from '@poker/strategies';
+import { createStrategy, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../../src/server.js';
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'browser_session_summary_' + randomUUID().replaceAll('-', '');
@@ -17,7 +17,7 @@ let mode: 'baseline' | 'passive' | 'numerical' = 'baseline';
 const humans = new Set<string>();
 async function start() {
   const server = await createServer({ databaseUrl, schema, automaticBots: true, strategyFactory: descriptor => {
-    const strategy = baselineStrategy(descriptor);
+    const strategy = createStrategy(descriptor);
     return { ...strategy, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, execution) => {
       const controlled = mode === 'baseline' || humans.has(view.state.actorId!);
       if (!controlled) {

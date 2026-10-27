@@ -1,0 +1,189 @@
+# Expandable Trainer decision review
+
+The selected design is mockup B from the user's review: personal decisions form
+an expandable list, and the other Participants' actions appear on a miniature
+poker table inside the open decision. This implements current-Hand review within
+ADR-0028, without introducing a historical replay workspace.
+
+## Accepted behavior
+
+- The table workspace fits the viewport and does not scroll with analysis. The
+  sidebar has its own vertical scroll area with contained overscroll. At widths
+  up to 1000px, it fills the workspace below the app header; the covered table is
+  hidden from interaction. Closing returns focus to play without moving the page.
+- Short phone screens place the three action buttons together and keep sizing
+  controls below them. Human cards sit beside the human seat to keep the board
+  clear within the available table height. Hand activity scrolls inside its open
+  disclosure; practice setup and saved-table browsing retain normal page scrolling.
+- Only accepted human decisions appear as review rows. Each collapsed row names
+  the action. Preflop, Flop, Turn and River labels and their community cards belong
+  inside the expanded detail, not in separate list headings.
+- The Your decisions heading and all rows share one bordered, rounded box, matching
+  mockup B. Row dividers and a distinct expanded surface keep the group readable.
+- Collapsed decision headers show Decision Score and Action Rank Score out of 100
+  in fixed columns, aligned across actions and values of different lengths. An
+  expanded header shows only the action and chevron; the large Decision Score and
+  secondary Action Rank Score appear inside its detail. The action header stays
+  visible while its detail scrolls. Its grid and reserved score space stay the
+  same size when toggled; expanded header scores are visually hidden and excluded
+  from assistive technology. Pending/unavailable states remain explicit.
+- At phone widths the action, both score columns and chevron share one compact
+  grid row, at least 75px high, with a 152px score grid. The full score labels use
+  0.72rem, values 1rem and denominators 0.8rem. Probability labels, You markers
+  and panel metadata are larger for legibility. Expanded scores remain hidden in
+  that same row; no second score line is reserved. Desktop score columns keep
+  their alignment.
+- The stable Hand N analysis heading has separate Live and This hand tabs. The
+  chosen view stays in place as play advances. Tabs support arrow keys, Home/End
+  and normal keyboard activation. Live shows only the current human decision;
+  This hand contains the shared human decision box. Review hand/Review decisions
+  opens This hand. Closing and reopening the sidebar retains the view unless a
+  review entry point explicitly selects This hand. A different table initializes
+  to Live when Live Analysis is enabled, otherwise This hand. Selecting Live never
+  enables Live Analysis: the disabled view offers an explicit enable control.
+- Only Live/This hand tabs stay pinned as the sidebar scrolls. The title,
+  Reference Strategy caption and settings/return controls scroll away. The open
+  decision header stays below the tabs using their measured height; keyboard
+  scrolling reserves room for the pinned navigation. This hand omits the
+  redundant Reviewing this hand line; Live keeps its current status messages.
+- One decision is expanded at a time. The selected row can collapse, and opening
+  it again restores its matching situation and analysis. Manual selection applies
+  within the current Hand until another human action is
+  accepted. A new Hand clears the previous review immediately and the sidebar
+  follows the current Hand and newest accepted decision. Latest decision restores
+  following when reviewing
+  an older action; collapsing the newest action does not add that control. The
+  Live tab restores the current live reference without discarding the Hand review
+  selection. New accepted actions still follow the latest review within This hand.
+- The detail shows a static participant-safe poker table before the selected
+  action: original seats, stacks, dealer, human cards and community cards. It
+  shows the pot and stacks on the mini table, with amount to call and seat/blind
+  context beneath it. These facts are not repeated in extra score/action blocks.
+- The live Current decision shows reference actions directly, without a duplicate
+  table snapshot or Current table state label. Frozen snapshots remain available
+  when reviewing an accepted decision, including with Live Analysis enabled.
+- Each other Participant shows their latest earlier action, with an earlier-street
+  label when relevant. Folded and all-in states remain visible. The selected action
+  and later actions never supply these captions. Opponent cards are not revealed.
+- Earlier actions is a collapsed disclosure containing only the preceding actions
+  of that Hand, in order. No earlier player action is inferred when history is absent.
+- The full Reference Strategy distribution, concrete sizing choices, selected
+  reference action, scores, loading/error states and retry controls remain tied
+  to the selected decision. The snapshot remains useful while analysis is pending.
+- Expanded content follows this order: large scores, Reference actions and full
+  sizing tree, one-line sampled/selected action, street and frozen situation, Earlier actions,
+  Analysis details. The latter contains sampling explanations and Policy/Selector
+  versions. Repeated You labels, accepted-action blocks and instructional captions
+  are removed. The full Reference Strategy name and chip units appear once at
+  panel level. The name shows Policy followed by Action Selector, with the exact
+  labels used by Analysis settings (for example, Simple Heuristic · Probability
+  Selector), and may wrap naturally on narrow screens.
+- Analysis settings is a header control opening a nonmodal popover anchored to
+  its button, with the Reference Strategy and Live Analysis controls. It overlays
+  the review without moving its content and closes with Escape, an outside click
+  or its close control. One About these scores disclosure explains the
+  scores and their limitations. Settings support keyboard activation and Escape.
+- The completed-Hand recap keeps its outcome, decision count, Review hand entry
+  point and Deal next hand controls. Hand means appear only in This hand, inside
+  the shared Your decisions header. Title/count wording stays unchanged. Compact
+  rows place each full label left and its value right; Mean Decision Score uses
+  22.4px and Mean Action Rank Score 17.5px at the 14px root. Expanded individual
+  scores retain their two-column pair and 35px / 19.6px values.
+- After each accepted human decision, request a new server-computed current-Hand
+  summary. Each immutable snapshot freezes its whole accepted human decision set
+  and one complete Reference Strategy for every member. Publish both means only
+  after every required analysis succeeds. Never calculate scores or averages in
+  the browser. Keep the last complete snapshot, including its recorded decision
+  count and reference, while a newer request is pending or failed. Before the first
+  success, pending values use static score skeletons; empty and error states use
+  em dashes, never zero. New Hands clear the means. Late responses and
+  obsolete attempts cannot replace the current target; reconnect reconciles HTTP
+  state without polling. Explicit Retry retains the failed snapshot's inputs.
+- Once confirmed means are available, routine updates have no caption about decision count, status sentence,
+  spinner, pulse or processing indicator. Real errors and Retry remain visible;
+  failure text identifies the older snapshot's decision count when one is shown.
+  Settings changes alone retain the recorded summary; the next accepted human
+  decision captures a new snapshot against the then-current reference. A differing
+  recorded reference adds the existing full Policy and Action Selector caption.
+- Both mean values and both expanded individual scores appear immediately when
+  confirmed results arrive, without rolling digits or crossfade animation. Each
+  score pair exposes one final contextual update to assistive technology. Live
+  and Table Session summary behavior otherwise remains unchanged.
+- Initial loading preserves the surrounding UI with static skeletons: expanded
+  analysis keeps score and reference-action structure; Live reserves reference
+  actions without suggesting pre-action scores; collapsed rows keep both score
+  columns; opening a table retains its table and optional sidebar shell; saved
+  tables retain row shapes; session summaries reserve their mean values. These
+  placeholders have accessible loading labels, no motion or made-up numeric
+  output. Known frozen situations remain visible while analysis is pending.
+  Confirmed data stays visible during refreshes, and errors replace skeletons with
+  the existing recovery controls. No skeleton replaces a genuine empty state.
+- Desktop and mobile use the same expandable list. The mini table supports the
+  configured two through nine seats, including sparse seats, without horizontal
+  scrolling. Disclosure controls work with keyboard activation.
+
+## Verification boundaries
+
+The user agreed to tests through the rendered AnalysisPanel and DecisionSituation
+interfaces, with browser verification for interactions. The score-hierarchy
+implementation review baseline is commit d48dba4d9c58f59207af29e648764b57588a2f58.
+
+## Selected comparison changes
+
+The user selected changes 1 (separate views), 2 (reference before situation) and
+4 (compact mobile header) from the React/Vite sidebar comparison prototype.
+Its source is retained on branch `codex/sidebar-review-prototype`, under
+`.scratch/sidebar-review-prototype`, against the pre-implementation UI.
+Changes 3 (numbered decisions/count wording) and 5 (local score/sampling help) are
+excluded. Existing action labels, Your decisions count wording, About these scores,
+Analysis details, numerical meanings and anchored settings remain as before.
+
+The subsequent usability comparison selected changes 1 (tabs-only sticky
+navigation), 2 (larger phone text, with the revised smaller score labels) and
+4 (full reference name matching settings), plus removal of Reviewing this hand.
+Change 3 (larger settings/return tap targets) is excluded. Source is retained on
+branch `codex/sidebar-usability-prototype`, under
+`.scratch/sidebar-usability-prototype`, against implementation baseline eb9cb68.
+Current-Hand behavior, independent sidebar scrolling, score order, full sizing
+trees, frozen snapshots and the existing settings/help behavior stay unchanged.
+
+The hand-summary comparison selected all three changes: averages in the Your
+decisions heading using the Two-tier layout, primary Mean Decision Score emphasis,
+and the conditional Reference Strategy caption. Source is retained on branch
+`codex/hand-summary-prototype`, commit `1ee1dcf8a18f8200711ec1430007ad999e867db7`,
+under `.scratch/hand-summary-prototype`. Its parent and this implementation's
+review baseline are `19f9c0c33d48acc78d271d47b3dc28d04bd01666`. Other placements and
+header variations were not selected. The mockup's caption was revised to Reference
+Strategy, without the extra sentence about retaining the original reference.
+
+The score-hierarchy comparison selected only option 2, Matching score pairs.
+Hand means and expanded decision scores use the same two columns (1.45fr / 1fr),
+Decision Score left and Action Rank Score right, with full labels above values.
+Hand means use 23.8px / 17.5px; expanded decisions use 35px / 19.6px at the 14px
+root size. Labels match their value colors, while all four denominators remain
+muted at 0.8rem, weight 400, with 6px separation. The 24px column gap becomes
+16px at 650px without changing the numeric sizes. Options 1 and 3 are excluded.
+This selected arrangement supersedes only ADR-0008's older presentation wording
+that places Action Rank Score underneath; all its numerical rules remain intact.
+The two-tier heading/count, completed current-Hand scope, recorded-reference
+identity, summary states, collapsed rows and all existing review behavior remain
+unchanged. Source is retained on branch `codex/score-hierarchy-prototype`, commit
+`a48af7e49ad8b4632c6550915a7102b77b25e1bc`, under
+`.scratch/score-hierarchy-prototype`, with parent baseline
+`d48dba4d9c58f59207af29e648764b57588a2f58`. The prototype uses illustrative data,
+without an API or user data, and stays off the production branch.
+
+The running-means and feedback comparison selected compact label/value rows,
+server-computed running means, upward score rolls and silent routine updates.
+This explicitly supersedes the end-of-Hand presentation timing in ADR-0026 and
+ADR-0028 while preserving their numerical contracts and frozen summary inputs.
+It also supersedes the prior matching-column layout only for Hand means; expanded
+individual scores keep their two-column pair. All other prototype alternatives
+are excluded. Source is archived on `codex/mean-feedback-prototype`, commit
+`de5a4becf1b2e7c3a6c7f10cbe4f8d8c37cb13d2`, under
+`.scratch/mean-feedback-prototype`, parented at implementation/review baseline
+`e7f0e10eb7dced1a9c19d8491b5395c45b2b5598`. The prototype contains illustrative
+fixtures only and is not tracked on the production branch.
+
+The subsequent accepted refinement removes score rolling and its reduced-motion
+crossfade. Compact mean rows, running summaries and silent pending updates remain.

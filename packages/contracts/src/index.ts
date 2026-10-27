@@ -225,7 +225,12 @@ export const baselinePlayingStrategy: StrategyDescriptor = Object.freeze({
   policy: Object.freeze({ id: 'uniform-choice', version: 'v1', configuration: Object.freeze({}) }),
   selector: Object.freeze({ id: 'seeded-sampling', version: 'v1', configuration: Object.freeze({}) }),
 });
-export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({ referenceStrategy: baselinePlayingStrategy, liveAnalysis: false });
+export const simpleHeuristicPlayingStrategy: StrategyDescriptor = Object.freeze({
+  policy: Object.freeze({ id: 'simple-heuristic', version: 'v1', configuration: Object.freeze({}) }),
+  selector: baselinePlayingStrategy.selector,
+});
+export const defaultPlayingStrategy = simpleHeuristicPlayingStrategy;
+export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({ referenceStrategy: defaultPlayingStrategy, liveAnalysis: false });
 
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }

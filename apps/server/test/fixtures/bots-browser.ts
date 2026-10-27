@@ -1,7 +1,7 @@
 /** Isolated browser verification fixture. No HTTP testing or controller-authority bypass. */
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselineStrategy } from '@poker/strategies';
+import { createStrategy } from '@poker/strategies';
 import { createServer } from '../../src/server.js';
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL.');
@@ -14,7 +14,7 @@ const port = Number(process.env.POKER_BROWSER_PORT ?? 3012);
 const server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: async context => {
   if (context.requestId.startsWith('bot:') && failSaveOnce) { failSaveOnce = false; throw new Error('Controlled browser PostgreSQL rollback.'); }
 } }, strategyFactory: descriptor => {
-  const strategy = baselineStrategy(descriptor);
+  const strategy = createStrategy(descriptor);
   return { ...strategy, policy: {
     checkCompatibility: view => strategy.policy.checkCompatibility(view),
     evaluate: (view, options) => {

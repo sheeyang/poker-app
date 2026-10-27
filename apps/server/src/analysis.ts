@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 import type { AnalysisUpdate, ConcreteAction, DecisionAnalysis, EvaluationIdentity, ReferenceStrategyEvaluation, StrategyDescriptor } from '@poker/contracts';
-import { baselineStrategy, immutableData, type Strategy } from '@poker/strategies';
+import { createStrategy, immutableData, type Strategy } from '@poker/strategies';
 import { calculateActionProbabilities, calculateDecisionScores, scoringMethodVersion } from '@poker/research';
 import type { ObservableGameView } from '@poker/contracts';
 import { JobRunner, type JobHandle, type JobPurpose } from './job-runner.js';
@@ -19,7 +19,7 @@ function matchingKey(input: FrozenEvaluationInput): string {
 type Database = ReturnType<typeof openDatabase>['db'];
 interface Entry { readonly input: FrozenEvaluationInput; readonly purpose: AnalysisPurpose; state: DecisionAnalysis }
 /** Owns matching, execution and successful retention, independently of connections and poker. */
-export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = baselineStrategy, publish: (ownerUserId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
+export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (ownerUserId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
   const entries = new Map<string, Entry>();
   const byRequest = new Map<string, Entry>();
   const initializing = new Map<string, Promise<Entry>>();

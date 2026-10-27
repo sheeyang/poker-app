@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 
@@ -97,14 +97,14 @@ test('live recovery starts one accepted analysis after proving COMMIT without a 
     await f.resolve('COMMIT');
     await expect.poll(() => f.evaluations.length).toBe(1);
     const automatic = await f.request(t);
-    expect(automatic).toMatchObject({ scoredDecision: { acceptedAction: { type: 'fold' } }, referenceStrategy: baselinePlayingStrategy });
+    expect(automatic).toMatchObject({ scoredDecision: { acceptedAction: { type: 'fold' } }, referenceStrategy: defaultPlayingStrategy });
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await f.result(t, automatic.requestId)).status).toBe('complete');
     const before = await f.read(t);
     expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false } })).status).toBe(200);
     expect(await (await f.submit(t, 'act', body)).json()).toMatchObject({ ok: true, pokerRevision: 4, sessionRevision: 4 });
     expect(f.evaluations).toHaveLength(1);
-    expect(await f.result(t, automatic.requestId)).toMatchObject({ referenceStrategy: baselinePlayingStrategy, status: 'complete' });
+    expect(await f.result(t, automatic.requestId)).toMatchObject({ referenceStrategy: defaultPlayingStrategy, status: 'complete' });
   } finally { await f.close(); }
 });
 
@@ -242,7 +242,7 @@ test('explicit Retry preserves automatic dependency priority, accepted action, o
     expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false } })).status).toBe(200);
     const blocker = await f.decision(); await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(2);
     const retried: DecisionAnalysis = await (await f.submit(t, 'analysis/' + pending.requestId + '/retry', {})).json();
-    expect(retried).toMatchObject({ status: 'pending', requestId: pending.requestId, referenceStrategy: baselinePlayingStrategy, scoredDecision: { acceptedAction: { type: 'fold' }, scoringMethodVersion: 'v1' } });
+    expect(retried).toMatchObject({ status: 'pending', requestId: pending.requestId, referenceStrategy: defaultPlayingStrategy, scoredDecision: { acceptedAction: { type: 'fold' }, scoringMethodVersion: 'v1' } });
     expect(retried.attemptId).not.toBe(pending.attemptId);
     const interactive = await f.decision(); await f.request(interactive);
     f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
@@ -250,7 +250,7 @@ test('explicit Retry preserves automatic dependency priority, accepted action, o
     expect(f.evaluations[2]!.view.state.actorId).toBe(interactive.human);
     f.evaluations[2]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(4);
-    expect(f.evaluations[3]).toMatchObject({ view: original.view, seed: original.seed, descriptor: baselinePlayingStrategy });
+    expect(f.evaluations[3]).toMatchObject({ view: original.view, seed: original.seed, descriptor: original.descriptor });
     f.evaluations[3]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: .25 }, { action: { type: 'call' }, probability: .75 }] });
     await expect.poll(async () => (await f.result(t, pending.requestId)).status).toBe('complete');
     expect(await f.result(t, pending.requestId)).toMatchObject({ attemptId: retried.attemptId, scores: { decisionScore: .25, actionRankScore: .5 } });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
@@ -21,10 +21,10 @@ beforeAll(async () => {
   await start();
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
-async function table() {
+async function table(playingStrategy = baselinePlayingStrategy) {
   const identity = await fetch(base + '/api/identity');
   const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
-  const creation = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
+  const creation = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy }] }) });
   expect(creation.status).toBe(201);
   const result = await creation.json();
   return { id: result.tableSessionId as string, cookie, bot: result.bindings[1].participantId as string };
@@ -50,7 +50,7 @@ test('new Table Sessions expose a complete default Reference Strategy and Live A
   const t = await table();
   expect(await read(t)).toMatchObject({
     pokerRevision: 0, sessionRevision: 0,
-    trainerConfiguration: { referenceStrategy: baselinePlayingStrategy, liveAnalysis: false },
+    trainerConfiguration: { referenceStrategy: defaultPlayingStrategy, liveAnalysis: false },
     bindings: [expect.objectContaining({ controller: { kind: 'human' } }), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } })],
   });
 });
@@ -81,7 +81,7 @@ test('two owner connections receive the complete configuration only after commit
     beforeCommit = async context => { if (context.tableSessionId === t.id) { entered.resolve(); await release.promise; } };
     held = configure(t, change(0, 'held'));
     await entered.promise;
-    expect(await read(t)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, trainerConfiguration: { referenceStrategy: baselinePlayingStrategy, liveAnalysis: false } });
+    expect(await read(t)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, trainerConfiguration: { referenceStrategy: defaultPlayingStrategy, liveAnalysis: false } });
     expect(first.messages).toHaveLength(1);
     expect(second.messages).toHaveLength(1);
     release.resolve();
@@ -183,4 +183,23 @@ test('the owner commits a complete Reference Strategy and Live Analysis setting 
   const reset = { referenceStrategy: baselinePlayingStrategy, liveAnalysis: false };
   expect((await configure(t, { requestId: randomUUID(), expectedSessionRevision: 2, trainerConfiguration: reset })).status).toBe(200);
   expect(await read(t)).toMatchObject({ trainerConfiguration: reset, pokerRevision: 0, sessionRevision: 3, bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: highestProbabilityPlayingStrategy } })] });
+});
+
+test('Simple Heuristic assignments persist and an existing Uniform Choice reference and Bot remain unchanged after restart', async () => {
+  const heuristic = await table(defaultPlayingStrategy);
+  const baseline = await table();
+  expect(await read(heuristic)).toMatchObject({
+    trainerConfiguration: { referenceStrategy: defaultPlayingStrategy },
+    bindings: [expect.anything(), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: defaultPlayingStrategy } })],
+  });
+  expect((await configure(baseline, { requestId: randomUUID(), expectedSessionRevision: 0, trainerConfiguration: { referenceStrategy: baselinePlayingStrategy, liveAnalysis: false } })).status).toBe(200);
+  const before = await read(baseline);
+  const heuristicBefore = await read(heuristic);
+  await server.close();
+  await start();
+  expect(await read(baseline)).toEqual(before);
+  expect(await read(heuristic)).toEqual(heuristicBefore);
+  const reference = { ...defaultPlayingStrategy, selector: highestProbabilityPlayingStrategy.selector };
+  expect((await configure(baseline, { requestId: randomUUID(), expectedSessionRevision: 1, trainerConfiguration: { referenceStrategy: reference, liveAnalysis: true } })).status).toBe(200);
+  expect(await read(baseline)).toMatchObject({ trainerConfiguration: { referenceStrategy: reference }, bindings: before.bindings });
 });
