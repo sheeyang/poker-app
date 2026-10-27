@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: poker-trainer-preview
+    runtime: node
+    plan: free
+    region: singapore
+    autoDeployTrigger: 'off'
+    buildCommand: corepack enable && corepack pnpm install --frozen-lockfile --prod=false && corepack pnpm build
+    startCommand: node apps/server/dist/main.js
+    healthCheckPath: /healthz
+    maxShutdownDelaySeconds: 30
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: SERVE_WEB
+        value: 'true'
+      - key: SINGLE_SERVER_GUARD
+        value: 'true'
+      - key: POKER_ADMIN_MODE
+        value: 'false'
+      - key: DATABASE_URL
+        sync: false
