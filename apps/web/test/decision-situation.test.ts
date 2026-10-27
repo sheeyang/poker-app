@@ -121,10 +121,51 @@ describe('decision situation', () => {
       expect(html).toContain(empty ? '0 to review' : '1 to review');
       expect(html).toContain('Mean Decision Score');
       expect(html).toContain('Mean Action Rank Score');
-      expect(html).toContain('\u2014');
+      if ('loading' in display && display.loading || 'data' in display && display.data.status === 'pending') expect(html).toContain('aria-label="Score pending"');
+      else expect(html).toContain('\u2014');
       expect(html).not.toContain('Preparing the complete summary');
       if (!empty) expect(html).toContain('Review your flop Call');
     }
+  });
+
+  it('keeps the selected decision structure visible before its analysis response arrives', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1' } as unknown as Props['analysis'];
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary: unrequestedSummary, command: { busy: false } as Props['command'], close: () => {} }));
+    expect(html).toContain('aria-label="Loading reference analysis"');
+    expect(html).toContain('Reference actions');
+    expect(html).toContain('Decision Score');
+    expect(html).toContain('Action Rank Score');
+    expect(html).toContain('Poker table before your flop decision');
+    expect(html).not.toContain('Play first. Explore after.');
+    expect(html).not.toContain('Loading reference actions…');
+    const pendingContent = html.slice(html.indexOf('class="analysis-skeleton"'), html.indexOf('class="decision-context"'));
+    expect(pendingContent).not.toContain('0.00');
+  });
+
+  it('retains confirmed decision values when a matching request is still pending', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const complete = { decisionId: 'd1', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, scores: { decisionScore: .94, actionRankScore: 1 }, evaluation: { actionProbabilities: [{ type: 'call', probability: 1 }], policyResult: { choices: [{ action: { type: 'call' }, probability: 1 }] }, selectedAction: { type: 'call' } } };
+    for (const status of ['pending', 'error'] as const) {
+      const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1', rowAnalyses: { d1: complete }, display: { data: { decisionId: 'd1', status, error: { message: 'Reference unavailable.' } }, loading: status === 'pending' } } as unknown as Props['analysis'];
+      const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary: unrequestedSummary, command: { busy: false } as Props['command'], close: () => {} }));
+      expect(html.replace(/<[^>]*>/g, '')).toContain('94.0/100');
+      expect(html).not.toContain('Loading reference analysis');
+      expect(html).toContain('1.00');
+      if (status === 'error') expect(html).toContain('Retry analysis');
+    }
+  });
+
+  it('reserves live reference content without suggesting uncomputed decision scores', () => {
+    type Props = ComponentProps<typeof AnalysisPanel>;
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
+    const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { view: 'live', acceptedDecisions: [], display: { loading: true } } as unknown as Props['analysis'], summary: unrequestedSummary, command: { busy: false } as Props['command'], close: () => {} }));
+    expect(html).toContain('Loading reference analysis');
+    expect(html).toContain('Reference actions');
+    expect(html).not.toContain('class="decision-scores"');
+    expect(html).not.toContain('Poker table before your');
   });
 
   it('shows live reference actions without duplicating the table, while keeping completed decision snapshots', () => {
@@ -163,7 +204,7 @@ describe('decision situation', () => {
     } as unknown as Props['analysis'];
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis, command: { busy: false } as Props['command'], close: () => {} }));
     const summaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
-    expect(summaries).toEqual(['CallDecision Score72.0/100Action Rank Score80.0/100', 'CallDecision Score35.0/100Action Rank Score50.0/100', 'CallScores pending']);
+    expect(summaries).toEqual(['CallDecision Score72.0/100Action Rank Score80.0/100', 'CallDecision Score35.0/100Action Rank Score50.0/100', 'CallDecision Score/100Action Rank Score/100']);
   });
   it('lists only human decisions as expandable actions, with the street inside the selected detail', () => {
     const accepted = [
@@ -175,7 +216,7 @@ describe('decision situation', () => {
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('<ol aria-label="Your decisions in this hand"');
     const actionSummaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
-    expect(actionSummaries).toEqual(['CallScores pending', 'CheckScores pending']);
+    expect(actionSummaries).toEqual(['CallDecision Score/100Action Rank Score/100', 'CheckDecision Score/100Action Rank Score/100']);
     expect(html).toContain('id="decision-scores-d1" aria-hidden="true"');
     expect(html).toContain('Flop · Before your action');
     expect(html).not.toContain('River · Before your action');

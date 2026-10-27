@@ -6,8 +6,9 @@ import { StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { chips } from './table-model.js';
 import { useSession, type Command } from './session.js';
+import { SavedTableSkeleton, SavedTablesSkeleton } from './loading-skeleton.js';
 
-export function SessionBrowser({ command, ready, close }: { command: Command; ready: boolean; close?: () => void }) {
+export function SessionBrowser({ command, ready, connecting = false, close }: { command: Command; ready: boolean; connecting?: boolean; close?: () => void }) {
   const [players, setPlayers] = useState(6), [depth, setDepth] = useState(100);
   const [smallBlind, setSmallBlind] = useState(10), [bigBlind, setBigBlind] = useState(20), [ante, setAnte] = useState(0);
   const [minimumBB, setMinimumBB] = useState(20), [maximumBB, setMaximumBB] = useState(200);
@@ -32,7 +33,7 @@ export function SessionBrowser({ command, ready, close }: { command: Command; re
       <p className="baseline-note"><Icon name="info" size={16} /><span>Simple Heuristic uses basic hand strength and modest bets. Scores compare your play with a reference; they don’t measure poker skill.</span></p>
     </section>
     <section className="practice-return" aria-labelledby="return-title"><h2 id="return-title">Pick up where you left off</h2><p className="muted">Your tables are saved automatically.</p>
-      {sessions.isLoading && <p className="muted" role="status">Finding your tables…</p>}
+      {!sessions.data && (connecting || ready && sessions.isPending) && <SavedTablesSkeleton />}
       {sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
       {sessions.data?.tableSessionIds.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
       <ul className="return-list">{sessions.data?.tableSessionIds.map(id => <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
@@ -43,7 +44,7 @@ export function SessionBrowser({ command, ready, close }: { command: Command; re
 function SavedTable({ id, selected, open }: { id: string; selected: boolean; open: () => void }) {
   const table = useQuery({ queryKey: ['table-session', id], queryFn: ({ signal }) => api.readSession(id, signal) });
   const data = table.data;
-  if (!data) return <li className="saved-table"><p className="muted">{table.isError ? 'This saved table couldn’t be read.' : 'Reading saved table…'}</p>{table.isError && <button className="text-button" onClick={() => void table.refetch()}>Retry</button>}</li>;
+  if (!data) return table.isError ? <li className="saved-table"><p className="muted">This saved table couldn’t be read.</p><button className="text-button" onClick={() => void table.refetch()}>Retry</button></li> : <SavedTableSkeleton />;
   const human = data.bindings.find(b => b.controller.kind === 'human');
   const participant = data.view.state.participants.find(p => p.participantId === human?.participantId);
   const size = data.view.configuration.seatCount;

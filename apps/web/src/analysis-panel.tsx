@@ -9,6 +9,7 @@ import type { useHandSummary, useTableSessionSummary } from './summaries.js';
 import type { Command } from './session.js';
 import { Dialog } from './dialog.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
+import { AnalysisSkeleton, ScoreSkeleton, Skeleton } from './loading-skeleton.js';
 
 type Analysis = ReturnType<typeof useDecisionAnalysis>;
 type HandSummary = ReturnType<typeof useHandSummary>;
@@ -37,7 +38,11 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   const liveDecision = configuration.liveAnalysis && !!table.view.state.decisionId && table.view.state.legalActions.length > 0;
   const candidate = analysis.display?.data;
   const displayDecisionId = liveView ? liveDecision ? table.view.state.decisionId : undefined : selected?.decisionId;
-  const data = candidate && displayDecisionId && candidate.decisionId === displayDecisionId ? candidate : selected ? analysis.rowAnalyses?.[selected.decisionId] : undefined;
+  const matching = candidate && displayDecisionId && candidate.decisionId === displayDecisionId ? candidate : undefined;
+  const recorded = selected ? analysis.rowAnalyses?.[selected.decisionId] : undefined;
+  const data = matching?.status === 'complete' ? matching : recorded?.status === 'complete' ? recorded : matching ?? recorded;
+  const analysisError = matching?.status === 'error' ? matching : data?.status === 'error' ? data : undefined;
+  const loadingAnalysis = !!displayDecisionId && data?.status !== 'complete' && data?.status !== 'error' && !analysis.display?.error;
   const handNumber = table.view.history.findIndex(hand => hand.handId === table.view.state.handId) + 1;
   const context = selected?.state ?? table.view.state;
   const handActions = table.view.history.find(hand => hand.handId === context.handId)?.decisions ?? [];
@@ -52,13 +57,13 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   const content = <>
     {data?.status === 'complete' && data.scores && <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
-    {(analysis.display?.loading && !data || data?.status === 'pending') && <p className="review-analysis-status" role="status">Loading reference actions…</p>}
-    {data?.status === 'error' && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{data.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
+    {loadingAnalysis && <AnalysisSkeleton actions={context.legalActions} scores={!!selected} sampled={reference.selector.id === 'seeded-sampling'} />}
+    {analysisError && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{analysisError.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
     {data?.status === 'complete' && <DecisionResult data={data} />}
     {selected ? <div className="decision-context"><span>{`${street[0]!.toUpperCase()}${street.slice(1)} · Before your action`}</span>{humanId && <DecisionSituation state={context} humanId={humanId} bindings={table.bindings} earlierActions={earlierActions} seatCount={table.view.configuration.seatCount} />}</div> : !configuration.liveAnalysis && <div className="decision-context"><span>Reference appears after you act</span></div>}
     {humanId && selected && <EarlierActions actions={earlierActions} humanId={humanId} bindings={table.bindings} />}
     {data?.status === 'complete' && <AnalysisDetails data={data} />}
-    {!data && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{liveView ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{liveView ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
+    {!data && !loadingAnalysis && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{liveView ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{liveView ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
   </>;
   return <aside ref={panel} id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis">
     <div className="panel-heading"><div><Icon name="chart" /><h2>{handNumber > 0 ? `Hand ${handNumber} analysis` : selected ? `Hand ${selected.handNumber} analysis` : 'Current hand'}</h2></div><div className="panel-actions"><button className="icon-button analysis-settings-trigger" aria-label="Analysis settings" title="Analysis settings" aria-haspopup="dialog" popoverTarget="analysis-settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Return to table" onClick={close}><Icon name="close" size={18} /></button></div></div>
@@ -79,8 +84,10 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
       {handDecisions.length > 0 && <ol aria-label="Your decisions in this hand" className="review-decision-list">{handDecisions.map(d => {
         const open = d.decisionId === expandedDecisionId;
         const rowData = analysis.rowAnalyses?.[d.decisionId] ?? (data?.decisionId === d.decisionId ? data : undefined);
+        const rowFailed = rowData?.status === 'error' || analysis.rowErrors?.[d.decisionId];
+        const rowScores = rowData?.status === 'complete' ? rowData.scores : undefined;
         return <li key={d.decisionId}><details className="review-decision" open={open}>
-          <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-describedby={!open ? `decision-scores-${d.decisionId}` : undefined} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><strong className="review-row-action">{actionLabel(d.action)}</strong><span id={`decision-scores-${d.decisionId}`} aria-hidden={open || undefined} className="review-row-scores">{rowData?.status === 'complete' && rowData.scores ? <><span><span>Decision Score</span><strong>{(rowData.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></span><span><span>Action Rank Score</span><strong>{(rowData.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></span></> : <span className="review-row-status">{rowData?.status === 'error' || analysis.rowErrors?.[d.decisionId] ? 'Scores unavailable' : 'Scores pending'}</span>}</span><Icon name="chevron" size={17} /></summary>
+          <summary onClick={event => { event.preventDefault(); if (open) analysis.collapseDecision(); else analysis.selectDecision(d.decisionId); }} aria-describedby={!open ? `decision-scores-${d.decisionId}` : undefined} aria-label={`Review your ${d.state.street} ${actionLabel(d.action)}`}><strong className="review-row-action">{actionLabel(d.action)}</strong><span id={`decision-scores-${d.decisionId}`} aria-hidden={open || undefined} className="review-row-scores">{rowFailed && !rowScores ? <span className="review-row-status">Scores unavailable</span> : <><span><span>Decision Score</span><strong>{rowScores ? (rowScores.decisionScore * 100).toFixed(1) : <ScoreSkeleton />}<small>/100</small></strong></span><span><span>Action Rank Score</span><strong>{rowScores ? (rowScores.actionRankScore * 100).toFixed(1) : <ScoreSkeleton />}<small>/100</small></strong></span></>}</span><Icon name="chevron" size={17} /></summary>
           {open && <div className="review-decision-content">{content}</div>}
         </details></li>;
       })}</ol>}
@@ -88,6 +95,10 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
     </>}</section>
     <details className="analysis-explainer"><summary><Icon name="info" size={16} />About these scores</summary><div className="details-content"><p>Scores compare your play with the Reference Strategy. They do not measure poker skill, EV or profit.</p><p>Decision Score measures alignment with the reference Policy, including bet sizing. Action Rank Score measures the rank of your action type’s probability.</p><p>Probabilities run from 0.00 to 1.00. Bet and raise sizes show their original probabilities. Simple Heuristic uses basic rules; Uniform Choice is a testing baseline.</p></div></details>
   </aside>;
+}
+
+export function AnalysisPanelSkeleton({ close }: { close: () => void }) {
+  return <aside id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis" aria-busy="true"><div className="panel-heading"><Skeleton className="skeleton-panel-title" /><div className="panel-actions"><button className="icon-button" disabled aria-label="Analysis settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Return to table" onClick={close}><Icon name="close" size={18} /></button></div></div><div className="analysis-meta"><span>Reference: <Skeleton className="skeleton-reference" /></span><span>Amounts in chips</span></div><div className="analysis-view-tabs" role="tablist" aria-label="Analysis view"><button role="tab" aria-selected="false" disabled>Live</button><button role="tab" aria-selected="false" disabled>This hand</button></div><section className="decision-section"><AnalysisSkeleton actions={[]} scores sampled={false} /></section></aside>;
 }
 
 function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
@@ -110,8 +121,9 @@ function HandMeans({ summary, currentReference }: { summary: HandSummary; curren
   const data = candidate?.status === 'complete' ? candidate : summary.complete;
   const differentReference = data && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
   const retainedCount = data ? ` The mean shown covers ${data.decisionCount} ${data.decisionCount === 1 ? 'decision' : 'decisions'}.` : '';
+  const pending = !data && !summary.display?.error && candidate?.status !== 'error' && candidate?.status !== 'empty' && (summary.canRequest || summary.display?.loading || candidate?.status === 'pending');
   return <>
-    <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong>{data ? (data.averages.decisionScore * 100).toFixed(1) : '—'}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{data ? (data.averages.actionRankScore * 100).toFixed(1) : '—'}<small>/100</small></strong></div></div>
+    <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong>{data ? (data.averages.decisionScore * 100).toFixed(1) : pending ? <ScoreSkeleton /> : '—'}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{data ? (data.averages.actionRankScore * 100).toFixed(1) : pending ? <ScoreSkeleton /> : '—'}<small>/100</small></strong></div></div>
     {summary.display?.error && <div className="notice-error" role="alert"><p>{summary.display.error}{retainedCount}</p><button onClick={summary.request}>Request summary again</button></div>}
     {candidate?.status === 'error' && <div className="notice-error" role="alert"><p>{candidate.error.message}{retainedCount}</p><button disabled={summary.display?.retrying} onClick={() => void summary.retry()}>{summary.display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {candidate?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
@@ -123,7 +135,7 @@ export function SummaryResult({ summary, currentReference }: { summary: HandSumm
   const display = summary.display, data: ScoreSummary | undefined = display?.data;
   const differentReference = data && currentReference && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
   return <>
-    {(display?.loading || data?.status === 'pending') && <p className="muted" role="status">Preparing the complete summary…</p>}
+    {!display?.error && (!data || data.status === 'pending') && (display?.loading || data?.status === 'pending' || !display && summary.canRequest) && <div className="summary-averages" role="status" aria-label="Loading complete summary"><div><span>Mean Decision Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div></div>}
     {display?.error && <div className="notice-error" role="alert"><p>{display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message}</p><button disabled={display?.retrying} onClick={() => void summary.retry()}>{display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {data?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}

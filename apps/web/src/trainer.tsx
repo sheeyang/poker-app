@@ -10,7 +10,8 @@ import { ActionTray, CommandFeedback } from './controls.js';
 import { TableSettings } from './settings.js';
 import { useDecisionAnalysis } from './analysis.js';
 import { useHandSummary, useTableSessionSummary } from './summaries.js';
-import { AnalysisPanel, FinishSession } from './analysis-panel.js';
+import { AnalysisPanel, AnalysisPanelSkeleton, FinishSession } from './analysis-panel.js';
+import { TableSkeleton } from './loading-skeleton.js';
 import { HandReview } from './hand-review.js';
 import { actionLabel, chips } from './table-model.js';
 
@@ -54,10 +55,10 @@ export function Trainer() {
     <header className="app-header"><button className="brand" onClick={() => setBrowse(true)} aria-label="Poker Trainer · practice"><span className="brand-mark"><Icon name="spade" size={23} /></span><strong>Poker<span className="brand-divider" /> <span>Trainer</span></strong></button><nav aria-label="Practice navigation"><button className={browse || !selected ? 'nav-active' : ''} onClick={() => setBrowse(true)}><Icon name="tables" size={18} /><span>Practice</span></button>{selected && <button onClick={() => setBrowse(false)} className={!browse ? 'nav-active' : ''}><Icon name="cards" size={18} /><span>Your table</span></button>}</nav><span className="identity-status">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span></header>
     <CommandFeedback command={command} />
     {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>Your saved table is still selected.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
-    {!selected || browse ? <SessionBrowser command={command} ready={identity.isSuccess} close={selected ? () => setBrowse(false) : undefined} /> : <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
+    {!selected || browse ? <SessionBrowser command={command} ready={identity.isSuccess} connecting={identity.isPending} close={selected ? () => setBrowse(false) : undefined} /> : <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
       <div className="play-area">
         <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}</span></div><div className="toolbar-actions"><button className="quiet-button" aria-expanded={analysisOpen} aria-controls="analysis-panel" onClick={() => analysisOpen ? closeAnalysis() : review()}><Icon name="chart" size={18} /><span>{analysisOpen ? 'Return to play' : handDecisions.length ? 'Review decisions' : 'Analysis'}</span></button><button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings(true)}><Icon name="settings" /></button></div></div>
-        {!current && !table.error && <div className="table-loading" role="status"><div className="loading-oval" /><p>Opening your table…</p></div>}
+        {!current && !table.error && !identity.isError && <TableSkeleton />}
         {table.error && <div className="table-error notice-error" role="alert"><h2>Couldn’t open this table.</h2><p>{table.error.message}</p><div className="button-row"><button onClick={() => void table.refetch()}>Retry</button><button onClick={() => setBrowse(true)}>Choose another table</button></div></div>}
         {current && <>
           <div className="hand-status"><span><strong>{current.view.state.handId ? `Hand ${String(handNumber).padStart(2, '0')}` : 'Your practice'}</strong><span className="status-separator">·</span>{current.view.state.status === 'completed-hand' ? 'Complete' : current.view.state.status === 'between-hands' ? 'Getting ready' : current.view.state.street ? current.view.state.street[0]!.toUpperCase() + current.view.state.street.slice(1) : 'In play'}</span></div>
@@ -74,6 +75,7 @@ export function Trainer() {
         </>}
       </div>
       {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} command={command} close={closeAnalysis} />}
+      {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
     </main>}
     {settings && current && <TableSettings table={current} command={command} close={() => setSettings(false)} />}
     {finish && current && <FinishSession summary={sessionSummary} close={() => setFinish(false)} leave={() => { setFinish(false); select(null); }} />}

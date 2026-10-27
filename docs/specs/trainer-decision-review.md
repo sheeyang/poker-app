@@ -95,10 +95,11 @@ ADR-0028, without introducing a historical replay workspace.
   after every required analysis succeeds. Never calculate scores or averages in
   the browser. Keep the last complete snapshot, including its recorded decision
   count and reference, while a newer request is pending or failed. Before the first
-  success use em dashes, never zero. New Hands clear the means. Late responses and
+  success, pending values use static score skeletons; empty and error states use
+  em dashes, never zero. New Hands clear the means. Late responses and
   obsolete attempts cannot replace the current target; reconnect reconciles HTTP
   state without polling. Explicit Retry retains the failed snapshot's inputs.
-- Routine mean updates have no caption about decision count, status sentence,
+- Once confirmed means are available, routine updates have no caption about decision count, status sentence,
   spinner, pulse or processing indicator. Real errors and Retry remain visible;
   failure text identifies the older snapshot's decision count when one is shown.
   Settings changes alone retain the recorded summary; the next accepted human
@@ -108,6 +109,15 @@ ADR-0028, without introducing a historical replay workspace.
   confirmed results arrive, without rolling digits or crossfade animation. Each
   score pair exposes one final contextual update to assistive technology. Live
   and Table Session summary behavior otherwise remains unchanged.
+- Initial loading preserves the surrounding UI with static skeletons: expanded
+  analysis keeps score and reference-action structure; Live reserves reference
+  actions without suggesting pre-action scores; collapsed rows keep both score
+  columns; opening a table retains its table and optional sidebar shell; saved
+  tables retain row shapes; session summaries reserve their mean values. These
+  placeholders have accessible loading labels, no motion or made-up numeric
+  output. Known frozen situations remain visible while analysis is pending.
+  Confirmed data stays visible during refreshes, and errors replace skeletons with
+  the existing recovery controls. No skeleton replaces a genuine empty state.
 - Desktop and mobile use the same expandable list. The mini table supports the
   configured two through nine seats, including sparse seats, without horizontal
   scrolling. Disclosure controls work with keyboard activation.

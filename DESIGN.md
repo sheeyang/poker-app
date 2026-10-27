@@ -195,7 +195,7 @@ On phones up to (650px), the table uses the remaining viewport height, with a (2
 
 Most interface surfaces use tonal layering and one-pixel borders. Shadows express physical separation for the felt rail and playing cards, and elevation for modal dialogs. Do not apply them indiscriminately to every container. Exact shadow values live in the sidecar.
 
-Card dealing lasts (360ms) and face-down burn presentation lasts (500ms), sharing an easing curve of `cubic-bezier(.16,1,.3,1)`. Control color changes and the analysis switch use (150ms) transitions. Reduced-motion preference removes gameplay animations and transitions. Confirmed Hand means and expanded scores appear immediately without rolling or crossfade animation. Assistive technology receives one final contextual update per pair. Presentation motion never determines when a legal action becomes available.
+Card dealing lasts (360ms) and face-down burn presentation lasts (500ms), sharing an easing curve of `cubic-bezier(.16,1,.3,1)`. Control color changes and the analysis switch use (150ms) transitions. Reduced-motion preference removes gameplay animations and transitions. Confirmed Hand means and expanded scores appear immediately without rolling or crossfade animation. Initial loading uses static tonal skeletons shaped like scores, reference actions, the table and saved-table rows; there is no shimmer or pulse. Confirmed content remains visible during refreshes, and errors keep their recovery controls. Assistive technology receives one final contextual update per pair. Presentation motion never determines when a legal action becomes available.
 
 ## Shapes
 
