@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ObservableTableSession, type TableLiveMessage } from '@poker/contracts';
 import { CashGame, type TableSessionRecord } from '@poker/engine';
 import { createServer } from '../src/server.js';
+import { JobRunner } from '../src/job-runner.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { baselineStrategy, type Strategy } from '@poker/strategies';
 
@@ -37,6 +38,21 @@ async function command(t: Table, kind: string, contents: object = {}) {
   expect(result.status).toBe(200);
 }
 const inspect = (t: Table, handId = 'hand-1', cookie = t.cookie, extras = {}) => fetch(base + '/api/table-sessions/' + t.id + '/inspect-hand', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ handId, ...extras }) });
+async function queueInspection(t: Table, handId = 'hand-1') {
+  // Observe admission without issuing another HTTP request that could take its slot.
+  const submissions = vi.spyOn(JobRunner.prototype, 'submit');
+  const response = inspect(t, handId);
+  try {
+    await expect.poll(() => {
+      const index = submissions.mock.calls.findIndex(([purpose, input]) => purpose === 'interactive-analysis'
+        && !!input && typeof input === 'object' && 'pokerRecord' in input
+        && 'tableSessionId' in input && input.tableSessionId === t.id && 'handId' in input && input.handId === handId);
+      const result = submissions.mock.results[index];
+      return result?.type === 'return' ? result.value.admitted : undefined;
+    }, { timeout: 5000 }).toBe(true);
+    return { response };
+  } finally { submissions.mockRestore(); }
+}
 async function completed() {
   const t = await table();
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
@@ -44,7 +60,7 @@ async function completed() {
   await command(t, 'start-hand');
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   const analysis = await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis', { method: 'POST', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ decisionId: 'hand-1/decision-1' }) })).json();
-  await expect.poll(async () => (await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + analysis.requestId, { headers: { cookie: t.cookie } })).json()).status).toBe('complete');
+  await expect.poll(async () => (await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + analysis.requestId, { headers: { cookie: t.cookie } })).json()).status, { timeout: 5000 }).toBe('complete');
   return t;
 }
 
@@ -208,10 +224,10 @@ test('queued inspection retains its captured active-Hand rejection after the liv
     const captured = await controllers.readPersistedSession(t.id);
     const replay = vi.spyOn(CashGame, 'fromRecord');
     try {
-      const queued = inspect(t, 'hand-2');
+      const { response: queued } = await queueInspection(t, 'hand-2');
       let finished = false;
       void queued.then(() => { finished = true; });
-      await expect.poll(async () => (await (await inspect(t, 'hand-2')).json()).rejection?.code).toBe('inspection-capacity');
+      expect(await (await inspect(t, 'hand-2')).json()).toMatchObject({ rejection: { code: 'inspection-capacity' } });
       expect(finished).toBe(false);
       expect(replay).not.toHaveBeenCalled();
       expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: active.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } })).toMatchObject({ ok: true });
@@ -253,11 +269,11 @@ test('inspection shares Bot capacity, waits outside mutation acceptance and reta
     const replay = vi.spyOn(CashGame, 'fromRecord');
     let queued: Promise<Response>;
     try {
-      queued = inspect(t);
+      ({ response: queued } = await queueInspection(t));
       let finished = false;
       void queued.then(() => { finished = true; });
       // Capacity proves this is the same runner as the executing Bot, not a second Research runner.
-      await expect.poll(async () => (await (await inspect(t)).json()).rejection?.code).toBe('inspection-capacity');
+      expect(await (await inspect(t)).json()).toMatchObject({ rejection: { code: 'inspection-capacity' } });
       expect(finished).toBe(false);
       const rejected = await inspect(corrupt);
       expect(rejected.status).toBe(503);
