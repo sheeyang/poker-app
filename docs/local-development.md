@@ -74,6 +74,7 @@ server to disable completed-Hand hidden-information reveal.
 For the package map and dependency checks, see [workspace architecture](architecture.md).
 For identity, endpoints, fingerprints, and recovery mechanics, see
 [the server protocol reference](server-protocol.md).
+For a hosted free preview, see the [Render and Neon deployment guide](deployment_guide.md).
 
 ## Recovery browser fixture
 
