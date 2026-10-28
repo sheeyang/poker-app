@@ -2,7 +2,8 @@
 
 This guide starts with no accounts, checkout, database, or hosted service. It ends
 with one free Render service serving the Trainer, API, and WebSockets, a free Neon
-database, automatic CI checks, and a one-click release workflow.
+database, automatic releases after CI passes on the default branch, and a manual
+release fallback.
 
 The application and automation described here are already implemented in this
 repository. There are no source-code patches to copy from this guide. Account
@@ -61,34 +62,19 @@ The repository's **default branch** is the deployment branch throughout this
 guide. Its name might be `main` or something else. Use the branch marked as the
 default in GitHub; the release workflow rejects other branches.
 
-Make sure that branch contains these implementation files:
-
-| File | Purpose |
-| --- | --- |
-| [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) | Automatic checks on pushes and pull requests; also runnable manually. |
-| [`.github/workflows/release.yml`](../.github/workflows/release.yml) | Manual release: validate, test Neon recovery, deploy the selected commit, and verify it. |
-| [`render.yaml`](../render.yaml) | Free web-service settings and a prompt for its database secret. |
-| [`apps/server/src/hosting.ts`](../apps/server/src/hosting.ts) | Frontend serving, liveness/readiness, and the single-authority handoff. |
-| [`scripts/deploy-render.ts`](../scripts/deploy-render.ts) | Exact-commit deployment and post-deployment checks. |
-
-If the implementation exists only in your local checkout, commit and push the
-relevant changes and merge them into the default branch before continuing. Review
-`git status` first; never commit credentials or `.env` files. Commit the matching
-`pnpm-lock.yaml` whenever dependencies change.
-
 In GitHub:
 
-1. Open the repository's **Actions** tab. Enable workflows if GitHub asks; forks
-   can require this explicit step.
-2. If Actions are disabled, use **Settings → Actions → General** to allow the
-   actions used by these checked-in workflows.
-3. Select **CI → Run workflow**, choose the default branch, and run it. Wait for
+1. Open the repository's **Actions** tab.
+2. Select **CI → Run workflow**, choose the default branch, and run it. Wait for
    its **check** job to pass before creating the hosted service.
 
-CI runs `pnpm check`, including typechecking, real PostgreSQL tests, builds, and
-workspace-boundary checks. Ordinary CI needs no cloud secrets and consumes no
-Neon quota. Manual workflow files must exist on the default branch for the Run
-workflow button to appear. [GitHub workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
+CI's **check** job runs `pnpm check`, including typechecking, real PostgreSQL tests,
+builds, and workspace-boundary checks. This job needs no cloud secrets and consumes
+no Neon quota. Automatic releases stay skipped until both `RENDER_SERVICE_ID` and
+`APP_URL` repository variables are set in section 5. Pull requests, feature-branch
+pushes, and manual CI runs perform checks only. Manual workflow files must exist on
+the default branch for the **Run workflow** button to appear.
+[GitHub workflow instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)
 
 ## 3. Create two Neon Free projects
 
@@ -99,8 +85,8 @@ For the **preview project**:
 
 1. Sign in to Neon and click **New Project**.
 2. Name it `poker-trainer-preview` and keep its plan **Free**.
-3. Select a region near the Render service. The checked-in Blueprint uses
-   Singapore; select a nearby available Neon region, ideally Singapore as well.
+3. Choose the closest available Neon region to the Render service's region
+   configured in `render.yaml`.
 4. Expand the Postgres settings and select **PostgreSQL 18**, matching local tests.
    Leave unrelated Auth, Functions, and storage services disabled.
 5. Create the project. Use its initial branch and database, commonly `neondb`.
@@ -121,10 +107,11 @@ Sources: [Neon projects](https://neon.com/docs/manage/projects),
 [pooling limitations](https://neon.com/docs/connect/connection-pooling#connection-pooling-in-transaction-mode).
 
 Before the first Render deployment, verify recovery against the **test** project
-from your local checkout. In PowerShell:
+from your local checkout. Replace `YOUR_NEON_TEST_DATABASE_URL_HERE` with the test
+project's direct URL, keeping the single quotes. In PowerShell:
 
 ```powershell
-$env:TEST_DATABASE_URL = Read-Host 'Paste the direct URL for poker-trainer-tests'
+$env:TEST_DATABASE_URL = 'YOUR_NEON_TEST_DATABASE_URL_HERE'
 pnpm test apps/server/test/recovery.test.ts
 Remove-Item Env:TEST_DATABASE_URL
 ```
@@ -222,10 +209,14 @@ workflow YAML, screenshot, or log.
 
 ## 6. Run the first automated release
 
+Use the manual fallback for this first release because the setup steps above did
+not require a new push after configuring hosting.
+
 1. In GitHub, open **Actions → Release preview → Run workflow**.
 2. Choose the repository's **default branch**, then start the run.
 3. Follow the job's steps. It will:
-   - Install the pinned dependencies and run `pnpm check` with temporary PostgreSQL.
+   - Install the pinned dependencies and run `pnpm check` with temporary PostgreSQL
+     for this manual run. Automatic releases reuse the successful CI check instead.
    - Run recovery tests against the separate Neon test project.
    - Ask Render to deploy the exact Git commit selected by this run.
    - Wait for Render to report the new deployment live.
@@ -235,8 +226,20 @@ workflow YAML, screenshot, or log.
 4. Wait for the **whole workflow** to succeed. Render's Live label alone means
    the listener is up, not that game restoration is complete.
 
-The workflow serializes releases and does not cancel an in-progress release.
-A later merge does not change the commit already selected by a running release.
+For later default-branch pushes, open the **CI** run and follow its **Release
+preview** job after **check** succeeds. The automatic release appears inside that
+CI run; it does not create a separate manually dispatched **Release preview** run.
+If checks fail or are canceled, deployment does not start. The release checks out
+and deploys the same commit SHA that CI tested.
+
+Automatic and manual releases share one release queue. An active release is not
+canceled by a newer push. At most one release waits behind it; a new pending
+release replaces the previous pending one. A later merge does not change the
+commit already selected by a running release. Superseded CI checks can still be
+canceled to save runner time.
+
+See [GitHub reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows)
+and [concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 
 A release can briefly interrupt play, typically around **1–2 minutes** during
 handoff in addition to build time. The new process binds its listener first, but
@@ -273,11 +276,18 @@ hostname and browser cookie to retain ownership of existing tables.
 
 1. Make changes on a branch, commit them, push, and open a pull request.
 2. Let **CI** finish; review the changes and merge into the default branch.
-3. When you want to publish, run **Release preview** from that default branch.
-   It repeats checks before deploying, even if the push's CI already passed.
-4. Wait for readiness and smoke checks to succeed before treating the release as
-   complete. Existing clients can reconnect to their committed tables; reload
-   the page after readiness if it was opened during the interruption.
+3. Open the new **CI** run for the merge commit. When **check** passes, **Release
+   preview** automatically tests Neon recovery, deploys that exact commit, and
+   verifies the hosted app. There is no extra dashboard step to start deployment.
+4. Wait for the whole CI run, including readiness and smoke checks, to succeed
+   before treating the release as complete. Existing clients can reconnect to
+   their committed tables; reload the page after readiness if it was opened
+   during the interruption.
+
+To retry a release deliberately or publish without a new push, use **Actions →
+Release preview → Run workflow** on the default branch. This manual fallback runs
+`pnpm check` itself before the Neon tests and deployment. **CI → Run workflow**
+performs checks only.
 
 Keep the **same Render service**. Do not delete/recreate it, change the hostname,
 remove the authority guard, or enable independent automatic deploys. Ordinary
@@ -293,6 +303,9 @@ Release preview to verify the intended revision and settings.
 | Symptom | What to check |
 | --- | --- |
 | No Run workflow button | The workflow files must be on the default branch; enable Actions and ensure your account has repository write access. |
+| A fork asks to enable workflows | If the **Actions** tab displays an enable-workflows prompt, accept it, then run CI. |
+| No separate Release preview run after a merge | Automatic releases run as the **Release preview** job inside that commit's **CI** run. Open that run to inspect deployment progress. |
+| Automatic Release preview job is skipped | It requires a successful **check** job from a push to the default branch and both `RENDER_SERVICE_ID` and `APP_URL` repository variables. PRs, feature branches, and manual CI runs do not deploy. Add the section 5 settings, then use the manual release fallback or push a new commit. |
 | Release rejects the branch | Select the default branch, rather than a feature branch, in Run workflow. |
 | Missing secret or variable | Use the repository Actions settings from section 5; names must match exactly. Empty Neon secrets are rejected rather than silently using local PostgreSQL. |
 | CI or Neon test failure | Read the failed step and fix it before retrying. A failure before the deployment step does not request a Render release. |
@@ -329,7 +342,8 @@ Sources: [Render Free](https://render.com/docs/free),
 
 Use the default HTTPS domain and keep the service on Free. Close unused browsers
 and local database connections; do not add uptime pings that continuously wake the
-preview. Run cloud recovery checks for releases, rather than every pull request.
+preview. Cloud recovery checks run for releases, including automatic releases
+after successful default-branch pushes; pull requests use temporary PostgreSQL.
 Review usage in all three dashboards. Free limits are finite; for example,
 100 CU-hours corresponds to about 400 active hours at 0.25 CU, before other usage.
 
