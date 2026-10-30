@@ -80,6 +80,34 @@ something billable exists: find it and delete it.
 
 ## 4. Create the VM
 
+### Create the network first
+
+The instance wizard can create a network itself, but then its address settings
+stay disabled, and Oracle warns that it offers only some options. Create the
+network on its own first:
+
+1. Open **Networking → Virtual cloud networks** and choose **Start VCN Wizard**.
+   In some consoles it is under **Actions**.
+2. Choose **Create VCN with Internet Connectivity**, then **Start VCN Wizard**.
+3. Set **VCN name** to `poker-vcn` and **Compartment** to the root compartment.
+   Keep the suggested address ranges (for example `10.0.0.0/16` for the VCN,
+   `10.0.0.0/24` public and `10.0.1.0/24` private).
+4. Choose **Next**, then **Create**. The wizard creates the network with a public
+   subnet, a private subnet, gateways, and route tables. Always Free includes two
+   networks, and Oracle does not charge for these networking parts.
+
+Then open ports 80 and 443 for HTTPS:
+
+1. Open `poker-vcn` → **Security** (or **Security Lists**) → **Default Security
+   List for poker-vcn** → **Add Ingress Rules**.
+2. Set **Source CIDR** to `0.0.0.0/0` and **IP Protocol** to **TCP**. Leave the
+   source port range empty, and set **Destination Port Range** to `80,443`. If
+   the console rejects the list, add two rules, one per port.
+
+Port 22 for SSH is already open. Do not open PostgreSQL's 5432.
+
+### Start the instance wizard
+
 In the Oracle Console, open **Compute → Instances → Create instance**. The wizard
 has five steps. Settings not listed here can keep their defaults. Ignore the
 banner suggesting additional regions: Always Free resources exist only in the
@@ -121,23 +149,17 @@ Under **Advanced options**:
 | Setting | Choose |
 | --- | --- |
 | **VNIC name** | Leave empty or use `poker-production`. |
-| **Primary network** | **Create new virtual cloud network**. If an earlier attempt already created one, choose **Select existing virtual cloud network** instead, and then that network's public subnet. **Specify OCID** is not needed. |
-| **New virtual cloud network name** | `poker-vcn`, or keep a suggested name. |
-| **Create in compartment** (network) | The root compartment, as in step 1. |
-| **Subnet** | **Create new public subnet**, the only choice for a new network. |
-| **New subnet name** | `poker-public`, or keep a suggested name. |
-| **Create in compartment** (subnet) | The root compartment. |
-| **CIDR block** | Keep the suggested value. If it is empty, enter `10.0.0.0/24`. |
-| Warning about additional options on the Networking pages | Ignore it. This VM needs nothing beyond the fields above. |
-| **Private IPv4 address assignment** | **Automatically assign private IPv4 address**. These options stay disabled until the subnet fields are filled in. |
-| **Public IPv4 address assignment** | Turn on **Automatically assign public IPv4 address**. It is **off by default**, and Oracle accepts it only with a public subnet. Without it the VM is unreachable from the internet. |
+| **Primary network** | **Select existing virtual cloud network**. Do not create one here; its address settings stay disabled. |
+| **Virtual cloud network compartment** | The root compartment. |
+| **Virtual cloud network** | `poker-vcn`, created above. |
+| **Subnet** | **Select existing subnet**. |
+| **Subnet compartment** | The root compartment. |
+| **Subnet** (list) | The **public** subnet, named like `public subnet-poker-vcn`. The private subnet cannot receive a public IP. |
+| **Private IPv4 address assignment** | **Automatically assign private IPv4 address**. |
+| **Public IPv4 address assignment** | Turn on **Automatically assign public IPv4 address**. It is **off by default**. Without it the VM is unreachable from the internet. |
 | **IPv6 address assignment → Assign IPv6 address from subnet prefix** | Leave off. |
 | **Advanced options → DNS record** | **Assign a private DNS record**. The hostname is optional, and the fully qualified domain name fills in after the subnet is set. The public hostname comes from DuckDNS. |
 | **Advanced options → Launch options** | **Paravirtualized networking**. Hardware-assisted (SR-IOV) networking does not support live migration. |
-| **Advanced options → VCN tags** and **Subnet tags** | None. |
-
-If the step reports errors, a required field is still empty: usually a name or
-the CIDR block.
 | **Add SSH keys** | **Generate a key pair for me**, then **Download private key**. It is shown only once. Save it as `$HOME\.ssh\oracle-admin.key`. This is your administrator login, separate from the deploy key in section 5. You can instead paste or upload an existing public key. Never choose **No SSH keys**. |
 
 ### Step 4: Storage
@@ -159,12 +181,8 @@ save it as a stack.
 If creation fails with **Out of host capacity**, retry later. Singapore has a
 single availability domain, so there is no other domain to try.
 
-After creation, copy the instance's **public IP address**, then:
-
-1. In DuckDNS, set your subdomain's IP to that address.
-2. Open the instance's subnet → **Security Lists → Default Security List → Add
-   Ingress Rules**. Add source `0.0.0.0/0`, TCP, destination ports **80** and
-   **443**. Port 22 is already open. Do not open PostgreSQL's 5432.
+After creation, copy the instance's **public IP address** and set it as your
+DuckDNS subdomain's IP.
 
 Sources: [Always Free resources](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm),
 [Free Tier FAQ](https://www.oracle.com/cloud/free/faq/).
