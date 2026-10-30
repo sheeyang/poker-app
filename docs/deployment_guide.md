@@ -18,6 +18,11 @@ Each command block starts with a comment saying where it runs: `# local windows`
 (PowerShell on your own computer), `# local linux` (a terminal on your own
 computer), or `# oracle linux` (on the VM). Pick the local block for your system.
 
+Text in `<angle brackets>` is a placeholder for your own value. Commands read your
+values from shell variables that you set once in
+[Set your values](#set-your-values), so you replace placeholders only there; every
+other command block can be copied and run as is.
+
 ## 1. Create accounts and install local tools
 
 1. Create a free [GitHub account](https://github.com/signup) and verify your email.
@@ -25,10 +30,10 @@ computer), or `# oracle linux` (on the VM). Pick the local block for your system
    Oracle normally asks for a mobile number and a card.
    - Choose **Singapore (`ap-singapore-1`)** as the **home region**. It cannot be
      changed later, and Always Free compute exists only in the home region.
-3. Sign in to [DuckDNS](https://www.duckdns.org/) and create a subdomain, for
-   example `yourname.duckdns.org`. **Choose carefully:** browsers hold Table
-   Ownership cookies for this hostname, so changing it later loses every saved
-   Table Session.
+3. Sign in to [DuckDNS](https://www.duckdns.org/) and create a subdomain. Your
+   hostname is then `<subdomain>.duckdns.org`. **Choose carefully:** browsers hold
+   Table Ownership cookies for this hostname, so changing it later loses every
+   saved Table Session.
 4. Install [Git](https://git-scm.com/downloads) and
    [Node.js 24](https://nodejs.org/en/download). Reopen your terminal afterward.
 5. Install the repository's pinned package manager:
@@ -51,15 +56,55 @@ Confirm `git --version`, `node --version` (24 or newer), and `pnpm --version`
 Linux they come from the `openssh-client` package, which most distributions
 install by default.
 
+### Set your values
+
+The guide's commands use two values:
+
+| Variable | Value | Example |
+| --- | --- | --- |
+| `GITHUB_ACCOUNT` | Your GitHub account name from step 1, which will own your copy of the repository. | `octocat` |
+| `APP_HOST` | Your DuckDNS hostname from step 3. | `example.duckdns.org` |
+
+Replace the placeholders below, keeping the quotes, and keep the edited blocks
+somewhere handy. Run the block for your computer now. Each block's last line
+prints both values so you can check them.
+
+```powershell
+# local windows
+$GITHUB_ACCOUNT = '<github-account>'
+$APP_HOST = '<subdomain>.duckdns.org'
+"$GITHUB_ACCOUNT $APP_HOST"
+```
+
+```bash
+# local linux
+GITHUB_ACCOUNT='<github-account>'
+APP_HOST='<subdomain>.duckdns.org'
+echo "$GITHUB_ACCOUNT $APP_HOST"
+```
+
+Run this block on the VM once you log in to it in section 5:
+
+```bash
+# oracle linux
+GITHUB_ACCOUNT='<github-account>'
+APP_HOST='<subdomain>.duckdns.org'
+echo "$GITHUB_ACCOUNT $APP_HOST"
+```
+
+The variables last only until the terminal or SSH session closes. Run the block
+again in every new terminal and every time you log in to the VM, before running
+the guide's other commands.
+
 ## 2. Get the repository and enable CI
 
 1. Open [sheeyang/poker-app](https://github.com/sheeyang/poker-app) while signed in.
    To set up your own copy, use **Fork**. If you own the original, use it directly.
-2. Clone it and check it locally, replacing the example account:
+2. Clone it and check it locally:
 
 ```powershell
 # local windows
-git clone https://github.com/YOUR-ACCOUNT/poker-app.git
+git clone "https://github.com/$GITHUB_ACCOUNT/poker-app.git"
 cd poker-app
 pnpm install --frozen-lockfile
 pnpm check
@@ -67,7 +112,7 @@ pnpm check
 
 ```bash
 # local linux
-git clone https://github.com/YOUR-ACCOUNT/poker-app.git
+git clone "https://github.com/$GITHUB_ACCOUNT/poker-app.git"
 cd poker-app
 pnpm install --frozen-lockfile
 pnpm check
@@ -246,24 +291,43 @@ Sources: [Always Free resources](https://docs.oracle.com/en-us/iaas/Content/Free
 
 ## 5. Prepare the VM
 
-Log in as the image's `ubuntu` user with the administrator key from step 3,
-replacing the hostname:
+### Create the deploy key and log in
+
+On **your own computer**, create a key for GitHub Actions outside the checkout.
+Press Enter at both passphrase prompts:
 
 ```powershell
 # local windows
-ssh -i $HOME\.ssh\oracle-admin.key ubuntu@yourname.duckdns.org
+ssh-keygen -t ed25519 -C poker-release -f $HOME\.ssh\poker-release
+```
+
+```bash
+# local linux
+ssh-keygen -t ed25519 -C poker-release -f ~/.ssh/poker-release
+```
+
+Copy the key's public half to the VM, then log in as the image's `ubuntu` user
+with the administrator key from section 4. The first time, answer `yes` to trust
+the VM's host key:
+
+```powershell
+# local windows
+scp -i $HOME\.ssh\oracle-admin.key $HOME\.ssh\poker-release.pub "ubuntu@${APP_HOST}:"
+ssh -i $HOME\.ssh\oracle-admin.key "ubuntu@$APP_HOST"
 ```
 
 ```bash
 # local linux
 chmod 600 ~/.ssh/oracle-admin.key
-ssh -i ~/.ssh/oracle-admin.key ubuntu@yourname.duckdns.org
+scp -i ~/.ssh/oracle-admin.key ~/.ssh/poker-release.pub "ubuntu@${APP_HOST}:"
+ssh -i ~/.ssh/oracle-admin.key "ubuntu@$APP_HOST"
 ```
 
 On Linux, `ssh` refuses a private key that other users can read, hence the
 `chmod`.
 
-Run the remaining commands in this section **on the VM**.
+Run the remaining commands in this section **on the VM**. First run the
+`# oracle linux` block from [Set your values](#set-your-values).
 
 ### Open the host firewall
 
@@ -306,8 +370,8 @@ sudo systemctl restart docker
 
 ### Create the deploy user and production settings
 
-Replace the hostname and image repository below. The repository is
-`ghcr.io/` followed by your GitHub account and repository name **in lowercase**.
+This writes your values into the production settings. The image repository must
+be in lowercase, so `${GITHUB_ACCOUNT,,}` lowercases the account name.
 
 ```bash
 # oracle linux
@@ -315,55 +379,41 @@ sudo adduser --disabled-password --gecos '' deploy
 sudo usermod -aG docker deploy
 sudo install -d -o deploy -g deploy -m 700 /opt/poker
 sudo -u deploy sh -c 'umask 077; cat > /opt/poker/.env' <<EOF
-APP_HOST=yourname.duckdns.org
-APP_IMAGE_REPOSITORY=ghcr.io/your-account/poker-app
+APP_HOST=$APP_HOST
+APP_IMAGE_REPOSITORY=ghcr.io/${GITHUB_ACCOUNT,,}/poker-app
 POSTGRES_PASSWORD=$(openssl rand -hex 32)
 EOF
 sudo -u deploy curl -fsSL -o /opt/poker/deploy.sh \
-  https://raw.githubusercontent.com/YOUR-ACCOUNT/poker-app/HEAD/deploy/deploy.sh
+  "https://raw.githubusercontent.com/$GITHUB_ACCOUNT/poker-app/HEAD/deploy/deploy.sh"
 sudo chmod 700 /opt/poker/deploy.sh
 ```
 
 `.env` holds the only copy of the database password; keep it on the VM. Each
 release adds an `APP_REVISION` line to it. `deploy.sh` is installed once; if a
-later commit changes `deploy/deploy.sh`, repeat the `curl` command.
+later commit changes `deploy/deploy.sh`, set your values on the VM and repeat the
+`curl` command.
 
 ### Install the deploy key
 
-On **your own computer**, create a key for GitHub Actions outside the checkout.
-Press Enter at both passphrase prompts:
-
-```powershell
-# local windows
-ssh-keygen -t ed25519 -C poker-release -f $HOME\.ssh\poker-release
-Get-Content $HOME\.ssh\poker-release.pub
-```
-
-```bash
-# local linux
-ssh-keygen -t ed25519 -C poker-release -f ~/.ssh/poker-release
-cat ~/.ssh/poker-release.pub
-```
-
-Back **on the VM**, authorize it to run only `deploy.sh`. Paste the printed
-`ssh-ed25519 ...` line after `restrict `, keeping the single quotes:
+Authorize the deploy key you copied to the VM to run only `deploy.sh`:
 
 ```bash
 # oracle linux
 sudo install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
-echo 'command="/opt/poker/deploy.sh",restrict PASTE-THE-PUBLIC-KEY-LINE-HERE' \
+printf 'command="/opt/poker/deploy.sh",restrict %s\n' "$(tr -d '\r' < ~/poker-release.pub)" \
   | sudo -u deploy tee /home/deploy/.ssh/authorized_keys > /dev/null
 sudo chmod 600 /home/deploy/.ssh/authorized_keys
+rm ~/poker-release.pub
 ```
 
 The key can only start an already-published image of this repository. It cannot
 open a shell, run other commands, or choose another image.
 
-Print the VM's host key line for GitHub, replacing the hostname:
+Print the VM's host key line for GitHub:
 
 ```bash
 # oracle linux
-echo "yourname.duckdns.org $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
+echo "$APP_HOST $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
 ```
 
 ## 6. Connect GitHub Actions to the VM
@@ -406,9 +456,9 @@ On the **Variables** tab, add:
 
 | Variable | Value |
 | --- | --- |
-| `DEPLOY_HOST` | `yourname.duckdns.org` |
+| `DEPLOY_HOST` | `<subdomain>.duckdns.org`, the same as your `APP_HOST`. |
 | `DEPLOY_KNOWN_HOSTS` | The host key line printed at the end of section 5. |
-| `APP_URL` | `https://yourname.duckdns.org`, without a path. |
+| `APP_URL` | `https://<subdomain>.duckdns.org`, without a path. |
 
 You may delete the local key files afterward. If the private key leaks, replace
 the `authorized_keys` line on the VM with a new key.
@@ -429,14 +479,14 @@ tables, which can take a minute.
 
 ## 8. Verify and monitor production
 
-1. Open `https://yourname.duckdns.org`, start practice, and play a Hand.
+1. Open `https://<subdomain>.duckdns.org`, start practice, and play a Hand.
 2. Reload in the same browser profile. Confirm your Table Session restores.
-3. Open `https://yourname.duckdns.org/readyz`. It should report `ok: true`,
+3. Open `https://<subdomain>.duckdns.org/readyz`. It should report `ok: true`,
    `status: ready`, and the commit SHA of the successful run.
 
 Nobody notices an outage when nobody is playing, so add an external monitor. In a
 free [UptimeRobot](https://uptimerobot.com/) account, create an **HTTP(s)** monitor
-for `https://yourname.duckdns.org/readyz` with email alerts. `/readyz` returns
+for `https://<subdomain>.duckdns.org/readyz` with email alerts. `/readyz` returns
 HTTP 503 whenever the application is not ready. The monitor only watches; the VM
 never sleeps.
 
@@ -456,7 +506,8 @@ same commit is safe.
 
 Changes to `deploy/compose.yaml` ship with the release, and each release also
 installs patch updates to the PostgreSQL 18 and Caddy 2 images. Changes to
-`deploy/deploy.sh` require repeating its `curl` command on the VM (section 5).
+`deploy/deploy.sh` require repeating its `curl` command on the VM (section 5),
+after setting your values there.
 
 ### Reboot manually
 
