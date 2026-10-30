@@ -1,0 +1,58 @@
+# Production stack on the Oracle VM. deploy.sh installs this file from each released image;
+# /opt/poker/.env supplies APP_HOST, APP_IMAGE_REPOSITORY, POSTGRES_PASSWORD, and APP_REVISION.
+name: poker
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: poker
+      POSTGRES_DB: poker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql
+    shm_size: 256mb
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U poker -d poker']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    stop_grace_period: 60s
+
+  app:
+    image: ${APP_IMAGE_REPOSITORY:?Set APP_IMAGE_REPOSITORY in .env}:${APP_REVISION:?Run deploy.sh to select a release}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: '3001'
+      SERVE_WEB: 'true'
+      SINGLE_SERVER_GUARD: 'true'
+      POKER_ADMIN_MODE: 'false'
+      DEPLOYMENT_REVISION: ${APP_REVISION}
+      DATABASE_URL: postgresql://poker:${POSTGRES_PASSWORD}@postgres:5432/poker
+    # Shutdown stops queues and jobs before releasing the authority lock (ADR-0030).
+    stop_grace_period: 30s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    # Obtains and renews the HTTPS certificate for APP_HOST; WebSockets pass through.
+    command: caddy reverse-proxy --from ${APP_HOST:?Set APP_HOST in .env} --to app:3001
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  postgres:
+  caddy-data:
+  caddy-config:

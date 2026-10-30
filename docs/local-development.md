@@ -81,7 +81,7 @@ PostgreSQL authority guard; local HTTP checks should use development mode.
 For the package map and dependency checks, see [workspace architecture](architecture.md).
 For identity, endpoints, fingerprints, and recovery mechanics, see
 [the server protocol reference](server-protocol.md).
-For a hosted free preview, see the [Render and Neon deployment guide](deployment_guide.md).
+For production hosting, see the [deployment guide](deployment_guide.md).
 
 ## Recovery browser fixture
 
@@ -121,7 +121,7 @@ An explicit `DATABASE_URL` bypasses embedded development startup. An explicit `T
 
 Set values in the shell or optionally in the root `.env`, using `.env.example` as a guide. Shell values take precedence. If an existing `.env` contains URLs for a previously stopped local database, remove those assignments to use automatic embedded startup. Unset unused URL variables rather than assigning empty strings.
 
-The [deployment guide](deployment_guide.md) uses Neon for hosted previews. Keep its required TLS parameters in the supplied connection string. Validate the application's transaction-recovery behavior against a separate real Neon test project before release; hosting configuration does not establish a new schema migration policy. See [ADR-0027](adr/0027-use-embedded-postgresql-for-local-development-and-tests.md).
+Production runs PostgreSQL 18 beside the server on one VM, as described in the [deployment guide](deployment_guide.md) and [ADR-0031](adr/0031-host-production-on-one-oracle-always-free-vm.md). The recovery tests in `pnpm check` use embedded PostgreSQL 18, the same major version; hosting configuration does not establish a new schema migration policy. See [ADR-0027](adr/0027-use-embedded-postgresql-for-local-development-and-tests.md).
 
 ## Troubleshooting
 

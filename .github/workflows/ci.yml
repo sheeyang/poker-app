@@ -31,14 +31,16 @@ jobs:
       - run: pnpm check
 
   release:
-    name: Release preview
+    name: Release
     needs: check
     # During initial setup, checks still run before hosting is configured.
     if: >-
       github.event_name == 'push' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
-      vars.RENDER_SERVICE_ID != '' && vars.APP_URL != ''
+      vars.DEPLOY_HOST != '' && vars.APP_URL != ''
+    permissions:
+      contents: read
+      packages: write
     uses: ./.github/workflows/release.yml
     secrets:
-      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-      NEON_TEST_DATABASE_URL: ${{ secrets.NEON_TEST_DATABASE_URL }}
+      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
