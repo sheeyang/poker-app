@@ -14,6 +14,10 @@ reboots interrupts play for a few seconds. The reasons are recorded in
 
 Provider details checked on **30 October 2026**.
 
+Each command block starts with a comment saying where it runs: `# local windows`
+(PowerShell on your own computer), `# local linux` (a terminal on your own
+computer), or `# oracle linux` (on the VM). Pick the local block for your system.
+
 ## 1. Create accounts and install local tools
 
 1. Create a free [GitHub account](https://github.com/signup) and verify your email.
@@ -30,11 +34,22 @@ Provider details checked on **30 October 2026**.
 5. Install the repository's pinned package manager:
 
 ```powershell
+# local windows
 npm install --global pnpm@11.25.0
 ```
 
+```bash
+# local linux
+npm install --global pnpm@11.25.0
+```
+
+On Linux, if `npm` reports a permissions error, your Node.js installation needs
+`sudo` for global packages: run the same command with `sudo` in front.
+
 Confirm `git --version`, `node --version` (24 or newer), and `pnpm --version`
-(**11.25.0**). Windows 11 already includes the `ssh` and `ssh-keygen` commands.
+(**11.25.0**). Windows 11 already includes the `ssh` and `ssh-keygen` commands. On
+Linux they come from the `openssh-client` package, which most distributions
+install by default.
 
 ## 2. Get the repository and enable CI
 
@@ -43,6 +58,15 @@ Confirm `git --version`, `node --version` (24 or newer), and `pnpm --version`
 2. Clone it and check it locally, replacing the example account:
 
 ```powershell
+# local windows
+git clone https://github.com/YOUR-ACCOUNT/poker-app.git
+cd poker-app
+pnpm install --frozen-lockfile
+pnpm check
+```
+
+```bash
+# local linux
 git clone https://github.com/YOUR-ACCOUNT/poker-app.git
 cd poker-app
 pnpm install --frozen-lockfile
@@ -193,7 +217,7 @@ Under **Advanced options**:
 | **IPv6 address assignment → Assign IPv6 address from subnet prefix** | Leave off. |
 | **Advanced options → DNS record** | **Assign a private DNS record**. The hostname is optional, and the fully qualified domain name fills in after the subnet is set. The public hostname comes from DuckDNS. |
 | **Advanced options → Launch options** | **Paravirtualized networking**. Hardware-assisted (SR-IOV) networking does not support live migration. |
-| **Add SSH keys** | **Generate a key pair for me**, then **Download private key**. It is shown only once. Save it as `$HOME\.ssh\oracle-admin.key`. This is your administrator login, separate from the deploy key in section 5. You can instead paste or upload an existing public key. Never choose **No SSH keys**. |
+| **Add SSH keys** | **Generate a key pair for me**, then **Download private key**. It is shown only once. Save it as `oracle-admin.key` in the `.ssh` folder of your home directory, creating the folder if needed: `$HOME\.ssh\oracle-admin.key` on Windows, `~/.ssh/oracle-admin.key` on Linux. This is your administrator login, separate from the deploy key in section 5. You can instead paste or upload an existing public key. Never choose **No SSH keys**. |
 
 ### Step 4: Storage
 
@@ -226,8 +250,18 @@ Log in as the image's `ubuntu` user with the administrator key from step 3,
 replacing the hostname:
 
 ```powershell
+# local windows
 ssh -i $HOME\.ssh\oracle-admin.key ubuntu@yourname.duckdns.org
 ```
+
+```bash
+# local linux
+chmod 600 ~/.ssh/oracle-admin.key
+ssh -i ~/.ssh/oracle-admin.key ubuntu@yourname.duckdns.org
+```
+
+On Linux, `ssh` refuses a private key that other users can read, hence the
+`chmod`.
 
 Run the remaining commands in this section **on the VM**.
 
@@ -237,6 +271,7 @@ Oracle's Ubuntu image also blocks ports in its own iptables rules. Save the new
 rules **before** installing Docker so Docker's rules are not saved with them:
 
 ```bash
+# oracle linux
 sudo iptables -I INPUT -p tcp -m multiport --dports 80,443 -m conntrack --ctstate NEW -j ACCEPT
 sudo netfilter-persistent save
 ```
@@ -244,6 +279,7 @@ sudo netfilter-persistent save
 ### Install updates and Docker
 
 ```bash
+# oracle linux
 sudo apt update && sudo apt full-upgrade -y
 sudo apt install -y docker.io docker-compose-v2 unattended-upgrades
 sudo dpkg-reconfigure -plow unattended-upgrades
@@ -257,6 +293,7 @@ Keep containers running while Docker itself is updated, and cap log size so
 months of unattended operation cannot fill the disk:
 
 ```bash
+# oracle linux
 sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
 {
   "live-restore": true,
@@ -273,6 +310,7 @@ Replace the hostname and image repository below. The repository is
 `ghcr.io/` followed by your GitHub account and repository name **in lowercase**.
 
 ```bash
+# oracle linux
 sudo adduser --disabled-password --gecos '' deploy
 sudo usermod -aG docker deploy
 sudo install -d -o deploy -g deploy -m 700 /opt/poker
@@ -296,14 +334,22 @@ On **your own computer**, create a key for GitHub Actions outside the checkout.
 Press Enter at both passphrase prompts:
 
 ```powershell
+# local windows
 ssh-keygen -t ed25519 -C poker-release -f $HOME\.ssh\poker-release
 Get-Content $HOME\.ssh\poker-release.pub
+```
+
+```bash
+# local linux
+ssh-keygen -t ed25519 -C poker-release -f ~/.ssh/poker-release
+cat ~/.ssh/poker-release.pub
 ```
 
 Back **on the VM**, authorize it to run only `deploy.sh`. Paste the printed
 `ssh-ed25519 ...` line after `restrict `, keeping the single quotes:
 
 ```bash
+# oracle linux
 sudo install -d -o deploy -g deploy -m 700 /home/deploy/.ssh
 echo 'command="/opt/poker/deploy.sh",restrict PASTE-THE-PUBLIC-KEY-LINE-HERE' \
   | sudo -u deploy tee /home/deploy/.ssh/authorized_keys > /dev/null
@@ -316,6 +362,7 @@ open a shell, run other commands, or choose another image.
 Print the VM's host key line for GitHub, replacing the hostname:
 
 ```bash
+# oracle linux
 echo "yourname.duckdns.org $(cut -d' ' -f1,2 /etc/ssh/ssh_host_ed25519_key.pub)"
 ```
 
@@ -327,7 +374,33 @@ On the **Secrets** tab, add:
 
 | Secret | Value |
 | --- | --- |
-| `DEPLOY_SSH_KEY` | The full contents of the private key file `$HOME\.ssh\poker-release`, including its `BEGIN` and `END` lines. |
+| `DEPLOY_SSH_KEY` | The full contents of the private key file `poker-release` from section 5 (not `poker-release.pub`), including its `BEGIN` and `END` lines. |
+
+To copy the key without printing it, use the block for your system. Run its
+first line, paste into the secret's value box, and only then run its second line,
+which overwrites the clipboard:
+
+```powershell
+# local windows
+Get-Content $HOME\.ssh\poker-release -Raw | Set-Clipboard
+Set-Clipboard -Value ' '
+```
+
+```bash
+# local linux, Wayland desktop (needs the wl-clipboard package)
+wl-copy < ~/.ssh/poker-release
+wl-copy --clear
+```
+
+```bash
+# local linux, X11 desktop (needs the xclip package)
+xclip -selection clipboard < ~/.ssh/poker-release
+printf ' ' | xclip -selection clipboard
+```
+
+On Linux, `echo $XDG_SESSION_TYPE` prints `wayland` or `x11`. If clipboard
+history is on (**Win+V** on Windows, or a clipboard manager on Linux), also delete
+the entry from it.
 
 On the **Variables** tab, add:
 
@@ -392,6 +465,7 @@ occasionally; Ubuntu prints **System restart required** when a kernel update is
 waiting. Reboot when nobody is playing:
 
 ```bash
+# oracle linux
 sudo reboot
 ```
 
@@ -403,6 +477,7 @@ Run these as the `ubuntu` user on the VM. Replace `app` with `caddy` or `postgre
 for the other services:
 
 ```bash
+# oracle linux
 sudo -u deploy docker compose --project-directory /opt/poker ps
 sudo -u deploy docker compose --project-directory /opt/poker logs --tail 200 app
 ```
