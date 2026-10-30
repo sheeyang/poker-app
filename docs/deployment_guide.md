@@ -71,9 +71,27 @@ so the budget alert is mandatory.
 1. In the Oracle Console, open **Billing & Cost Management → Upgrade and Manage
    Payment** and upgrade to **Pay As You Go**. Oracle may place a temporary hold
    on the card.
-2. Open **Billing & Cost Management → Budgets → Create Budget**. Create a monthly
-   budget of **1 USD** for the root compartment, with an alert to your email when
-   actual spending reaches 100%.
+2. Open **Billing & Cost Management → Cost Management → Budgets → Create Budget**
+   and fill in the form:
+
+   | Setting | Choose |
+   | --- | --- |
+   | **Name** | `always-free-guard` (any name works). |
+   | **Description** | `Alerts on any charge`. Fill it in, because the form may mark it required. |
+   | **Budget Scope** | **Compartment**. |
+   | **Target Compartment** | The root compartment (your tenancy name, marked *(root)*). |
+   | **Schedule** | **Monthly**. |
+   | **Budget Amount** | `1`. The amount is in your account's billing currency. |
+   | **Day of the month to begin budget processing** | `1`, so the period runs from the 1st to the end of the month. |
+   | **Budget Alert Rule → Threshold Metric** | **Actual Spend**. |
+   | **Budget Alert Rule → Threshold Type** | **Percentage of Budget**. |
+   | **Budget Alert Rule → Threshold %** | `100`. |
+   | **Budget Alert Rule → Email Recipients** | Your email address. |
+   | **Budget Alert Rule → Email Message** | Optional, such as `Oracle is charging for something. Find it and delete it.` |
+   | **Tags** | None. |
+
+   Choose **Create**. The budget list should then show the budget against the root
+   compartment.
 
 Create only resources marked **Always Free-eligible** in this guide. An alert means
 something billable exists: find it and delete it.
