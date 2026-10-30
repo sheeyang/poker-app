@@ -80,17 +80,71 @@ something billable exists: find it and delete it.
 
 ## 4. Create the VM
 
-In the Oracle Console, open **Compute → Instances → Create instance**:
+In the Oracle Console, open **Compute → Instances → Create instance**. The wizard
+has five steps. Settings not listed here can keep their defaults. Ignore the
+banner suggesting additional regions: Always Free resources exist only in the
+home region.
 
-1. **Image:** Canonical Ubuntu **24.04**. Oracle selects the aarch64 build for
-   Ampere shapes.
-2. **Shape:** Ampere **VM.Standard.A1.Flex** with **2 OCPUs and 12 GB** memory.
-   This is the documented Always Free allowance. Do not size it larger.
-3. **Networking:** create a new virtual cloud network with a public subnet, and
-   assign a public IPv4 address.
-4. **SSH keys:** upload your own public key or download the generated private key.
-   This is your administrator login, separate from the deploy key in section 5.
-5. **Boot volume:** set a custom size of **100 GB**. Always Free includes 200 GB.
+### Step 1: Basic information
+
+| Setting | Choose |
+| --- | --- |
+| **Name** | `poker-production` (any name works). |
+| **Create in compartment** | The root compartment (your tenancy name), which the budget covers. |
+| **Placement → Availability domain** | **AD 1**, the only one in Singapore. |
+| **Placement → Advanced options → Capacity type** | **On-demand capacity**. Never choose **Preemptible**: Oracle can reclaim it at any time. Capacity reservation, dedicated host, and compute cluster are billed. |
+| **Placement → Advanced options → Cluster placement group** | None. |
+| **Placement → Advanced options → Fault domain** | Leave unset so Oracle chooses. |
+| **Image** | **Canonical Ubuntu 24.04**, the standard image rather than *Minimal*. If another image is shown, use **Change image**. Oracle selects the aarch64 build for Ampere shapes. |
+| **Shape** | **Change shape → Ampere → VM.Standard.A1.Flex**, marked **Always Free-eligible**. Set **2 OCPUs** and **12 GB** memory; the default of 1 OCPU and 6 GB is too small. This is the documented Always Free allowance, so do not size it larger. |
+
+Under **Advanced options**:
+
+| Setting | Choose |
+| --- | --- |
+| **Management → Instance metadata service → Require an authorization header** | Leave unchanged. The server never calls the metadata service. |
+| **Management → Initialization script** | None. Section 5 prepares the VM by hand. |
+| **Tagging** | None. |
+| **Availability configuration → Live migration** | **Use live migration if possible.** Oracle then moves the running VM during host maintenance without interrupting play, and falls back to a reboot only if that fails. |
+| **Availability configuration → Restore instance lifecycle state after infrastructure maintenance** | **Enabled.** Otherwise a VM affected by maintenance comes back **stopped** and stays down until you notice. |
+| **Oracle Cloud Agent** plugins | Leave the defaults; the monitoring plugin supplies the console's CPU and memory charts. Do not enable a plugin that installs OS updates, because section 5 configures updates without reboots. |
+
+### Step 2: Security
+
+| Setting | Choose |
+| --- | --- |
+| **Shielded instance** / confidential computing | Leave off. |
+| **Advanced options → Security attributes** | None. |
+
+### Step 3: Networking
+
+| Setting | Choose |
+| --- | --- |
+| **VNIC name** | Leave empty or use `poker-production`. |
+| **Primary network** | **Create new virtual cloud network**, unless you already created one for this VM. |
+| **Subnet** | **Create new public subnet**. A private subnet cannot receive a public IP. |
+| **Private IPv4 address assignment** | **Automatically assign private IPv4 address**. |
+| **Public IPv4 address assignment** | **Automatically assign public IPv4 address**: enabled. Without it the VM is unreachable from the internet. |
+| **IPv6 address assignment** | Off. |
+| **Advanced options → DNS record** | **Assign a private DNS record**; the hostname is optional. The public hostname comes from DuckDNS. |
+| **Advanced options → Launch options** | **Paravirtualized networking**. Hardware-assisted (SR-IOV) networking does not support live migration. |
+| **Add SSH keys** | **Generate a key pair for me**, then **Download private key**. It is shown only once. Save it as `$HOME\.ssh\oracle-admin.key`. This is your administrator login, separate from the deploy key in section 5. You can instead paste or upload an existing public key. Never choose **No SSH keys**. |
+
+### Step 4: Storage
+
+| Setting | Choose |
+| --- | --- |
+| **Boot volume → Specify a custom boot volume size and performance setting** | Enabled. Set the size to **100 GB**, within the 200 GB Always Free block storage. |
+| **Boot volume performance** | Keep **Balanced (10 VPUs/GB)**. Higher performance levels are billed. |
+| **Use in-transit encryption** | Leave the default. |
+| **Encrypt this volume with a key that you manage** | Off. Oracle-managed encryption is free and needs no Vault. |
+| **Block volumes** | Attach none. The database lives on the boot volume. |
+
+### Step 5: Review
+
+Confirm the shape shows **Always Free-eligible**, **2 OCPUs and 12 GB**, a
+public IPv4 address, and a **100 GB** boot volume. Then choose **Create**. Do not
+save it as a stack.
 
 If creation fails with **Out of host capacity**, retry later. Singapore has a
 single availability domain, so there is no other domain to try.
@@ -107,10 +161,11 @@ Sources: [Always Free resources](https://docs.oracle.com/en-us/iaas/Content/Free
 
 ## 5. Prepare the VM
 
-Log in as the image's `ubuntu` user, replacing the key path and hostname:
+Log in as the image's `ubuntu` user with the administrator key from step 3,
+replacing the hostname:
 
 ```powershell
-ssh -i PATH-TO-YOUR-ADMIN-KEY ubuntu@yourname.duckdns.org
+ssh -i $HOME\.ssh\oracle-admin.key ubuntu@yourname.duckdns.org
 ```
 
 Run the remaining commands in this section **on the VM**.
