@@ -86,15 +86,30 @@ The instance wizard can create a network itself, but then its address settings
 stay disabled, and Oracle warns that it offers only some options. Create the
 network on its own first:
 
-1. Open **Networking → Virtual cloud networks** and choose **Start VCN Wizard**.
-   In some consoles it is under **Actions**.
-2. Choose **Create VCN with Internet Connectivity**, then **Start VCN Wizard**.
-3. Set **VCN name** to `poker-vcn` and **Compartment** to the root compartment.
+1. Open **Networking → Virtual cloud networks**. Keep the **Compartment** filter
+   on your tenancy's **(root)** compartment.
+2. Open the **Actions** menu beside **Create VCN** and choose **Start VCN Wizard**.
+   If the menu has no wizard, follow the manual steps below instead.
+3. Choose **Create VCN with Internet Connectivity**, then **Start VCN Wizard**.
+4. Set **VCN name** to `poker-vcn` and **Compartment** to the root compartment.
    Keep the suggested address ranges (for example `10.0.0.0/16` for the VCN,
    `10.0.0.0/24` public and `10.0.1.0/24` private).
-4. Choose **Next**, then **Create**. The wizard creates the network with a public
+5. Choose **Next**, then **Create**. The wizard creates the network with a public
    subnet, a private subnet, gateways, and route tables. Always Free includes two
    networks, and Oracle does not charge for these networking parts.
+
+**Manual alternative.** Without the wizard, create only what the VM needs:
+
+1. Choose **Create VCN**. Name it `poker-vcn` in the root compartment, with IPv4
+   CIDR block `10.0.0.0/16`. Leave IPv6 off, then create it.
+2. Open `poker-vcn` → **Internet Gateways** (under **Gateways** in some consoles)
+   → **Create Internet Gateway**. Name it `poker-igw` and create it.
+3. Open **Route Tables → Default Route Table for poker-vcn → Add Route Rules**.
+   Set **Target Type** to **Internet Gateway**, **Destination CIDR Block** to
+   `0.0.0.0/0`, and **Target** to `poker-igw`.
+4. Open **Subnets → Create Subnet**. Name it `poker-public`, with IPv4 CIDR block
+   `10.0.0.0/24` and **Public Subnet** access. Use the default route table and
+   default security list, then create it.
 
 Then open ports 80 and 443 for HTTPS:
 
@@ -154,7 +169,7 @@ Under **Advanced options**:
 | **Virtual cloud network** | `poker-vcn`, created above. |
 | **Subnet** | **Select existing subnet**. |
 | **Subnet compartment** | The root compartment. |
-| **Subnet** (list) | The **public** subnet, named like `public subnet-poker-vcn`. The private subnet cannot receive a public IP. |
+| **Subnet** (list) | The **public** subnet: named like `public subnet-poker-vcn` by the wizard, or `poker-public` if you created it manually. A private subnet cannot receive a public IP. |
 | **Private IPv4 address assignment** | **Automatically assign private IPv4 address**. |
 | **Public IPv4 address assignment** | Turn on **Automatically assign public IPv4 address**. It is **off by default**. Without it the VM is unreachable from the internet. |
 | **IPv6 address assignment → Assign IPv6 address from subnet prefix** | Leave off. |
