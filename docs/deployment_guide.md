@@ -569,19 +569,7 @@ There is **no automatic rollback**. A previous image may not read records writte
 by a newer version under ADR-0014. Fix forward, or deliberately run Release for a
 compatible commit.
 
-## 11. Retire the Render and Neon setup
-
-If you deployed with the earlier Render and Neon guide, do this only after
-production passes section 8:
-
-1. In Render, delete the `poker-trainer-preview` web service and its Blueprint.
-2. In Neon, delete the `poker-trainer-preview` and `poker-trainer-tests` projects.
-3. In GitHub, delete the `RENDER_API_KEY` and `NEON_TEST_DATABASE_URL` secrets and
-   the `RENDER_SERVICE_ID` variable. Update `APP_URL` if it still points at Render.
-
-Saved Table Sessions on Render are not migrated.
-
-## 12. Stay within free allowances
+## 11. Stay within free allowances
 
 | Provider | Free-plan considerations |
 | --- | --- |
