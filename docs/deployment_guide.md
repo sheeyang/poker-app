@@ -96,7 +96,7 @@ home region.
 | **Placement → Advanced options → Cluster placement group** | None. |
 | **Placement → Advanced options → Fault domain** | Leave unset so Oracle chooses. |
 | **Image** | **Canonical Ubuntu 24.04**, the standard image rather than *Minimal*. If another image is shown, use **Change image**. Oracle selects the aarch64 build for Ampere shapes. |
-| **Shape** | **Change shape → Ampere → VM.Standard.A1.Flex**, marked **Always Free-eligible**. Set **2 OCPUs** and **12 GB** memory; the default of 1 OCPU and 6 GB is too small. This is the documented Always Free allowance, so do not size it larger. |
+| **Shape** | **Change shape → Ampere → VM.Standard.A1.Flex**, marked **Always Free-eligible**. The list shows only the defaults (1 OCPU, 6 GB). Select the row, then click the **▸** arrow beside the shape name to expand it. Set **Number of OCPUs** to **2** and **Amount of memory (GB)** to **12**, then choose **Select shape**. Check that the summary now reads 2 OCPUs and 12 GB. This is the documented Always Free allowance, so do not size it larger. |
 
 Under **Advanced options**:
 
