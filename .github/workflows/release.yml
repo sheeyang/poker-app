@@ -1,25 +1,25 @@
-name: Release preview
+name: Release
 
 on:
   workflow_dispatch:
   workflow_call:
     secrets:
-      RENDER_API_KEY:
-        required: true
-      NEON_TEST_DATABASE_URL:
+      DEPLOY_SSH_KEY:
         required: true
 
 permissions:
   contents: read
+  packages: write
 
-# Do not cancel a release while Render is replacing its authoritative process.
+# Do not cancel a release while the VM is replacing its authoritative process.
 concurrency:
-  group: render-preview-release
+  group: production-release
   cancel-in-progress: false
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Native Arm build for the Oracle Ampere VM.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     steps:
       - name: Require the default branch
@@ -30,6 +30,19 @@ jobs:
             echo 'Run releases from the repository default branch.'
             exit 1
           fi
+      - name: Require deployment settings
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          for name in DEPLOY_SSH_KEY DEPLOY_HOST DEPLOY_KNOWN_HOSTS APP_URL; do
+            if [ -z "$(printenv "$name")" ]; then
+              echo "Set $name in the repository's Actions secrets and variables."
+              exit 1
+            fi
+          done
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -46,20 +59,36 @@ jobs:
         # Automatic releases depend on CI's check job for this same commit.
         if: github.event_name == 'workflow_dispatch'
         run: pnpm check
-      - name: Verify recovery on the separate Neon test project
+      - name: Publish the image
         env:
-          TEST_DATABASE_URL: ${{ secrets.NEON_TEST_DATABASE_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$TEST_DATABASE_URL" ]; then
-            echo 'Set NEON_TEST_DATABASE_URL to a separate Neon test project.'
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:$GITHUB_SHA"
+          echo "$GITHUB_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker build --tag "$image" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" .
+          docker push "$image"
+          docker logout ghcr.io
+          # The VM pulls anonymously, so the package must be public.
+          if ! docker manifest inspect "$image" > /dev/null 2>&1; then
+            echo "Make the ghcr.io package public (Package settings → Change visibility), then re-run this job."
             exit 1
           fi
-          # Poll deadlines are independent of testTimeout; allow for remote Neon latency.
-          pnpm test apps/server/test/recovery.test.ts --testTimeout=120000 --hookTimeout=120000 --expect.poll.timeout=10000
-      - name: Deploy and verify the selected commit
+      - name: Deploy the selected commit
         env:
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-          RENDER_SERVICE_ID: ${{ vars.RENDER_SERVICE_ID }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The key's forced command only starts a published image, so a retry is safe.
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "deploy@$DEPLOY_HOST" "$GITHUB_SHA"
+      - name: Verify the deployed commit
+        env:
           APP_URL: ${{ vars.APP_URL }}
           DEPLOY_COMMIT: ${{ github.sha }}
-        run: node --import tsx scripts/deploy-render.ts
+        run: node --import tsx scripts/verify-release.ts

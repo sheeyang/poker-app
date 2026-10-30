@@ -3,7 +3,7 @@ import { request } from 'node:https';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-interface DeploymentOptions { readonly apiKey: string; readonly serviceId: string; readonly appUrl: string; readonly commit: string; readonly timeoutMs?: number }
+interface VerificationOptions { readonly appUrl: string; readonly commit: string; readonly timeoutMs?: number }
 interface Dependencies {
   readonly fetch?: typeof fetch;
   readonly wait?: (milliseconds: number) => Promise<void>;
@@ -47,61 +47,18 @@ function verifyWebSocket(origin: string, cookie: string): Promise<void> {
   });
 }
 
-export async function deployRender(options: DeploymentOptions, dependencies: Dependencies = {}) {
-  if (!options.apiKey) throw new Error('Set RENDER_API_KEY.');
-  if (!/^srv-[a-z0-9]+$/.test(options.serviceId)) throw new Error('Set RENDER_SERVICE_ID to the Render web service ID.');
+/** A started container is not a release: wait for restored authority at the requested revision. */
+export async function verifyRelease(options: VerificationOptions, dependencies: Dependencies = {}) {
   if (!/^[0-9a-f]{40}$/.test(options.commit)) throw new Error('DEPLOY_COMMIT must be a full tested Git commit SHA.');
-  const app = new URL(options.appUrl);
-  if (app.protocol !== 'https:' || app.username || app.password || app.pathname !== '/' || app.search || app.hash) throw new Error('APP_URL must be the HTTPS application origin without a path.');
+  const app = URL.parse(options.appUrl);
+  if (!app || app.protocol !== 'https:' || app.username || app.password || app.pathname !== '/' || app.search || app.hash) throw new Error('APP_URL must be the HTTPS application origin without a path.');
   const origin = app.origin;
   const get = dependencies.fetch ?? fetch;
   const wait = dependencies.wait ?? (milliseconds => delay(milliseconds));
   const now = dependencies.now ?? Date.now;
   const log = dependencies.log ?? console.log;
-  const deadline = now() + (options.timeoutMs ?? 20 * 60 * 1000);
-  const base = 'https://api.render.com/v1/services/' + options.serviceId;
-  const headers = { authorization: 'Bearer ' + options.apiKey, 'content-type': 'application/json' };
-  async function read(url: string) {
-    const response = await get(url, { headers, signal: AbortSignal.timeout(20000) });
-    if (!response.ok) throw new Error('Render API returned HTTP ' + response.status + '.');
-    return await response.json();
-  }
-  const service = await read(base);
-  if (service.type !== 'web_service' || !(service.autoDeployTrigger === 'off' || service.autoDeploy === 'no')) {
-    throw new Error('Use a Render Web Service with automatic deploys disabled.');
-  }
-  let deployment: { id?: string; status?: string; commit?: { id?: string } };
-  try {
-    const response = await get(base + '/deploys', { method: 'POST', headers,
-      body: JSON.stringify({ commitId: options.commit }), signal: AbortSignal.timeout(20000) });
-    if (!response.ok) throw new Error('Render API returned HTTP ' + response.status + '.');
-    deployment = await response.json();
-    if (!deployment.id || !/^dep-[a-z0-9]+$/.test(deployment.id)) throw new Error('Render did not return a deploy ID.');
-  } catch {
-    // Never retry an ambiguous mutation: another deployment may already exist.
-    throw new Error('Render did not confirm deploy creation. Inspect Render Deploys before starting another release.');
-  }
-  const deployId = deployment.id!;
-  log('Created Render deployment ' + deployId + ' for ' + options.commit + '.');
-  let lastStatus = '';
-  while (now() < deadline) {
-    try { deployment = await read(base + '/deploys/' + deployId); }
-    catch {
-      // A read is safe to repeat; the earlier creation POST is not.
-      log('Render status temporarily unavailable; checking again.');
-      await wait(5000);
-      continue;
-    }
-    if (deployment.status !== lastStatus) { lastStatus = deployment.status ?? 'unknown'; log('Render: ' + lastStatus); }
-    if (['build_failed', 'pre_deploy_failed', 'update_failed', 'canceled', 'deactivated'].includes(lastStatus)) throw new Error('Render deployment ended with ' + lastStatus + '.');
-    if (lastStatus === 'live') {
-      if (deployment.commit?.id !== options.commit) throw new Error('Render deployed a different commit.');
-      break;
-    }
-    await wait(5000);
-  }
-  if (lastStatus !== 'live') throw new Error('Timed out waiting for the Render deployment.');
-  log('Listener live; waiting for restored application authority.');
+  const deadline = now() + (options.timeoutMs ?? 10 * 60 * 1000);
+  log('Waiting for restored application authority at ' + options.commit + '.');
   while (now() < deadline) {
     let verified = false;
     try {
@@ -112,21 +69,20 @@ export async function deployRender(options: DeploymentOptions, dependencies: Dep
           verified = true;
         }
       }
-    } catch { /* Cold starts and the old process draining are expected during handoff. */ }
+    } catch { /* The old process draining and the new one restoring are expected during handoff. */ }
     if (verified) {
       await (dependencies.smoke ?? verifyHostedApp)(origin);
       log('Trainer, secure identity, WebSocket, and revision verified.');
-      return { deployId, revision: options.commit };
+      return { revision: options.commit };
     }
     await wait(5000);
   }
-  throw new Error('Timed out waiting for the requested application revision. Inspect Render logs; no automatic rollback or database reset was attempted.');
+  throw new Error('Timed out waiting for the requested application revision. Inspect the VM logs; no automatic rollback or database reset was attempted.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  deployRender({ apiKey: process.env.RENDER_API_KEY ?? '', serviceId: process.env.RENDER_SERVICE_ID ?? '',
-    appUrl: process.env.APP_URL ?? '', commit: process.env.DEPLOY_COMMIT ?? '' }).catch(error => {
-    console.error(error instanceof Error ? error.message : 'Deployment failed.');
+  verifyRelease({ appUrl: process.env.APP_URL ?? '', commit: process.env.DEPLOY_COMMIT ?? '' }).catch(error => {
+    console.error(error instanceof Error ? error.message : 'Release verification failed.');
     process.exitCode = 1;
   });
 }

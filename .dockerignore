@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+.git
+.github
+.agents
+.claude
+.scratch
+.worktrees
+.local
+.impeccable
+.env
+.env.*
+docs

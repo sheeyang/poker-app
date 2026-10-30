@@ -40,6 +40,7 @@ package implementations.
 - [ADR-0028](adr/0028-introduce-the-product-trainer-interface.md): Trainer interface and shared Client.
 - [ADR-0029](adr/0029-retire-the-playground.md): retirement of the independent Playground.
 - [ADR-0030](adr/0030-handoff-hosted-authority-after-listener-readiness.md): hosted single-authority handoff and application readiness.
+- [ADR-0031](adr/0031-host-production-on-one-oracle-always-free-vm.md): production hosting on one Oracle Always Free VM.
 
 Seed derivation, random sources, deck order/shuffle, and selector sampling are
 specified in [random v1](random-v1.md).
