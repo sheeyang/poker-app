@@ -222,10 +222,13 @@ test('shutdown releases a waiting score dependency and restart creates no work u
 test('an unavailable evaluation store produces a readable scored error rather than pending work that was never admitted', async () => {
   const f = await fixture();
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const t = await f.decision();
+    // Accepting the action starts automatic scoring, so the store must already be unavailable.
     await administration.query('ALTER TABLE "' + f.schema + '".analysis_evaluations RENAME TO unavailable_evaluations');
     let failure;
-    try { failure = await (await f.request(t)).json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'persistence-unavailable' } }); }
+    try {
+      await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });      failure = await (await f.request(t)).json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'persistence-unavailable' } });
+    }
     finally { await administration.query('ALTER TABLE "' + f.schema + '".unavailable_evaluations RENAME TO analysis_evaluations'); }
     expect(await (await f.result(t, failure.requestId)).json()).toEqual(failure);
     expect(await (await f.request(t)).json()).toEqual(failure);
