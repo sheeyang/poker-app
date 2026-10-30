@@ -121,13 +121,23 @@ Under **Advanced options**:
 | Setting | Choose |
 | --- | --- |
 | **VNIC name** | Leave empty or use `poker-production`. |
-| **Primary network** | **Create new virtual cloud network**, unless you already created one for this VM. |
-| **Subnet** | **Create new public subnet**. A private subnet cannot receive a public IP. |
-| **Private IPv4 address assignment** | **Automatically assign private IPv4 address**. |
-| **Public IPv4 address assignment** | **Automatically assign public IPv4 address**: enabled. Without it the VM is unreachable from the internet. |
-| **IPv6 address assignment** | Off. |
-| **Advanced options → DNS record** | **Assign a private DNS record**; the hostname is optional. The public hostname comes from DuckDNS. |
+| **Primary network** | **Create new virtual cloud network**. If an earlier attempt already created one, choose **Select existing virtual cloud network** instead, and then that network's public subnet. **Specify OCID** is not needed. |
+| **New virtual cloud network name** | `poker-vcn`, or keep a suggested name. |
+| **Create in compartment** (network) | The root compartment, as in step 1. |
+| **Subnet** | **Create new public subnet**, the only choice for a new network. |
+| **New subnet name** | `poker-public`, or keep a suggested name. |
+| **Create in compartment** (subnet) | The root compartment. |
+| **CIDR block** | Keep the suggested value. If it is empty, enter `10.0.0.0/24`. |
+| Warning about additional options on the Networking pages | Ignore it. This VM needs nothing beyond the fields above. |
+| **Private IPv4 address assignment** | **Automatically assign private IPv4 address**. These options stay disabled until the subnet fields are filled in. |
+| **Public IPv4 address assignment** | Turn on **Automatically assign public IPv4 address**. It is **off by default**, and Oracle accepts it only with a public subnet. Without it the VM is unreachable from the internet. |
+| **IPv6 address assignment → Assign IPv6 address from subnet prefix** | Leave off. |
+| **Advanced options → DNS record** | **Assign a private DNS record**. The hostname is optional, and the fully qualified domain name fills in after the subnet is set. The public hostname comes from DuckDNS. |
 | **Advanced options → Launch options** | **Paravirtualized networking**. Hardware-assisted (SR-IOV) networking does not support live migration. |
+| **Advanced options → VCN tags** and **Subnet tags** | None. |
+
+If the step reports errors, a required field is still empty: usually a name or
+the CIDR block.
 | **Add SSH keys** | **Generate a key pair for me**, then **Download private key**. It is shown only once. Save it as `$HOME\.ssh\oracle-admin.key`. This is your administrator login, separate from the deploy key in section 5. You can instead paste or upload an existing public key. Never choose **No SSH keys**. |
 
 ### Step 4: Storage
