@@ -19,9 +19,10 @@ Each command block starts with a comment saying where it runs: `# local windows`
 computer), or `# oracle linux` (on the VM). Pick the local block for your system.
 
 Text in `<angle brackets>` is a placeholder for your own value. Commands read your
-values from shell variables that you set once in
-[Set your values](#set-your-values), so you replace placeholders only there; every
-other command block can be copied and run as is.
+values from shell variables, so you replace placeholders only in the blocks that
+set them: [on your computer](#set-your-values) and, once the VM exists,
+[on the VM](#set-your-values-on-the-vm). Every other command block can be copied
+and run as is.
 
 ## 1. Create accounts and install local tools
 
@@ -65,9 +66,9 @@ The guide's commands use two values:
 | `GITHUB_ACCOUNT` | Your GitHub account name from step 1, which will own your copy of the repository. | `octocat` |
 | `APP_HOST` | Your DuckDNS hostname from step 3. | `example.duckdns.org` |
 
-Replace the placeholders below, keeping the quotes, and keep the edited blocks
-somewhere handy. Run the block for your computer now. Each block's last line
-prints both values so you can check them.
+Replace the placeholders in the block for your computer, keeping the quotes, then
+run it. Keep the edited block somewhere handy. Its last line prints both values so
+you can check them.
 
 ```powershell
 # local windows
@@ -83,18 +84,8 @@ APP_HOST='<subdomain>.duckdns.org'
 echo "$GITHUB_ACCOUNT $APP_HOST"
 ```
 
-Run this block on the VM once you log in to it in section 5:
-
-```bash
-# oracle linux
-GITHUB_ACCOUNT='<github-account>'
-APP_HOST='<subdomain>.duckdns.org'
-echo "$GITHUB_ACCOUNT $APP_HOST"
-```
-
-The variables last only until the terminal or SSH session closes. Run the block
-again in every new terminal and every time you log in to the VM, before running
-the guide's other commands.
+The variables last only until the terminal closes. Run the block again in every
+new terminal before running the guide's other commands.
 
 ## 2. Get the repository and enable CI
 
@@ -326,8 +317,22 @@ ssh -i ~/.ssh/oracle-admin.key "ubuntu@$APP_HOST"
 On Linux, `ssh` refuses a private key that other users can read, hence the
 `chmod`.
 
-Run the remaining commands in this section **on the VM**. First run the
-`# oracle linux` block from [Set your values](#set-your-values).
+Run the remaining commands in this section **on the VM**.
+
+### Set your values on the VM
+
+Now that you are logged in to the VM, set the same two values there, replacing
+the placeholders as you did [on your computer](#set-your-values):
+
+```bash
+# oracle linux
+GITHUB_ACCOUNT='<github-account>'
+APP_HOST='<subdomain>.duckdns.org'
+echo "$GITHUB_ACCOUNT $APP_HOST"
+```
+
+The variables last only until you log out. Run this block again whenever you log
+in to the VM to run one of the guide's commands that uses them.
 
 ### Open the host firewall
 
@@ -390,8 +395,9 @@ sudo chmod 700 /opt/poker/deploy.sh
 
 `.env` holds the only copy of the database password; keep it on the VM. Each
 release adds an `APP_REVISION` line to it. `deploy.sh` is installed once; if a
-later commit changes `deploy/deploy.sh`, set your values on the VM and repeat the
-`curl` command.
+later commit changes `deploy/deploy.sh`,
+[set your values on the VM](#set-your-values-on-the-vm) and repeat the `curl`
+command.
 
 ### Install the deploy key
 
@@ -507,7 +513,7 @@ same commit is safe.
 Changes to `deploy/compose.yaml` ship with the release, and each release also
 installs patch updates to the PostgreSQL 18 and Caddy 2 images. Changes to
 `deploy/deploy.sh` require repeating its `curl` command on the VM (section 5),
-after setting your values there.
+after [setting your values on the VM](#set-your-values-on-the-vm).
 
 ### Reboot manually
 
