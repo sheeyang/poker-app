@@ -1,6 +1,6 @@
 # Document Standard CashGame Rules Without Rules Profiles
 
-**Amended by [ADR-0032](0032-extend-table-sessions-for-shared-online-play.md):** CashGame accepts seating during an active Hand, and the newcomer is dealt in from the next Hand. The frozen Hand participants and the no-missed-blind rule below are unchanged. The `leave-participant` command becomes `stand-up-participant`, matching the glossary's Stand Up.
+**Amended by [ADR-0032](0032-extend-table-sessions-for-shared-online-play.md):** CashGame accepts seating during an active Hand, and the newcomer is dealt in from the next Hand. The frozen Hand participants and the no-missed-blind rule below are unchanged. The `leave-participant` command becomes `stand-up-participant`, matching the glossary's Stand Up. CashGame also records when a Participant joins and leaves the table, so it can derive when-joined visibility for unseated Participants.
 
 The initial public game is No-Limit Texas Hold'em CashGame, with standard documented behavior rather than a separate rules-profile system. CashGame owns the rules below and the authoritative cards, chips, contributions, and betting state, using focused internal modules and invariant-preserving helpers rather than a separate PokerCore; configurable alternatives belong directly in game configuration only when there is a real use case. This keeps callers at the level of game intentions with one Hold'em rules implementation and one state owner, as defined in [ADR-0011](0011-use-a-holdem-specific-cash-game.md).
 
