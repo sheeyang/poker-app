@@ -1,6 +1,6 @@
 # Retain Numerical Trainer Analysis Independently of Gameplay
 
-**Planned online extension:** [M4 — Shared gameplay foundation](../milestones.md#m4--shared-gameplay-foundation) retains Live Analysis and scoring online, extending the single-owner preference and authorization model below to independent participants. Each participant has their own Reference Strategy, Live Analysis settings, and authorized analysis resources; scoring retains original-decision snapshots and includes timeout-generated human actions.
+**Amended by [ADR-0032](0032-extend-table-sessions-for-shared-online-play.md):** at both table modes, the Reference Strategy, Live Analysis setting, Analysis Results, scores, and summaries below belong to a Participant rather than a Table Session. Authorization follows the Participant's Human Controller instead of Table Ownership. An Online Table may disallow Live Analysis. Timeout Actions are scored as human decisions, and a Session summary tab replaces the explicit end-of-session action.
 
 M2 proves the complete numerical analysis pipeline using the existing baseline Strategies, with stronger Strategies remaining separate scope. The application provides Policy probabilities, concrete sizings, the Reference Strategy's selected action, and numerical alignment scores; the human interprets them, and the application does not give advice or label decisions good or bad. The established scoring formulas and package boundaries in ADR-0006, ADR-0008, and ADR-0019 still apply.
 

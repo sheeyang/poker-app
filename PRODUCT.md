@@ -9,23 +9,30 @@ web
 ## Users
 
 The primary users are poker players studying their decisions on desktop and
-mobile browsers. They play Texas Hold'em against Bots and examine numerical
-outputs from a selected Reference Strategy. This audience and both device classes
-were confirmed during M3 initialization; a specific skill level or need for
-instruction in poker basics has not been established.
+mobile browsers. They play Texas Hold'em against Bots, and examine numerical
+outputs from a selected Reference Strategy. From M4 they can also play other
+people at Online Tables. The hosted product is open to the public, and anyone can
+create a table as a Guest. This audience and both device classes were confirmed
+during M3 initialization. A specific skill level, or a need for instruction in
+poker basics, has not been established.
 
 ## Product Purpose
 
-Let a human play no-limit Hold'em Cash Game Hands against strategy-controlled
-Participants and study how their concrete decisions align with a chosen Reference
-Strategy. The Trainer supplies numerical evidence for the player's interpretation
-without prescribing an action or labeling a decision good or bad.
+Let a human play no-limit Hold'em Cash Game Hands and study how their concrete
+decisions align with a chosen Reference Strategy. Hands are played against Bots
+at a Practice Table or, from M4, against other humans at an Online Table. The
+Trainer supplies numerical evidence for the player's interpretation without
+prescribing an action or labeling a decision good or bad.
 
 M3 delivered the main product interface in `apps/web` for capabilities established
 through M1 and M2. Success means the player can configure and continue a Table
 Session, play legal actions, understand confirmed table state, and inspect Strategy
 outputs and alignment results on desktop and mobile. Analysis and presentation
 must not delay gameplay or make its correctness depend on an animation.
+
+M4 extends this to Online Tables. Guests join through a Join Link, choose their
+Seats, and play under server-owned timing, keeping their own study settings and
+results private from everyone else at the table.
 
 ## Positioning
 
@@ -42,12 +49,21 @@ claim of poker expertise or Solver quality.
 
 ## Operating Context
 
-- Start practice from table-size and starting-stack presets; the explicit gesture
-  creates the Table Session, seats the human and Bots and starts its first Hand.
-  Custom rules and Bot Playing Strategies remain available through progressive
+- Start a Practice Table from table-size and starting-stack presets. The explicit
+  gesture creates the Table Session, seats the human and Bots and starts its first
+  Hand. Custom rules and Bot Playing Strategies remain available through progressive
   disclosure. Reopen saved tables using observable stakes, stack and play state.
-- Explicitly start each Hand. Submit the human's legal Fold, Check, Call, Bet-to or
-  Raise-to action; the authoritative server runs Bot decisions.
+- At a Practice Table, explicitly start each Hand. Submit the human's legal Fold,
+  Check, Call, Bet-to or Raise-to action; the authoritative server runs Bot
+  decisions.
+- M4 adds Online Tables, a table mode chosen at creation.
+  - Guests enter a display name, join through the table's Join Link, watch
+    unseated, and take a Seat when ready.
+  - Every Online Table has an Action Time Limit and Automatic Dealing.
+  - Its Table Owner manages table options and Bots, but never another human.
+- M4 adds server-owned Presentation Phases and Action Windows at every table. A
+  Practice Table may enable an Action Time Limit. A missed Action Deadline submits
+  the Timeout Action.
 - Observe cards, stacks, turn, bets, pots, showdown and payouts. Manage Participants
   and stacks between Hands, including sit out/return, seat changes, top-ups and
   rebuys when permitted by the configuration.
@@ -57,16 +73,19 @@ claim of poker expertise or Solver quality.
 - Review the visible Hand recap after completion, then choose a street-labeled
   decision to inspect its captured cards and numerical reference. Reviews stay
   within the current Hand and follow the newest accepted decision
-  as play advances. Session summary captures a Table Session summary.
+  as play advances. Session summary captures a Table Session summary. M4 moves it
+  to a Session summary tab in the analysis panel, available at any time.
 - Retain confirmed state through loading, failure, uncertain outcomes, reload and
   reconnect. Offer specific recovery actions and explicit Retry where supported.
 
-The existing implementation runs locally with Fastify and PostgreSQL. A
-server-issued browser identity establishes Table Ownership; browser storage only
-remembers the selected session. The current setup is documented in
-[README.md](README.md) and [local development](docs/local-development.md).
-Desktop and mobile browser support is the M3 product target; remote access,
-deployment and account requirements have not been established by this init.
+The implementation runs on Fastify and PostgreSQL. It runs locally, and in
+production on one Oracle VM under [ADR-0031](docs/adr/0031-host-production-on-one-oracle-always-free-vm.md).
+A server-issued browser identity establishes Table Ownership; browser storage only
+remembers the selected session. From M4 that identity is a Guest with a chosen
+display name. The current setup is documented in [README.md](README.md) and
+[local development](docs/local-development.md). Desktop and mobile browsers are
+the product target. Accounts and login are unscheduled, and production remains
+non-durable until M9 — Release preparation.
 
 ## Capabilities and Constraints
 
@@ -91,12 +110,14 @@ Use the terms in [GLOSSARY.md](GLOSSARY.md).
 - Hidden seeds, authoritative game objects and privileged information remain
   server-side. Completed-Hand inspection requires Table Ownership, enabled Admin
   Mode and Hand completion, and does not expand ordinary Participant observations
-  or Policy inputs.
+  or Policy inputs. M4 makes it unavailable at Online Tables.
 - Legal Bet-to and Raise-to amounts are exact integer total commitments for the
   current betting street. The interface must respect server-provided legality and
   bounds, including all-ins and reopening rules.
-- Analysis and feedback never gate acceptance of a legal human action. Every normal
-  next Hand still requires an explicit Start Hand operation.
+- Analysis and feedback never gate acceptance of a legal human action. At a
+  Practice Table every next Hand requires an explicit Start Hand operation; M4
+  Online Tables deal automatically. Animation completion never opens an Action
+  Window or starts a Hand.
 
 ### Trainer analysis
 
@@ -117,6 +138,10 @@ Use the terms in [GLOSSARY.md](GLOSSARY.md).
 - HTTP supplies numerical results and summaries. The shared browser WebSocket
   supplies authorized table updates and analysis notifications; initial readiness
   and reconnect reconcile relevant state without normal-operation polling.
+- M4 makes the Reference Strategy, Live Analysis, results and summaries belong to
+  each Participant, readable only by that Participant's Human Controller. An Online
+  Table Owner may disallow Live Analysis, and that choice is visible to everyone at
+  the table.
 
 ### Milestone scope
 
@@ -126,13 +151,21 @@ feedback timing, loading/error/retry states and basic dealing/burn presentation.
 product interaction and authority decisions; [ADR-0029](docs/adr/0029-retire-the-playground.md)
 records retirement of the Playground.
 
-The [current eight-milestone plan](docs/milestones.md) makes M4 — Shared gameplay
-foundation the current focus. Elaborate animations belong to M5. General history
-navigation, action-by-action replay, counterfactual comparison, Range Visualizer,
-Equity / Poker Math Overlay and overall-history summaries belong to M6. Solver
-work belongs to M7; mass simulation and benchmarking belong to M8. Older ADR
-milestone numbers retain their historical meaning; use the current plan for
-delivery order.
+The [current nine-milestone plan](docs/milestones.md) makes M4 — Shared gameplay
+foundation the current focus. [ADR-0032](docs/adr/0032-extend-table-sessions-for-shared-online-play.md)
+records its decisions. The later milestones are:
+
+- **M5:** elaborate animations.
+- **M6:** general history navigation, action-by-action replay, counterfactual
+  comparison, Range Visualizer, Equity / Poker Math Overlay and overall-history
+  summaries.
+- **M7:** Solver work.
+- **M8:** mass simulation and benchmarking.
+- **M9 — Release preparation:** fair outage handling, backups, name moderation and
+  idle-table cleanup.
+
+Accounts remain unscheduled. Older ADR milestone numbers retain their historical
+meaning; use the current plan for delivery order.
 
 ## Evidence on Hand
 

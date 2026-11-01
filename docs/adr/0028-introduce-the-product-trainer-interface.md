@@ -1,6 +1,8 @@
 # Introduce the Product Trainer Interface
 
-**Roadmap scope:** [M3](../milestones.md) was completed and accepted on 24 October 2026. M4 — Shared gameplay foundation is the current focus. Existing basic motion stays; [M4 — Shared gameplay foundation](../milestones.md#m4--shared-gameplay-foundation) adds server-controlled presentation windows, deadlines, and automatic online dealing before M5 adds elaborate animations. M4's extension ADR must revisit the immediate-presentation policy below while keeping complete-view recovery and animation completion independent of action validity. Trainer retains explicit subsequent Hand starts.
+**Roadmap scope:** [M3](../milestones.md) was completed and accepted on 24 October 2026. M4 — Shared gameplay foundation is the current focus.
+
+**Amended by [ADR-0032](0032-extend-table-sessions-for-shared-online-play.md):** server Presentation Phases replace immediate presentation as the gameplay pace at every table. Complete views remain the recovery authority, and animation completion stays independent of action validity. Practice Tables keep explicit Deal, accepted once the payout phase ends. A Session summary tab in the analysis panel replaces the explicit end-of-session action. The roadmap now has nine milestones.
 
 M3 introduces `apps/web` as the participant-facing Trainer. It consumes safe
 Contracts and shares HTTP, live synchronization and analysis-resource
