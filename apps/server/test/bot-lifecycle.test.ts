@@ -134,7 +134,7 @@ test('changing away and back to the same descriptor rejects old work even with t
     const current = f.evaluations.at(-1)!; expect(current.view).toEqual(old.view); expect(current.seed).toBe(old.seed);
     current.result.resolve(answer({ type: 'fold' })); await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
     const persisted = await f.commands.readPersistedSession(t.id);
-    expect(persisted?.botProvenance?.[0]?.assignmentId).toBe(persisted?.bindings[1]?.assignmentId);
+    expect(persisted?.botProvenance?.[0]?.assignmentId).toBe((persisted?.bindings[1] as { assignmentId?: string } | undefined)?.assignmentId);
     expect(await f.read(t)).toMatchObject({ pokerRevision: 5, sessionRevision: 7 });
   } finally { await f.close(); }
 });

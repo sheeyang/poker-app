@@ -1,6 +1,6 @@
 import type { ConcreteAction, ObservableCashGameState, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding } from '@poker/contracts';
 import { CashGame, type CashGameEvent } from '@poker/engine';
-import type { PersistedTableSession } from './aggregate.js';
+import { findBinding, isHuman, type PersistedTableSession } from './aggregate.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
   return action.type === 'bet' ? { type: 'bet', betTo: action.betTo } : action.type === 'raise' ? { type: 'raise', raiseTo: action.raiseTo } : { type: action.type };
 }
@@ -27,7 +27,10 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
     },
   }));
 }
+/** Projects the table for one viewing human Participant, including only that Participant's own study settings. */
 export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game?: CashGame, adminMode = true): ObservableTableSession {
+  const viewer = findBinding(aggregate, participantId);
+  if (!isHuman(viewer)) throw new Error('Table views are projected only for a human Participant.');
   if (!game) {
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new Error('Committed CashGame record could not be restored.');
@@ -36,9 +39,9 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   const view = game.forParticipant(participantId).getView();
   const c = view.configuration;
   return {
-    tableSessionId: aggregate.tableSessionId, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
-    trainerConfiguration: structuredClone(aggregate.trainerConfiguration),
+    trainerConfiguration: structuredClone(viewer.trainerConfiguration),
     inspection: { adminMode, completedHands: adminMode ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },

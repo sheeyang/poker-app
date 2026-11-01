@@ -82,7 +82,7 @@ test('restart resumes an exact human decision and between-Hand state across mana
   expect((await response(t, stranger.cookie)).status).toBe(404);
   expect((await fetch(base + '/api/table-sessions/' + t.id)).status).toBe(401);
   const list = await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json();
-  expect(list.tableSessionIds).toContain(t.id);
+  expect(list.tables).toContainEqual({ tableSessionId: t.id, mode: 'practice' });
   await command(t, 'top-up-to', { participantId: t.human, targetStack: 1500 });
   await command(t, 'set-button', { seat: 2 }); await command(t, 'start-hand');
   const decision = await read(t);

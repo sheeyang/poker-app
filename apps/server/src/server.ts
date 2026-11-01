@@ -11,6 +11,8 @@ import { and, eq } from 'drizzle-orm';
 import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
+import { savedTables } from './membership.js';
+import { upgradeTableSession } from './aggregate.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 import { validateDisplayName } from './validation.js';
@@ -49,12 +51,18 @@ export async function createServer(options: ServerOptions) {
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
-  // The user channel is independent of open table subscriptions. Analysis publishes here
-  // only after establishing the request owner's authorization and making HTTP state readable.
+  // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
+  // reaching only its Human Controller, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
-  function publishUserUpdate(userId: string, message: AnalysisUpdate) {
-    for (const deliver of userChannels.get(userId) ?? []) deliver(message);
+  function publishUserUpdate(participantId: string, message: AnalysisUpdate) {
+    const userId = mutations.controllerOf(message.tableSessionId, participantId);
+    for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message);
   }
+  /** The requesting Guest's own joined Participant: the only one whose study results they may read or retry. */
+  async function participantAt(tableSessionId: string, userId: string) {
+    return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
+  }
+  const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required'];
   app.get('/api/live', {
     websocket: true,
     preValidation: async (request, reply) => {
@@ -162,8 +170,8 @@ export async function createServer(options: ServerOptions) {
   app.get('/api/table-sessions', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
-    const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(eq(tableSessions.ownerUserId, userId));
-    return { tableSessionIds: rows.map(row => row.id) };
+    try { return { tables: await savedTables(db, userId) }; }
+    catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
   });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
@@ -186,7 +194,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : outcome.rejection.code === 'actor-not-authorized' ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-poker-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : forbidden.includes(outcome.rejection.code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-poker-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
@@ -200,7 +208,7 @@ export async function createServer(options: ServerOptions) {
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-session-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : forbidden.includes(outcome.rejection.code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-session-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The configuration commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
@@ -212,7 +220,8 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     try {
-      const state = await summaries.retry(request.params.id, request.params.requestId, userId);
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && await summaries.retry(request.params.id, request.params.requestId, participantId);
       if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be retried. Read its state before trying again.' } }); }
@@ -220,8 +229,11 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    const state = summaries.read(request.params.id, request.params.requestId, userId);
-    return state ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+    try {
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && summaries.read(request.params.id, request.params.requestId, participantId);
+      return state || reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string }; Body: Record<string, never> }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
@@ -267,7 +279,8 @@ export async function createServer(options: ServerOptions) {
     if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Retry uses the original analysis inputs. Supply an empty request.' } });
     try {
-      const state = await analysis.retry(request.params.id, request.params.requestId, userId);
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && await analysis.retry(request.params.id, request.params.requestId, participantId);
       if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be retried. Try reading it again.' } }); }
@@ -277,7 +290,8 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
     try {
-      const state = await analysis.read(request.params.id, request.params.requestId, userId);
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && await analysis.read(request.params.id, request.params.requestId, participantId);
       if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
       return state;
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
@@ -290,10 +304,12 @@ export async function createServer(options: ServerOptions) {
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId'))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-inspection-request', message: 'Supply only the completed Hand ID.' } });
     try {
-      const input = await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
+      const access = await mutations.access(request.params.id, userId);
+      if (access && !access.owner) return reply.code(403).send({ ok: false, rejection: { code: 'table-owner-required', message: 'Only the Table Owner can inspect completed Hands.' } });
+      const input = access && await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
         // Load authorized durable inputs; reconstruction belongs to the admitted Research job.
         const owned = await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, userId)));
-        const aggregate = owned[0]?.aggregate;
+        const aggregate = owned[0] && upgradeTableSession(owned[0].aggregate);
         return aggregate?.ownerUserId === userId ? { pokerRecord: aggregate.pokerRecord } : undefined;
       });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });

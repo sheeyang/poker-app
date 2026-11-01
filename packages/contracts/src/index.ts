@@ -95,7 +95,7 @@ export interface StrategyDescriptor {
   readonly policy: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
   readonly selector: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
 }
-/** Table Owner preferences, independent of every Bot's Playing Strategy. */
+/** One human Participant's study preferences, independent of other Participants and every Bot's Playing Strategy. */
 export interface TrainerConfiguration {
   readonly referenceStrategy: StrategyDescriptor;
   readonly liveAnalysis: boolean;
@@ -177,11 +177,18 @@ export interface InspectionCapabilities {
   readonly adminMode: boolean;
   readonly completedHands: readonly { readonly handId: HandId; readonly sequence: number }[];
 }
+/** Fixed when a Table Session is created. */
+export type TableMode = 'practice' | 'online';
+/** One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left. */
+export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode }
+export interface SavedTables { readonly tables: readonly SavedTable[] }
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
+  readonly mode: TableMode;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
+  /** The viewing Participant's own Trainer configuration. */
   readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
   /** Application feedback; never part of the game view or a Policy input. */
@@ -238,6 +245,7 @@ export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
 export interface RetryBotRequest extends ControllerMutationMetadata {}
+/** Sets the requesting Guest's own Participant's Trainer configuration. */
 export interface SetTrainerConfigurationRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;

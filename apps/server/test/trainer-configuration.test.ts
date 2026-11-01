@@ -162,8 +162,8 @@ test('lost commit confirmation resolves to one original preference outcome and r
 test('an incompatible pre-release record fails restoration instead of silently replacing its missing Trainer configuration', async () => {
   const t = await table();
   await server.close();
-  // An external persistence fixture simulates an older pre-release record format.
-  await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = aggregate - \'trainerConfiguration\' WHERE id = $1', [t.id]);
+  // An external persistence fixture simulates a record whose human Participant lacks its Trainer configuration.
+  await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(aggregate, \'{bindings,0}\', (aggregate #> \'{bindings,0}\') - \'trainerConfiguration\') WHERE id = $1', [t.id]);
   await start();
   const response = await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } });
   expect(response.status).toBe(503);

@@ -53,7 +53,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     expect(response.status).toBe(201); const created = await response.json(); humans.add(created.bindings[0].participantId); return created;
   }
   const read = async (id: string) => (await fetch(base + '/api/table-sessions/' + id, { headers: { cookie } })).json();
-  const list = async () => (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tableSessionIds;
+  const list = async () => (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tables.map((table: { tableSessionId: string }) => table.tableSessionId);
   async function newOwner() { const c = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, c); return c; }
   return { schema, table, read, post, list, newOwner, get commands() { return commands!; }, hold(id: string) { heldId = id; }, async resolve(sql: 'COMMIT' | 'ROLLBACK') { terminal!.resolve(sql); await Promise.all([...targets]); heldId = undefined; }, async restart() { await server.close(); await start(); }, async close() { terminal?.resolve('ROLLBACK'); await Promise.allSettled([...targets]); await server.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); } };
 }

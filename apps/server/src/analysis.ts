@@ -11,15 +11,16 @@ import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { AcceptTableJobResult } from './mutations.js';
 
-export interface FrozenEvaluationInput { readonly ownerUserId: string; readonly identity: EvaluationIdentity; readonly view: ObservableGameView; readonly acceptedAction?: ConcreteAction }
+/** Frozen analysis inputs. `identity.participantId` keys the result: only that Participant's Human Controller reads or retries it. */
+export interface FrozenEvaluationInput { readonly identity: EvaluationIdentity; readonly view: ObservableGameView; readonly acceptedAction?: ConcreteAction }
 export type AnalysisPurpose = Extract<JobPurpose, 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis'>;
 function matchingKey(input: FrozenEvaluationInput): string {
   return createHash('sha256').update(canonical({ ...input.identity, ...(input.acceptedAction ? { scoredDecision: { acceptedAction: input.acceptedAction, scoringMethodVersion } } : {}) })).digest('hex');
 }
 type Database = ReturnType<typeof openDatabase>['db'];
 interface Entry { readonly input: FrozenEvaluationInput; readonly purpose: AnalysisPurpose; state: DecisionAnalysis }
-/** Owns matching, execution and successful retention, independently of connections and poker. */
-export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (ownerUserId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
+/** Owns matching, execution and successful retention, independently of connections and poker. Notifications go to the Participant. */
+export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (participantId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
   const entries = new Map<string, Entry>();
   const byRequest = new Map<string, Entry>();
   const initializing = new Map<string, Promise<Entry>>();
@@ -36,10 +37,10 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const state = entry.state;
     for (const resolve of terminalWaiters.get(state.requestId) ?? []) resolve(state);
     terminalWaiters.delete(state.requestId);
-    try { publish(entry.input.ownerUserId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }); } catch { /* Delivery cannot change a readable result. */ }
+    try { publish(entry.input.identity.participantId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }); } catch { /* Delivery cannot change a readable result. */ }
   }
   function accept(entry: Entry, attemptId: string, operation: () => void = () => {}): Promise<boolean> {
-    return acceptJobResult(entry.input.identity.tableSessionId, entry.input.ownerUserId, () => {
+    return acceptJobResult(entry.input.identity.tableSessionId, entry.input.identity.participantId, () => {
       if (stopped || entry.state.attemptId !== attemptId) return false;
       operation(); return true;
     });
@@ -81,7 +82,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       let terminal: DecisionAnalysis = complete;
       // Derived persistence is deliberately outside the Table Session queue.
       try {
-        await db.insert(analysisEvaluations).values({ fingerprint, requestId: state.requestId, tableSessionId: input.identity.tableSessionId, ownerUserId: input.ownerUserId, result: complete });
+        await db.insert(analysisEvaluations).values({ fingerprint, requestId: state.requestId, tableSessionId: input.identity.tableSessionId, participantId: input.identity.participantId, result: complete });
       } catch {
         terminal = immutableData({ ...state, status: 'error', error: { code: 'persistence-unavailable', message: 'The evaluation result could not be saved.' } });
       }
@@ -104,7 +105,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const { acceptedAction: _action, ...evaluationInput } = entry.input;
     try {
       let dependency = await operations.getOrStart(evaluationInput, entry.purpose);
-      if (retryFailed && dependency.status === 'error') dependency = (await operations.retry(state.tableSessionId, dependency.requestId, entry.input.ownerUserId))!;
+      if (retryFailed && dependency.status === 'error') dependency = (await operations.retry(state.tableSessionId, dependency.requestId, entry.input.identity.participantId))!;
       if (!await accept(entry, state.attemptId, () => { entry.state = immutableData({ ...state, evaluationRequestId: dependency.requestId }); })) return entry;
       let physical = Promise.resolve();
       const initialized = Promise.withResolvers<void>();
@@ -150,17 +151,19 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       const complete = immutableData({ ...state, status: 'complete' as const, evaluation: dependency.evaluation, scores: result.value });
       terminal = complete;
       try {
-        await db.insert(analysisScores).values({ fingerprint, requestId: state.requestId, tableSessionId: input.identity.tableSessionId, ownerUserId: input.ownerUserId, result: complete });
+        await db.insert(analysisScores).values({ fingerprint, requestId: state.requestId, tableSessionId: input.identity.tableSessionId, participantId: input.identity.participantId, result: complete });
       } catch { terminal = immutableData({ ...state, status: 'error', error: { code: 'persistence-unavailable', message: 'The decision scores could not be saved.' } }); }
     }
     await accept(entry, state.attemptId, () => { entry.state = terminal; notify(entry); });
   }
-  async function read(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
+  const owns = (entry: Entry, tableSessionId: string, participantId: string) => entry.input.identity.participantId === participantId && entry.state.tableSessionId === tableSessionId;
+  /** `participantId` must be the requesting Guest's own joined Participant at `tableSessionId`. */
+  async function read(tableSessionId: string, requestId: string, participantId: string): Promise<DecisionAnalysis | undefined> {
     const memory = byRequest.get(requestId);
-    if (memory) return memory.input.ownerUserId === ownerUserId && memory.state.tableSessionId === tableSessionId ? memory.state : undefined;
-    const rows = await db.select().from(analysisEvaluations).where(and(eq(analysisEvaluations.requestId, requestId), eq(analysisEvaluations.tableSessionId, tableSessionId), eq(analysisEvaluations.ownerUserId, ownerUserId)));
+    if (memory) return owns(memory, tableSessionId, participantId) ? memory.state : undefined;
+    const rows = await db.select().from(analysisEvaluations).where(and(eq(analysisEvaluations.requestId, requestId), eq(analysisEvaluations.tableSessionId, tableSessionId), eq(analysisEvaluations.participantId, participantId)));
     if (rows[0]) return rows[0].result;
-    const scored = await db.select().from(analysisScores).where(and(eq(analysisScores.requestId, requestId), eq(analysisScores.tableSessionId, tableSessionId), eq(analysisScores.ownerUserId, ownerUserId)));
+    const scored = await db.select().from(analysisScores).where(and(eq(analysisScores.requestId, requestId), eq(analysisScores.tableSessionId, tableSessionId), eq(analysisScores.participantId, participantId)));
     return scored[0]?.result;
   }
   async function lookup(input: FrozenEvaluationInput): Promise<DecisionAnalysis | undefined> {
@@ -206,21 +209,21 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       return entry.state;
     },
     read,
-    async waitForSettlement(tableSessionId: string, requestId: string, ownerUserId: string, attemptId: string): Promise<void> {
+    async waitForSettlement(tableSessionId: string, requestId: string, participantId: string, attemptId: string): Promise<void> {
       const entry = byRequest.get(requestId);
-      if (!entry || entry.input.ownerUserId !== ownerUserId || entry.state.tableSessionId !== tableSessionId) return;
+      if (!entry || !owns(entry, tableSessionId, participantId)) return;
       await settlements.get(attemptId);
     },
-    async waitForResult(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
-      const state = await read(tableSessionId, requestId, ownerUserId);
+    async waitForResult(tableSessionId: string, requestId: string, participantId: string): Promise<DecisionAnalysis | undefined> {
+      const state = await read(tableSessionId, requestId, participantId);
       if (!state || state.status !== 'pending') return state;
       return waitForEvaluation(requestId);
     },
-    async retry(tableSessionId: string, requestId: string, ownerUserId: string): Promise<DecisionAnalysis | undefined> {
+    async retry(tableSessionId: string, requestId: string, participantId: string): Promise<DecisionAnalysis | undefined> {
       if (stopped) throw new Error('Analysis is closing.');
       const entry = byRequest.get(requestId);
-      if (!entry) return read(tableSessionId, requestId, ownerUserId);
-      if (entry.input.ownerUserId !== ownerUserId || entry.state.tableSessionId !== tableSessionId) return undefined;
+      if (!entry) return read(tableSessionId, requestId, participantId);
+      if (!owns(entry, tableSessionId, participantId)) return undefined;
       let operation = retrying.get(requestId);
       if (!operation) {
         if (entry.state.status !== 'error') return entry.state;

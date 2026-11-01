@@ -73,7 +73,7 @@ The private durable representation from which an authoritative Table Session can
 _Avoid_: Observable Session History, live Cash Game object, event log
 
 **Persisted Table Session**:
-The complete application-owned durable representation of a Table Session, containing its Table Session Record, participant controller assignments, and Trainer configuration needed to continue the session.
+The complete application-owned durable representation of a Table Session, containing its Table Session Record, its mode, participant controller assignments with each human Participant's Guest and membership, and each human Participant's Trainer configuration needed to continue the session.
 _Avoid_: Table Session Record, Cash Game state
 
 **Table Owner**:
