@@ -79,7 +79,7 @@ test('Bots continue automatically after the human Participant leaves between Han
   await command(t, 'start-hand');
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   await command(t, 'seat-participant', { participantId: t.bots[1], seat: 3 });
-  await command(t, 'leave-participant', { participantId: t.human });
+  await command(t, 'stand-up-participant', { participantId: t.human });
   const before = await read(t);
   await command(t, 'start-hand');
   await expect.poll(async () => (await read(t)).inspection.completedHands).toEqual([{ handId: 'hand-1', sequence: 1 }, { handId: 'hand-2', sequence: 2 }]);
@@ -98,7 +98,7 @@ test('an absent Human receives no Bot-only all-in cards through HTTP or live pre
   socket.on('message', data => messages.push(JSON.parse(data.toString())));
   try {
     await expect.poll(() => messages.length).toBe(1);
-    await command(t, 'leave-participant', { participantId: t.human });
+    await command(t, 'stand-up-participant', { participantId: t.human });
     await command(t, 'seat-participant', { participantId: t.bots[0], seat: 1 });
     await command(t, 'seat-participant', { participantId: t.bots[1], seat: 2 });
     await command(t, 'start-hand');
@@ -108,7 +108,7 @@ test('an absent Human receives no Bot-only all-in cards through HTTP or live pre
     expect(completed.view.state).not.toHaveProperty('handId');
     const update = messages.find(message => message.type === 'table-update' && message.sessionRevision === 5);
     expect(update).toMatchObject({ presentationEvents: [], view: completed.view });
-    expect(messages).toContainEqual(expect.objectContaining({ type: 'table-update', presentationEvents: [{ type: 'participant-left', participantId: t.human, seat: 3, cashOut: 10 }] }));
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'table-update', presentationEvents: [{ type: 'participant-stood-up', participantId: t.human, seat: 3, cashOut: 10 }] }));
     expect(JSON.stringify(messages)).not.toMatch(/"(?:holeCards|cards|deck|burns|seed)"\s*:/);
     const response = await fetch(base + '/api/table-sessions/' + t.id + '/inspect-hand', { method: 'POST', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ handId: 'hand-1' }) });
     expect(response.status).toBe(200);

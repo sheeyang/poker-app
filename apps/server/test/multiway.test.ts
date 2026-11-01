@@ -50,7 +50,7 @@ test('sparse three-player seats preserve public position, antes, all street orde
   expect(before.view.state.participants.map(p => [p.seat, p.stack, p.anteContribution, p.wager, p.contribution, p.cardCount])).toEqual([[7, 995, 5, 0, 5, 2], [9, 985, 5, 10, 15, 2], [2, 975, 5, 20, 25, 2]]);
   expect(before.view.state.participants[0]!.holeCards).toHaveLength(2);
   expect(before.view.state.participants[1]).not.toHaveProperty('holeCards'); expect(before.view.state.participants[2]).not.toHaveProperty('holeCards');
-  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['leave-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: true }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
+  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['stand-up-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: true }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
     const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: t.revision, ...fields });
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
     expect(await read(t)).toEqual(before);
@@ -71,7 +71,7 @@ test('sparse three-player seats preserve public position, antes, all street orde
   expect(completed.view.history[0]!.decisions[0]!.state.participants[1]!.anteContribution).toBe(5);
   expect(JSON.stringify(completed)).not.toMatch(/"(?:seed|deck|burns|drawnCardCount|commands)"\s*:/);
   await server.close(); await startServer(); expect(await read(t)).toEqual(completed);
-  await command(t, 'move-participant', { participantId: human, seat: 8 }); await command(t, 'leave-participant', { participantId: bob }); await command(t, 'start-hand');
+  await command(t, 'move-participant', { participantId: human, seat: 8 }); await command(t, 'stand-up-participant', { participantId: bob }); await command(t, 'start-hand');
   const next = await read(t);
   expect(next.view.state).toMatchObject({ buttonSeat: 8, smallBlindParticipantId: human, bigBlindParticipantId: carol, actorId: human });
   expect(next.view.history[0]!.result!.buttonSeat).toBe(7); expect(next.view.history[0]!.result!.participants.map(p => p.seat)).toEqual([7, 9, 2]);

@@ -163,7 +163,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Table Session is unavailable. Refresh to try reading it again.' } });
     }
   });
-  for (const kind of ['seat-participant', 'start-hand', 'act', 'leave-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+  for (const kind of ['seat-participant', 'start-hand', 'act', 'stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });

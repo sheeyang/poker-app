@@ -36,7 +36,7 @@ test('restoration rejects malformed metadata, configuration and accepted-command
   const cashGame = game(); cashGame.startHand(); cashGame.act('alice', { type: 'fold' });
   const record = cashGame.toRecord();
   for (const malformed of [
-    null, [], { ...record, schemaVersion: 2 }, { ...record, engineVersion: 'v2' },
+    null, [], { ...record, schemaVersion: 3 }, { ...record, engineVersion: 'v2' },
     { ...record, pokerRevision: 3 }, { ...record, configuration: { ...record.configuration, deck: [] } },
     { ...record, configuration: { ...record.configuration, seed: '' } },
     { ...record, configuration: { ...record.configuration, defaultBuyIn: Number.NaN } },
@@ -51,6 +51,36 @@ test('restoration rejects malformed metadata, configuration and accepted-command
     expect(result).not.toHaveProperty('game');
   }
   expect(cashGame.toRecord()).toEqual(record);
+});
+
+test('a stored version-1 record with the legacy leave command is upgraded on load and restores the same cards, chips and outcomes', () => {
+  const legacy = { schemaVersion: 1, engineVersion: 'v1', configuration, commands: [
+    { type: 'seat-participant', participantId: 'alice', seat: 1, buyIn: 1000 },
+    { type: 'seat-participant', participantId: 'bob', seat: 4, buyIn: 1000 },
+    { type: 'start-hand' }, { type: 'act', participantId: 'alice', action: { type: 'fold' } },
+    { type: 'leave-participant', participantId: 'bob' },
+    { type: 'seat-participant', participantId: 'bob', seat: 2, buyIn: 100 },
+    { type: 'start-hand' },
+  ] };
+  const restored = CashGame.fromRecord(JSON.parse(JSON.stringify(legacy)));
+  if (!restored.ok) throw new Error('Expected the legacy record to upgrade.');
+  const played = game(); played.startHand(); played.act('alice', { type: 'fold' }); played.standUpParticipant('bob'); played.seatParticipant('bob', 2, 100); played.startHand();
+  const upgraded = restored.game.toRecord();
+  expect(upgraded).toEqual(played.toRecord());
+  expect(upgraded).toMatchObject({ schemaVersion: 2 });
+  expect(upgraded.commands[4]).toEqual({ type: 'stand-up-participant', participantId: 'bob' });
+  expect(upgraded.commands).toHaveLength(legacy.commands.length);
+  expect(restored.game.getHand('hand-1')).toMatchObject({ returns: [{ participantId: 'bob', amount: 10 }], payouts: [{ participantId: 'bob', amount: 20 }] });
+  for (const id of ['hand-1', 'hand-2']) expect(restored.game.getHand(id)).toEqual(played.getHand(id));
+  for (const id of ['alice', 'bob']) expect(restored.game.forParticipant(id).getView()).toEqual(played.forParticipant(id).getView());
+  expect(restored.game.forParticipant('alice').getView().state.participants.map(p => [p.participantId, p.seat, p.stack + (p.contribution ?? 0)])).toEqual([['alice', 1, 990], ['bob', 2, 100]]);
+  expect(CashGame.fromRecord(JSON.parse(JSON.stringify(upgraded))).ok).toBe(true);
+  const renamed = upgraded.commands.map(command => command.type === 'stand-up-participant' ? { type: 'leave-participant', participantId: command.participantId } : command);
+  for (const malformed of [
+    { ...upgraded, commands: renamed },
+    { ...legacy, commands: [...legacy.commands.slice(0, 4), { type: 'stand-up-participant', participantId: 'bob' }] },
+    { ...legacy, commands: [...legacy.commands.slice(0, 4), { type: 'leave-participant', participantId: 'bob', requestId: 'server' }] },
+  ]) expect(CashGame.fromRecord(malformed)).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
 });
 
 test('restoration accepts plain replay data only, rejecting accessors and non-data record contents', () => {
@@ -79,7 +109,7 @@ test('history retains full original observed decisions and results without trans
   const observer = cashGame.forParticipant('observer').getView();
   expect(observer.history[0].decisions[0].state.participants.every(p => !p.holeCards)).toBe(true);
   expect(observer.history[0].decisions[0].state.legalActions).toEqual([]);
-  cashGame.leaveParticipant('alice'); cashGame.seatParticipant('newcomer', 1);
+  cashGame.standUpParticipant('alice'); cashGame.seatParticipant('newcomer', 1);
   expect(cashGame.forParticipant('newcomer').getView().history).toEqual([]);
   expect(cashGame.forParticipant('newcomer').getView().state).not.toHaveProperty('handId');
   expect(() => cashGame.forParticipant('newcomer').getView({ at: { decisionId: 'hand-1/decision-1' } })).toThrow(RangeError);
@@ -113,7 +143,7 @@ test('a full multi-Hand record restores facts, original decision visibility, reg
   }
   cashGame.moveParticipant('alice', 2); cashGame.topUpTo('alice', 1500); cashGame.setSittingOut('bob', true);
   cashGame.seatParticipant('carol', 6); cashGame.setButton(2); cashGame.startHand(); cashGame.act('alice', { type: 'fold' });
-  cashGame.leaveParticipant('carol'); cashGame.setSittingOut('bob', false); cashGame.setButton(2); cashGame.startHand();
+  cashGame.standUpParticipant('carol'); cashGame.setSittingOut('bob', false); cashGame.setButton(2); cashGame.startHand();
   const record = cashGame.toRecord();
   expect(Object.keys(record).sort()).toEqual(['commands', 'configuration', 'engineVersion', 'schemaVersion']);
   expect(JSON.stringify(record)).not.toMatch(/"(?:deck|burns|events|history|decisionId|handId|derivedSeed|pokerRevision|sessionRevision)"\s*:/);

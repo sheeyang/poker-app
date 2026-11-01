@@ -65,7 +65,7 @@ test('restart resumes an exact human decision and between-Hand state across mana
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   await command(t, 'top-up-to', { participantId: t.human, targetStack: 1200 });
   await command(t, 'move-participant', { participantId: t.human, seat: 2 });
-  await command(t, 'leave-participant', { participantId: t.bot });
+  await command(t, 'stand-up-participant', { participantId: t.bot });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 6, buyIn: 1000 });
   await command(t, 'set-button', { seat: 2 });
   await command(t, 'start-hand');

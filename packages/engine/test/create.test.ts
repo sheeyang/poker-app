@@ -13,7 +13,7 @@ describe('CashGame creation', () => {
     expect(created.ok).toBe(true);
     if (!created.ok) throw new Error('Expected a valid CashGame');
     expect(created.game.toRecord()).toEqual({
-      schemaVersion: 1, engineVersion: 'v1', configuration, commands: [],
+      schemaVersion: 2, engineVersion: 'v1', configuration, commands: [],
     });
     expect(created.game.forParticipant('human').getView()).toEqual({
       configuration: {
@@ -38,7 +38,7 @@ test.each([
   expect(result).toMatchObject({ ok: false, rejection: { code: 'invalid-configuration' } });
 });
 
-test('a detached version-1 record restores the complete empty game and preserves independent forks', () => {
+test('a detached record restores the complete empty game and preserves independent forks', () => {
   const created = CashGame.create(configuration);
   if (!created.ok) throw new Error('Expected valid CashGame');
   configuration.smallBlind = 99;
@@ -55,7 +55,7 @@ test('a detached version-1 record restores the complete empty game and preserves
   const view = created.game.forParticipant('human').getView();
   expect(() => { (view.configuration as { smallBlind: number }).smallBlind = 99; }).toThrow();
   for (const invalid of [
-    { ...record, schemaVersion: 2 }, { ...record, engineVersion: 'other' },
+    { ...record, schemaVersion: 3 }, { ...record, engineVersion: 'other' },
     { ...record, commands: [{ type: 'unknown' }] },
     { ...record, configuration: { ...record.configuration, seatCount: 0 } },
   ]) expect(CashGame.fromRecord(invalid).ok).toBe(false);

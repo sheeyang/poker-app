@@ -40,7 +40,7 @@ test('owner management commits and retries exactly once through the durable poke
   const t = await completed();
   const initial = await read(t);
   const operations = [
-    ['leave-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2, buyIn: 100 }],
+    ['stand-up-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2, buyIn: 100 }],
     ['top-up-to', { participantId: t.human, targetStack: 1200 }], ['move-participant', { participantId: t.human, seat: 3 }],
     ['set-sitting-out', { participantId: t.bot, sittingOut: true }], ['set-sitting-out', { participantId: t.bot, sittingOut: false }], ['set-button', { seat: 3 }],
   ] as const;
@@ -63,7 +63,7 @@ test('owner-only management rejects active, stale, unsupported and disabled-poli
   const t = await completed(false);
   const stranger = await table(); const initial = await read(t);
   const commands = [
-    ['leave-participant', { participantId: t.human }], ['move-participant', { participantId: t.human, seat: 2 }],
+    ['stand-up-participant', { participantId: t.human }], ['move-participant', { participantId: t.human, seat: 2 }],
     ['set-sitting-out', { participantId: t.human, sittingOut: true }], ['top-up-to', { participantId: t.human, targetStack: 1200 }], ['set-button', { seat: 4 }],
   ] as const;
   for (const [index, [kind, body]] of commands.entries()) expect((await submit(t, kind, { ...body, requestId: 'foreign-' + index, expectedPokerRevision: 4 }, stranger.cookie)).status).toBe(404);
@@ -93,7 +93,7 @@ test('PostgreSQL rollback and held COMMIT withhold management state, identity, h
   const t = await completed();
   const initial = await read(t);
   const operations = [
-    ['leave-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2 }],
+    ['stand-up-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2 }],
     ['move-participant', { participantId: t.human, seat: 3 }], ['set-sitting-out', { participantId: t.bot, sittingOut: true }],
     ['top-up-to', { participantId: t.human, targetStack: 1200 }], ['set-button', { seat: 3 }],
   ] as const;

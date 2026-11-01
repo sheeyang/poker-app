@@ -3,7 +3,7 @@ import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
-import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import type { PersistedTableSession, BotActionProvenance } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, processedRequests, tableSessions } from './db/schema.js';
@@ -22,7 +22,7 @@ type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export class TableSessionRestorationError extends Error {
   constructor() { super('The complete committed Table Session could not be restored.'); }
 }
-export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'leave-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
+export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
 /** Internal controller authority. No browser route receives this capability. */
 export interface TableSessionControllerCommands {
   submitAction(tableSessionId: string, request: ActRequest): Promise<MutationOutcome>;
@@ -39,7 +39,7 @@ const reject = (code: string, message: string): MutationOutcome => ({ ok: false,
 function applicationRejection(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
   const commandFields: Record<PokerMutationKind, readonly string[]> = {
     'seat-participant': ['participantId', 'seat', 'buyIn'], 'start-hand': [], act: ['participantId', 'action'],
-    'leave-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'],
+    'stand-up-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'],
   };
   const fields = ['requestId', 'expectedPokerRevision', ...commandFields[kind]];
   if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
@@ -341,7 +341,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   case 'start-hand': return working.startHand();
                   case 'act': return working.act((request as ActRequest).participantId, (request as ActRequest).action);
                   case 'seat-participant': return working.seatParticipant((request as SeatParticipantRequest).participantId, (request as SeatParticipantRequest).seat, (request as SeatParticipantRequest).buyIn);
-                  case 'leave-participant': return working.leaveParticipant((request as LeaveParticipantRequest).participantId);
+                  case 'stand-up-participant': return working.standUpParticipant((request as StandUpParticipantRequest).participantId);
                   case 'move-participant': return working.moveParticipant((request as MoveParticipantRequest).participantId, (request as MoveParticipantRequest).seat);
                   case 'set-sitting-out': return working.setSittingOut((request as SetSittingOutRequest).participantId, (request as SetSittingOutRequest).sittingOut);
                   case 'top-up-to': return working.topUpTo((request as TopUpToRequest).participantId, (request as TopUpToRequest).targetStack);
