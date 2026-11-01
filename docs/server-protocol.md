@@ -37,7 +37,9 @@ All table paths below start with `/api/table-sessions`:
 
 Creation rejects hidden or unknown configuration fields and supplied
 ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
-Participants, occupied/invalid seats, duplicate seating, and invalid buy-ins. See
+Participants, occupied/invalid seats, duplicate seating, and invalid buy-ins.
+Seating is accepted during an active Hand; the newcomer is dealt in from the
+next Hand. See
 [`validation.ts`](../apps/server/src/validation.ts) and
 [`mutations.ts`](../apps/server/src/mutations.ts) for validation.
 

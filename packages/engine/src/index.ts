@@ -348,9 +348,12 @@ export class CashGame {
     events.push({ type: 'board-dealt', street: hand.street, cards });
     this.#continueBetting(draft, hand, hand.buttonSeat, events);
   }
+  /**
+   * Seating is accepted during a Hand. Hand participants stay frozen, so a newcomer is dealt in
+   * from the next Hand without a missed-blind obligation.
+   */
   seatParticipant(participantId: ParticipantId, seat: number, buyIn = this.#configuration.defaultBuyIn): CashGameResult {
     const reject = (code: string, message: string, field?: string): CashGameResult => ({ ok: false, rejection: { code, message, ...(field ? { field } : {}) } });
-    if (this.#state.status === 'active-hand') return reject('active-hand', 'Seat Participants between Hands.');
     if (typeof participantId !== 'string' || participantId.trim().length === 0) return reject('invalid-participant', 'Supply a nonempty ParticipantId.', 'participantId');
     if (!Number.isInteger(seat) || seat < 1 || seat > this.#configuration.seatCount) return reject('invalid-seat', 'Choose a valid seat in this table.', 'seat');
     if (this.#state.participants.some(p => p.participantId === participantId && p.seat !== null)) return reject('participant-already-seated', 'This Participant is already seated.');

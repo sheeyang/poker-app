@@ -71,7 +71,6 @@ test('Start Hand readiness, wrong actors, unsupported actions, and active-Hand s
   const facts = cashGame.getHand('hand-1');
   const view = cashGame.forParticipant('alice').getView();
   expect(cashGame.startHand()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
-  expect(cashGame.seatParticipant('carol', 2)).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
   expect(cashGame.act('bob', { type: 'fold' })).toMatchObject({ ok: false, rejection: { code: 'wrong-actor' } });
   expect(cashGame.act('alice', { type: 'check' })).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
   expect(cashGame.act('alice', { type: 'fold', requestId: 'leak' } as { type: 'fold' })).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
