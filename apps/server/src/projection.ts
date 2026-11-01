@@ -38,11 +38,15 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   }
   const view = game.forParticipant(participantId).getView();
   const c = view.configuration;
+  // Admin Mode is never available at an Online Table, whatever the server allows.
+  const inspectable = adminMode && aggregate.mode === 'practice';
   return {
-    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: { ...aggregate.options }, viewerParticipantId: participantId,
+    ...(aggregate.joinToken && viewer.userId === aggregate.ownerUserId ? { joinToken: aggregate.joinToken } : {}),
+    pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: structuredClone(viewer.trainerConfiguration),
-    inspection: { adminMode, completedHands: adminMode ? game.getCompletedHands() : [] },
+    inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
       state: projectState(view.state),

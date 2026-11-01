@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
+import { startStoredHand } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -17,8 +18,9 @@ async function start() {
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 /**
- * Persistence fixture standing in for joining until the Join Link route exists: binds another Guest's human
- * Participant, with its membership, while the server is stopped. Returns that Participant's ID.
+ * Persistence fixture for the memberships no route reaches yet: Leave Table and Removal arrive in later tickets.
+ * Binds another Guest's human Participant with that membership while the server is stopped. Returns its ID.
+ * A joined second human joins through the real Join Link instead.
  */
 async function bindHuman(t: { id: string }, cookie: string, name: string, membership: 'joined' | 'left' | 'removed' = 'joined') {
   const token = decodeURIComponent(cookie.slice('poker_local='.length));
@@ -39,8 +41,8 @@ async function guest(name = 'You') {
   await nameGuest(base, cookie, name);
   return cookie;
 }
-async function table(cookie: string) {
-  const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
+async function table(cookie: string, mode: 'practice' | 'online' = 'practice') {
+  const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), mode, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   expect(response.status).toBe(201);
   const created = await response.json();
   return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
@@ -56,9 +58,16 @@ async function command(t: Table, kind: string, contents: object = {}, cookie = t
 async function completedHand(t: Table) {
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
-  await command(t, 'start-hand');
+  if ((await read(t)).mode === 'online') {
+    // Online Tables reject Deal until Automatic Dealing exists.
+    await server.close();
+    await startStoredHand(administration, schema, t.id);
+    await start();
+  } else await command(t, 'start-hand');
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
 }
+const join = (t: Table, cookie: string) => post('/api/join-links/' + encodeURIComponent(joinTokens.get(t.id)!) + '/join', cookie, { requestId: randomUUID() });
+const joinTokens = new Map<string, string>();
 async function settledAnalysis(t: Table, decisionId = 'hand-1/decision-1', cookie = t.cookie) {
   const requested = await (await post('/api/table-sessions/' + t.id + '/analysis', cookie, { decisionId })).json();
   await expect.poll(async () => (await (await get('/api/table-sessions/' + t.id + '/analysis/' + requested.requestId, cookie)).json()).status, { timeout: 10000 }).toBe('complete');
@@ -152,25 +161,30 @@ test('a Guest who has not joined a table is refused every route and live subscri
 
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
 test('each human acts, manages and studies only through their own Participant, and only the owner manages the table', async () => {
-  const owner = await table(await guest('Ann'));
+  const owner = await table(await guest('Ann'), 'online');
+  joinTokens.set(owner.id, (await read(owner)).joinToken!);
   await completedHand(owner);
   const ownerAnalysis = await settledAnalysis(owner);
   const ownerSummary = await (await post('/api/table-sessions/' + owner.id + '/session-summaries', owner.cookie, {})).json();
   const otherCookie = await guest('Ben'), leftCookie = await guest('Cy'), removedCookie = await guest('Di');
-  const other = await bindHuman(owner, otherCookie, 'Ben');
+  const joined = await join(owner, otherCookie);
+  expect(joined.status).toBe(200);
+  const other = (await joined.json()).participantId as string;
   await bindHuman(owner, leftCookie, 'Cy', 'left');
   await bindHuman(owner, removedCookie, 'Di', 'removed');
   const ben = { ...owner, cookie: otherCookie };
 
   const seen = await read(ben);
-  expect(seen).toMatchObject({ mode: 'practice', trainerConfiguration: defaultTrainerConfiguration, view: { state: { status: 'completed-hand', participants: [{ participantId: owner.human, seat: 1 }, { participantId: owner.bot, seat: 2 }] }, history: [] } });
+  // Joining after the Hand, Ben observes none of it.
+  expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [] } });
+  expect(seen.view.state.participants).toEqual(expect.arrayContaining([{ participantId: owner.human, seat: 1, stack: 990, sittingOut: false }, { participantId: owner.bot, seat: 2, stack: 1010, sittingOut: false }]));
   expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
   for (const cookie of [leftCookie, removedCookie]) {
     expect((await get('/api/table-sessions/' + owner.id, cookie)).status).toBe(404);
     expect(await (await get('/api/table-sessions', cookie)).json()).toEqual({ tables: [] });
   }
-  expect(await (await get('/api/table-sessions', otherCookie)).json()).toEqual({ tables: [{ tableSessionId: owner.id, mode: 'practice' }] });
-  expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual({ tableSessionId: owner.id, mode: 'practice' });
+  expect(await (await get('/api/table-sessions', otherCookie)).json()).toEqual({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
+  expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual({ tableSessionId: owner.id, mode: 'online' });
 
   // Trainer configuration belongs to each Participant. Another Guest's identical retry never receives its outcome.
   const ownerStudy = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true };
