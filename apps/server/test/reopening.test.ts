@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { nameGuest } from './fixtures/guest.js';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
@@ -34,7 +35,7 @@ beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + 
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 type Table = { id: string; cookie: string; ids: string[]; revision: number };
 async function table(count: number, configuration: Partial<ObservableGameConfiguration> = {}, seed = '0'.repeat(64)): Promise<Table> {
-  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   randomness.seed = seed;
   let response: Response;
   try { response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration: { seatCount: 9, minimumBuyIn: 1, defaultBuyIn: 1000, maximumBuyIn: 2000, ...configuration }, bots: Array.from({ length: count - 1 }, (_, i) => ({ name: 'Bot ' + (i + 1), playingStrategy: baselinePlayingStrategy })) }) }); }

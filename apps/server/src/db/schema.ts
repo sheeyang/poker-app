@@ -4,6 +4,7 @@ import type { PersistedTableSession } from '../aggregate.js';
 export const localUsers = pgTable('local_users', {
   id: uuid('id').primaryKey(),
   tokenHash: text('token_hash').notNull().unique(),
+  displayName: text('display_name'),
 });
 export const tableSessions = pgTable('table_sessions', {
   id: uuid('id').primaryKey(),

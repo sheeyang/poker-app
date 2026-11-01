@@ -13,6 +13,7 @@ import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
+import { validateDisplayName } from './validation.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
@@ -131,7 +132,21 @@ export async function createServer(options: ServerOptions) {
       else unsubscribe = subscription;
     }).catch(() => socket.close(1011, 'The committed view could not be loaded.'));
   });
-  app.get('/api/identity', async (request, reply) => { await ensureIdentity(request, reply); return { ok: true }; });
+  app.get('/api/identity', async (request, reply) => {
+    const userId = await ensureIdentity(request, reply);
+    const displayName = (await db.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
+    return displayName ? { ok: true, displayName } : { ok: true };
+  });
+  app.put<{ Body: { displayName?: unknown } }>('/api/display-name', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    const body = request.body as unknown;
+    const checked = validateDisplayName(body && typeof body === 'object' && !Array.isArray(body) ? (body as { displayName?: unknown }).displayName : undefined);
+    if (!checked.ok) return reply.code(400).send(checked);
+    try { await db.update(localUsers).set({ displayName: checked.displayName }).where(eq(localUsers.id, userId)); }
+    catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The display name could not be saved. Try again.' } }); }
+    return { ok: true, displayName: checked.displayName };
+  });
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
     const ownerUserId = await ensureIdentity(request, reply);
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)

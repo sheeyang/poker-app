@@ -22,6 +22,14 @@ ownership after reload or server restart. Browser storage remembers the selected
 Table Session but does not establish permission. Clearing the cookie creates a
 different local user.
 
+`GET /api/identity` also returns the Guest's `displayName` once set. `PUT
+/api/display-name` with `{ displayName }` sets or edits it. Names are trimmed and
+must be 1-20 characters of letters, digits, spaces and basic punctuation
+(`. , ' - _ ! ? ( )`), with no control characters; otherwise the server answers
+400 `invalid-display-name`. Table creation answers 400 `display-name-required`
+until a name exists, and the human Participant takes the Guest's name at creation
+and keeps it when the Guest later edits their name.
+
 All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |

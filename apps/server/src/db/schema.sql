@@ -2,6 +2,12 @@ CREATE TABLE IF NOT EXISTS local_users (
   id uuid PRIMARY KEY,
   token_hash text NOT NULL UNIQUE
 );
+-- Check first: even a no-op ALTER takes an exclusive lock that would block startup behind in-flight transactions.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'local_users' AND column_name = 'display_name') THEN
+    ALTER TABLE local_users ADD COLUMN display_name text;
+  END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS table_sessions (
   id uuid PRIMARY KEY,
   owner_user_id uuid NOT NULL REFERENCES local_users(id),

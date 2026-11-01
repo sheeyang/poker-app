@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
@@ -27,7 +28,7 @@ const humanAct = (t: Table, revision: number, action: ConcreteAction, requestId:
 const botAct = (t: Table, revision: number, action: ConcreteAction, requestId: string = randomUUID()) => controllers.submitAction(t.id, { requestId, expectedPokerRevision: revision, participantId: t.bot, action });
 async function table(): Promise<Table> {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const created = await (await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) })).json();
   const t = { id: created.tableSessionId, cookie, human: created.bindings[0].participantId, bot: created.bindings[1].participantId };
   expect((await submit(t, 'seat-participant', { requestId: 'seat-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(200);
