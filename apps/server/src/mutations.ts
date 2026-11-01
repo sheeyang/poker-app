@@ -580,7 +580,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
       if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
       const view = session.game.forParticipant(participantId).getView();
-      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' || hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
       const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId)!);
       return immutableData({ participantId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: binding.trainerConfiguration.referenceStrategy, decisionIds, members });
     });

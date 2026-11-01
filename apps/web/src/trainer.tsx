@@ -11,15 +11,15 @@ import { TableSettings } from './settings.js';
 import { JoinLinkDialog } from './join-table.js';
 import { useDecisionAnalysis } from './analysis.js';
 import { useHandSummary, useTableSessionSummary } from './summaries.js';
-import { AnalysisPanel, AnalysisPanelSkeleton, FinishSession } from './analysis-panel.js';
+import { AnalysisPanel, AnalysisPanelSkeleton } from './analysis-panel.js';
 import { TableSkeleton } from './loading-skeleton.js';
 import { HandReview } from './hand-review.js';
 import { actionLabel, chips, modeLabel } from './table-model.js';
 
 export function Trainer() {
-  const selected = useSession(s => s.selectedId), select = useSession(s => s.select);
+  const selected = useSession(s => s.selectedId);
   const analysisOpen = useSession(s => s.analysisOpen), animations = useSession(s => s.animations);
-  const [browse, setBrowse] = useState(false), [settings, setSettings] = useState(false), [finish, setFinish] = useState(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
+  const [browse, setBrowse] = useState(false), [settings, setSettings] = useState(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity });
   const table = useQuery({ queryKey: ['table-session', selected], queryFn: ({ signal }) => api.readSession(selected!, signal), enabled: identity.isSuccess && !!selected, structuralSharing: retainNewestTable });
   const analysis = useDecisionAnalysis(table.data), summary = useHandSummary(table.data), sessionSummary = useTableSessionSummary(table.data);
@@ -32,7 +32,7 @@ export function Trainer() {
   const setup = usePracticeSetup(table.data, command);
   const preparing = setup?.tableId === selected && !!setup;
   const lastSelected = useRef(selected);
-  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setFinish(false); setJoinLinkOpen(false); useSession.setState({ analysisOpen: false }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
+  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setJoinLinkOpen(false); useSession.setState({ analysisOpen: false }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
   useEffect(() => { if (browse) window.scrollTo({ top: 0 }); }, [browse]);
   const runtime = live.runtimeStatus ?? table.data?.runtimeStatus;
   const current = table.data && runtime ? { ...table.data, runtimeStatus: runtime } : table.data;
@@ -71,15 +71,14 @@ export function Trainer() {
             {current.view.state.status === 'completed-hand' && <HandReview table={current} />}
             <div id="play-controls" className="play-controls" tabIndex={-1}><ActionTray table={current} command={command} openSettings={() => setSettings(true)} review={review} /></div>
           </>}
-          <div className="below-table"><details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === humanId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details><button className="text-button" disabled={current.view.state.status === 'active-hand' || command.busy || preparing} onClick={() => { sessionSummary.request(); setFinish(true); }}><Icon name="exit" size={16} />Session summary</button></div>
+          <div className="below-table"><details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === humanId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details></div>
           <footer className="table-footer"><span>All amounts in chips</span></footer>
         </>}
       </div>
-      {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} command={command} close={closeAnalysis} />}
+      {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} />}
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
     </main>}
     {joinLinkOpen && current?.joinToken && <JoinLinkDialog token={current.joinToken} close={() => setJoinLinkOpen(false)} />}
     {settings && current && <TableSettings table={current} command={command} close={() => setSettings(false)} />}
-    {finish && current && <FinishSession summary={sessionSummary} close={() => setFinish(false)} leave={() => { setFinish(false); select(null); }} />}
   </div>;
 }
