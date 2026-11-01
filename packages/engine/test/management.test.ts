@@ -10,18 +10,20 @@ function game(settings = configuration) {
   return cashGame;
 }
 
-test('leaving cashes out winnings without changing completed Hand facts, and reseating retains Participant identity', () => {
+test('Stand Up cashes out winnings without changing completed Hand facts, and reseating retains Participant identity', () => {
   const cashGame = game(); cashGame.startHand(); cashGame.act('alice', { type: 'fold' });
   const completed = cashGame.getHand('hand-1');
   const observed = cashGame.forParticipant('bob').getView();
-  expect(cashGame.leaveParticipant('bob')).toEqual({ ok: true, events: [{ type: 'participant-left', participantId: 'bob', seat: 4, cashOut: 1010 }] });
+  expect(cashGame.standUpParticipant('bob')).toEqual({ ok: true, events: [{ type: 'participant-stood-up', participantId: 'bob', seat: 4, cashOut: 1010 }] });
   expect(cashGame.forParticipant('bob').getView().state.participants[1]).toMatchObject({ participantId: 'bob', seat: null, stack: 0 });
   expect(cashGame.seatParticipant('bob', 2, 100).ok).toBe(true);
   expect(cashGame.forParticipant('bob').getView().state.participants).toHaveLength(2);
   expect(cashGame.getHand('hand-1')).toEqual(completed);
   expect(observed.state.participants[1]).toMatchObject({ seat: 4, stack: 1010 });
-  expect(cashGame.toRecord().commands.slice(-2)).toEqual([{ type: 'leave-participant', participantId: 'bob' }, { type: 'seat-participant', participantId: 'bob', seat: 2, buyIn: 100 }]);
+  expect(cashGame.toRecord()).toMatchObject({ schemaVersion: 2 });
+  expect(cashGame.toRecord().commands.slice(-2)).toEqual([{ type: 'stand-up-participant', participantId: 'bob' }, { type: 'seat-participant', participantId: 'bob', seat: 2, buyIn: 100 }]);
   expect(cashGame.forParticipant('alice').getView().state.participants.map(p => p.stack)).toEqual([990, 100]);
+  expect(cashGame.forParticipant('bob').projectEvents([{ type: 'participant-stood-up', participantId: 'bob', seat: 4, cashOut: 1010 }])).toEqual([{ type: 'participant-stood-up', participantId: 'bob', seat: 4, cashOut: 1010 }]);
 });
 
 test('movement respects the seat-change policy and sitting out changes next-Hand eligibility without removing identity', () => {
@@ -53,7 +55,7 @@ test('topUpTo adds only the amount needed to reach the target and respects exter
   const short = game({ ...configuration, minimumBuyIn: 1000 }); short.startHand(); short.act('alice', { type: 'fold' });
   expect(short.topUpTo('alice', 995).ok).toBe(true);
   expect(short.startHand().ok).toBe(true);
-  const zero = game({ ...configuration, minimumBuyIn: 0 }); zero.leaveParticipant('alice'); zero.seatParticipant('alice', 2, 0);
+  const zero = game({ ...configuration, minimumBuyIn: 0 }); zero.standUpParticipant('alice'); zero.seatParticipant('alice', 2, 0);
   expect(zero.startHand()).toMatchObject({ ok: false, rejection: { code: 'insufficient-participants' } });
   expect(zero.topUpTo('alice', 100).ok).toBe(true);
   expect(zero.startHand().ok).toBe(true);
@@ -62,7 +64,7 @@ test('topUpTo adds only the amount needed to reach the target and respects exter
   expect(huge.topUpTo('alice', Number.MAX_SAFE_INTEGER)).toMatchObject({ ok: false, rejection: { code: 'chip-capacity-exceeded' } });
   expect(huge.toRecord()).toEqual(safe);
   const winnings = game({ ...configuration, maximumBuyIn: 1000 }); winnings.startHand(); winnings.act('alice', { type: 'fold' });
-  expect(winnings.leaveParticipant('bob')).toMatchObject({ ok: true, events: [{ cashOut: 1010 }] });
+  expect(winnings.standUpParticipant('bob')).toMatchObject({ ok: true, events: [{ cashOut: 1010 }] });
 });
 
 test('button rotation starts clockwise from the frozen previous button, skips ineligible seats, and accepts an explicit eligible override', () => {
@@ -70,7 +72,7 @@ test('button rotation starts clockwise from the frozen previous button, skips in
   cashGame.seatParticipant('carol', 3); cashGame.seatParticipant('zero', 2, 0); cashGame.setSittingOut('carol', true);
   cashGame.startHand(); cashGame.act('alice', { type: 'fold' });
   const completed = cashGame.getHand('hand-1');
-  cashGame.leaveParticipant('alice'); cashGame.seatParticipant('dave', 5);
+  cashGame.standUpParticipant('alice'); cashGame.seatParticipant('dave', 5);
   expect(cashGame.startHand().ok).toBe(true);
   expect(cashGame.getHand('hand-2')).toMatchObject({ buttonSeat: 4, smallBlindParticipantId: 'bob' });
   cashGame.act('bob', { type: 'fold' });
@@ -93,7 +95,7 @@ test('Participant observations follow identity across movement and rejoining, ex
   expect(old.map(h => h.handId)).toEqual(['hand-1']);
   expect(cashGame.forParticipant('observer').getView().history.map(h => h.handId)).toEqual(['hand-1']);
   expect(cashGame.forParticipant('stranger').getView().history).toEqual([]);
-  cashGame.moveParticipant('alice', 2); cashGame.leaveParticipant('alice');
+  cashGame.moveParticipant('alice', 2); cashGame.standUpParticipant('alice'); cashGame.leaveTable('alice');
   cashGame.seatParticipant('newcomer', 1);
   cashGame.startHand(); cashGame.act('bob', { type: 'fold' });
   expect(cashGame.forParticipant('alice').getView().history).toEqual(old);
@@ -110,9 +112,10 @@ test('Participant observations follow identity across movement and rejoining, ex
 test('presentation events preserve the originating Hand’s observer membership after absence and later rejoining', () => {
   const cashGame = game({ ...configuration, ante: 10, minimumBuyIn: 10, defaultBuyIn: 10 });
   cashGame.seatParticipant('observer', 3, 10);
-  const left = cashGame.leaveParticipant('observer');
-  if (!left.ok) throw new Error('Expected accepted leave.');
-  expect(cashGame.forParticipant('observer').projectEvents(left.events)).toEqual([{ type: 'participant-left', participantId: 'observer', seat: 3, cashOut: 10 }]);
+  const stood = cashGame.standUpParticipant('observer');
+  const left = cashGame.leaveTable('observer');
+  if (!stood.ok || !left.ok) throw new Error('Expected accepted Stand Up and Leave Table.');
+  expect(cashGame.forParticipant('observer').projectEvents([...stood.events, ...left.events])).toEqual([{ type: 'participant-stood-up', participantId: 'observer', seat: 3, cashOut: 10 }, { type: 'participant-left', participantId: 'observer' }]);
   const missed = cashGame.startHand();
   if (!missed.ok) throw new Error('Expected forced all-in Hand.');
   expect(cashGame.getHand('hand-1')?.completed).toBe(true);
@@ -122,7 +125,7 @@ test('presentation events preserve the originating Hand’s observer membership 
   expect(cashGame.forParticipant('alice').projectEvents(copiedEvents).filter(event => event.type === 'hole-cards-revealed')).toHaveLength(2);
   cashGame.seatParticipant('observer', 3, 10);
   cashGame.setSittingOut('observer', true);
-  for (const participant of ['alice', 'bob']) { cashGame.leaveParticipant(participant); cashGame.seatParticipant(participant, participant === 'alice' ? 1 : 4, 10); }
+  for (const participant of ['alice', 'bob']) { cashGame.standUpParticipant(participant); cashGame.seatParticipant(participant, participant === 'alice' ? 1 : 4, 10); }
   const observed = cashGame.startHand();
   if (!observed.ok) throw new Error('Expected next all-in Hand.');
   expect(cashGame.forParticipant('observer').projectEvents(observed.events).filter(event => event.type === 'board-dealt')).toHaveLength(3);
@@ -134,18 +137,18 @@ test('presentation events preserve the originating Hand’s observer membership 
 test('every between-Hand command rejects active changes atomically and complete command replay and forks stay independent', () => {
   const cashGame = game(); cashGame.startHand();
   const before = cashGame.toRecord(); const view = cashGame.forParticipant('alice').getView(); const facts = cashGame.getHand('hand-1');
-  for (const submit of [() => cashGame.leaveParticipant('alice'), () => cashGame.moveParticipant('alice', 2), () => cashGame.setSittingOut('alice', true), () => cashGame.topUpTo('alice', 1200), () => cashGame.setButton(4)]) {
+  for (const submit of [() => cashGame.standUpParticipant('alice'), () => cashGame.moveParticipant('alice', 2), () => cashGame.setSittingOut('alice', true), () => cashGame.topUpTo('alice', 1200), () => cashGame.setButton(4)]) {
     expect(submit()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
     expect(cashGame.toRecord()).toEqual(before); expect(cashGame.forParticipant('alice').getView()).toEqual(view); expect(cashGame.getHand('hand-1')).toEqual(facts);
   }
   cashGame.act('alice', { type: 'fold' });
   const fork = cashGame.fork();
-  cashGame.moveParticipant('alice', 2); cashGame.setSittingOut('alice', true); cashGame.topUpTo('alice', 1500); cashGame.setButton(4); cashGame.leaveParticipant('bob'); cashGame.seatParticipant('bob', 6, 200);
+  cashGame.moveParticipant('alice', 2); cashGame.setSittingOut('alice', true); cashGame.topUpTo('alice', 1500); cashGame.setButton(4); cashGame.standUpParticipant('bob'); cashGame.seatParticipant('bob', 6, 200);
   expect(fork.forParticipant('alice').getView().state.participants.map(p => ({ seat: p.seat, stack: p.stack, sittingOut: p.sittingOut }))).toEqual([{ seat: 1, stack: 990, sittingOut: false }, { seat: 4, stack: 1010, sittingOut: false }]);
   const replayed = CashGame.fromRecord(JSON.parse(JSON.stringify(cashGame.toRecord())));
   if (!replayed.ok) throw new Error('Expected complete accepted-command replay.');
   expect(replayed.game.forParticipant('alice').getView()).toEqual(cashGame.forParticipant('alice').getView());
   expect(replayed.game.getHand('hand-1')).toEqual(cashGame.getHand('hand-1'));
-  for (const tail of [{ type: 'top-up-to', participantId: 'alice', targetStack: 1000 }, { type: 'move-participant', participantId: 'alice', seat: 6 }, { type: 'set-sitting-out', participantId: 'alice', sittingOut: 'false' }, { type: 'leave-participant', participantId: 'bob', requestId: 'server' }, { type: 'set-button', seat: 6, expectedPokerRevision: 0 }])
+  for (const tail of [{ type: 'top-up-to', participantId: 'alice', targetStack: 1000 }, { type: 'move-participant', participantId: 'alice', seat: 6 }, { type: 'set-sitting-out', participantId: 'alice', sittingOut: 'false' }, { type: 'stand-up-participant', participantId: 'bob', requestId: 'server' }, { type: 'set-button', seat: 6, expectedPokerRevision: 0 }])
     expect(CashGame.fromRecord({ ...cashGame.toRecord(), commands: [...cashGame.toRecord().commands, tail] })).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
 });

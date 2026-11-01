@@ -70,7 +70,7 @@ test('owner management does not authorize browser actions as a Bot, and wrong hu
   expect((await submit(t, 'act', botAction)).status).toBe(403);
   expect(await (await submit(t, 'act', botAction)).json()).toMatchObject({ ok: false, rejection: { code: 'actor-not-authorized' } });
   expect(await (await submit(t, 'start-hand', { requestId: 'already-active', expectedPokerRevision: 3 })).json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
-  expect(await (await submit(t, 'seat-participant', { requestId: 'active-setup', expectedPokerRevision: 3, participantId: t.human, seat: 2 })).json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
+  expect(await (await submit(t, 'seat-participant', { requestId: 'active-setup', expectedPokerRevision: 3, participantId: t.human, seat: 2 })).json()).toMatchObject({ ok: false, rejection: { code: 'participant-already-seated' } });
   expect(await (await submit(t, 'act', { requestId: 'illegal-check', expectedPokerRevision: 3, participantId: t.human, action: { type: 'check' } })).json()).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
   expect(await read(t)).toEqual(decision);
   await submit(t, 'act', { requestId: 'fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } });

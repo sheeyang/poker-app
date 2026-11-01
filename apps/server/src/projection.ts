@@ -53,8 +53,9 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
 export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, events: readonly CashGameEvent[] = [], adminMode = true): ObservableTableUpdate {
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
+      case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
       case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
-      case 'participant-left': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
+      case 'participant-stood-up': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
       case 'participant-moved': return { type: event.type, participantId: event.participantId, fromSeat: event.fromSeat, seat: event.seat };
       case 'sitting-out-changed': return { type: event.type, participantId: event.participantId, sittingOut: event.sittingOut };
       case 'participant-topped-up': return { type: event.type, participantId: event.participantId, targetStack: event.targetStack, amount: event.amount };

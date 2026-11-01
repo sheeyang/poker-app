@@ -12,8 +12,10 @@ export type { ObservableGameConfiguration, ObservableGameView, ParticipantId } f
 export interface HiddenGameConfiguration { readonly seed: string }
 export type GameConfiguration = ObservableGameConfiguration & HiddenGameConfiguration;
 export type CashGameCommand =
+  | { readonly type: 'join-table'; readonly participantId: ParticipantId }
+  | { readonly type: 'leave-table'; readonly participantId: ParticipantId }
   | { readonly type: 'seat-participant'; readonly participantId: ParticipantId; readonly seat: number; readonly buyIn: number }
-  | { readonly type: 'leave-participant'; readonly participantId: ParticipantId }
+  | { readonly type: 'stand-up-participant'; readonly participantId: ParticipantId }
   | { readonly type: 'move-participant'; readonly participantId: ParticipantId; readonly seat: number }
   | { readonly type: 'set-sitting-out'; readonly participantId: ParticipantId; readonly sittingOut: boolean }
   | { readonly type: 'top-up-to'; readonly participantId: ParticipantId; readonly targetStack: number }
@@ -44,7 +46,7 @@ export interface AuthoritativeHandFacts {
   readonly payouts: readonly { readonly participantId: ParticipantId; readonly amount: number }[];
 }
 export interface TableSessionRecord {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly engineVersion: 'v1';
   readonly configuration: GameConfiguration;
   readonly commands: readonly CashGameCommand[];
@@ -103,19 +105,42 @@ function plainCommandArray(value: unknown): value is readonly CashGameCommand[] 
     return Number.isInteger(index) && index >= 0 && index < value.length && String(index) === key && descriptor.enumerable && 'value' in descriptor;
   });
 }
+const legacyCommandTypes: ReadonlySet<unknown> = new Set(['seat-participant', 'start-hand', 'act', 'leave-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button']);
+/**
+ * Version-1 records predate Stand Up and table membership. Their `leave-participant`
+ * becomes `stand-up-participant` one-for-one, so command indexes are unchanged, and
+ * each Participant counts as joined from their first seating.
+ */
+function upgradeLegacyCommands(commands: readonly CashGameCommand[]): readonly CashGameCommand[] | undefined {
+  const upgraded: CashGameCommand[] = [];
+  for (const command of commands as readonly unknown[]) {
+    const type = command && typeof command === 'object' ? (command as { readonly type?: unknown }).type : undefined;
+    if (!legacyCommandTypes.has(type)) return undefined;
+    if (type !== 'leave-participant') { upgraded.push(command as CashGameCommand); continue; }
+    if (!plainFields(command, ['type', 'participantId'])) return undefined;
+    upgraded.push({ type: 'stand-up-participant', participantId: (command as { readonly participantId: ParticipantId }).participantId });
+  }
+  return upgraded;
+}
 /** Shared replay dispatch uses the same validated intentions as normal play. */
 function replayCommand(game: CashGame, command: CashGameCommand): CashGameResult | undefined {
   if (!command || typeof command !== 'object' || Array.isArray(command)) return;
   switch (command.type) {
+    case 'join-table':
+      if (!plainFields(command, ['type', 'participantId'])) return;
+      return game.joinTable(command.participantId);
+    case 'leave-table':
+      if (!plainFields(command, ['type', 'participantId'])) return;
+      return game.leaveTable(command.participantId);
     case 'seat-participant':
       if (!plainFields(command, ['type', 'participantId', 'seat', 'buyIn']) || !Number.isSafeInteger(command.buyIn)) return;
       return game.seatParticipant(command.participantId, command.seat, command.buyIn);
     case 'start-hand':
       if (!plainFields(command, ['type'])) return;
       return game.startHand();
-    case 'leave-participant':
+    case 'stand-up-participant':
       if (!plainFields(command, ['type', 'participantId'])) return;
-      return game.leaveParticipant(command.participantId);
+      return game.standUpParticipant(command.participantId);
     case 'move-participant':
       if (!plainFields(command, ['type', 'participantId', 'seat'])) return;
       return game.moveParticipant(command.participantId, command.seat);
@@ -142,6 +167,7 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
     if (!p.participantId || identities.has(p.participantId)) throw new Error('Participant identity invariant failed.');
     identities.add(p.participantId);
     if (p.seat !== null) {
+      if (!p.joined) throw new Error('Membership invariant failed.');
       if (!Number.isInteger(p.seat) || p.seat < 1 || p.seat > configuration.seatCount || seats.has(p.seat)) throw new Error('Seat invariant failed.');
       seats.add(p.seat);
     }
@@ -149,7 +175,10 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
     bankroll += BigInt(p.stack);
   }
   const current = state.hands.at(-1);
-  if (current && !current.completed) for (const p of current.participants) bankroll += BigInt(p.contribution);
+  if (current && !current.completed) {
+    for (const p of current.participants) bankroll += BigInt(p.contribution);
+    if (current.observerParticipantIds.some(id => !state.participants.some(p => p.participantId === id && p.joined))) throw new Error('Observer membership invariant failed.');
+  }
   for (const hand of state.hands) {
     if (hand.deck.length !== 52 || new Set(hand.deck).size !== 52) throw new Error('Deck uniqueness invariant failed.');
     const locations = [...hand.participants.flatMap(p => p.holeCards), ...hand.burns, ...hand.board];
@@ -179,12 +208,14 @@ export class CashGame {
     const invalid = (): CashGameConstructionResult => ({ ok: false, rejection: { code: 'invalid-record', message: 'The complete record must use supported versions and valid accepted commands.' } });
     try {
       if (!plainFields(record, ['schemaVersion', 'engineVersion', 'configuration', 'commands'])) return invalid();
-      const r = record as TableSessionRecord;
-      if (r.schemaVersion !== 1 || r.engineVersion !== 'v1' || !plainCommandArray(r.commands)) return invalid();
+      const r = record as Omit<TableSessionRecord, 'schemaVersion'> & { readonly schemaVersion: unknown };
+      if ((r.schemaVersion !== 1 && r.schemaVersion !== 2) || r.engineVersion !== 'v1' || !plainCommandArray(r.commands)) return invalid();
       if (!plainFields(r.configuration, ['seatCount', 'smallBlind', 'bigBlind', 'ante', 'minimumBuyIn', 'defaultBuyIn', 'maximumBuyIn', 'allowSeatChanges', 'seed'])) return invalid();
+      const commands = r.schemaVersion === 1 ? upgradeLegacyCommands(r.commands) : r.commands;
+      if (!commands) return invalid();
       const result = CashGame.create(r.configuration);
       if (!result.ok) return invalid();
-      for (const command of r.commands) {
+      for (const command of commands) {
         if (!replayCommand(result.game, command)?.ok) return invalid();
       }
       validateState(result.game.#state, result.game.#configuration);
@@ -199,7 +230,7 @@ export class CashGame {
     return fork;
   }
   toRecord(): TableSessionRecord {
-    return immutable({ schemaVersion: 1, engineVersion: 'v1', configuration: structuredClone(this.#configuration), commands: structuredClone(this.#state.commands) });
+    return immutable({ schemaVersion: 2, engineVersion: 'v1', configuration: structuredClone(this.#configuration), commands: structuredClone(this.#state.commands) });
   }
   /** Trusted application metadata; Participant histories remain separately scoped. */
   getCompletedHands(): readonly { readonly handId: string; readonly sequence: number }[] {
@@ -227,7 +258,7 @@ export class CashGame {
       const bigBlind = eligible.length === 2 ? order[0]! : order[1]!;
       const sequence = draft.hands.length + 1;
       const hand: HandState = { handId: 'hand-' + sequence, sequence, completed: false, buttonSeat: button.seat!, smallBlindParticipantId: smallBlind.participantId, bigBlindParticipantId: bigBlind.participantId,
-        observerParticipantIds: draft.participants.filter(p => p.seat !== null).map(p => p.participantId),
+        observerParticipantIds: draft.participants.filter(p => p.joined).map(p => p.participantId),
         participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, anteContribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
         deck: shuffledDeck(c.seed, sequence), drawnCardCount: 0, burns: [], board: [], street: 'preflop', actorId: null, decisionSequence: 0, decisionId: null, price: c.bigBlind, lastFullIncrement: c.bigBlind, pots: [], returns: [], payouts: [], actions: [] };
       draft.hands.push(hand); draft.status = 'active-hand'; draft.buttonSeat = button.seat!; draft.nextButtonSeat = null;
@@ -321,9 +352,12 @@ export class CashGame {
     events.push({ type: 'board-dealt', street: hand.street, cards });
     this.#continueBetting(draft, hand, hand.buttonSeat, events);
   }
+  /**
+   * Seating is accepted during a Hand. Hand participants stay frozen, so a newcomer is dealt in
+   * from the next Hand without a missed-blind obligation.
+   */
   seatParticipant(participantId: ParticipantId, seat: number, buyIn = this.#configuration.defaultBuyIn): CashGameResult {
     const reject = (code: string, message: string, field?: string): CashGameResult => ({ ok: false, rejection: { code, message, ...(field ? { field } : {}) } });
-    if (this.#state.status === 'active-hand') return reject('active-hand', 'Seat Participants between Hands.');
     if (typeof participantId !== 'string' || participantId.trim().length === 0) return reject('invalid-participant', 'Supply a nonempty ParticipantId.', 'participantId');
     if (!Number.isInteger(seat) || seat < 1 || seat > this.#configuration.seatCount) return reject('invalid-seat', 'Choose a valid seat in this table.', 'seat');
     if (this.#state.participants.some(p => p.participantId === participantId && p.seat !== null)) return reject('participant-already-seated', 'This Participant is already seated.');
@@ -332,12 +366,43 @@ export class CashGame {
     const bankroll = this.#state.participants.reduce((total, p) => total + BigInt(p.stack), 0n);
     if (bankroll + BigInt(buyIn) > BigInt(Number.MAX_SAFE_INTEGER)) return reject('chip-capacity-exceeded', 'This buy-in would exceed the table chip capacity.', 'buyIn');
     return this.#mutate({ type: 'seat-participant', participantId, seat, buyIn }, draft => {
-      const existing = draft.participants.find(p => p.participantId === participantId);
-      if (existing) { existing.seat = seat; existing.stack = buyIn; existing.sittingOut = false; }
-      else draft.participants.push({ participantId, seat, stack: buyIn, sittingOut: false });
+      // Seating implicitly joins a Participant who is not at the table.
+      this.#join(draft, participantId);
+      const participant = draft.participants.find(p => p.participantId === participantId)!;
+      participant.seat = seat; participant.stack = buyIn; participant.sittingOut = false;
       draft.bankroll += buyIn;
       return [{ type: 'participant-seated', participantId, seat, buyIn }];
     });
+  }
+  /** Join the table unseated. A joined Participant observes public facts from this point. */
+  joinTable(participantId: ParticipantId): CashGameResult {
+    if (typeof participantId !== 'string' || participantId.trim().length === 0) return { ok: false, rejection: { code: 'invalid-participant', message: 'Supply a nonempty ParticipantId.', field: 'participantId' } };
+    if (this.#state.participants.some(p => p.participantId === participantId && p.joined)) return { ok: false, rejection: { code: 'participant-already-joined', message: 'This Participant has already joined the table.' } };
+    return this.#mutate({ type: 'join-table', participantId }, draft => {
+      this.#join(draft, participantId);
+      return [{ type: 'participant-joined', participantId }];
+    });
+  }
+  /** Leave Table: stop observing until rejoining with the same ParticipantId. Requires being unseated. */
+  leaveTable(participantId: ParticipantId): CashGameResult {
+    const participant = this.#state.participants.find(p => p.participantId === participantId);
+    if (!participant?.joined) return { ok: false, rejection: { code: 'participant-not-joined', message: 'Choose a Participant who has joined the table.', field: 'participantId' } };
+    if (participant.seat !== null) return { ok: false, rejection: { code: 'participant-seated', message: 'Stand Up before leaving the table.', field: 'participantId' } };
+    return this.#mutate({ type: 'leave-table', participantId }, draft => {
+      draft.participants.find(p => p.participantId === participantId)!.joined = false;
+      const hand = draft.hands.at(-1);
+      if (hand && !hand.completed) hand.observerParticipantIds = hand.observerParticipantIds.filter(id => id !== participantId);
+      return [{ type: 'participant-left', participantId }];
+    });
+  }
+  #join(draft: CashGameState, participantId: ParticipantId): void {
+    const existing = draft.participants.find(p => p.participantId === participantId);
+    if (existing?.joined) return;
+    if (existing) existing.joined = true;
+    else draft.participants.push({ participantId, joined: true, seat: null, stack: 0, sittingOut: false });
+    // A Participant joining during a Hand observes the rest of it, including its result.
+    const hand = draft.hands.at(-1);
+    if (hand && !hand.completed) hand.observerParticipantIds.push(participantId);
   }
   setButton(seat: number): CashGameResult {
     if (this.#state.status === 'active-hand') return { ok: false, rejection: { code: 'active-hand', message: 'Choose the next button between Hands.' } };
@@ -385,16 +450,17 @@ export class CashGame {
       return [{ type: 'participant-topped-up', participantId, targetStack, amount }];
     });
   }
-  leaveParticipant(participantId: ParticipantId): CashGameResult {
+  /** Stand Up: leave the Seat and cash out while remaining at the table. */
+  standUpParticipant(participantId: ParticipantId): CashGameResult {
     const rejected = this.#managementRejection(participantId);
     if (rejected) return rejected;
-    return this.#mutate({ type: 'leave-participant', participantId }, draft => {
+    return this.#mutate({ type: 'stand-up-participant', participantId }, draft => {
       const participant = draft.participants.find(p => p.participantId === participantId)!;
       const seat = participant.seat!;
       const cashOut = participant.stack;
       participant.seat = null; participant.stack = 0; participant.sittingOut = false;
       draft.bankroll -= cashOut;
-      return [{ type: 'participant-left', participantId, seat, cashOut }];
+      return [{ type: 'participant-stood-up', participantId, seat, cashOut }];
     });
   }
   #managementRejection(participantId: ParticipantId): CashGameResult | undefined {
@@ -409,7 +475,7 @@ export class CashGame {
     validateState(draft, this.#configuration);
     const authoritativeEvents: CashGameEvent[] = events.map(event => {
       switch (event.type) {
-        case 'participant-seated': case 'participant-left': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': return event;
+        case 'participant-joined': case 'participant-left': case 'participant-seated': case 'participant-stood-up': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': return event;
         default: return { ...event, handId: draft.hands.at(-1)!.handId };
       }
     });
@@ -418,10 +484,13 @@ export class CashGame {
     return result;
   }
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
-    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || this.#state.hands.find(hand => hand.handId === event.handId)?.observerParticipantIds.includes(participantId)).map(event => {
+    const observes = (handId: string) => this.#state.participants.some(p => p.participantId === participantId && p.joined)
+      && !!this.#state.hands.find(hand => hand.handId === handId)?.observerParticipantIds.includes(participantId);
+    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || observes(event.handId)).map(event => {
       switch (event.type) {
+        case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
         case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
-        case 'participant-left': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
+        case 'participant-stood-up': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
         case 'participant-moved': return { type: event.type, participantId: event.participantId, fromSeat: event.fromSeat, seat: event.seat };
         case 'sitting-out-changed': return { type: event.type, participantId: event.participantId, sittingOut: event.sittingOut };
         case 'participant-topped-up': return { type: event.type, participantId: event.participantId, targetStack: event.targetStack, amount: event.amount };
@@ -464,7 +533,8 @@ export class CashGame {
   #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[]): ObservableGameView {
     const c = this.#configuration;
     const current = this.#state.hands.at(-1);
-    const hand = current?.observerParticipantIds.includes(participantId) ? current : undefined;
+    const joined = this.#state.participants.some(p => p.participantId === participantId && p.joined);
+    const hand = joined && current?.observerParticipantIds.includes(participantId) ? current : undefined;
     return immutable({
       configuration: {
         seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,

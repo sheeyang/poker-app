@@ -86,6 +86,44 @@ test('restoration validates the entire accepted seating sequence and never retur
   ]) expect(CashGame.fromRecord({ ...record, commands: [...record.commands, tail] })).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
 });
 
+test('a Participant seated during a Hand is dealt in from the next Hand with unchanged button and blind selection and no missed blind', () => {
+  const midHand = game(); midHand.seatParticipant('alice', 1); midHand.seatParticipant('bob', 4); midHand.startHand();
+  const facts = midHand.getHand('hand-1');
+  expect(midHand.seatParticipant('carol', 2, 500)).toEqual({ ok: true, events: [{ type: 'participant-seated', participantId: 'carol', seat: 2, buyIn: 500 }] });
+  expect(midHand.getHand('hand-1')).toEqual(facts);
+  const newcomer = midHand.forParticipant('carol').getView();
+  expect(newcomer.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', actorId: 'alice', legalActions: [] });
+  expect(newcomer.state.participants.find(p => p.participantId === 'carol')).toEqual({ participantId: 'carol', seat: 2, stack: 500, sittingOut: false });
+  expect(newcomer.state.participants.some(p => p.holeCards)).toBe(false);
+  expect(midHand.forParticipant('alice').getView().state.participants.reduce((total, p) => total + p.stack + (p.contribution ?? 0), 0)).toBe(2500);
+  midHand.act('alice', { type: 'fold' });
+  expect(midHand.forParticipant('carol').getView().history).toMatchObject([{ handId: 'hand-1', description: 'Completed Hand 1', decisions: [{ action: { participantId: 'alice', action: { type: 'fold' } } }] }]);
+  const between = game(); between.seatParticipant('alice', 1); between.seatParticipant('bob', 4); between.startHand(); between.act('alice', { type: 'fold' }); between.seatParticipant('carol', 2, 500);
+  expect(midHand.startHand()).toEqual(between.startHand());
+  expect(midHand.getHand('hand-2')).toEqual(between.getHand('hand-2'));
+  expect(midHand.getHand('hand-2')).toMatchObject({ buttonSeat: 2, smallBlindParticipantId: 'bob', bigBlindParticipantId: 'alice' });
+  expect(midHand.getHand('hand-2')!.participants.map(p => [p.participantId, p.contribution])).toEqual([['alice', 20], ['bob', 10], ['carol', 0]]);
+  const restored = CashGame.fromRecord(JSON.parse(JSON.stringify(midHand.toRecord())));
+  if (!restored.ok) throw new Error('Expected mid-Hand seating to replay.');
+  for (const id of ['alice', 'bob', 'carol']) expect(restored.game.forParticipant(id).getView()).toEqual(midHand.forParticipant(id).getView());
+});
+
+test('during a Hand, seating stays validated and every other Participant change is still rejected atomically', () => {
+  const cashGame = game(); cashGame.seatParticipant('alice', 1); cashGame.seatParticipant('bob', 4); cashGame.startHand(); cashGame.seatParticipant('carol', 2, 500);
+  const before = cashGame.toRecord(); const view = cashGame.forParticipant('carol').getView(); const facts = cashGame.getHand('hand-1');
+  for (const [submit, code] of [
+    [() => cashGame.seatParticipant('dave', 4), 'seat-occupied'], [() => cashGame.seatParticipant('alice', 5), 'participant-already-seated'], [() => cashGame.seatParticipant('dave', 5, 99), 'invalid-buy-in'],
+    ...['alice', 'carol'].flatMap(id => [
+      [() => cashGame.moveParticipant(id, 6), 'active-hand'], [() => cashGame.setSittingOut(id, true), 'active-hand'],
+      [() => cashGame.topUpTo(id, 1500), 'active-hand'], [() => cashGame.standUpParticipant(id), 'active-hand'],
+    ] as const),
+    [() => cashGame.setButton(2), 'active-hand'],
+  ] as const) {
+    expect(submit()).toMatchObject({ ok: false, rejection: { code } });
+    expect(cashGame.toRecord()).toEqual(before); expect(cashGame.forParticipant('carol').getView()).toEqual(view); expect(cashGame.getHand('hand-1')).toEqual(facts);
+  }
+});
+
 test('an unexpected controlled defect after draft evaluation leaves seats and accepted history unchanged', () => {
   const cashGame = game();
   cashGame.seatParticipant('alice', 3);

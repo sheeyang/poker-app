@@ -173,7 +173,7 @@ test('committed management commands automatically synchronize their complete vie
       ['set-sitting-out', { participantId: t.bot, sittingOut: true }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: true }],
       ['set-sitting-out', { participantId: t.bot, sittingOut: false }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: false }],
       ['set-button', { seat: 1 }, { type: 'button-set', seat: 1 }],
-      ['leave-participant', { participantId: t.bot }, { type: 'participant-left', participantId: t.bot, seat: 2, cashOut: 1000 }],
+      ['stand-up-participant', { participantId: t.bot }, { type: 'participant-stood-up', participantId: t.bot, seat: 2, cashOut: 1000 }],
     ] as const;
     for (let index = 0; index < steps.length; index++) {
       const [kind, contents, event] = steps[index]!;

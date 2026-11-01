@@ -57,8 +57,10 @@ export interface ObservableCashGameState {
   readonly payouts?: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
 }
 export type ObservablePresentationEvent =
+  | { readonly type: 'participant-joined'; readonly participantId: ParticipantId }
+  | { readonly type: 'participant-left'; readonly participantId: ParticipantId }
   | { readonly type: 'participant-seated'; readonly participantId: ParticipantId; readonly seat: number; readonly buyIn: ChipAmount }
-  | { readonly type: 'participant-left'; readonly participantId: ParticipantId; readonly seat: number; readonly cashOut: ChipAmount }
+  | { readonly type: 'participant-stood-up'; readonly participantId: ParticipantId; readonly seat: number; readonly cashOut: ChipAmount }
   | { readonly type: 'participant-moved'; readonly participantId: ParticipantId; readonly fromSeat: number; readonly seat: number }
   | { readonly type: 'sitting-out-changed'; readonly participantId: ParticipantId; readonly sittingOut: boolean }
   | { readonly type: 'participant-topped-up'; readonly participantId: ParticipantId; readonly targetStack: ChipAmount; readonly amount: ChipAmount }
@@ -131,13 +133,14 @@ export interface SeatParticipantRequest extends PokerMutationMetadata {
   readonly buyIn?: ChipAmount;
 }
 export interface StartHandRequest extends PokerMutationMetadata {}
-export interface LeaveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
+/** Stand Up: leave the Seat and cash out while remaining at the table. */
+export interface StandUpParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
 export interface MoveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly seat: number }
 export interface SetSittingOutRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly sittingOut: boolean }
 export interface TopUpToRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly targetStack: ChipAmount }
 export interface SetButtonRequest extends PokerMutationMetadata { readonly seat: number }
-export type ParticipantManagementRequest = LeaveParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest;
-export type ParticipantManagementKind = 'leave-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
+export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest;
+export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
 export interface ActRequest extends PokerMutationMetadata {
   readonly participantId: ParticipantId;
   readonly action: ConcreteAction;
