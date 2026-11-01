@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
@@ -24,7 +25,7 @@ beforeAll(async () => {
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(bots = 1) {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const result = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: bots }, (_, i) => ({ name: 'Bot ' + i, playingStrategy: baselinePlayingStrategy })) }) });
   const created = await result.json();
   for (const binding of created.bindings.slice(1)) botParticipants.add(binding.participantId);

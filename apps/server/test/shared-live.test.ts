@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
@@ -17,7 +18,7 @@ beforeAll(async () => {
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
-async function identity() { return (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; }
+async function identity() { const cookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie); return cookie; }
 function connect(cookie: string) {
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie } });
   const messages: ServerLiveMessage[] = [];

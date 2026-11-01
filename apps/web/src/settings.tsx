@@ -5,11 +5,13 @@ import { StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { Dialog } from './dialog.js';
 import { CommandFeedback } from './controls.js';
+import { DisplayNameForm, useDisplayName } from './display-name.js';
 import { chips } from './table-model.js';
 import { useSession, type Command } from './session.js';
 
 export function TableSettings({ table, command, close }: { table: ObservableTableSession; command: Command; close: () => void }) {
   const [seatingAll, setSeatingAll] = useState(false);
+  const { displayName } = useDisplayName();
   const animations = useSession(s => s.animations), setAnimations = useSession(s => s.setAnimations);
   const active = table.view.state.status === 'active-hand';
   const disabled = active || command.busy || table.runtimeStatus?.phase === 'recovering';
@@ -36,6 +38,7 @@ export function TableSettings({ table, command, close }: { table: ObservableTabl
     <div className="player-settings">{table.bindings.map(binding => <PlayerSettings key={binding.participantId} table={table} binding={binding} command={command} disabled={disabled || seatingAll} />)}</div>
     <details className="settings-section"><summary>Next dealer button</summary><form className="inline-form" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); command.submit({ kind: 'manage', operation: 'set-button', tableId: table.tableSessionId, body: { ...metadata(), seat: Number(data.get('buttonSeat')) } }); }}><label>Seat<select name="buttonSeat" defaultValue={table.view.state.buttonSeat} disabled={disabled}>{table.view.state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).map(p => <option key={p.seat} value={p.seat!}>{p.seat} · {table.bindings.find(b => b.participantId === p.participantId)?.controller.kind === 'human' ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name}</option>)}</select></label><button disabled={disabled}>Set button</button></form></details>
     <section className="settings-section"><h3>Presentation</h3><label className="check-label"><input type="checkbox" checked={animations} onChange={e => setAnimations(e.target.checked)} />Card animations</label></section>
+    <details className="settings-section"><summary>Your name{displayName ? ` · ${displayName}` : ''}</summary><p className="muted">Applies to tables you create from now on, not this one.</p><DisplayNameForm current={displayName} /></details>
     <details className="settings-section"><summary>Session details</summary><label>Table Session ID<input readOnly value={table.tableSessionId} onFocus={e => e.target.select()} /></label><p className="muted">Your table is also available from Practice.</p></details>
     <button className="primary full-width" onClick={close}>Back to the table</button>
   </Dialog>;

@@ -1,6 +1,14 @@
 import { isSupportedStrategy } from '@poker/strategies';
 import { defaultConfiguration, type ApplicationRejection, type CreateTableSessionRequest } from '@poker/contracts';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+/** Trimmed, 1-20 characters: letters, digits, spaces and basic punctuation; no control characters. */
+export function validateDisplayName(value: unknown): { ok: true; displayName: string } | ApplicationRejection {
+  const name = typeof value === 'string' ? value.trim() : '';
+  const length = [...name].length;
+  if (typeof value !== 'string' || length < 1 || length > 20 || !/^[\p{L}\p{N} .,'’\-_!?()]+$/u.test(name))
+    return { ok: false, rejection: { code: 'invalid-display-name', field: 'displayName', message: 'Use 1 to 20 letters, digits, spaces or basic punctuation (. , \' - _ ! ? and parentheses).' } };
+  return { ok: true, displayName: name };
+}
 export function validateTrainerConfiguration(value: unknown, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   if (!object(value) || Object.keys(value).some(key => !['referenceStrategy', 'liveAnalysis'].includes(key)) || typeof value.liveAnalysis !== 'boolean')
     return { ok: false, rejection: { code: 'invalid-trainer-configuration', message: 'Supply a complete Reference Strategy and a boolean Live Analysis setting.' } };

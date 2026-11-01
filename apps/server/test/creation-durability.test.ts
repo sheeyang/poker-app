@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { createServer } from '../src/server.js';
@@ -25,7 +26,9 @@ afterAll(async () => {
 });
 async function newUser() {
   const identity = await fetch(base + '/api/identity');
-  return identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  await nameGuest(base, cookie);
+  return cookie;
 }
 function submit(cookie: string, requestId: string) {
   return fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId }) });
