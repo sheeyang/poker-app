@@ -25,8 +25,8 @@ const decision: ObservableCashGameState = {
 describe('decision situation', () => {
   it('shows complete running current-Hand means in the decision heading before its rows', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
-    const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
+    const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', handId: 'hand-1', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
     const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
     const render = (current = table, view: 'hand' | 'live' = 'hand', handSummary = summary) => renderToStaticMarkup(createElement(AnalysisPanel, { table: current, analysis: { ...analysis, view }, summary: handSummary, sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
     const html = render();
@@ -47,8 +47,8 @@ describe('decision situation', () => {
 
   it('retains the last complete Hand snapshot and its recorded reference while newer work is pending or failed', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 4, sessionRevision: 4, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: highestProbabilityPlayingStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
-    const complete = { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', decisionCount: 1, referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: .667, actionRankScore: .833 } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 4, sessionRevision: 4, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: highestProbabilityPlayingStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const complete = { status: 'complete', scope: 'hand', tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', handId: 'hand-1', decisionCount: 1, referenceStrategy: defaultTrainerConfiguration.referenceStrategy, averages: { decisionScore: .667, actionRankScore: .833 } };
     const analysis = { view: 'hand', acceptedDecisions: ['d1', 'd2'].map(decisionId => ({ decisionId, handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } })), expandedDecisionId: '' } as unknown as Props['analysis'];
     for (const status of ['pending', 'error', 'transport-error'] as const) {
       const display = status === 'transport-error' ? { error: 'Connection unavailable.' } : { data: { status, decisionCount: 2, referenceStrategy: highestProbabilityPlayingStrategy, error: { message: 'Reference failed.' } } };
@@ -72,7 +72,7 @@ describe('decision situation', () => {
       [defaultTrainerConfiguration.referenceStrategy.selector, 'Simple Heuristic · Probability Selector'],
       [highestProbabilityPlayingStrategy.selector, 'Simple Heuristic · Highest Probability'],
     ] as const) {
-      const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: { ...defaultTrainerConfiguration.referenceStrategy, selector } }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+      const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy: { ...defaultTrainerConfiguration.referenceStrategy, selector } }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
       const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { acceptedDecisions: [], selectedDecisionId: '' } as unknown as Props['analysis'], sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
       const caption = html.match(/<div class="analysis-meta">([\s\S]*?)<\/div>/)![1].replace(/<[^>]*>/g, '');
       expect(caption).toContain(expected);
@@ -91,8 +91,8 @@ describe('decision situation', () => {
       [{ ...recorded, policy: { ...recorded.policy, version: 'next' } }, true],
       [{ ...recorded, policy: { ...recorded.policy, configuration: { limits: { minimum: 1, maximum: 3 } } } }, true],
     ] as const) {
-      const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
-      const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', handId: 'hand-1', referenceStrategy: recorded, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
+      const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
+      const summary = { handId: 'hand-1', display: { data: { status: 'complete', scope: 'hand', tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', handId: 'hand-1', referenceStrategy: recorded, averages: { decisionScore: 2 / 3, actionRankScore: 5 / 6 } } } } as Props['summary'];
       const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
       const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary, sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
       expect(html.includes('Reference Strategy: <strong>Simple Heuristic · Probability Selector</strong>')).toBe(changed);
@@ -105,7 +105,7 @@ describe('decision situation', () => {
 
   it('keeps pending, failed and empty Hand summaries explicit without showing partial averages', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, status: 'completed-hand', legalActions: [], actorId: null }, history: [] } };
     const accepted = { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } };
     for (const [display, expected, empty] of [
       [{ loading: true }, 'Mean Decision Score', false],
@@ -130,7 +130,7 @@ describe('decision situation', () => {
 
   it('keeps the selected decision structure visible before its analysis response arrives', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1' } as unknown as Props['analysis'];
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis, summary: unrequestedSummary, sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('aria-label="Loading reference analysis"');
@@ -146,7 +146,7 @@ describe('decision situation', () => {
 
   it('retains confirmed decision values when a matching request is still pending', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     const complete = { decisionId: 'd1', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, scores: { decisionScore: .94, actionRankScore: 1 }, evaluation: { actionProbabilities: [{ type: 'call', probability: 1 }], policyResult: { choices: [{ action: { type: 'call' }, probability: 1 }] }, selectedAction: { type: 'call' } } };
     for (const status of ['pending', 'error'] as const) {
       const analysis = { view: 'hand', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1', rowAnalyses: { d1: complete }, display: { data: { decisionId: 'd1', status, error: { message: 'Reference unavailable.' } }, loading: status === 'pending' } } as unknown as Props['analysis'];
@@ -160,7 +160,7 @@ describe('decision situation', () => {
 
   it('reserves live reference content without suggesting uncomputed decision scores', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { table, analysis: { view: 'live', acceptedDecisions: [], display: { loading: true } } as unknown as Props['analysis'], summary: unrequestedSummary, sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('Loading reference analysis');
     expect(html).toContain('Reference actions');
@@ -170,7 +170,7 @@ describe('decision situation', () => {
 
   it('shows live reference actions without duplicating the table, while keeping completed decision snapshots', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { ...decision, decisionId: 'live' }, history: [] } };
     const data = { decisionId: 'live', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, evaluation: { actionProbabilities: [{ type: 'call', probability: 1 }], policyResult: { choices: [{ action: { type: 'call' }, probability: 1 }] }, selectedAction: { type: 'call' } } };
     const render = (review: boolean) => renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { view: review ? 'hand' : 'live', acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', display: { data: { ...data, decisionId: review ? 'd1' : 'live' } } } as unknown as Props['analysis'], sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
     const live = render(false);
@@ -195,7 +195,7 @@ describe('decision situation', () => {
   });
 
   it('shows separate scores for collapsed decisions', () => {
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const analysis = {
       acceptedDecisions: ['d1', 'd2', 'd3'].map(decisionId => ({ decisionId, handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } })),
@@ -211,7 +211,7 @@ describe('decision situation', () => {
       { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' as const } },
       { decisionId: 'd2', handId: 'hand-1', handNumber: 1, state: { ...decision, street: 'river' as const }, action: { type: 'check' as const } },
     ];
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const html = renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table, analysis: { acceptedDecisions: accepted, selectedDecisionId: 'd1', pinned: true } as Props['analysis'], sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(html).toContain('<ol aria-label="Your decisions in this hand"');
@@ -223,7 +223,7 @@ describe('decision situation', () => {
   });
 
   it('shows large scores inside the expanded detail without repeating them in its header', () => {
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     type Props = ComponentProps<typeof AnalysisPanel>;
     const data = { decisionId: 'd1', status: 'complete', referenceStrategy: defaultTrainerConfiguration.referenceStrategy, scoredDecision: { acceptedAction: { type: 'call' } }, scores: { decisionScore: .72, actionRankScore: .8 }, evaluation: { actionProbabilities: [{ type: 'call', probability: .6 }, { type: 'raise', probability: .4 }], policyResult: { choices: [{ action: { type: 'call' }, probability: .6 }, { action: { type: 'raise', raiseTo: 150 }, probability: .4 }] }, selectedAction: { type: 'call' } } };
     const analysis = { acceptedDecisions: [{ decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } }], selectedDecisionId: 'd1', expandedDecisionId: 'd1', pinned: true, display: { data }, rowAnalyses: { d1: data } } as unknown as Props['analysis'];
@@ -255,7 +255,7 @@ describe('decision situation', () => {
 
   it('offers Latest decision only for older reviews, with Live available as a separate view', () => {
     type Props = ComponentProps<typeof AnalysisPanel>;
-    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
+    const table: ObservableTableSession = { tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 2, sessionRevision: 2, bindings, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: decision, history: [] } };
     const accepted = { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' } };
     const render = (acceptedDecisions = [accepted], live = false) => renderToStaticMarkup(createElement(AnalysisPanel, { summary: unrequestedSummary, table: live ? { ...table, trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis: true }, view: { ...table.view, state: { ...decision, decisionId: 'current' } } } : table, analysis: { acceptedDecisions, selectedDecisionId: 'd1', expandedDecisionId: '', pinned: true } as Props['analysis'], sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
     expect(render()).not.toContain('>Latest decision');
@@ -266,7 +266,7 @@ describe('decision situation', () => {
 
   it('shows the current hand instead of a pinned review from the previous hand', () => {
     const table: ObservableTableSession = {
-      tableSessionId: 'table', pokerRevision: 20, sessionRevision: 20, bindings,
+      tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 20, sessionRevision: 20, bindings,
       trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
       view: {
         configuration: defaultConfiguration,
@@ -287,7 +287,7 @@ describe('decision situation', () => {
 
   it('shows the prior participant action on the mini table without later actions or revealed cards', () => {
     const table: ObservableTableSession = {
-      tableSessionId: 'table', pokerRevision: 8, sessionRevision: 8, bindings,
+      tableSessionId: 'table', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 8, sessionRevision: 8, bindings,
       trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
       view: { configuration: defaultConfiguration, state: { ...decision, street: 'river', board: ['2c', '3d', '4h', 'Qs', 'Qh'] }, history: [{ handId: 'hand-1', description: 'Hand 1', decisions: [
         { decisionId: 'before', state: { ...decision, street: 'preflop' }, action: { participantId: 'bot', action: { type: 'raise', raiseTo: 175 } } },

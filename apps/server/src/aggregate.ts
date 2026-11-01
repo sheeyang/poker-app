@@ -1,4 +1,4 @@
-import type { StrategyDescriptor, TableMode, TrainerConfiguration } from '@poker/contracts';
+import type { StrategyDescriptor, TableMode, TableOptions, TrainerConfiguration } from '@poker/contracts';
 import type { TableSessionRecord } from '@poker/engine';
 /**
  * A human Participant's application membership. Only `joined` grants access to the table.
@@ -39,6 +39,9 @@ export interface PersistedTableSession {
   /** Table Ownership: table options, Bots and inspection. Never control of another human. */
   readonly ownerUserId: string;
   readonly mode: TableMode;
+  readonly options: TableOptions;
+  /** The Online Table's current Join Link token. A unique index in schema.sql reads this exact key. */
+  readonly joinToken?: string;
   readonly pokerRecord: TableSessionRecord;
   readonly bindings: readonly PersistedBinding[];
   readonly pokerRevision: number;
@@ -63,16 +66,18 @@ export interface PersistedTableSessionV1 {
 export type StoredTableSession = PersistedTableSessionV1 | PersistedTableSession;
 /** Version-1 tables are Practice Tables. The membership index backfill in schema.sql relies on this too. */
 export const legacyTableMode: TableMode = 'practice';
+/** Practice Tables have no Action Time Limit unless they ask for one. */
+export const defaultPracticeOptions: TableOptions = { actionTimeLimitSeconds: null, allowLiveAnalysis: true };
 
 /**
  * Upgrades every stored version in memory. The row is rewritten in the current version at its next commit.
  * Version 1 loads as a Practice Table whose joined human takes the table-level Trainer configuration.
  */
 export function upgradeTableSession(stored: StoredTableSession): PersistedTableSession {
-  if (stored.schemaVersion === 2) return stored;
+  if (stored.schemaVersion === 2) return stored.options ? stored : { ...stored, options: defaultPracticeOptions };
   const { trainerConfiguration, ...rest } = stored;
   return {
-    ...rest, schemaVersion: 2, mode: legacyTableMode,
+    ...rest, schemaVersion: 2, mode: legacyTableMode, options: defaultPracticeOptions,
     bindings: stored.bindings.map((binding): PersistedBinding => binding.controller.kind === 'human'
       ? { ...binding as Omit<PersistedHumanBinding, 'membership' | 'trainerConfiguration'>, membership: 'joined', trainerConfiguration }
       : binding as PersistedBotBinding),

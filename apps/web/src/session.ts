@@ -83,7 +83,7 @@ export function useCommand() {
     },
     launch: (body: CreateTableSessionRequest) => {
       if (useSession.getState().pending || mutation.isPending) return;
-      useSession.getState().setSetup({ requestId: body.requestId });
+      if (body.mode !== 'online') useSession.getState().setSetup({ requestId: body.requestId });
       const attempt: Attempt = { kind: 'create', body };
       setPending(attempt); mutation.mutate(attempt);
     },

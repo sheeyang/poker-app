@@ -1,8 +1,8 @@
 import { isSupportedStrategy } from '@poker/strategies';
-import { validateCreationRequest } from './validation.js';
+import { nameKey, validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { defaultConfiguration, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome } from '@poker/contracts';
+import { defaultConfiguration, defaultOnlineActionTimeLimitSeconds, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome, type TableOptions } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
 import { creationRequests, localUsers } from './db/schema.js';
@@ -53,18 +53,33 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         };
         const guest = await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, ownerUserId));
         const displayName = guest[0]?.displayName;
+        const mode = request.mode ?? 'practice';
         const created = !displayName ? { ok: false as const, rejection: { code: 'display-name-required', message: 'Choose a display name before creating a table.' } } : validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
+        // At an Online Table everyone is told apart by name, ignoring case, so the owner's name cannot be a Bot's.
+        const names = created.ok ? [displayName, ...(request.bots ?? []).map(bot => bot.name)].map(name => nameKey(String(name))) : [];
+        const rejection = mode === 'online' && new Set(names).size !== names.length
+          ? { ok: false as const, rejection: { code: 'name-taken', field: 'bots', message: 'Every Participant at an Online Table needs a different name, ignoring case. Rename a Bot.' } } : undefined;
         let outcome: CreationOutcome;
-        if (!created.ok) outcome = { ok: false, rejection: created.rejection };
+        if (rejection) outcome = rejection;
+        else if (!created.ok) outcome = { ok: false, rejection: created.rejection };
         else {
           const tableSessionId = randomUUID();
+          const ownerParticipantId = randomUUID();
           const bindings: PersistedTableSession['bindings'] = [
-            { participantId: randomUUID(), name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) },
+            { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) },
             ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: b.name, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
           ];
+          // The Online owner joins unseated, without the Join Link, and observes from creation. A Practice human joins by sitting down.
+          const joined = mode === 'online' ? created.game.joinTable(ownerParticipantId) : undefined;
+          if (joined && !joined.ok) throw new Error('The Online owner could not join their own table.');
+          const options: TableOptions = {
+            actionTimeLimitSeconds: request.options?.actionTimeLimitSeconds !== undefined ? request.options.actionTimeLimitSeconds : mode === 'online' ? defaultOnlineActionTimeLimitSeconds : null,
+            allowLiveAnalysis: request.options?.allowLiveAnalysis ?? true,
+          };
           const aggregate: PersistedTableSession = {
-            schemaVersion: 2, tableSessionId, ownerUserId, mode: 'practice', pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [],
+            schemaVersion: 2, tableSessionId, ownerUserId, mode, options, ...(mode === 'online' ? { joinToken: randomBytes(32).toString('base64url') } : {}),
+            pokerRecord: created.game.toRecord(), bindings,
+            pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [],
           };
           await writeTableSession(tx, undefined, aggregate);
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };

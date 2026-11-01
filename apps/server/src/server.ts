@@ -8,7 +8,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { savedTables } from './membership.js';
@@ -62,7 +62,7 @@ export async function createServer(options: ServerOptions) {
   async function participantAt(tableSessionId: string, userId: string) {
     return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
   }
-  const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required'];
+  const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'guest-removed'];
   app.get('/api/live', {
     websocket: true,
     preValidation: async (request, reply) => {
@@ -172,6 +172,32 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     try { return { tables: await savedTables(db, userId) }; }
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
+  });
+  app.get<{ Params: { token: string } }>('/api/join-links/:token', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    try {
+      const preview = await mutations.previewJoin(userId, request.params.token);
+      return preview ?? reply.code(404).send({ ok: false, rejection: { code: 'invalid-join-link', message: 'This Join Link does not work. Ask the Table Owner for a new one.' } });
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The table could not be read. Try opening the link again.' } });
+    }
+  });
+  app.post<{ Params: { token: string }; Body: JoinTableRequest }>('/api/join-links/:token/join', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    try {
+      const outcome = await mutations.join(userId, request.params.token, request.body);
+      const code = outcome.ok ? undefined : outcome.rejection.code;
+      return reply.code(!code ? 200 : code === 'invalid-join-link' ? 404 : forbidden.includes(code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(code) ? 503 : ['request-id-conflict', 'table-full', 'name-taken'].includes(code) ? 409 : 400).send(outcome);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The join outcome is unknown. Try joining again with the same request.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Joining could not be confirmed. Try again.' } });
+    }
   });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
@@ -306,6 +332,7 @@ export async function createServer(options: ServerOptions) {
     try {
       const access = await mutations.access(request.params.id, userId);
       if (access && !access.owner) return reply.code(403).send({ ok: false, rejection: { code: 'table-owner-required', message: 'Only the Table Owner can inspect completed Hands.' } });
+      if (access?.mode === 'online') return reply.code(403).send({ ok: false, rejection: { code: 'unavailable-at-online-tables', message: 'Admin Mode and completed-Hand inspection are not available at Online Tables.' } });
       const input = access && await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
         // Load authorized durable inputs; reconstruction belongs to the admitted Research job.
         const owned = await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, userId)));

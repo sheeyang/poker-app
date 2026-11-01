@@ -1,6 +1,8 @@
 import { isSupportedStrategy } from '@poker/strategies';
-import { defaultConfiguration, type ApplicationRejection, type CreateTableSessionRequest } from '@poker/contracts';
+import { actionTimeLimits, defaultConfiguration, type ApplicationRejection, type CreateTableSessionRequest } from '@poker/contracts';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+/** The key by which two Participant names at one table are the same name, ignoring case. */
+export const nameKey = (name: string) => name.normalize('NFC').toLowerCase();
 /** Trimmed, 1-20 characters: letters, digits, spaces and basic punctuation; no control characters. */
 export function validateDisplayName(value: unknown): { ok: true; displayName: string } | ApplicationRejection {
   const name = typeof value === 'string' ? value.trim() : '';
@@ -18,7 +20,16 @@ export function validateTrainerConfiguration(value: unknown, supportsStrategy: (
 export function validateCreationRequest(request: CreateTableSessionRequest, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   const reject = (field: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code: 'invalid-creation-settings', field, message } });
   for (const key of Object.keys(request)) {
-    if (!['requestId', 'configuration', 'bots'].includes(key)) return reject(key, 'Creation accepts only observable configuration and Bot controller intentions.');
+    if (!['requestId', 'mode', 'configuration', 'options', 'bots'].includes(key)) return reject(key, 'Creation accepts only a mode, observable configuration, table options and Bot controller intentions.');
+  }
+  if (request.mode !== undefined && request.mode !== 'practice' && request.mode !== 'online') return reject('mode', 'Choose a Practice Table or an Online Table.');
+  if (request.options !== undefined) {
+    const options = request.options as unknown;
+    if (!object(options) || Object.keys(options).some(key => !['actionTimeLimitSeconds', 'allowLiveAnalysis'].includes(key))) return reject('options', 'Table options are an Action Time Limit and whether Live Analysis is allowed.');
+    const limit = options.actionTimeLimitSeconds;
+    if (limit !== undefined && limit !== null && !(actionTimeLimits as readonly unknown[]).includes(limit)) return reject('actionTimeLimitSeconds', 'Choose an Action Time Limit of 15, 30 or 60 seconds.');
+    if (limit === null && request.mode === 'online') return reject('actionTimeLimitSeconds', 'An Online Table always has an Action Time Limit of 15, 30 or 60 seconds.');
+    if (options.allowLiveAnalysis !== undefined && typeof options.allowLiveAnalysis !== 'boolean') return reject('allowLiveAnalysis', 'Allow Live Analysis is on or off.');
   }
   if (request.configuration !== undefined) {
     if (!object(request.configuration)) return reject('configuration', 'Supply observable settings as an object.');

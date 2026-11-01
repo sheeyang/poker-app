@@ -108,9 +108,26 @@ export interface ParticipantBinding {
   readonly name: string;
   readonly controller: ControllerDescriptor;
 }
+/** The Action Time Limit lengths a table can offer, in seconds. */
+export const actionTimeLimits = [15, 30, 60] as const;
+export type ActionTimeLimitSeconds = typeof actionTimeLimits[number];
+/** Table-wide options. Enforcement of the Action Time Limit belongs to server timing, not to creation. */
+export interface TableOptions {
+  /** `null` is off, which only a Practice Table can have: an Online Table always has a limit. */
+  readonly actionTimeLimitSeconds: ActionTimeLimitSeconds | null;
+  /** Whether Participants may use Live Analysis at this table. */
+  readonly allowLiveAnalysis: boolean;
+}
+/** Online defaults when creation names no option. */
+export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
+/** An Online Table holds at most this many joined human Participants. */
+export const onlineTableCapacity = 20;
 export interface CreateTableSessionRequest {
   readonly requestId: string;
+  /** Fixed for the table's life. Defaults to a Practice Table. */
+  readonly mode?: TableMode;
   readonly configuration?: Partial<ObservableGameConfiguration>;
+  readonly options?: Partial<TableOptions>;
   readonly bots?: readonly { readonly name: string; readonly playingStrategy: StrategyDescriptor }[];
 }
 export interface CreationAcknowledgement {
@@ -154,6 +171,21 @@ export interface MutationAcknowledgement {
   readonly sessionRevision: Revision;
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
+/** Joining carries a request ID but no expected revision: the joiner has not seen the table. */
+export interface JoinTableRequest { readonly requestId: string }
+/** The Guest's Participant at the table: the same one every time they join. */
+export interface JoinAcknowledgement extends MutationAcknowledgement { readonly participantId: ParticipantId }
+export type JoinOutcome = JoinAcknowledgement | ApplicationRejection;
+/** What a Join Link shows before joining. Only a holder of the link can read it. */
+export interface JoinLinkPreview {
+  readonly ok: true;
+  readonly ownerName: string;
+  readonly configuration: ObservableGameConfiguration;
+  readonly options: TableOptions;
+  readonly joinedCount: number;
+  /** The requesting Guest has already joined, so joining returns their own Participant. */
+  readonly alreadyJoined: boolean;
+}
 /** Explicitly authorized completed-Hand Research output; never an Observable Game View. */
 export interface CompletedHandInspection {
   readonly handId: HandId;
@@ -185,6 +217,13 @@ export interface SavedTables { readonly tables: readonly SavedTable[] }
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
+  readonly options: TableOptions;
+  /** The Participant this view was projected for: the viewing Guest's own. */
+  readonly viewerParticipantId: ParticipantId;
+  /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another human. */
+  readonly ownerParticipantId: ParticipantId;
+  /** The secret Join Link token of an Online Table, read by its Table Owner only. */
+  readonly joinToken?: string;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];

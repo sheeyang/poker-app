@@ -3,11 +3,11 @@ import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
-import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, upgradeTableSession, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
-import { creationRequests, processedRequests, tableSessions } from './db/schema.js';
-import { membership, writeTableSession } from './membership.js';
+import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
+import { membership, tableOfJoinLink, writeTableSession } from './membership.js';
 import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
@@ -15,7 +15,7 @@ import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
-import { validateTrainerConfiguration } from './validation.js';
+import { nameKey, validateTrainerConfiguration } from './validation.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -37,15 +37,18 @@ export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
   readonly afterCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
 }
-const reject = (code: string, message: string): MutationOutcome => ({ ok: false, rejection: { code, message } });
+const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
 const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots or change table options.');
+const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
+const invalidJoinLink = () => reject('invalid-join-link', 'This Join Link does not work. Ask the Table Owner for a new one.');
 /**
  * Who may ask for what, decided before request idempotency, so a remembered outcome is only ever replayed to
  * a requester who may make that request. Unknown Participants and acting as a Bot stay definitive rejections.
  */
 function humanMutationDenial(aggregate: PersistedTableSession, requester: PersistedHumanBinding, kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
   const owner = aggregate.ownerUserId === requester.userId;
+  if (kind === 'start-hand' && owner && aggregate.mode === 'online') return unavailableOnline('Hands at an Online Table are dealt automatically.');
   if (kind === 'start-hand' || kind === 'set-button') return owner ? undefined : ownerRequired();
   const target = findBinding(aggregate, (request as { participantId?: unknown }).participantId);
   if (isHuman(target) && target.participantId !== requester.participantId) return reject('not-your-participant', 'Only its own Human Controller can act for or manage this Participant.');
@@ -265,11 +268,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     deliver(id, () => ({ type: 'table-status', tableSessionId: id, status: safeStatus }));
   }
   /** Membership from the committed aggregate when cached, otherwise from the index, without restoring the table. */
-  async function access(id: string, userId: string): Promise<{ participantId: string; owner: boolean } | undefined> {
+  async function access(id: string, userId: string): Promise<{ participantId: string; owner: boolean; mode: TableMode } | undefined> {
     const cached = committed.get(id);
     if (!cached) return membership(db, id, userId);
     const binding = memberBinding(cached.aggregate, userId);
-    return binding && { participantId: binding.participantId, owner: cached.aggregate.ownerUserId === userId };
+    return binding && { participantId: binding.participantId, owner: cached.aggregate.ownerUserId === userId, mode: cached.aggregate.mode };
   }
   /** With a Guest, loads only a table they have joined: anyone else cannot learn that it exists. */
   async function load(id: string, userId?: string): Promise<CommittedSession | undefined> {
@@ -468,6 +471,85 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         }
       });
     }
+    /**
+     * Joins the Online Table that this Join Link opens, as the Guest's one Participant there. The link is the
+     * authorization, so there is no expected revision. A Guest who already joined gets their Participant back,
+     * and one who left rejoins as the same Participant under their original name.
+     */
+    async function join(userId: string, token: string, request: JoinTableRequest): Promise<JoinOutcome> {
+      const id = await tableOfJoinLink(db, token);
+      if (!id) return invalidJoinLink();
+      return enqueue(id, async () => {
+        let session = await load(id);
+        // The link may have been replaced while this request waited for its turn.
+        if (!session || session.aggregate.joinToken !== token) return invalidJoinLink();
+        if (stopped) return reject('server-closing', 'The server is closing.');
+        const { requestId, ...contents } = request;
+        if (Object.keys(contents).length) return reject('invalid-mutation-request', 'Joining carries only a requestId.');
+        const fingerprint = createHash('sha256').update('join-table-v1:' + canonical({ userId })).digest('hex');
+        const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
+        session = committed.get(id)!;
+        let proposed: CommittedSession | undefined;
+        let events: readonly CashGameEvent[] = [];
+        const context = { tableSessionId: id, requestId };
+        try {
+          const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async (tx): Promise<JoinOutcome> => {
+            const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
+            if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome as JoinOutcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
+            const { aggregate } = session;
+            const binding = humanBindings(aggregate).find(candidate => candidate.userId === userId);
+            const guest = (await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
+            const acknowledged = (participantId: string, next = aggregate): JoinOutcome => ({ ok: true, tableSessionId: id, participantId, pokerRevision: next.pokerRevision, sessionRevision: next.sessionRevision });
+            let result: JoinOutcome | undefined;
+            if (binding?.membership === 'removed') result = reject('guest-removed', 'The Table Owner removed you from this table, so you cannot join it again.');
+            else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
+            else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
+            else if (humanBindings(aggregate).filter(candidate => candidate.membership === 'joined').length >= onlineTableCapacity) result = reject('table-full', 'This table already has ' + onlineTableCapacity + ' players. Ask the Table Owner to make room.');
+            else if (!binding && aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(guest!))) result = reject('name-taken', 'Someone at this table already uses that name, ignoring case. Choose a different display name.');
+            if (!result) {
+              const participantId = binding?.participantId ?? randomUUID();
+              const working = session.game.fork();
+              const joined = working.joinTable(participantId);
+              // An engine that already counts the Participant as joined needs no second command.
+              if (!joined.ok && joined.rejection.code !== 'participant-already-joined') result = { ok: false, rejection: joined.rejection };
+              else {
+                if (joined.ok) events = joined.events;
+                const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1,
+                  ...(joined.ok ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
+                  bindings: binding ? aggregate.bindings.map(candidate => candidate.participantId === participantId ? { ...binding, membership: 'joined' as const } : candidate)
+                    : [...aggregate.bindings, { participantId, name: guest!, controller: { kind: 'human' }, userId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) }] };
+                proposed = { aggregate: next, game: working };
+                await writeTableSession(tx, aggregate, next);
+                result = acknowledged(participantId, next);
+              }
+            }
+            await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
+            return result;
+          }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
+          if (proposed) { committed.set(id, proposed); publishCommitted(id, events); }
+          return outcome;
+        } catch (error) {
+          if (error instanceof CommitOutcomeUnknown) pause(id);
+          throw error;
+        }
+      });
+    }
+    /** What a Join Link shows before joining, for the Guest holding it. */
+    async function previewJoin(userId: string, token: string): Promise<JoinLinkPreview | undefined> {
+      const id = await tableOfJoinLink(db, token);
+      if (!id) return undefined;
+      return enqueue(id, async () => {
+        const session = await load(id);
+        if (!session || session.aggregate.joinToken !== token) return undefined;
+        const { aggregate } = session;
+        const humans = humanBindings(aggregate);
+        const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
+        // Every Participant's view carries the same public configuration.
+        const { configuration } = session.game.forParticipant(owner.participantId).getView();
+        return { ok: true as const, ownerName: owner.name, configuration, options: { ...aggregate.options },
+          joinedCount: humans.filter(binding => binding.membership === 'joined').length, alreadyJoined: !!memberBinding(aggregate, userId) };
+      });
+    }
     async function readPersistedSession(id: string) {
       const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
       const stored = rows[0]?.aggregate;
@@ -530,6 +612,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     read,
     subscribe,
     configure,
+    join,
+    previewJoin,
     resumeBots,
     startRecovery,
     stop,
