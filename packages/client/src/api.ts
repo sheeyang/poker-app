@@ -12,6 +12,8 @@ async function request<T>(path: string, init?: RequestInit, acceptAnalysisError 
   return data as T;
 }
 export const api = {
+  previewJoinLink: (token: string, signal?: AbortSignal) => request<import('@poker/contracts').JoinLinkPreview>('/join-links/' + encodeURIComponent(token), { signal }),
+  joinTable: (token: string, body: import('@poker/contracts').JoinTableRequest) => request<import('@poker/contracts').JoinAcknowledgement>('/join-links/' + encodeURIComponent(token) + '/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   createSessionSummary: (id: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/session-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
   createHandSummary: (id: string, handId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/hand-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }, true),
   readSummary: (id: string, requestId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/summaries/' + encodeURIComponent(requestId)),

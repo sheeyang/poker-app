@@ -48,7 +48,7 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   const handActions = table.view.history.find(hand => hand.handId === context.handId)?.decisions ?? [];
   const selectedActionIndex = selected ? handActions.findIndex(action => action.decisionId === selected.decisionId) : -1;
   const earlierActions = selected ? selectedActionIndex < 0 ? [] : handActions.slice(0, selectedActionIndex) : handActions;
-  const humanId = table.bindings.find(b => b.controller.kind === 'human')?.participantId;
+  const humanId = table.viewerParticipantId;
   const expandedDecisionId = analysis.expandedDecisionId ?? analysis.selectedDecisionId;
   const showFollow = !liveView && analysis.pinned && selected?.decisionId !== accepted.at(-1)?.decisionId;
   const reference = data?.referenceStrategy ?? configuration.referenceStrategy;

@@ -220,6 +220,8 @@ export interface ObservableTableSession {
   readonly options: TableOptions;
   /** The Participant this view was projected for: the viewing Guest's own. */
   readonly viewerParticipantId: ParticipantId;
+  /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another human. */
+  readonly ownerParticipantId: ParticipantId;
   /** The secret Join Link token of an Online Table, read by its Table Owner only. */
   readonly joinToken?: string;
   readonly pokerRevision: Revision;

@@ -3,7 +3,7 @@ import { defaultConfiguration, defaultTrainerConfiguration, baselinePlayingStrat
 import { practiceStep } from '../src/practice-plan.js';
 
 function table(): ObservableTableSession {
-  return { tableSessionId: 't', pokerRevision: 7, sessionRevision: 9, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'bot', name: 'Bot 1', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }], view: { configuration: { ...defaultConfiguration, seatCount: 2, defaultBuyIn: 2000 }, history: [], state: { status: 'between-hands', buttonSeat: 1, participants: [], board: [], pots: [], actorId: null, legalActions: [] } } };
+  return { tableSessionId: 't', mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'you', pokerRevision: 7, sessionRevision: 9, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'bot', name: 'Bot 1', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }], view: { configuration: { ...defaultConfiguration, seatCount: 2, defaultBuyIn: 2000 }, history: [], state: { status: 'between-hands', buttonSeat: 1, participants: [], board: [], pots: [], actorId: null, legalActions: [] } } };
 }
 
 describe('practice preparation from confirmed state', () => {

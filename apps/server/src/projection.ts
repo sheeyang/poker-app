@@ -1,6 +1,6 @@
 import type { ConcreteAction, ObservableCashGameState, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding } from '@poker/contracts';
 import { CashGame, type CashGameEvent } from '@poker/engine';
-import { findBinding, isHuman, type PersistedTableSession } from './aggregate.js';
+import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
   return action.type === 'bet' ? { type: 'bet', betTo: action.betTo } : action.type === 'raise' ? { type: 'raise', raiseTo: action.raiseTo } : { type: action.type };
 }
@@ -41,7 +41,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   // Admin Mode is never available at an Online Table, whatever the server allows.
   const inspectable = adminMode && aggregate.mode === 'practice';
   return {
-    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: { ...aggregate.options }, viewerParticipantId: participantId,
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: { ...aggregate.options }, viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     ...(aggregate.joinToken && viewer.userId === aggregate.ownerUserId ? { joinToken: aggregate.joinToken } : {}),
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),

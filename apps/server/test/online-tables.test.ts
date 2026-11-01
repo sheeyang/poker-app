@@ -46,7 +46,7 @@ test('an Online Table is created with its fixed mode and options, the owner join
   expect(table.bindings).toEqual([{ participantId: expect.any(String), name: 'Ann', controller: { kind: 'human' } }, { participantId: expect.any(String), name: 'Rex', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }]);
   const view = await read(table);
   expect(view).toMatchObject({
-    mode: 'online', viewerParticipantId: table.ownerParticipant, options: { actionTimeLimitSeconds: 15, allowLiveAnalysis: false },
+    mode: 'online', viewerParticipantId: table.ownerParticipant, ownerParticipantId: table.ownerParticipant, options: { actionTimeLimitSeconds: 15, allowLiveAnalysis: false },
     inspection: { adminMode: false, completedHands: [] },
     view: { configuration: { seatCount: 4, smallBlind: 5, bigBlind: 10, ante: 1, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000, allowSeatChanges: false }, state: { status: 'between-hands', participants: [{ participantId: table.ownerParticipant, seat: null, stack: 0, sittingOut: false }] } },
   });
@@ -96,7 +96,7 @@ test('a Guest opens a Join Link, joins as an unseated Participant under their di
   expect(outcome).toMatchObject({ ok: true, tableSessionId: table.id, participantId: expect.any(String) });
   // The Guest sees the public table from their own Participant, with no Seat, and cannot read the Join Link.
   const seen = await read(table, ben);
-  expect(seen).toMatchObject({ mode: 'online', viewerParticipantId: outcome.participantId, view: { state: { status: 'between-hands', participants: expect.arrayContaining([{ participantId: outcome.participantId, seat: null, stack: 0, sittingOut: false }]) } } });
+  expect(seen).toMatchObject({ mode: 'online', viewerParticipantId: outcome.participantId, ownerParticipantId: table.ownerParticipant, view: { state: { status: 'between-hands', participants: expect.arrayContaining([{ participantId: outcome.participantId, seat: null, stack: 0, sittingOut: false }]) } } });
   expect(seen.bindings).toContainEqual({ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } });
   expect(JSON.stringify(seen)).not.toContain(token);
   expect(await read(table)).toMatchObject({ joinToken: token, bindings: expect.arrayContaining([{ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } }]) });

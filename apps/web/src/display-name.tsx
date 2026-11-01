@@ -36,7 +36,7 @@ export function DisplayNameForm({ current, submitLabel = 'Save name', onSaved }:
 /** Shown before a Guest's first table creation. */
 export function DisplayNamePrompt({ onSaved, close }: { onSaved: (name: string) => void; close: () => void }) {
   return <Dialog title="What should we call you?" close={close}>
-    <p className="muted">Your name appears at the tables you create. You can change it later for future tables.</p>
+    <p className="muted">Your name appears at the tables you create or join. You can change it later for future tables.</p>
     <DisplayNameForm submitLabel="Save and start" onSaved={onSaved} />
   </Dialog>;
 }

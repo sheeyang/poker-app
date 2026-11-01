@@ -11,7 +11,7 @@ function identity(value: unknown): string {
 export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string; handId?: string; newestAccepted?: string; collapsed?: boolean }>();
   const [viewSelection, setViewSelection] = useState<{ tableId: string; view: 'live' | 'hand' }>();
-  const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
+  const human = table?.viewerParticipantId;
   const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.handId !== table.view.state.handId ? [] : hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
   const newestAccepted = acceptedDecisions.at(-1)?.decisionId;
   const currentDecisionId = table?.view.state.legalActions.length ? table.view.state.decisionId : undefined;
