@@ -1,7 +1,8 @@
 import type { ConcreteAction, HandId, ParticipantId } from '@poker/contracts';
 import type { CashGameCommand } from '../index.js';
 
-export interface ParticipantState { participantId: ParticipantId; seat: number | null; stack: number; sittingOut: boolean }
+/** `joined` is table membership: seated Participants are always joined; unseated ones may be. */
+export interface ParticipantState { participantId: ParticipantId; joined: boolean; seat: number | null; stack: number; sittingOut: boolean }
 export interface HandParticipantState {
   participantId: ParticipantId;
   seat: number;
@@ -23,7 +24,11 @@ export interface HandState {
   buttonSeat: number;
   smallBlindParticipantId: ParticipantId;
   bigBlindParticipantId: ParticipantId;
-  /** Seated observers include sitting-out Participants; absent identities gain no history. */
+  /**
+   * Joined Participants currently observing this Hand, seated or not. Joining during the
+   * Hand adds one and leaving removes one; at completion the set freezes as the Participants
+   * who observed its result. Absent identities gain no history.
+   */
   observerParticipantIds: ParticipantId[];
   participants: HandParticipantState[];
   deck: string[];

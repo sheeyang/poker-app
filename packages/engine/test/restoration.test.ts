@@ -109,7 +109,7 @@ test('history retains full original observed decisions and results without trans
   const observer = cashGame.forParticipant('observer').getView();
   expect(observer.history[0].decisions[0].state.participants.every(p => !p.holeCards)).toBe(true);
   expect(observer.history[0].decisions[0].state.legalActions).toEqual([]);
-  cashGame.standUpParticipant('alice'); cashGame.seatParticipant('newcomer', 1);
+  cashGame.standUpParticipant('alice'); cashGame.leaveTable('alice'); cashGame.seatParticipant('newcomer', 1);
   expect(cashGame.forParticipant('newcomer').getView().history).toEqual([]);
   expect(cashGame.forParticipant('newcomer').getView().state).not.toHaveProperty('handId');
   expect(() => cashGame.forParticipant('newcomer').getView({ at: { decisionId: 'hand-1/decision-1' } })).toThrow(RangeError);

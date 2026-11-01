@@ -57,6 +57,8 @@ export interface ObservableCashGameState {
   readonly payouts?: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
 }
 export type ObservablePresentationEvent =
+  | { readonly type: 'participant-joined'; readonly participantId: ParticipantId }
+  | { readonly type: 'participant-left'; readonly participantId: ParticipantId }
   | { readonly type: 'participant-seated'; readonly participantId: ParticipantId; readonly seat: number; readonly buyIn: ChipAmount }
   | { readonly type: 'participant-stood-up'; readonly participantId: ParticipantId; readonly seat: number; readonly cashOut: ChipAmount }
   | { readonly type: 'participant-moved'; readonly participantId: ParticipantId; readonly fromSeat: number; readonly seat: number }

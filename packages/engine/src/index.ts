@@ -12,6 +12,8 @@ export type { ObservableGameConfiguration, ObservableGameView, ParticipantId } f
 export interface HiddenGameConfiguration { readonly seed: string }
 export type GameConfiguration = ObservableGameConfiguration & HiddenGameConfiguration;
 export type CashGameCommand =
+  | { readonly type: 'join-table'; readonly participantId: ParticipantId }
+  | { readonly type: 'leave-table'; readonly participantId: ParticipantId }
   | { readonly type: 'seat-participant'; readonly participantId: ParticipantId; readonly seat: number; readonly buyIn: number }
   | { readonly type: 'stand-up-participant'; readonly participantId: ParticipantId }
   | { readonly type: 'move-participant'; readonly participantId: ParticipantId; readonly seat: number }
@@ -124,6 +126,12 @@ function upgradeLegacyCommands(commands: readonly CashGameCommand[]): readonly C
 function replayCommand(game: CashGame, command: CashGameCommand): CashGameResult | undefined {
   if (!command || typeof command !== 'object' || Array.isArray(command)) return;
   switch (command.type) {
+    case 'join-table':
+      if (!plainFields(command, ['type', 'participantId'])) return;
+      return game.joinTable(command.participantId);
+    case 'leave-table':
+      if (!plainFields(command, ['type', 'participantId'])) return;
+      return game.leaveTable(command.participantId);
     case 'seat-participant':
       if (!plainFields(command, ['type', 'participantId', 'seat', 'buyIn']) || !Number.isSafeInteger(command.buyIn)) return;
       return game.seatParticipant(command.participantId, command.seat, command.buyIn);
@@ -246,7 +254,7 @@ export class CashGame {
       const bigBlind = eligible.length === 2 ? order[0]! : order[1]!;
       const sequence = draft.hands.length + 1;
       const hand: HandState = { handId: 'hand-' + sequence, sequence, completed: false, buttonSeat: button.seat!, smallBlindParticipantId: smallBlind.participantId, bigBlindParticipantId: bigBlind.participantId,
-        observerParticipantIds: draft.participants.filter(p => p.seat !== null).map(p => p.participantId),
+        observerParticipantIds: draft.participants.filter(p => p.joined).map(p => p.participantId),
         participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, anteContribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
         deck: shuffledDeck(c.seed, sequence), drawnCardCount: 0, burns: [], board: [], street: 'preflop', actorId: null, decisionSequence: 0, decisionId: null, price: c.bigBlind, lastFullIncrement: c.bigBlind, pots: [], returns: [], payouts: [], actions: [] };
       draft.hands.push(hand); draft.status = 'active-hand'; draft.buttonSeat = button.seat!; draft.nextButtonSeat = null;
@@ -351,12 +359,43 @@ export class CashGame {
     const bankroll = this.#state.participants.reduce((total, p) => total + BigInt(p.stack), 0n);
     if (bankroll + BigInt(buyIn) > BigInt(Number.MAX_SAFE_INTEGER)) return reject('chip-capacity-exceeded', 'This buy-in would exceed the table chip capacity.', 'buyIn');
     return this.#mutate({ type: 'seat-participant', participantId, seat, buyIn }, draft => {
-      const existing = draft.participants.find(p => p.participantId === participantId);
-      if (existing) { existing.seat = seat; existing.stack = buyIn; existing.sittingOut = false; }
-      else draft.participants.push({ participantId, seat, stack: buyIn, sittingOut: false });
+      // Seating implicitly joins a Participant who is not at the table.
+      this.#join(draft, participantId);
+      const participant = draft.participants.find(p => p.participantId === participantId)!;
+      participant.seat = seat; participant.stack = buyIn; participant.sittingOut = false;
       draft.bankroll += buyIn;
       return [{ type: 'participant-seated', participantId, seat, buyIn }];
     });
+  }
+  /** Join the table unseated. A joined Participant observes public facts from this point. */
+  joinTable(participantId: ParticipantId): CashGameResult {
+    if (typeof participantId !== 'string' || participantId.trim().length === 0) return { ok: false, rejection: { code: 'invalid-participant', message: 'Supply a nonempty ParticipantId.', field: 'participantId' } };
+    if (this.#state.participants.some(p => p.participantId === participantId && p.joined)) return { ok: false, rejection: { code: 'participant-already-joined', message: 'This Participant has already joined the table.' } };
+    return this.#mutate({ type: 'join-table', participantId }, draft => {
+      this.#join(draft, participantId);
+      return [{ type: 'participant-joined', participantId }];
+    });
+  }
+  /** Leave Table: stop observing until rejoining with the same ParticipantId. Requires being unseated. */
+  leaveTable(participantId: ParticipantId): CashGameResult {
+    const participant = this.#state.participants.find(p => p.participantId === participantId);
+    if (!participant?.joined) return { ok: false, rejection: { code: 'participant-not-joined', message: 'Choose a Participant who has joined the table.', field: 'participantId' } };
+    if (participant.seat !== null) return { ok: false, rejection: { code: 'participant-seated', message: 'Stand Up before leaving the table.', field: 'participantId' } };
+    return this.#mutate({ type: 'leave-table', participantId }, draft => {
+      draft.participants.find(p => p.participantId === participantId)!.joined = false;
+      const hand = draft.hands.at(-1);
+      if (hand && !hand.completed) hand.observerParticipantIds = hand.observerParticipantIds.filter(id => id !== participantId);
+      return [{ type: 'participant-left', participantId }];
+    });
+  }
+  #join(draft: CashGameState, participantId: ParticipantId): void {
+    const existing = draft.participants.find(p => p.participantId === participantId);
+    if (existing?.joined) return;
+    if (existing) existing.joined = true;
+    else draft.participants.push({ participantId, joined: true, seat: null, stack: 0, sittingOut: false });
+    // A Participant joining during a Hand observes the rest of it, including its result.
+    const hand = draft.hands.at(-1);
+    if (hand && !hand.completed) hand.observerParticipantIds.push(participantId);
   }
   setButton(seat: number): CashGameResult {
     if (this.#state.status === 'active-hand') return { ok: false, rejection: { code: 'active-hand', message: 'Choose the next button between Hands.' } };
@@ -429,7 +468,7 @@ export class CashGame {
     validateState(draft, this.#configuration);
     const authoritativeEvents: CashGameEvent[] = events.map(event => {
       switch (event.type) {
-        case 'participant-seated': case 'participant-stood-up': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': return event;
+        case 'participant-joined': case 'participant-left': case 'participant-seated': case 'participant-stood-up': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': return event;
         default: return { ...event, handId: draft.hands.at(-1)!.handId };
       }
     });
@@ -440,6 +479,7 @@ export class CashGame {
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
     return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || this.#state.hands.find(hand => hand.handId === event.handId)?.observerParticipantIds.includes(participantId)).map(event => {
       switch (event.type) {
+        case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
         case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
         case 'participant-stood-up': return { type: event.type, participantId: event.participantId, seat: event.seat, cashOut: event.cashOut };
         case 'participant-moved': return { type: event.type, participantId: event.participantId, fromSeat: event.fromSeat, seat: event.seat };
@@ -484,7 +524,8 @@ export class CashGame {
   #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[]): ObservableGameView {
     const c = this.#configuration;
     const current = this.#state.hands.at(-1);
-    const hand = current?.observerParticipantIds.includes(participantId) ? current : undefined;
+    const joined = this.#state.participants.some(p => p.participantId === participantId && p.joined);
+    const hand = joined && current?.observerParticipantIds.includes(participantId) ? current : undefined;
     return immutable({
       configuration: {
         seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,

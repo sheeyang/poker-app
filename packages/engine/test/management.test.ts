@@ -95,7 +95,7 @@ test('Participant observations follow identity across movement and rejoining, ex
   expect(old.map(h => h.handId)).toEqual(['hand-1']);
   expect(cashGame.forParticipant('observer').getView().history.map(h => h.handId)).toEqual(['hand-1']);
   expect(cashGame.forParticipant('stranger').getView().history).toEqual([]);
-  cashGame.moveParticipant('alice', 2); cashGame.standUpParticipant('alice');
+  cashGame.moveParticipant('alice', 2); cashGame.standUpParticipant('alice'); cashGame.leaveTable('alice');
   cashGame.seatParticipant('newcomer', 1);
   cashGame.startHand(); cashGame.act('bob', { type: 'fold' });
   expect(cashGame.forParticipant('alice').getView().history).toEqual(old);
@@ -112,9 +112,10 @@ test('Participant observations follow identity across movement and rejoining, ex
 test('presentation events preserve the originating Hand’s observer membership after absence and later rejoining', () => {
   const cashGame = game({ ...configuration, ante: 10, minimumBuyIn: 10, defaultBuyIn: 10 });
   cashGame.seatParticipant('observer', 3, 10);
-  const left = cashGame.standUpParticipant('observer');
-  if (!left.ok) throw new Error('Expected accepted leave.');
-  expect(cashGame.forParticipant('observer').projectEvents(left.events)).toEqual([{ type: 'participant-stood-up', participantId: 'observer', seat: 3, cashOut: 10 }]);
+  const stood = cashGame.standUpParticipant('observer');
+  const left = cashGame.leaveTable('observer');
+  if (!stood.ok || !left.ok) throw new Error('Expected accepted Stand Up and Leave Table.');
+  expect(cashGame.forParticipant('observer').projectEvents([...stood.events, ...left.events])).toEqual([{ type: 'participant-stood-up', participantId: 'observer', seat: 3, cashOut: 10 }, { type: 'participant-left', participantId: 'observer' }]);
   const missed = cashGame.startHand();
   if (!missed.ok) throw new Error('Expected forced all-in Hand.');
   expect(cashGame.getHand('hand-1')?.completed).toBe(true);
