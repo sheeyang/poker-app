@@ -167,6 +167,7 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
     if (!p.participantId || identities.has(p.participantId)) throw new Error('Participant identity invariant failed.');
     identities.add(p.participantId);
     if (p.seat !== null) {
+      if (!p.joined) throw new Error('Membership invariant failed.');
       if (!Number.isInteger(p.seat) || p.seat < 1 || p.seat > configuration.seatCount || seats.has(p.seat)) throw new Error('Seat invariant failed.');
       seats.add(p.seat);
     }
@@ -174,7 +175,10 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
     bankroll += BigInt(p.stack);
   }
   const current = state.hands.at(-1);
-  if (current && !current.completed) for (const p of current.participants) bankroll += BigInt(p.contribution);
+  if (current && !current.completed) {
+    for (const p of current.participants) bankroll += BigInt(p.contribution);
+    if (current.observerParticipantIds.some(id => !state.participants.some(p => p.participantId === id && p.joined))) throw new Error('Observer membership invariant failed.');
+  }
   for (const hand of state.hands) {
     if (hand.deck.length !== 52 || new Set(hand.deck).size !== 52) throw new Error('Deck uniqueness invariant failed.');
     const locations = [...hand.participants.flatMap(p => p.holeCards), ...hand.burns, ...hand.board];
@@ -480,7 +484,9 @@ export class CashGame {
     return result;
   }
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
-    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || this.#state.hands.find(hand => hand.handId === event.handId)?.observerParticipantIds.includes(participantId)).map(event => {
+    const observes = (handId: string) => this.#state.participants.some(p => p.participantId === participantId && p.joined)
+      && !!this.#state.hands.find(hand => hand.handId === handId)?.observerParticipantIds.includes(participantId);
+    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || observes(event.handId)).map(event => {
       switch (event.type) {
         case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
         case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };

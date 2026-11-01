@@ -100,6 +100,68 @@ test('a Participant who joins during a Hand observes the rest of it and its resu
   expect(cashGame.forParticipant('alice').getView().history[0].decisions).toHaveLength(8);
 });
 
+test('presentation events reach a Participant only while they observe the originating Hand', () => {
+  const cashGame = game(); const started = cashGame.startHand();
+  if (!started.ok) throw new Error('Expected a Hand.');
+  const joined = cashGame.joinTable('late');
+  if (!joined.ok) throw new Error('Expected join.');
+  expect(cashGame.forParticipant('late').projectEvents(joined.events)).toEqual([{ type: 'participant-joined', participantId: 'late' }]);
+  const acted = cashGame.act('alice', { type: 'call' });
+  if (!acted.ok) throw new Error('Expected call.');
+  expect(cashGame.forParticipant('late').projectEvents(acted.events)).toEqual([{ type: 'acted', participantId: 'alice', action: { type: 'call' } }]);
+  const left = cashGame.leaveTable('late');
+  if (!left.ok) throw new Error('Expected leave.');
+  expect(cashGame.forParticipant('late').projectEvents(left.events)).toEqual([{ type: 'participant-left', participantId: 'late' }]);
+  const flop = cashGame.act('bob', { type: 'check' });
+  if (!flop.ok) throw new Error('Expected check.');
+  expect(cashGame.forParticipant('late').projectEvents(flop.events)).toEqual([]);
+  expect(cashGame.forParticipant('alice').projectEvents(flop.events).filter(e => e.type === 'board-dealt')).toHaveLength(1);
+  playPassively(cashGame); cashGame.joinTable('late');
+  const next = cashGame.startHand();
+  if (!next.ok) throw new Error('Expected next Hand.');
+  const dealt = cashGame.forParticipant('late').projectEvents(structuredClone(next.events));
+  expect(dealt.filter(e => e.type === 'hole-cards-dealt')).toEqual([{ type: 'hole-cards-dealt', participantId: 'alice', cardCount: 2 }, { type: 'hole-cards-dealt', participantId: 'bob', cardCount: 2 }]);
+  expect(cashGame.forParticipant('late').projectEvents(structuredClone(started.events))).toEqual([]);
+  const completed = cashGame.act('bob', { type: 'fold' });
+  if (!completed.ok) throw new Error('Expected the Hand to complete.');
+  expect(cashGame.forParticipant('late').projectEvents(completed.events).map(e => e.type)).toEqual(['acted', 'uncalled-return', 'pot-awarded', 'hand-completed']);
+  cashGame.leaveTable('late');
+  expect(cashGame.forParticipant('late').projectEvents(completed.events)).toEqual([]);
+});
+
+test('membership, mid-Hand seating and Stand Up replay deterministically and conserve chips', () => {
+  const cashGame = game();
+  const total = () => { const { state } = cashGame.forParticipant('bob').getView(); return state.participants.reduce((sum, p) => sum + p.stack + (state.status === 'active-hand' ? p.contribution ?? 0 : 0), 0); };
+  cashGame.joinTable('watcher'); cashGame.startHand(); cashGame.joinTable('late'); cashGame.seatParticipant('carol', 2, 300);
+  expect(total()).toBe(2300);
+  cashGame.act('alice', { type: 'call' }); cashGame.leaveTable('watcher'); playPassively(cashGame);
+  expect(total()).toBe(2300);
+  const aliceStack = cashGame.forParticipant('alice').getView().state.participants[0].stack;
+  expect(cashGame.standUpParticipant('alice')).toMatchObject({ ok: true, events: [{ cashOut: aliceStack }] });
+  cashGame.leaveTable('alice'); cashGame.joinTable('watcher'); cashGame.startHand(); cashGame.seatParticipant('alice', 5, 150);
+  expect(total()).toBe(2450 - aliceStack);
+  playPassively(cashGame);
+  const record = cashGame.toRecord();
+  expect(record.commands.map(c => c.type)).toEqual(expect.arrayContaining(['join-table', 'leave-table', 'stand-up-participant']));
+  const restored = CashGame.fromRecord(JSON.parse(JSON.stringify(record)));
+  if (!restored.ok) throw new Error('Expected membership replay.');
+  expect(restored.game.toRecord()).toEqual(record);
+  for (const id of ['alice', 'bob', 'carol', 'watcher', 'late', 'stranger']) {
+    const view = cashGame.forParticipant(id).getView();
+    expect(restored.game.forParticipant(id).getView()).toEqual(view);
+    for (const decision of view.history.flatMap(h => h.decisions)) expect(restored.game.forParticipant(id).getView({ at: { decisionId: decision.decisionId } })).toEqual(cashGame.forParticipant(id).getView({ at: { decisionId: decision.decisionId } }));
+  }
+  for (const id of ['hand-1', 'hand-2']) expect(restored.game.getHand(id)).toEqual(cashGame.getHand(id));
+  expect(cashGame.forParticipant('watcher').getView().history.map(h => [h.handId, 'result' in h])).toEqual([['hand-1', false], ['hand-2', true]]);
+  expect(restored.game.startHand()).toEqual(cashGame.startHand());
+  for (const tail of [
+    { type: 'join-table', participantId: 'late' }, { type: 'join-table', participantId: 'new', requestId: 'server' }, { type: 'join-table', participantId: '' },
+    { type: 'leave-table', participantId: 'bob' }, { type: 'leave-table', participantId: 'stranger' }, { type: 'leave-table', participantId: 'late', expectedPokerRevision: 0 },
+  ]) expect(CashGame.fromRecord({ ...record, commands: [...record.commands, tail] })).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
+  for (const command of [{ type: 'join-table', participantId: 'late' }, { type: 'leave-table', participantId: 'late' }])
+    expect(CashGame.fromRecord({ schemaVersion: 1, engineVersion: 'v1', configuration, commands: [command] })).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
+});
+
 test('leaving requires being unseated, hides every Hand played during the absence, and rejoining resumes observation with earlier history', () => {
   const cashGame = game(); cashGame.joinTable('watcher');
   cashGame.startHand(); playPassively(cashGame);
