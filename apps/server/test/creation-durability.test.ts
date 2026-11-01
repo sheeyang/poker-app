@@ -3,6 +3,10 @@ import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -13,7 +17,7 @@ let beforeCommit: () => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false,
+  server = await createServer({ clock, automaticBots: false,
     databaseUrl, schema,
     transactionFaults: { beforeCommit: () => beforeCommit(), afterCommit: () => afterCommit() },
   });

@@ -5,6 +5,10 @@ import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -14,7 +18,7 @@ let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
 async function start() {
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => {

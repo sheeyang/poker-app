@@ -1,4 +1,4 @@
-import type { ConcreteAction, ObservableCashGameState, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding } from '@poker/contracts';
+import type { ConcreteAction, ObservableCashGameState, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, TableSchedule } from '@poker/contracts';
 import { CashGame, type CashGameEvent } from '@poker/engine';
 import { findBinding, isHuman, type PersistedTableSession } from './aggregate.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
@@ -27,8 +27,17 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
     },
   }));
 }
-/** Projects the table for one viewing human Participant, including only that Participant's own study settings. */
-export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game?: CashGame, adminMode = true): ObservableTableSession {
+function projectSchedule(schedule: TableSchedule): TableSchedule {
+  return {
+    phases: schedule.phases.map(p => ({ kind: p.kind, handId: p.handId, street: p.street, startsAt: p.startsAt, endsAt: p.endsAt, durationMs: p.durationMs })),
+    actionWindow: schedule.actionWindow && { participantId: schedule.actionWindow.participantId, decisionId: schedule.actionWindow.decisionId, opensAt: schedule.actionWindow.opensAt },
+  };
+}
+/**
+ * Projects the table for one viewing human Participant, including only that Participant's own study settings.
+ * `serverTime` is the injected clock's time at projection.
+ */
+export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game: CashGame | undefined, serverTime: number, adminMode = true): ObservableTableSession {
   const viewer = findBinding(aggregate, participantId);
   if (!isHuman(viewer)) throw new Error('Table views are projected only for a human Participant.');
   if (!game) {
@@ -42,6 +51,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: structuredClone(viewer.trainerConfiguration),
+    schedule: projectSchedule(aggregate.schedule), serverTime,
     inspection: { adminMode, completedHands: adminMode ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
@@ -53,7 +63,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     },
   };
 }
-export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, events: readonly CashGameEvent[] = [], adminMode = true): ObservableTableUpdate {
+export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = true): ObservableTableUpdate {
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
       case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
@@ -74,5 +84,5 @@ export function projectTableUpdate(aggregate: PersistedTableSession, participant
       case 'hand-completed': return { type: event.type, handId: event.handId };
     }
   });
-  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game, adminMode), presentationEvents };
+  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game, serverTime, adminMode), presentationEvents };
 }

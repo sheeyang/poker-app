@@ -5,6 +5,10 @@ import { Pool } from 'pg';
 import { baselinePlayingStrategy, defaultConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -13,7 +17,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>> | undefined;
 let base: string;
 async function start() {
-  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 async function stop() { await server?.close(); server = undefined; }
