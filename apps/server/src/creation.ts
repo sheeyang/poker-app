@@ -5,7 +5,7 @@ import { and, eq } from 'drizzle-orm';
 import { defaultConfiguration, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
-import { creationRequests, tableSessions } from './db/schema.js';
+import { creationRequests, localUsers, tableSessions } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
 import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
@@ -50,13 +50,15 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         if (existing) return existing.fingerprint === fingerprint ? existing.outcome : {
           ok: false, rejection: { code: 'request-id-conflict', message: 'This requestId was already used for different creation contents.' },
         };
-        const created = validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
+        const guest = await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, ownerUserId));
+        const displayName = guest[0]?.displayName;
+        const created = !displayName ? { ok: false as const, rejection: { code: 'display-name-required', message: 'Choose a display name before creating a table.' } } : validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
         let outcome: CreationOutcome;
         if (!created.ok) outcome = { ok: false, rejection: created.rejection };
         else {
           const tableSessionId = randomUUID();
           const bindings: PersistedTableSession['bindings'] = [
-            { participantId: randomUUID(), name: 'You', controller: { kind: 'human' }, userId: ownerUserId },
+            { participantId: randomUUID(), name: displayName!, controller: { kind: 'human' }, userId: ownerUserId },
             ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: b.name, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
           ];
           const aggregate: PersistedTableSession = {

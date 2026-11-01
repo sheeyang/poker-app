@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { createServer } from '../src/server.js';
@@ -28,6 +29,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
   expect(identity.status).toBe(200);
   expect(identity.headers.get('set-cookie')).toContain('HttpOnly');
   cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  await nameGuest(base, cookie);
   const create = await fetch(base + '/api/table-sessions', {
     method: 'POST', headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({ requestId: 'first-creation', configuration: {} }),

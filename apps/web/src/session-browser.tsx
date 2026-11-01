@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { CreateTableSessionRequest } from '@poker/contracts';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@poker/client';
 import { defaultPlayingStrategy, defaultConfiguration } from '@poker/contracts';
@@ -6,6 +7,7 @@ import { StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { chips } from './table-model.js';
 import { useSession, type Command } from './session.js';
+import { DisplayNameForm, DisplayNamePrompt, useDisplayName } from './display-name.js';
 import { SavedTableSkeleton, SavedTablesSkeleton } from './loading-skeleton.js';
 
 export function SessionBrowser({ command, ready, connecting = false, close }: { command: Command; ready: boolean; connecting?: boolean; close?: () => void }) {
@@ -13,6 +15,7 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
   const [smallBlind, setSmallBlind] = useState(10), [bigBlind, setBigBlind] = useState(20), [ante, setAnte] = useState(0);
   const [minimumBB, setMinimumBB] = useState(20), [maximumBB, setMaximumBB] = useState(200);
   const [strategy, setStrategy] = useState(defaultPlayingStrategy), [seatChanges, setSeatChanges] = useState(true);
+  const { displayName } = useDisplayName(), [awaitingName, setAwaitingName] = useState<CreateTableSessionRequest | null>(null);
   const select = useSession(s => s.select), selected = useSession(s => s.selectedId);
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: ready });
   function open(id: string) { select(id); close?.(); }
@@ -21,7 +24,7 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
     <div className="practice-heading"><div><h1>Practice</h1><p>Start a new table or continue a saved one.</p></div>{close && <button className="quiet-button" onClick={close}>Back to your hand <Icon name="arrow" size={17} /></button>}</div>
     <div className="practice-layout"><section className="practice-config" aria-labelledby="new-practice-title">
       <h2 id="new-practice-title">New table</h2>
-      <form onSubmit={e => { e.preventDefault(); if (!valid) return; command.launch({ requestId: crypto.randomUUID(), configuration: { ...defaultConfiguration, seatCount: players, smallBlind, bigBlind, ante, minimumBuyIn: bigBlind * minimumBB, defaultBuyIn: bigBlind * depth, maximumBuyIn: bigBlind * maximumBB, allowSeatChanges: seatChanges }, bots: Array.from({ length: players - 1 }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: strategy })) }); }}>
+      <form onSubmit={e => { e.preventDefault(); if (!valid) return; const request: CreateTableSessionRequest = { requestId: crypto.randomUUID(), configuration: { ...defaultConfiguration, seatCount: players, smallBlind, bigBlind, ante, minimumBuyIn: bigBlind * minimumBB, defaultBuyIn: bigBlind * depth, maximumBuyIn: bigBlind * maximumBB, allowSeatChanges: seatChanges }, bots: Array.from({ length: players - 1 }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: strategy })) }; if (displayName) command.launch(request); else setAwaitingName(request); }}>
         <fieldset disabled={command.busy || !ready}>
           <fieldset className="format-picker"><legend>Table size</legend><div className="format-options">{[{ n: 2, title: 'Heads-up', text: 'You + 1 bot' }, { n: 6, title: '6-max', text: 'You + 5 bots' }, { n: 9, title: 'Full ring', text: 'You + 8 bots' }].map(f => <label key={f.n} className={players === f.n ? 'format-selected' : ''}><input type="radio" name="format" checked={players === f.n} onChange={() => setPlayers(f.n)} /><strong>{f.title}</strong><span>{f.text}</span></label>)}</div></fieldset>
           <fieldset className="depth-picker"><legend>Starting stack</legend><div className="depth-options">{[50, 100, 200].map(n => <button type="button" key={n} aria-pressed={depth === n} onClick={() => setDepth(n)}>{n} BB</button>)}</div></fieldset>
@@ -30,6 +33,7 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
           <button className="primary start-practice" type="submit" disabled={!valid}>{command.busy ? 'Preparing your table…' : 'Start practice'}<Icon name="arrow" size={19} /></button>
         </fieldset>
       </form>
+      <details className="practice-custom"><summary>Your name{displayName ? ` · ${displayName}` : ''}</summary><div className="details-content"><p className="muted">Used at tables you create from now on. Existing tables keep the name they started with.</p><DisplayNameForm current={displayName} /></div></details>
       <p className="baseline-note"><Icon name="info" size={16} /><span>Simple Heuristic uses basic hand strength and modest bets. Scores compare your play with a reference; they don’t measure poker skill.</span></p>
     </section>
     <section className="practice-return" aria-labelledby="return-title"><h2 id="return-title">Pick up where you left off</h2><p className="muted">Your tables are saved automatically.</p>
@@ -38,6 +42,7 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
       {sessions.data?.tableSessionIds.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
       <ul className="return-list">{sessions.data?.tableSessionIds.map(id => <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
     </section></div>
+    {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;
 }
 
