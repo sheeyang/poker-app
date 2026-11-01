@@ -39,8 +39,8 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
     <section className="practice-return" aria-labelledby="return-title"><h2 id="return-title">Pick up where you left off</h2><p className="muted">Your tables are saved automatically.</p>
       {!sessions.data && (connecting || ready && sessions.isPending) && <SavedTablesSkeleton />}
       {sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
-      {sessions.data?.tableSessionIds.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
-      <ul className="return-list">{sessions.data?.tableSessionIds.map(id => <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
+      {sessions.data?.tables.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
+      <ul className="return-list">{sessions.data?.tables.map(({ tableSessionId: id }) => <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
     </section></div>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;

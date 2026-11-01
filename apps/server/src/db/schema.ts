@@ -1,6 +1,6 @@
 import type { CreationOutcome, MutationOutcome } from '@poker/contracts';
-import { jsonb, pgTable, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
-import type { PersistedTableSession } from '../aggregate.js';
+import { jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
+import type { MembershipStatus, StoredTableSession } from '../aggregate.js';
 export const localUsers = pgTable('local_users', {
   id: uuid('id').primaryKey(),
   tokenHash: text('token_hash').notNull().unique(),
@@ -9,8 +9,16 @@ export const localUsers = pgTable('local_users', {
 export const tableSessions = pgTable('table_sessions', {
   id: uuid('id').primaryKey(),
   ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),
-  aggregate: jsonb('aggregate').$type<PersistedTableSession>().notNull(),
+  /** Any stored version; read it through `upgradeTableSession`. */
+  aggregate: jsonb('aggregate').$type<StoredTableSession>().notNull(),
 });
+/** The membership index: one row per human Participant, mirroring its aggregate binding. */
+export const tableMemberships = pgTable('table_memberships', {
+  userId: uuid('user_id').notNull().references(() => localUsers.id),
+  tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
+  participantId: text('participant_id').notNull(),
+  status: text('status').$type<MembershipStatus>().notNull(),
+}, table => [primaryKey({ columns: [table.userId, table.tableSessionId] }), unique().on(table.tableSessionId, table.participantId)]);
 
 export const creationRequests = pgTable('creation_requests', {
   userId: uuid('user_id').notNull().references(() => localUsers.id),
@@ -31,7 +39,7 @@ export const analysisEvaluations = pgTable('analysis_evaluations', {
   fingerprint: text('fingerprint').primaryKey(),
   requestId: uuid('request_id').notNull().unique(),
   tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
-  ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),
+  participantId: text('participant_id').notNull(),
   result: jsonb('result').$type<Extract<import('@poker/contracts').DecisionAnalysis, { status: 'complete' }>>().notNull(),
 });
 /** Successful scores retain their evaluation identity without entering poker records. */
@@ -39,6 +47,6 @@ export const analysisScores = pgTable('analysis_scores', {
   fingerprint: text('fingerprint').primaryKey(),
   requestId: uuid('request_id').notNull().unique(),
   tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
-  ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),
+  participantId: text('participant_id').notNull(),
   result: jsonb('result').$type<Extract<import('@poker/contracts').DecisionAnalysis, { status: 'complete' }>>().notNull(),
 });

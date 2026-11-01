@@ -34,7 +34,7 @@ function submit(cookie: string, requestId: string) {
   return fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId }) });
 }
 async function list(cookie: string) {
-  return (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tableSessionIds;
+  return (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tables.map((table: { tableSessionId: string }) => table.tableSessionId);
 }
 test('a working creation remains unavailable until its real PostgreSQL transaction commits', async () => {
   const cookie = await newUser();

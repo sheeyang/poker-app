@@ -34,14 +34,49 @@ All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
 | --- | --- |
-| `POST` to the base path | Requires `requestId`; accepts optional observable `configuration` overrides and `bots`, each with `name` and `playingStrategy`. Returns the created Table Session ID and safe Participant bindings, without seating them. |
-| `GET` to the base path | Lists only the authenticated user's owned Table Session identifiers. |
-| `GET /:id` | Returns the committed participant-safe view, application-owned revisions, and safe bindings. |
+| `POST` to the base path | Requires `requestId`; accepts optional observable `configuration` overrides and `bots`, each with `name` and `playingStrategy`. Creates a Practice Table and returns its Table Session ID and safe Participant bindings, without seating them. |
+| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. |
+| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
-| `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. |
-| `POST /:id/inspect-hand` | Accepts only `handId`; requires an authenticated owner, a completed Hand, and enabled Admin Mode. |
+| `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
+| `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
 | `GET /:id/live` | Earlier table-specific WebSocket endpoint, retained for existing transport consumers. |
+
+## Authorization
+
+Every table route and live subscription is authorized through the requesting
+Guest's own human Participant, as its Human Controller. The Guest must be bound to
+a joined Participant of that table, and must not have left or been removed. Every
+view is projected for that Participant. Any other Guest receives the same 404
+`not-found` as for a table that does not exist. Two requests are checked before
+request idempotency, so a remembered outcome is replayed only to a requester
+allowed to make that request:
+
+- A request naming another human's Participant is rejected with 403
+  `not-your-participant`, even from the Table Owner.
+- Dealing (`start-hand`), `set-button`, managing a Bot (seating, Stand Up, moving,
+  sitting out, top-ups, `set-playing-strategy`, `retry-bot`) and completed-Hand
+  inspection require Table Ownership. Other Participants receive 403
+  `table-owner-required`.
+
+At a Practice Table the owner is the only human, so neither applies there. Acting
+for a Bot remains the definitive rejection 403 `actor-not-authorized`.
+
+Analysis Results, scores and summaries belong to the Participant whose decisions
+they analyze. Each one uses that Participant's own Reference Strategy, and only
+that Participant's Human Controller can read or retry it or receive its
+`analysis-update`.
+
+The Persisted Table Session is version 2. It records the table `mode`, and each
+human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
+configuration. Version-1 records load as Practice Tables whose human takes the
+table-level Trainer configuration, and are rewritten at their next commit. The
+`table_memberships` index (Guest, table, Participant, status) is written in the
+same transaction as every aggregate write that changes a membership (see
+[`membership.ts`](../apps/server/src/membership.ts)). Startup backfills it for
+version-1 records. It serves the saved-tables list and the authorization of
+tables that are not yet loaded.
 
 Creation rejects hidden or unknown configuration fields and supplied
 ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
@@ -72,7 +107,7 @@ canonical JSON:
 | --- | --- | --- | --- |
 | Table creation | `create-table-v1:` | Complete request contents excluding `requestId` | Authenticated user and `requestId` |
 | Poker mutation | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
-| Controller or Trainer configuration mutation | `controller-mutation-v1:` | `{ ownerUserId, kind, contents }` | Table Session and `requestId` |
+| Controller or Trainer configuration mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
 For poker mutations, `source` is `human` or `bot`. `kind` is the command name;
 `contents` is the complete request body excluding `requestId`. Expected revisions
@@ -85,7 +120,10 @@ Creation and mutation callers are in
 [`mutations.ts`](../apps/server/src/mutations.ts).
 
 Matching retries return the original small outcome; changed contents return
-`request-id-conflict`. Current views are read separately. The acceptance,
+`request-id-conflict`. Current views are read separately. Table request IDs are
+scoped to the Table Session, so all of its Guests share them. A Guest who reuses
+another Guest's request ID receives `request-id-conflict`, never that Guest's
+outcome. The acceptance,
 revision, and retained-outcome rules are defined in
 [ADR-0016](adr/0016-separate-semantic-and-durable-authority.md),
 [ADR-0018](adr/0018-wrap-poker-records-in-a-backend-aggregate.md), and

@@ -5,9 +5,10 @@ import { and, eq } from 'drizzle-orm';
 import { defaultConfiguration, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
-import { creationRequests, localUsers, tableSessions } from './db/schema.js';
+import { creationRequests, localUsers } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
+import { writeTableSession } from './membership.js';
 import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
@@ -58,14 +59,14 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         else {
           const tableSessionId = randomUUID();
           const bindings: PersistedTableSession['bindings'] = [
-            { participantId: randomUUID(), name: displayName!, controller: { kind: 'human' }, userId: ownerUserId },
+            { participantId: randomUUID(), name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) },
             ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: b.name, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
           ];
           const aggregate: PersistedTableSession = {
-            schemaVersion: 1, tableSessionId, ownerUserId, pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [], trainerConfiguration: structuredClone(defaultTrainerConfiguration),
+            schemaVersion: 2, tableSessionId, ownerUserId, mode: 'practice', pokerRecord: created.game.toRecord(), bindings,
+            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [],
           };
-          await tx.insert(tableSessions).values({ id: tableSessionId, ownerUserId, aggregate });
+          await writeTableSession(tx, undefined, aggregate);
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };
         }
         await tx.insert(creationRequests).values({ userId: ownerUserId, requestId, fingerprint, outcome });
