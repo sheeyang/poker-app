@@ -16,8 +16,9 @@ export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freez
 /**
  * The current decision after a transition, or `null` when no one is to act. `actionTimeLimitMs` is set only
  * when this decision's Participant has an Action Deadline: a human, under the table's Action Time Limit.
+ * `liveAnalysisDisallowed` is the table's Allow Live Analysis, captured for a human's decision as its window opens.
  */
-export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId; readonly actionTimeLimitMs?: number } | null;
+export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId; readonly actionTimeLimitMs?: number; readonly liveAnalysisDisallowed?: true } | null;
 
 const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
 
@@ -49,10 +50,11 @@ export function scheduleTransition(previous: TableSchedule, events: readonly Cas
     if (event.type === 'board-dealt') { street = event.street; add('street', event.handId); }
     if (event.type === 'hand-completed') { add('payout', event.handId); if (options.pauseBetweenHands) add('pause', event.handId); }
   }
-  // A decision that stays current keeps its window, and so its Action Deadline.
+  // A decision that stays current keeps its window, and so its Action Deadline and captured Allow Live Analysis.
   const kept = previous.actionWindow && decision && previous.actionWindow.decisionId === decision.decisionId ? previous.actionWindow : undefined;
   const actionWindow: ActionWindow | null = kept ?? (decision ? { participantId: decision.participantId, decisionId: decision.decisionId, opensAt: cursor,
-    ...(decision.actionTimeLimitMs !== undefined ? { deadlineAt: cursor + decision.actionTimeLimitMs } : {}) } : null);
+    ...(decision.actionTimeLimitMs !== undefined ? { deadlineAt: cursor + decision.actionTimeLimitMs } : {}),
+    ...(decision.liveAnalysisDisallowed ? { liveAnalysisDisallowed: true as const } : {}) } : null);
   return { phases, actionWindow };
 }
 
