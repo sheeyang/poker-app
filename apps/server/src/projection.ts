@@ -30,7 +30,8 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {
     phases: schedule.phases.map(p => ({ kind: p.kind, handId: p.handId, street: p.street, startsAt: p.startsAt, endsAt: p.endsAt, durationMs: p.durationMs })),
-    actionWindow: schedule.actionWindow && { participantId: schedule.actionWindow.participantId, decisionId: schedule.actionWindow.decisionId, opensAt: schedule.actionWindow.opensAt },
+    actionWindow: schedule.actionWindow && { participantId: schedule.actionWindow.participantId, decisionId: schedule.actionWindow.decisionId, opensAt: schedule.actionWindow.opensAt,
+      ...(schedule.actionWindow.deadlineAt !== undefined ? { deadlineAt: schedule.actionWindow.deadlineAt } : {}) },
   };
 }
 /**

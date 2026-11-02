@@ -54,16 +54,41 @@ export function dealOpen(table: ObservableTableSession, serverNow: number): bool
   return !payout || serverNow >= payout.endsAt;
 }
 
-/** Whether `participantId` may act at server time `serverNow`: their decision is current and its window has opened. */
-export function actionWindowOpen(table: ObservableTableSession, participantId: string | undefined, serverNow: number): boolean {
+/** The Action Window of the current decision, if the schedule has one. */
+function currentWindow(table: ObservableTableSession) {
   const state = table.view.state, window = table.schedule.actionWindow;
-  return state.status === 'active-hand' && !!participantId && state.actorId === participantId && !!window
-    && window.participantId === participantId && window.decisionId === state.decisionId && serverNow >= window.opensAt;
+  return state.status === 'active-hand' && window && window.participantId === state.actorId && window.decisionId === state.decisionId ? window : undefined;
 }
 
-/** The next server time at which the presentation changes, if any: a phase starting or ending, or the window opening. */
+/**
+ * Whether `participantId` may act at server time `serverNow`: their decision is current, its window has
+ * opened, and its Action Deadline, if any, has not been reached.
+ */
+export function actionWindowOpen(table: ObservableTableSession, participantId: string | undefined, serverNow: number): boolean {
+  const window = currentWindow(table);
+  return !!participantId && window?.participantId === participantId && serverNow >= window.opensAt && (window.deadlineAt === undefined || serverNow < window.deadlineAt);
+}
+
+/**
+ * Whole seconds left before the current decision's Action Deadline at server time `serverNow`, counted from
+ * when its window opens and never below zero; `undefined` when the decision has no deadline (a Bot's, or a
+ * table without an Action Time Limit).
+ */
+export function deadlineCountdown(table: ObservableTableSession, serverNow: number): number | undefined {
+  const window = currentWindow(table);
+  if (window?.deadlineAt === undefined) return undefined;
+  return Math.max(0, Math.ceil((window.deadlineAt - Math.max(serverNow, window.opensAt)) / 1000));
+}
+
+/**
+ * The next server time at which the presentation changes, if any: a phase starting or ending, the window
+ * opening, each second of its deadline countdown, or the deadline itself.
+ */
 export function nextPresentationChange(table: ObservableTableSession, serverNow: number): number | undefined {
-  const instants = [...phasesOf(table).flatMap(phase => [phase.startsAt, phase.endsAt]), ...(table.schedule.actionWindow ? [table.schedule.actionWindow.opensAt] : [])].filter(at => at > serverNow);
+  const window = currentWindow(table), deadline = window?.deadlineAt;
+  // The countdown shows ceil(remaining / 1 s), so it changes when the remaining time reaches a whole second.
+  const tick = window && deadline !== undefined && serverNow >= window.opensAt && serverNow < deadline ? [deadline - (Math.ceil((deadline - serverNow) / 1000) - 1) * 1000] : [];
+  const instants = [...phasesOf(table).flatMap(phase => [phase.startsAt, phase.endsAt]), ...(table.schedule.actionWindow ? [table.schedule.actionWindow.opensAt] : []), ...(deadline !== undefined ? [deadline] : []), ...tick].filter(at => at > serverNow);
   return instants.length ? Math.min(...instants) : undefined;
 }
 
