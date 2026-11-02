@@ -25,9 +25,9 @@ beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + 
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 
 type Table = { id: string; cookie: string; ids: string[]; revision: number };
-async function table(count = 2, configuration: Partial<ObservableGameConfiguration> = {}): Promise<Table> {
+async function table(count = 2, configuration: Partial<ObservableGameConfiguration> = {}, options?: { actionTimeLimitSeconds: 15 | 30 | 60 }): Promise<Table> {
   const cookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
-  const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration, bots: Array.from({ length: count - 1 }, (_, i) => ({ name: 'Bot ' + (i + 1), playingStrategy: baselinePlayingStrategy })) }) });
+  const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration, ...(options ? { options } : {}), bots: Array.from({ length: count - 1 }, (_, i) => ({ name: 'Bot ' + (i + 1), playingStrategy: baselinePlayingStrategy })) }) });
   expect(response.status).toBe(201); const created = await response.json();
   return { id: created.tableSessionId, cookie, ids: created.bindings.map((b: { participantId: string }) => b.participantId), revision: 0 };
 }
@@ -342,4 +342,39 @@ test('nobody manages another human, and an owner who leaves keeps their table, w
   const owner = await view(ann);
   expect(owner).toMatchObject({ viewerParticipantId: annId, ownerParticipantId: annId, joinToken: token });
   expect(participant(owner, annId)).toMatchObject({ seat: null, stack: 0 });
+});
+
+test('at a Practice Table a missed Action Deadline plays the Timeout Action without sitting the human out, and a sit-out asked for meanwhile applies after the Hand, before Deal', async () => {
+  const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [human, bot] = t.ids as [string, string];
+  await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
+  await command(t, 'start-hand'); clock.advance(1500);
+  expect(await command(t, 'set-sitting-out', { participantId: human, sittingOut: true })).toMatchObject({ afterHand: true });
+  clock.advance(15_001);
+  // The human never acted: the server folded for them, as their own decision.
+  await expect.poll(async () => (await read(t)).view.state.status).toBe('completed-hand');
+  const timedOut = await read(t);
+  expect(timedOut.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: human, action: { type: 'fold' } }]);
+  // The Timeout Action sat nobody out: only the request does, and not before the Hand has been paid out.
+  expect(participant(timedOut, human).sittingOut).toBe(false);
+  expect(timedOut.pendingChanges).toEqual([{ participantId: human, change: 'sit-out' }]);
+  clock.advance(2000);
+  await expect.poll(async () => (await read(t)).pendingChanges).toEqual([]);
+  expect(participant(await read(t), human).sittingOut).toBe(true);
+  // Deal then resumes them, as for any voluntary sit-out.
+  t.revision = (await read(t)).pokerRevision;
+  await command(t, 'start-hand');
+  expect(participant(await read(t), human)).toMatchObject({ sittingOut: false, inHand: true });
+});
+
+test('at a Practice Table a missed Action Deadline with nothing requested leaves the human playing and the table waiting for their Deal', async () => {
+  const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [human, bot] = t.ids as [string, string];
+  await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
+  await command(t, 'start-hand'); clock.advance(1500);
+  clock.advance(15_001);
+  await expect.poll(async () => (await read(t)).view.state.status).toBe('completed-hand');
+  clock.advance(2000);
+  const after = await read(t);
+  expect(after.pendingChanges).toEqual([]);
+  expect(participant(after, human)).toMatchObject({ seat: 1, sittingOut: false });
+  expect(after.view.state.status).toBe('completed-hand');
 });

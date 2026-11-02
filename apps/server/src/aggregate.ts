@@ -60,6 +60,12 @@ export interface PersistedTableSession {
    * the Hand's payout phase ends, and clears them in the same transaction.
    */
   readonly pendingChanges: readonly PendingParticipantChange[];
+  /**
+   * The Action Window most recently closed by its Timeout Action, with the poker revision at which it was open.
+   * A late act aimed at that decision (same Participant and expected revision) is then told its deadline passed,
+   * rather than that the table changed. Server-only: never projected.
+   */
+  readonly timedOutWindow?: { readonly participantId: string; readonly decisionId: string; readonly deadlineAt: number; readonly pokerRevision: number };
 }
 /** A version-2 aggregate as stored. Rows written before table options, scheduled play or after-Hand requests lack those fields. */
 export type StoredTableSessionV2 = Omit<PersistedTableSession, 'options' | 'schedule' | 'pendingChanges'> & { readonly options?: TableOptions; readonly schedule?: TableSchedule; readonly pendingChanges?: readonly PendingParticipantChange[] };

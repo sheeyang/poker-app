@@ -163,6 +163,9 @@ body:has(.table-active) { overflow: hidden; }
 .action-tray { display: grid; grid-template-columns: minmax(170px,.8fr) minmax(250px,1.2fr); gap: 14px 24px; padding: 18px 24px; border-radius: 12px; background: #1e2c24; border: 1px solid #3e4d3d; max-width: 980px; margin: 18px auto 0; }
 .action-context { grid-column: 1/-1; display: none; justify-content: flex-end; }
 .action-context > span { font-size: .8rem; color: #bdcabc; }
+.action-deadline { grid-column: 1/-1; margin: 0; display: flex; gap: 6px; align-items: baseline; font-size: .85rem; color: #edd7a9; }
+.action-deadline strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.action-deadline.deadline-near { color: #f0c8af; }
 .quick-actions { display: flex; gap: 8px; align-items: stretch; padding-bottom: 22px; }
 .action-tray:not(:has(.sizing)) .quick-actions { grid-column: 1/-1; padding-bottom: 0; }
 .action-button { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 70px; min-height: 55px; border-radius: 8px; padding: 10px 16px; }

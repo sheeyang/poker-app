@@ -7,19 +7,23 @@ import { useSession, type Command } from './session.js';
 
 export function CommandFeedback({ command }: { command: Command }) {
   if (command.sending || !command.pending && !command.error) return null;
-  const aborted = command.error instanceof RequestFailure && command.error.code === 'commit-not-applied';
+  const code = command.error instanceof RequestFailure ? command.error.code : undefined;
+  const aborted = code === 'commit-not-applied';
+  // A late action: the server played the Timeout Action instead, and its message says which.
+  const late = code === 'action-deadline-passed';
   return <div className={`command-feedback ${command.error ? 'notice-error' : ''}`} role={command.error ? 'alert' : 'status'}>
-    <div><strong>{command.sending ? 'Confirming your request…' : aborted ? 'This attempt was not applied.' : command.pending ? 'Waiting for confirmation.' : 'The request was not accepted.'}</strong><p>{command.error?.message ?? 'Your last confirmed table stays visible.'}</p></div>
+    <div><strong>{command.sending ? 'Confirming your request…' : aborted ? 'This attempt was not applied.' : late ? 'Your time ran out.' : command.pending ? 'Waiting for confirmation.' : 'The request was not accepted.'}</strong><p>{command.error?.message ?? 'Your last confirmed table stays visible.'}</p></div>
     {command.pending && !command.sending && !aborted && <button onClick={command.check}>Check status</button>}
     {(!command.pending || aborted) && <button onClick={command.dismiss}>{aborted ? 'Start a new attempt' : 'Dismiss'}</button>}
   </div>;
 }
 
 /**
- * `actionOpen`: the viewer's Action Window is open now, on the estimated server clock.
+ * `actionOpen`: the viewer's Action Window is open now, on the estimated server clock, and its Action Deadline
+ * has not been reached. `countdown`: whole seconds left before the acting Participant's Action Deadline, if any.
  * `dealOpen`: the last Hand's payout phase has ended, so Deal (and Rebuy & deal) is available.
  */
-export function ActionTray({ table, actionOpen, dealOpen, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; dealOpen: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
+export function ActionTray({ table, actionOpen, countdown, dealOpen, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; countdown?: number; dealOpen: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const participant = state.participants.find(p => p.participantId === humanId);
@@ -34,6 +38,9 @@ export function ActionTray({ table, actionOpen, dealOpen, command, openSettings,
   if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} openSettings={openSettings} review={review} /> : <NextHand table={table} busy={blocked || !dealOpen} openSettings={openSettings} review={review} />;
   if (state.actorId !== humanId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : participant?.seat == null ? 'You’re watching this hand.' : 'The hand is in play.'}</strong><p>{table.runtimeStatus?.phase === 'failed' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}</p></div><span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
   return <div className="action-tray">
+    {countdown !== undefined && <p className={`action-deadline${countdown <= 5 ? ' deadline-near' : ''}`} role="timer">{countdown > 0
+      ? <><strong>{countdown}s</strong> to act</>
+      : <><strong>Time’s up.</strong> {state.legalActions.some(a => a.type === 'check') ? 'Checking' : 'Folding'} for you…</>}</p>}
     <div className="action-context"><span>Stack {chips(participant?.stack ?? 0)} chips</span></div>
     <div className="quick-actions">{state.legalActions.filter(a => !('minimum' in a)).map(a => <button className={`action-button action-${a.type}`} key={a.type} disabled={busy} onClick={() => submit({ type: a.type } as ConcreteAction)}><span>{actionLabel({ type: a.type } as ConcreteAction)}</span>{a.type === 'call' && <strong>{chips(state.amountToCall ?? 0)}</strong>}</button>)}</div>
     {sized && <Sizing key={`${state.decisionId}-${sized.type}`} action={sized} table={table} disabled={busy} submit={submit} />}

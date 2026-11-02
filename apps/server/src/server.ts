@@ -242,7 +242,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : forbidden.includes(outcome.rejection.code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-poker-revision', 'action-window-not-open', 'payout-phase-not-ended'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : forbidden.includes(outcome.rejection.code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-poker-revision', 'action-window-not-open', 'action-deadline-passed', 'payout-phase-not-ended'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The commit outcome is unknown. This Table Session is paused pending durable recovery.' } });

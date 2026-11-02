@@ -10,8 +10,11 @@ export const presentationDurations: Readonly<Record<PresentationPhaseKind, numbe
 
 export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freeze([]), actionWindow: null });
 
-/** The current decision after a transition, or `null` when no one is to act. */
-export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId } | null;
+/**
+ * The current decision after a transition, or `null` when no one is to act. `actionTimeLimitMs` is set only
+ * when this decision's Participant has an Action Deadline: a human, under the table's Action Time Limit.
+ */
+export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId; readonly actionTimeLimitMs?: number } | null;
 
 const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
 
@@ -41,8 +44,10 @@ export function scheduleTransition(previous: TableSchedule, events: readonly Cas
     if (event.type === 'board-dealt') { street = event.street; add('street', event.handId); }
     if (event.type === 'hand-completed') add('payout', event.handId);
   }
+  // A decision that stays current keeps its window, and so its Action Deadline.
   const kept = previous.actionWindow && decision && previous.actionWindow.decisionId === decision.decisionId ? previous.actionWindow : undefined;
-  const actionWindow: ActionWindow | null = kept ?? (decision ? { participantId: decision.participantId, decisionId: decision.decisionId, opensAt: cursor } : null);
+  const actionWindow: ActionWindow | null = kept ?? (decision ? { participantId: decision.participantId, decisionId: decision.decisionId, opensAt: cursor,
+    ...(decision.actionTimeLimitMs !== undefined ? { deadlineAt: cursor + decision.actionTimeLimitMs } : {}) } : null);
   return { phases, actionWindow };
 }
 
@@ -51,6 +56,17 @@ export function beforeActionWindow(schedule: TableSchedule, participantId: Parti
   const window = schedule.actionWindow;
   return !!window && window.participantId === participantId && at < window.opensAt;
 }
+
+/**
+ * Whether an action by `participantId` at server time `at` arrives after the Action Deadline of `window`.
+ * An action received at the deadline itself is on time.
+ */
+export function pastActionDeadline(window: Pick<ActionWindow, 'participantId' | 'deadlineAt'> | null | undefined, participantId: ParticipantId, at: ServerTime): boolean {
+  return !!window && window.participantId === participantId && window.deadlineAt !== undefined && at > window.deadlineAt;
+}
+
+/** The first server time past the window's Action Deadline, from which its Timeout Action is due. */
+const timeoutDueAt = (window: ActionWindow | null) => window?.deadlineAt === undefined ? undefined : window.deadlineAt + 1;
 
 /**
  * When the latest Hand's payout phase ends, or `undefined` when no Hand has been paid out. This instant
@@ -67,8 +83,11 @@ export function beforePayoutEnd(schedule: TableSchedule, at: ServerTime): boolea
   return endsAt !== undefined && at < endsAt;
 }
 
-/** The next server time at which the table has scheduled work: its Action Window opening, or the end of the payout phase. */
+/**
+ * The next server time at which the table has scheduled work: its Action Window opening, the moment its Action
+ * Deadline has passed, or the end of the payout phase.
+ */
 export function nextWakeAt(schedule: TableSchedule, now: ServerTime): ServerTime | undefined {
-  const instants = [schedule.actionWindow?.opensAt, payoutEndsAt(schedule)].filter((at): at is ServerTime => at !== undefined && at > now);
+  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), payoutEndsAt(schedule)].filter((at): at is ServerTime => at !== undefined && at > now);
   return instants.length ? Math.min(...instants) : undefined;
 }

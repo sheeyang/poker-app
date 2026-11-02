@@ -252,6 +252,12 @@ export interface ActionWindow {
   readonly participantId: ParticipantId;
   readonly decisionId: DecisionId;
   readonly opensAt: ServerTime;
+  /**
+   * The Action Deadline of a human's window under an Action Time Limit: `opensAt` plus the limit. An action the
+   * server receives later than this is rejected (`action-deadline-passed`), and the server plays the Timeout
+   * Action (Check, or Fold when Check is not legal) as that Participant's decision. Bots never have one.
+   */
+  readonly deadlineAt?: ServerTime;
 }
 /**
  * A change to a seated human Participant that waits for the Hand in progress to end. A weaker request is
