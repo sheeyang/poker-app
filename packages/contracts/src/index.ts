@@ -69,6 +69,7 @@ export type ObservablePresentationEvent =
   | { readonly type: 'sitting-out-changed'; readonly participantId: ParticipantId; readonly sittingOut: boolean }
   | { readonly type: 'participant-topped-up'; readonly participantId: ParticipantId; readonly targetStack: ChipAmount; readonly amount: ChipAmount }
   | { readonly type: 'button-set'; readonly seat: number }
+  | { readonly type: 'seat-changes-changed'; readonly allowSeatChanges: boolean }
   | { readonly type: 'hand-started'; readonly handId: HandId; readonly buttonSeat: number; readonly smallBlindParticipantId: ParticipantId; readonly bigBlindParticipantId: ParticipantId }
   | { readonly type: 'forced-contribution'; readonly participantId: ParticipantId; readonly kind: 'ante' | 'small-blind' | 'big-blind'; readonly amount: ChipAmount }
   | { readonly type: 'hole-cards-dealt'; readonly participantId: ParticipantId; readonly cardCount: number; readonly cards?: readonly Card[] }
@@ -169,13 +170,29 @@ export interface LeaveTableRequest extends PokerMutationMetadata { readonly part
  * After-Hand Request); when it applies the Guest stands up and can no longer join through any Join Link.
  */
 export interface RemoveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
-export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest | LeaveTableRequest | RemoveParticipantRequest;
-export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table' | 'remove-participant';
+/**
+ * The Table Owner adds a Bot, at either table mode and at any time, even during a Hand. The Bot takes the open Seat
+ * named, or the lowest open one, with the buy-in named (the table's default otherwise); it is dealt in from the
+ * next Hand without a missed blind. Its name must differ from every other Participant's, ignoring case.
+ */
+export interface AddBotRequest extends PokerMutationMetadata {
+  readonly name: string;
+  readonly playingStrategy: StrategyDescriptor;
+  readonly seat?: number;
+  readonly buyIn?: ChipAmount;
+}
+/**
+ * The Table Owner removes a Bot: it stands up, cashing out, and leaves the table. A Bot in a Hand goes after it
+ * (an After-Hand Request, shown to everyone like a human's). Its name stays taken and its past Hands stay in the history.
+ */
+export interface RemoveBotRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
+export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest | LeaveTableRequest | RemoveParticipantRequest | RemoveBotRequest;
+export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table' | 'remove-participant' | 'remove-bot';
 export interface ActRequest extends PokerMutationMetadata {
   readonly participantId: ParticipantId;
   readonly action: ConcreteAction;
 }
-export type PokerMutationRequest = SeatParticipantRequest | StartHandRequest | ActRequest | ParticipantManagementRequest;
+export type PokerMutationRequest = SeatParticipantRequest | StartHandRequest | ActRequest | AddBotRequest | ParticipantManagementRequest;
 /** A durable outcome contains no complete view; read the current view separately. */
 export interface MutationAcknowledgement {
   readonly ok: true;
@@ -326,6 +343,12 @@ export interface ObservableTableSession {
    * each change is also published live (`table-presence`). A Practice Table, with its single human, has none.
    */
   readonly connectedParticipantIds?: readonly ParticipantId[];
+  /**
+   * The Participants who are no longer at the table: humans who left it or were removed, and Bots the owner removed.
+   * Public, and absent while nobody has departed. They keep their names in the history, and the owner is not offered
+   * Removal of them.
+   */
+  readonly departedParticipantIds?: readonly ParticipantId[];
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;
@@ -395,6 +418,22 @@ export interface SetTrainerConfigurationRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;
   readonly trainerConfiguration: TrainerConfiguration;
+}
+/**
+ * The options the Table Owner can change at an Online Table, between Hands. Each is optional; the request names only
+ * what it changes. There is no way to turn the Action Time Limit off: an Online Table always has one.
+ */
+export interface TableOptionChanges {
+  readonly actionTimeLimitSeconds?: ActionTimeLimitSeconds;
+  readonly allowLiveAnalysis?: boolean;
+  /** Applied through CashGame, so the Observable Game Configuration shows the current value. */
+  readonly allowSeatChanges?: boolean;
+}
+/** The Table Owner changes the table options of an Online Table between Hands. Everyone at the table sees the change. */
+export interface SetTableOptionsRequest {
+  readonly requestId: string;
+  readonly expectedSessionRevision: Revision;
+  readonly options: TableOptionChanges;
 }
 /** The Table Owner replaces an Online Table's Join Link: the old link stops working at once, and joined Participants stay. */
 export interface ReplaceJoinLinkRequest {
