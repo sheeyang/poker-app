@@ -71,6 +71,17 @@ databases.
 Admin Mode defaults on locally. Set `POKER_ADMIN_MODE=false` before starting the
 server to disable completed-Hand hidden-information reveal.
 
+Per-IP rate limits on table creation, joining and Join Link replacement are on in
+production and off locally, so repeated manual checks from one machine are not
+limited. Set `POKER_RATE_LIMITS=true` to try them (10 creations, 30 joins and 10
+replacements per address per 10 minutes) or `false` to turn them off. By default no
+reverse proxy is trusted and every client's address is the connection's own; behind
+one, set `TRUSTED_PROXIES` to its address (comma-separated addresses or CIDR ranges)
+and only a connection from it may supply `X-Forwarded-For`. The production stack
+sets this to Caddy's fixed address (`deploy/compose.yaml`). A Guest also cannot
+create a table while they own 10 tables that each have a seated human; stand up or
+leave a table to free a place.
+
 For a local check of the compiled hosted layout, set `SERVE_WEB=true`, build the
 workspace, and start the compiled server with `DATABASE_URL` configured. `HOST`
 defaults to `127.0.0.1`; hosted environments use `0.0.0.0`. `/healthz` reports a

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, RequestFailure } from '@poker/client';
-import type { ActRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ActRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -12,6 +12,8 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'trainer'; readonly body: SetTrainerConfigurationRequest }
   | { readonly kind: 'strategy'; readonly body: SetPlayingStrategyRequest }
   | { readonly kind: 'retry-bot'; readonly body: RetryBotRequest }
+  /** The Table Owner replaces the Online Table's Join Link. */
+  | { readonly kind: 'replace-link'; readonly body: ReplaceJoinLinkRequest }
   /** The Table Owner returns to a table they left, without the Join Link. */
   | { readonly kind: 'rejoin'; readonly body: JoinTableRequest }
 );
@@ -51,6 +53,7 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'strategy': return api.setPlayingStrategy(tableId, attempt.body);
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
     case 'rejoin': return api.rejoinTable(tableId, attempt.body);
+    case 'replace-link': return api.replaceJoinLink(tableId, attempt.body);
   }
 }
 

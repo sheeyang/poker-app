@@ -1,0 +1,22 @@
+# M4-11 implementation evidence
+
+The Table Owner of an Online Table can replace its Join Link and remove a disruptive Guest, and the public server protects itself from floods and from one Guest holding unbounded numbers of active tables.
+
+**Replace Join Link.** `POST /:id/replace-join-link` stores a new token in the same transaction as the revision bump, so the previous link stops resolving at once (404 `invalid-join-link` on both the preview and the join). Joined Participants keep their place, and only the owner reads the new link, from their view and live updates.
+
+**Removal.** The owner's `remove-participant` names a joined human other than themselves. Between Hands it stands the Guest up (cashing out), ends their membership and marks the binding `removed`. During a Hand, seated or not, it is the strongest After-Hand Request: it waits for the payout phase to end, replaces any weaker pending change of that Guest, and cannot be undone by anything the Guest asks for. A removed Guest receives `table-membership-ended` with `reason: 'removed'`, loses the table from their saved list, and is refused (403 `guest-removed`) by the join, its preview and every Join Link, including ones issued afterwards.
+
+**Rate limits and client addresses.** Table creation, joining (including the owner returning to a table they left) and Join Link replacement are limited per client address by a sliding window on the server clock: 10, 30 and 10 requests per 10 minutes. A refusal is HTTP 429 `rate-limited` with `Retry-After` and a message saying how long to wait. Client addresses come from `X-Forwarded-For` only on a connection from the proxies named in `TRUSTED_PROXIES`. The production stack gives Caddy a fixed address on a pinned Compose network and trusts that address alone.
+
+**Tables per Guest.** Creation answers 409 `table-limit-reached` while the Guest owns 10 tables that each have a seated human.
+
+Server tests are in `apps/server/test/join-link-removal.test.ts` (link replacement; Removal between Hands, during a Hand across a server restart in the payout phase, of an unseated Guest, the rules about who can be removed, and every way of trying to rejoin) and `apps/server/test/public-safeguards.test.ts` (each rate limit with a manual clock, the refusal text and `Retry-After`, forged and trusted forwarding headers, and the table limit including restart, a Guest's own counting and an idempotent retry). `apps/server/test/environment.test.ts` covers the environment configuration and `scripts/test/compose.test.ts` checks that the Compose file trusts Caddy's address and publishes nothing else. Online Tables cannot deal until Automatic Dealing exists, so the Hand-time tests use a stored Hand (`fixtures/online.ts`) as the earlier Online tests do. Web logic is in `apps/web/test/removal.test.ts`.
+
+## Browser check
+
+On 2 November 2026, using the [schedule browser fixture](../local-development.md#schedule-browser-fixture) (API port 3141, Vite port 5241, both stopped afterwards) and two isolated Chrome sessions, one per Guest:
+
+- Ann created an Online Table and opened "Join link". Ben opened the link, confirmed his name and joined. His table showed no "Join link" button.
+- In the dialog, "Replace link…" asked for confirmation ("The current link stops working right away. Players who already joined stay at the table"), and "Replace link" showed the new link at once. Ben opening the old link got "This link doesn’t work."; his table stayed in his saved tables.
+- In Table options, Ann saw "Remove from table" beside Ben, then "They stand up and leave at once." with "Remove Ben" / "Keep Ben". After "Remove Ben", Ben’s page returned to Tables with "The Table Owner removed you from that table." and no saved tables. Opening the replacement link then showed "You can’t join this table." and "The Table Owner removed you from this table, so you cannot join it again."
+- Not seen in the browser: the 429 and table-limit messages (the fixture has no rate limits; covered by server tests) and Removal during a Hand (Online Tables cannot deal until Automatic Dealing; covered by the stored-Hand server tests). The owner is still offered "Remove from table" for a Guest who has already gone, because the view does not say who has left; the server answers `participant-not-joined`.
