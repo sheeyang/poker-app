@@ -52,7 +52,7 @@ All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
 | --- | --- |
-| `POST` to the base path | Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). The limit is stored and shown only: it is not yet enforced. |
+| `POST` to the base path | Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A Practice Table enforces its limit through Action Deadlines (see [Play timing](#play-timing)); an Online Table's limit is stored and shown only until Automatic Dealing enforces it. |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. Only the Table Owner of an Online Table also receives its `joinToken`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
@@ -149,11 +149,31 @@ the persisted schedule unchanged. A table written before scheduled play restores
 its current decision with a window open since time 0, and has no payout phase to
 wait for.
 
+Under a Practice Table's Action Time Limit, each human Action Window also carries
+its Action Deadline, `deadlineAt` = `opensAt` plus the limit. Bot windows never
+have one, and an Online Table's limit is not enforced yet. A human `act` that the
+server receives after `deadlineAt` is rejected with 409 `action-deadline-passed`,
+both while the Timeout Action is still due and after it has applied (a late act
+that expected the timed-out decision's revision); one received at `deadlineAt` is
+on time and is never displaced. From the first millisecond after the deadline, the
+server plays the Timeout Action: Check when it is legal, otherwise Fold, as an
+ordinary accepted `act` for that Participant. Its request ID is
+`timeout:<decisionId>`, and its fingerprint source is `server`, so timers,
+retries and restarts resolve to one outcome. Only an attempt proven never to have
+committed is followed by a further derived ID (`timeout:<decisionId>:2`, and so
+on); one that could not be saved is tried again a second later. A Timeout Action
+is the human's own decision: it starts automatic post-action analysis and counts
+in Decision Scores, Action Rank Scores and Hand and Session summaries. Later
+decisions the human misses in that Hand time out too. The human is never sat out,
+and the next Hand waits for their Deal. A deadline that expired while the server
+was down plays its Timeout Action at startup, before any request is served.
+
 The Trainer estimates the server clock from `serverTime` (the least-delayed of
 recent views), shows hole cards, each street, the opponents' hands at showdown
 and the result from their phase's start, enables Deal when the payout phase
-ends, and enables action controls only inside its own Action Window. Elapsed
-phases are skipped, and presentation never sends or delays a request.
+ends, and enables action controls only inside its own Action Window and before
+its Action Deadline, whose countdown it shows. Elapsed phases are skipped, and
+presentation never sends or delays a request.
 
 Game Configuration defaults and seating rules are documented in
 [ADR-0025](adr/0025-document-standard-cash-game-rules.md). Current Strategy defaults
@@ -174,7 +194,8 @@ canonical JSON:
 | Poker mutation | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller or Trainer configuration mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
-For poker mutations, `source` is `human` or `bot`. `kind` is the command name;
+For poker mutations, `source` is `human`, `bot`, or `server` for the scheduler's
+own Timeout Actions. `kind` is the command name;
 `contents` is the complete request body excluding `requestId`. Expected revisions
 and omitted versus explicit `buyIn` therefore affect the fingerprint.
 

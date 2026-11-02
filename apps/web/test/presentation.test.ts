@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession, type PresentationPhase, type TableSchedule } from '@poker/contracts';
-import { actionWindowOpen, dealOpen, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample } from '../src/presentation.js';
+import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample } from '../src/presentation.js';
 
 const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500 });
 const street = (name: 'flop' | 'turn' | 'river', startsAt: number): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
@@ -155,5 +155,33 @@ describe('action controls follow the Action Window', () => {
     expect(actionWindowOpen(table({}, { phases: [deal(0)], actionWindow: null }), 'you', 10_000)).toBe(false);
     expect(actionWindowOpen(table({}, { phases: [deal(0)], actionWindow: { ...window, decisionId: 'hand-1/decision-0' } }), 'you', 10_000)).toBe(false);
     expect(actionWindowOpen(table({ status: 'completed-hand', actorId: null, decisionId: null, legalActions: [] }, { phases: [deal(0)], actionWindow: window }), 'you', 10_000)).toBe(false);
+  });
+});
+
+describe('the Action Deadline', () => {
+  // A 15 s Action Time Limit: the window opens when the 1.5 s deal ends and closes 15 s later.
+  const timed = table({}, { phases: [deal(0)], actionWindow: { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_500, deadlineAt: 16_500 } });
+  it('disables action controls at the deadline, on the estimated server clock', () => {
+    expect(actionWindowOpen(timed, 'you', 1_500)).toBe(true);
+    expect(actionWindowOpen(timed, 'you', 16_499)).toBe(true);
+    expect(actionWindowOpen(timed, 'you', 16_500)).toBe(false);
+    expect(actionWindowOpen(timed, 'you', 60_000)).toBe(false);
+    const offset = estimateClockOffset([{ serverTime: 1_500, receivedAt: 101_500 }]);
+    expect(actionWindowOpen(timed, 'you', 116_499 + offset)).toBe(true);
+    expect(actionWindowOpen(timed, 'you', 116_500 + offset)).toBe(false);
+  });
+  it('counts down whole seconds from when the window opens', () => {
+    expect([0, 1_500, 1_501, 2_500, 16_499, 16_500, 20_000].map(at => deadlineCountdown(timed, at))).toEqual([15, 15, 15, 14, 1, 0, 0]);
+  });
+  it('has no countdown without a deadline, as for a Bot or a table without an Action Time Limit', () => {
+    expect(deadlineCountdown(table({}, { phases: [deal(0)], actionWindow: { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_500 } }), 5_000)).toBeUndefined();
+    expect(deadlineCountdown(table({}, { phases: [deal(0)], actionWindow: { participantId: 'you', decisionId: 'hand-1/decision-0', opensAt: 1_500, deadlineAt: 16_500 } }), 5_000)).toBeUndefined();
+  });
+  it('is the next presentation change at each second of its countdown, and at the deadline', () => {
+    expect(nextPresentationChange(timed, 1_000)).toBe(1_500);
+    expect(nextPresentationChange(timed, 1_500)).toBe(2_500);
+    expect(nextPresentationChange(timed, 2_499)).toBe(2_500);
+    expect(nextPresentationChange(timed, 15_600)).toBe(16_500);
+    expect(nextPresentationChange(timed, 16_500)).toBeUndefined();
   });
 });

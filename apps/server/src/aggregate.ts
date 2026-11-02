@@ -54,6 +54,12 @@ export interface PersistedTableSession {
    * (`schedule.ts`). Never part of `pokerRecord`.
    */
   readonly schedule: TableSchedule;
+  /**
+   * The Action Window most recently closed by its Timeout Action, with the poker revision at which it was open.
+   * A late act aimed at that decision (same Participant and expected revision) is then told its deadline passed,
+   * rather than that the table changed. Server-only: never projected.
+   */
+  readonly timedOutWindow?: { readonly participantId: string; readonly decisionId: string; readonly deadlineAt: number; readonly pokerRevision: number };
 }
 /** A version-2 aggregate as stored. Rows written before table options or scheduled play lack those fields. */
 export type StoredTableSessionV2 = Omit<PersistedTableSession, 'options' | 'schedule'> & { readonly options?: TableOptions; readonly schedule?: TableSchedule };

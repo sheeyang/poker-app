@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef } from 'react';
 import type { ObservableTableSession } from '@poker/contracts';
-import { actionWindowOpen, dealOpen, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample, type ClockSample } from './presentation.js';
+import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample, type ClockSample } from './presentation.js';
 
 /**
  * Shows a committed table at the server's pace. Each received view's server time refines the clock
@@ -29,8 +29,10 @@ export function usePresentation(table: ObservableTableSession | undefined, viewe
   if (!table) return undefined;
   return {
     table: presentTable(table, serverNow),
-    /** The viewer may act now. */
+    /** The viewer may act now: their window is open and its Action Deadline, if any, has not been reached. */
     actionOpen: actionWindowOpen(table, viewerId, serverNow),
+    /** Whole seconds left before the acting Participant's Action Deadline, or `undefined` without one. */
+    countdown: deadlineCountdown(table, serverNow),
     /** The current actor's window is open, whoever acts. */
     actorWindowOpen: actionWindowOpen(table, table.view.state.actorId ?? undefined, serverNow),
     /** The last Hand has been paid out, so Deal is available. */
