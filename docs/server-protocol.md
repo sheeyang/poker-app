@@ -110,6 +110,38 @@ The Trainer uses the authenticated `GET /api/live` WebSocket with typed
 subscription authorization, revision ordering, status messages, and reconnect
 rules are defined in [ADR-0017](adr/0017-bind-observability-with-participant-cash-game.md).
 
+## Play timing
+
+The server owns play timing ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)).
+All of it reads one injectable clock, the `clock` server option
+([`clock.ts`](../apps/server/src/clock.ts)), which defaults to system time.
+Tests substitute a manually advanced clock.
+
+Each accepted transition schedules its Presentation Phases
+([`schedule.ts`](../apps/server/src/schedule.ts)): a 1.5 s `deal` phase when a
+Hand starts, and a 1 s `street` phase for each street dealt, including every
+street of an all-in runout. Each phase starts when the previous one ends, or at
+the commit. The schedule is persisted in the Persisted Table Session in the same
+transaction as that commit; phases are never poker commands. It holds the current
+Hand's phases (`kind`, `handId`, `street`, `startsAt`, `endsAt`, `durationMs`) and
+the current decision's `actionWindow` (`participantId`, `decisionId`, `opensAt`),
+which opens when the last phase ends. Every complete view and `table-update`
+carries this `schedule` and the `serverTime` at which it was produced, in
+milliseconds since the Unix epoch.
+
+An `act` for the window's Participant received before `opensAt` is rejected with
+409 `action-window-not-open`; a human request is judged by the time the server
+received it. A Bot's decision is requested only once its window opens: the
+server wakes the table at `opensAt`, including after a restart, which restores
+the persisted schedule unchanged. A table written before scheduled play restores
+its current decision with a window open since time 0.
+
+The Trainer estimates the server clock from `serverTime` (the least-delayed of
+recent views), shows hole cards and each street from their phase's start, holds a
+completed Hand's result until its last phase ends, and enables action controls
+only inside its own Action Window. Elapsed phases are skipped, and presentation
+never sends or delays a request.
+
 Game Configuration defaults and seating rules are documented in
 [ADR-0025](adr/0025-document-standard-cash-game-rules.md). Current Strategy defaults
 and analysis behavior are documented in

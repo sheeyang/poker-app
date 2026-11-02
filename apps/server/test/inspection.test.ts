@@ -9,6 +9,10 @@ import { createServer } from '../src/server.js';
 import { JobRunner } from '../src/job-runner.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { baselineStrategy, type Strategy } from '@poker/strategies';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -19,7 +23,7 @@ let controllers: TableSessionControllerCommands;
 const botParticipants = new Set<string>();
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -142,7 +146,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   expect(await read(t)).toEqual(before);
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual({ ...before, inspection: { adminMode: false, completedHands: [] } });
   expect(await (await inspect(t)).json()).toMatchObject({ ok: false, rejection: { code: 'admin-mode-disabled' } });
@@ -155,7 +159,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   } finally { socket.terminate(); }
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } });
 });
@@ -215,7 +219,7 @@ test('queued inspection retains its captured active-Hand rejection after the liv
     policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => { if (!botParticipants.has(view.state.actorId ?? '')) return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution); evaluating.resolve(); await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
     actionSelector: { select: choices => choices[0]!.action },
   };
-  server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();
@@ -258,7 +262,7 @@ test('inspection shares Bot capacity, waits outside mutation acceptance and reta
     policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => { if (!botParticipants.has(view.state.actorId ?? '')) return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution); policyView = view; await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
     actionSelector: { select: choices => choices[0]!.action },
   };
-  server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();

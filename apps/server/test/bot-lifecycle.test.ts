@@ -21,7 +21,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   const start = async (automaticBots = true) => {
-    server = await createServer({ databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
+    server = await createServer({ clock, databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
       supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: configured => {
         if (configured.policy.id !== 'fixture') return createStrategy(configured);
@@ -236,6 +236,10 @@ test('Bot provenance and play stay invisible while real PostgreSQL commit is hel
 
 // A shared real database administration connection is never used to read application facts.
 import { afterAll } from 'vitest';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 afterAll(async () => { await administration.end(); });
 
 test('closing the server cancels pending work and a late successful computation cannot submit to the old lifecycle', async () => {
@@ -434,7 +438,8 @@ test('waiting Bot decisions run FIFO ahead of earlier interactive inspection wit
     const response = await inspection;
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, tableSessionId: completed.id, hand: { handId: 'hand-1' } });
-    expect(await f.read(completed)).toEqual(beforeInspection);
+    // Deals at the other tables moved the clock on; inspection changed nothing at this one.
+    expect(await f.read(completed)).toEqual({ ...beforeInspection, serverTime: expect.any(Number) });
     for (const table of [running, first, second]) await expect.poll(async () => (await f.read(table)).pokerRevision).toBe(4);
   } finally {
     for (let remaining = 0; remaining < 3; remaining++) f.answerNext(answer({ type: 'fold' }));

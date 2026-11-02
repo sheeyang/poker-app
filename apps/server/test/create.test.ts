@@ -3,6 +3,10 @@ import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -15,7 +19,7 @@ let tableSessionId: string;
 
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -51,7 +55,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
   });
   expect(JSON.stringify(before)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   const after = await fetch(base + '/api/table-sessions/' + tableSessionId, { headers: { cookie } });
   expect(await after.json()).toEqual(before);

@@ -6,6 +6,10 @@ import { createServer, type ServerOptions } from '../src/server.js';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy } from '@poker/contracts';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { baselineStrategy, HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 async function fixture(options: Partial<ServerOptions> = {}) {
@@ -36,7 +40,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     },
   };
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
+    server = await createServer({ clock, databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
       strategyFactory: options.strategyFactory && (descriptor => {
         const controlled = options.strategyFactory!(descriptor); const reference = baselineStrategy(descriptor);
         return { ...controlled, policy: { ...controlled.policy, evaluate: (view, execution) => humans.has(view.state.actorId ?? '') ? reference.policy.evaluate(view, execution) : controlled.policy.evaluate(view, execution) } };

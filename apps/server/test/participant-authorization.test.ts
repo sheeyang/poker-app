@@ -6,6 +6,10 @@ import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
 import { startStoredHand } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -14,7 +18,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 async function start() {
-  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 /**

@@ -34,6 +34,8 @@ async function advance(id: string, cookie: string) {
       const table = await (await fetch(base + '/api/table-sessions/' + id, { headers: { cookie } })).json() as ObservableTableSession;
       const actor = table.bindings.find(b => b.participantId === table.view.state.actorId);
       if (actor?.controller.kind !== 'bot') return;
+      // Bots act only once their Action Window opens (system clock).
+      await new Promise(resolve => setTimeout(resolve, Math.max(0, (table.schedule.actionWindow?.opensAt ?? 0) - Date.now())));
       const state = table.view.state; const member = state.participants.find(p => p.participantId === actor.participantId)!;
       const price = Math.max(...state.participants.map(p => p.wager ?? 0));
       let action: ConcreteAction = { type: (member.wager ?? 0) < price ? 'call' : 'check' };

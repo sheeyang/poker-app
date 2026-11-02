@@ -115,6 +115,25 @@ before using that terminal for normal development. See
 browser flow and recovery checks. These controls are fixture-only; production
 exposes no fault routes or engine mutation bypasses.
 
+## Schedule browser fixture
+
+`schedule-browser.ts` runs the real application with automatic Bots and system
+time, so Presentation Phases and Action Windows run at their real pace. Pair it
+with the `live-transport.ts` relay to drop, hold or replay frames mid-schedule.
+Use three PowerShell terminals:
+
+```powershell
+$env:POKER_BROWSER_PORT = '4031'; pnpm db:with-test -- node --import tsx apps/server/test/fixtures/schedule-browser.ts
+$env:POKER_API_UPSTREAM = 'http://127.0.0.1:4031'; $env:POKER_TRANSPORT_PORT = '4032'; node --import tsx apps/server/test/fixtures/live-transport.ts
+$env:POKER_API_TARGET = 'http://127.0.0.1:4032'; pnpm --filter @poker/web dev --port 5191
+```
+
+Control the relay with `POST http://127.0.0.1:4032/api/__transport` and JSON such
+as `{ "kind": "hold", "tableSessionId": "<id>", "responseKind": "live" }`, then
+`release`, `drop` or `replay` with a `revision`. Type `stop` in the fixture
+terminal to remove its schema. See
+[M4-04 implementation evidence](specs/m4-04-implementation.md).
+
 ## External PostgreSQL
 
 An explicit `DATABASE_URL` bypasses embedded development startup. An explicit `TEST_DATABASE_URL` independently bypasses embedded test startup. The corresponding database must already exist and be reachable. Neither path creates, starts, stops, or resets an external database, and a connection error never triggers embedded fallback.

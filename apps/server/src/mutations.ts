@@ -16,6 +16,8 @@ import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
 import { nameKey, validateTrainerConfiguration } from './validation.js';
+import { systemClock, type ServerClock } from './clock.js';
+import { beforeActionWindow, emptySchedule, nextWakeAt, scheduleTransition } from './schedule.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -30,7 +32,8 @@ export interface TableSessionControllerCommands {
   submitAction(tableSessionId: string, request: ActRequest): Promise<MutationOutcome>;
   readPersistedSession(tableSessionId: string): Promise<PersistedTableSession | undefined>;
 }
-type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot'; identity?: BotIdentity };
+/** A human request carries the server time it was received, which decides Action Window timing. */
+type MutationAuthority = { kind: 'human'; userId: string; receivedAt: number } | { kind: 'bot'; identity?: BotIdentity };
 interface AcceptedHumanIntent { readonly participantId: string; readonly decisionId: string; readonly fingerprint: string }
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults extends AcceptanceFaults {
@@ -72,8 +75,10 @@ export interface BotRuntimeOptions {
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
 }
-export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions) {
+export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock) {
   const committed = new Map<string, CommittedSession>();
+  /** One pending wake-up per table, at its schedule's next instant (`nextWakeAt`). */
+  const wakes = new Map<string, { at: number; cancel: () => void }>();
   const loading = new Map<string, Promise<CommittedSession | undefined>>();
   const queue = new Map<string, Promise<unknown>>();
   const recovering = new Set<string>();
@@ -151,7 +156,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await restore(id);
       retire(id); recovering.delete(id);
       publishCommitted(id); publishStatus(id, { phase: 'idle' });
-      const session = committed.get(id); if (session) ensureBot(id, session, true);
+      const session = committed.get(id); if (session) runSchedule(id, session, true);
     }
     const session = committed.get(id);
     for (const { key, intent } of acceptedHumans) {
@@ -186,9 +191,36 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }, 100);
     recoveryTimer.unref();
   }
+  /**
+   * Brings a table up to date with its committed schedule. It runs after every commit and restore, and in
+   * the table FIFO at each wake-up: it wakes the table again at the schedule's next instant, then requests
+   * the current Bot decision once its Action Window is open. Later scheduled work (Action Deadlines,
+   * after-Hand transitions, Next-Hand Countdowns) belongs here, keyed off `nextWakeAt`.
+   */
+  function runSchedule(id: string, session: CommittedSession, forceBot = false) {
+    if (stopped || recovering.has(id)) return;
+    wake(id, nextWakeAt(session.aggregate.schedule, clock.now()));
+    ensureBot(id, session, forceBot);
+  }
+  function wake(id: string, at: number | undefined) {
+    const pending = wakes.get(id);
+    if (pending?.at === at) return;
+    pending?.cancel(); wakes.delete(id);
+    if (at === undefined) return;
+    const entry = { at, cancel: () => {} };
+    wakes.set(id, entry);
+    entry.cancel = clock.setTimer(at, () => {
+      if (wakes.get(id) !== entry) return;
+      wakes.delete(id);
+      if (stopped) return;
+      void enqueue(id, async () => { const session = committed.get(id); if (session) runSchedule(id, session); }).catch(() => {});
+    });
+  }
   function ensureBot(id: string, session: CommittedSession, force = false) {
     if (stopped || recovering.has(id) || !bots || bots.automaticBots === false) return;
-    const proposed = capture(session, randomUUID());
+    const window = session.aggregate.schedule.actionWindow;
+    // A Bot's decision is requested only once its Action Window opens; its wake-up comes back here.
+    const proposed = window && clock.now() < window.opensAt ? undefined : capture(session, randomUUID());
     const prior = work.get(id);
     if (!force && prior && current(id, prior.identity)) return;
     retire(id);
@@ -255,7 +287,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (entries.size === 0) subscribers.delete(id);
   }
   function publishCommitted(id: string, events: readonly CashGameEvent[] = []) {
-    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, events, bots?.adminMode !== false));
+    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode !== false));
   }
   function publishStatus(id: string, status: TableRuntimeStatus['status']) {
     if (stopped) return;
@@ -291,13 +323,26 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     loading.set(id, operation);
     try { return await operation; } finally { loading.delete(id); }
   }
+  /**
+   * A table written before scheduled play may be mid-decision without a recorded Action Window. That
+   * window opened before the upgrade, so it is restored as open since time 0.
+   */
+  function unscheduledWindow(aggregate: PersistedTableSession, game: CashGame): PersistedTableSession['schedule'] {
+    for (const binding of aggregate.bindings) {
+      const { state } = game.forParticipant(binding.participantId).getView();
+      if (state.status !== 'active-hand') break;
+      if (state.actorId && state.decisionId) return { phases: [], actionWindow: { participantId: state.actorId, decisionId: state.decisionId, opensAt: 0 } };
+    }
+    return emptySchedule;
+  }
   /** Upgrades any stored version and validates it completely, or throws TableSessionRestorationError. */
   function restorable(stored: StoredTableSession): CommittedSession {
     const aggregate = upgradeTableSession(stored);
     if (humanBindings(aggregate).some(binding => validateTrainerConfiguration(binding.trainerConfiguration, supportsStrategy))) throw new TableSessionRestorationError();
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new TableSessionRestorationError();
-    return { aggregate, game: restored.game };
+    const scheduled = stored.schemaVersion === 2 && !!stored.schedule;
+    return { aggregate: scheduled ? aggregate : { ...aggregate, schedule: unscheduledWindow(aggregate, restored.game) }, game: restored.game };
   }
   async function restore(id: string): Promise<CommittedSession | undefined> {
     const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
@@ -305,7 +350,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (!stored) return undefined;
     const session = restorable(stored);
     committed.set(id, session);
-    if (!stopped) queueMicrotask(() => { void enqueue(id, async () => { const currentSession = committed.get(id); if (currentSession) ensureBot(id, currentSession); }).catch(() => {}); });
+    if (!stopped) queueMicrotask(() => { void enqueue(id, async () => { const currentSession = committed.get(id); if (currentSession) runSchedule(id, currentSession); }).catch(() => {}); });
     return session;
   }
     async function read(id: string, userId: string) {
@@ -313,7 +358,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const session = committed.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
-      const projected = projectTableSession(session.aggregate, participantId, session.game, bots?.adminMode !== false);
+      const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode !== false);
       return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
     }
     async function subscribe(id: string, userId: string, publish: (update: TableLiveMessage) => void) {
@@ -327,7 +372,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
+        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode !== false), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
@@ -366,6 +411,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
               : !isBot(binding))) result = reject('actor-not-authorized', authority.kind === 'human'
                 ? 'This local identity can act only through its bound human Participant.'
                 : 'Trusted controller commands can act only through a bound Bot.');
+            // No one acts during a Presentation Phase: a human by when the request arrived, a Bot by now.
+            if (!result && kind === 'act' && beforeActionWindow(session.aggregate.schedule, (request as ActRequest).participantId, authority.kind === 'human' ? authority.receivedAt : clock.now()))
+              result = reject('action-window-not-open', 'This decision’s Action Window opens when the current Presentation Phase ends. Act once it opens.');
             if (!result) {
               const working = session.game.fork();
               const accepted = (() => {
@@ -389,8 +437,12 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   const { tableSessionId: _table, pokerRevision: _revision, ...identity } = authority.identity;
                   return { ...identity, commandIndex: pokerRecord.commands.length - 1 };
                 })() : undefined;
+                // The schedule commits with the transition that produced it.
+                const handEvent = accepted.events.findLast(event => 'handId' in event);
+                const hand = handEvent && 'handId' in handEvent ? working.getHand(handEvent.handId) : undefined;
+                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, hand?.actorId && hand.decisionId ? { participantId: hand.actorId, decisionId: hand.decisionId } : null, clock.now());
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + 1, sessionRevision: session.aggregate.sessionRevision + 1,
-                  ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}) };
+                  ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}), schedule };
                 proposed = { aggregate, game: working };
                 await writeTableSession(tx, session.aggregate, aggregate);
                 result = { ok: true, tableSessionId: id, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision };
@@ -400,7 +452,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
           if (proposed) {
-            committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed);
+            committed.set(id, proposed); publishCommitted(id, acceptedEvents); runSchedule(id, proposed);
             if (authority.kind === 'human' && acceptedHumanDecision) analyzeAccepted(proposed, (request as ActRequest).participantId, acceptedHumanDecision);
           }
           return outcome;
@@ -463,7 +515,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve() });
           if (proposed) { committed.set(id, proposed); publishCommitted(id); }
-          if (fresh && outcome.ok && kind !== 'set-trainer-configuration') ensureBot(id, proposed ?? session, kind === 'retry-bot');
+          if (fresh && outcome.ok && kind !== 'set-trainer-configuration') runSchedule(id, proposed ?? session, kind === 'retry-bot');
           return outcome;
         } catch (error) {
           if (error instanceof CommitOutcomeUnknown) pause(id);
@@ -558,11 +610,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     async function resumeBots() {
       const rows = await db.select({ id: tableSessions.id }).from(tableSessions);
       // A corrupt session remains unavailable at its routes without preventing other sessions from starting.
-      await Promise.allSettled(rows.map(row => enqueue(row.id, async () => { const session = await load(row.id); if (session) ensureBot(row.id, session); })));
+      await Promise.allSettled(rows.map(row => enqueue(row.id, async () => { const session = await load(row.id); if (session) runSchedule(row.id, session); })));
     }
     function stop() {
       stopped = true;
       clearInterval(recoveryTimer);
+      for (const pending of wakes.values()) pending.cancel();
+      wakes.clear();
       uncertainHumanActions.clear();
       for (const id of work.keys()) retire(id);
     }
@@ -622,7 +676,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     /** Use only after promoting confirmed durable state, including application-only mutations. */
     publishCommitted,
     publishStatus,
-    submit: (id: string, userId: string, kind: PokerMutationKind, request: PokerMutationRequest) => submit(id, { kind: 'human', userId }, kind, request),
+    submit: (id: string, userId: string, kind: PokerMutationKind, request: PokerMutationRequest) => submit(id, { kind: 'human', userId, receivedAt: clock.now() }, kind, request),
     submitControllerAction: (id: string, request: ActRequest) => submit(id, { kind: 'bot' }, 'act', request),
   };
 }

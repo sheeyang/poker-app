@@ -11,6 +11,8 @@ export async function startStoredHand(administration: Pool, schema: string, tabl
   if (!restored.ok) throw new Error(restored.rejection.message);
   const started = restored.game.startHand();
   if (!started.ok) throw new Error(started.rejection.message);
-  const next = { ...aggregate, pokerRecord: restored.game.toRecord(), pokerRevision: aggregate.pokerRevision + 1, sessionRevision: aggregate.sessionRevision + 1 };
+  // Without a stored schedule the server restores the Hand's first decision with its Action Window already open.
+  const { schedule: _schedule, ...unscheduled } = aggregate;
+  const next = { ...unscheduled, pokerRecord: restored.game.toRecord(), pokerRevision: aggregate.pokerRevision + 1, sessionRevision: aggregate.sessionRevision + 1 };
   await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = $1 WHERE id = $2`, [JSON.stringify(next), tableSessionId]);
 }

@@ -4,7 +4,8 @@ import { Card } from './cards.js';
 import { chips, potTotal, seatPosition, actionLabel } from './table-model.js';
 import { Icon } from './icons.js';
 
-export function PokerTable({ table, events, animate, eventCount, openSettings }: { table: ObservableTableSession; events: readonly ObservablePresentationEvent[]; animate: boolean; eventCount: number; openSettings: () => void }) {
+/** `actorWindowOpen`: the acting Participant's Action Window has opened, so they are now deciding. */
+export function PokerTable({ table, actorWindowOpen, events, animate, eventCount, openSettings }: { table: ObservableTableSession; actorWindowOpen: boolean; events: readonly ObservablePresentationEvent[]; animate: boolean; eventCount: number; openSettings: () => void }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const viewerSeat = state.participants.find(p => p.participantId === humanId)?.seat ?? null;
@@ -31,7 +32,7 @@ export function PokerTable({ table, events, animate, eventCount, openSettings }:
       const participant = state.participants.find(p => p.seat === seat);
       const binding = table.bindings.find(b => b.participantId === participant?.participantId);
       const hero = participant?.participantId === humanId;
-      const actor = participant && state.actorId === participant.participantId;
+      const actor = participant && state.actorId === participant.participantId && actorWindowOpen;
       const recentAction = participant && actions.findLast(d => d.action.participantId === participant.participantId)?.action.action;
       const dealing = animate && events.some(e => e.type === 'hole-cards-dealt' && e.participantId === participant?.participantId);
       const label = hero ? 'You' : binding?.name;

@@ -5,6 +5,10 @@ import { Client, Pool } from 'pg';
 import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const administration = new Pool({ connectionString: databaseUrl });
@@ -21,7 +25,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base = '';
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false,
+    server = await createServer({ clock, databaseUrl, schema, automaticBots: false,
       mutationTransactionFaults: {
         openClient: async context => {
           if (context.requestId !== heldId) return;

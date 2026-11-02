@@ -6,6 +6,10 @@ export type Revision = number;
 export type HandId = string;
 export type DecisionId = string;
 export type Card = string;
+/** Authoritative server time in milliseconds since the Unix epoch. */
+export type ServerTime = number;
+export type Street = 'preflop' | 'flop' | 'turn' | 'river';
+export type BoardStreet = Exclude<Street, 'preflop'>;
 
 export interface ObservableGameConfiguration {
   readonly seatCount: number;
@@ -50,7 +54,7 @@ export interface ObservableCashGameState {
   readonly amountToCall?: ChipAmount;
   readonly handId?: HandId;
   readonly decisionId?: DecisionId | null;
-  readonly street?: 'preflop' | 'flop' | 'turn' | 'river';
+  readonly street?: Street;
   readonly smallBlindParticipantId?: ParticipantId;
   readonly bigBlindParticipantId?: ParticipantId;
   readonly returns?: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
@@ -69,8 +73,8 @@ export type ObservablePresentationEvent =
   | { readonly type: 'forced-contribution'; readonly participantId: ParticipantId; readonly kind: 'ante' | 'small-blind' | 'big-blind'; readonly amount: ChipAmount }
   | { readonly type: 'hole-cards-dealt'; readonly participantId: ParticipantId; readonly cardCount: number; readonly cards?: readonly Card[] }
   | { readonly type: 'acted'; readonly participantId: ParticipantId; readonly action: ConcreteAction }
-  | { readonly type: 'card-burned'; readonly street: 'flop' | 'turn' | 'river' }
-  | { readonly type: 'board-dealt'; readonly street: 'flop' | 'turn' | 'river'; readonly cards: readonly Card[] }
+  | { readonly type: 'card-burned'; readonly street: BoardStreet }
+  | { readonly type: 'board-dealt'; readonly street: BoardStreet; readonly cards: readonly Card[] }
   | { readonly type: 'hole-cards-revealed'; readonly participantId: ParticipantId; readonly cards: readonly Card[] }
   | { readonly type: 'uncalled-return' | 'pot-awarded'; readonly participantId: ParticipantId; readonly amount: ChipAmount }
   | { readonly type: 'hand-completed'; readonly handId: HandId };
@@ -214,6 +218,33 @@ export type TableMode = 'practice' | 'online';
 /** One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left. */
 export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
+/** What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's board cards. */
+export type PresentationPhaseKind = 'deal' | 'street';
+/**
+ * A server-timed interval in which no Participant may act. Clients show the step it presents from
+ * `startsAt`; the next phase, or the Action Window, begins at `endsAt`. Phases are never poker commands.
+ */
+export interface PresentationPhase {
+  readonly kind: PresentationPhaseKind;
+  readonly handId: HandId;
+  /** The street presented: `preflop` for the deal, otherwise the street whose board cards are revealed. */
+  readonly street: Street;
+  readonly startsAt: ServerTime;
+  readonly endsAt: ServerTime;
+  /** The server constant used for this entry. */
+  readonly durationMs: number;
+}
+/** The interval in which the current decision's Participant may act. It opens when the preceding phase ends. */
+export interface ActionWindow {
+  readonly participantId: ParticipantId;
+  readonly decisionId: DecisionId;
+  readonly opensAt: ServerTime;
+}
+/** The current Hand's Presentation Phases, in order, and the current decision's Action Window, if any. */
+export interface TableSchedule {
+  readonly phases: readonly PresentationPhase[];
+  readonly actionWindow: ActionWindow | null;
+}
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
@@ -230,6 +261,10 @@ export interface ObservableTableSession {
   /** The viewing Participant's own Trainer configuration. */
   readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
+  /** The committed schedule, durable with the revisions above. */
+  readonly schedule: TableSchedule;
+  /** When the server produced this view, so clients can estimate the server clock. */
+  readonly serverTime: ServerTime;
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;

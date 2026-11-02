@@ -9,6 +9,7 @@ import { creationRequests, localUsers } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
 import { writeTableSession } from './membership.js';
+import { emptySchedule } from './schedule.js';
 import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
@@ -79,7 +80,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           const aggregate: PersistedTableSession = {
             schemaVersion: 2, tableSessionId, ownerUserId, mode, options, ...(mode === 'online' ? { joinToken: randomBytes(32).toString('base64url') } : {}),
             pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [],
+            pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule,
           };
           await writeTableSession(tx, undefined, aggregate);
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };
