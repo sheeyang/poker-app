@@ -26,11 +26,17 @@ describe('practice preparation from confirmed state', () => {
     expect(practiceStep(ended, 'h1', 'r')).toMatchObject({ kind: 'manage', operation: 'top-up-to', body: { participantId: 'bot', targetStack: 2000 } });
     expect(practiceStep({ ...ended, view: { ...ended.view, state: { ...ended.view.state, participants: ended.view.state.participants.map(p => ({ ...p, stack: 2000 })) } } }, 'h1', 'r')).toMatchObject({ kind: 'start', body: { expectedPokerRevision: 7 } });
   });
-  it('returns a sitting-out human but preserves deliberately removed opponents', () => {
+  it('leaves a sitting-out human to the Deal, which resumes them, but preserves deliberately removed opponents', () => {
     const t = table();
     const paused = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 1000, sittingOut: true }] } } };
-    expect(practiceStep(paused, 'h1', 'r')).toMatchObject({ kind: 'manage', operation: 'set-sitting-out', body: { participantId: 'you', sittingOut: false } });
-    const returned = { ...paused, view: { ...paused.view, state: { ...paused.view.state, participants: [{ ...paused.view.state.participants[0]!, sittingOut: false }] } } };
-    expect(() => practiceStep(returned, 'h1', 'r')).toThrow('Add an opponent');
+    // A sitting-out human still counts as a player: only an opponent is missing.
+    expect(() => practiceStep(paused, 'h1', 'r')).toThrow('Add an opponent');
+    const withOpponent = { ...paused, view: { ...paused.view, state: { ...paused.view.state, participants: [...paused.view.state.participants, { participantId: 'bot', seat: 2, stack: 1000, sittingOut: false }] } } };
+    expect(practiceStep(withOpponent, 'h1', 'r')).toMatchObject({ kind: 'start', body: { expectedPokerRevision: 7 } });
+  });
+  it('rebuys a busted human who sat out before the Deal resumes them', () => {
+    const t = table();
+    const busted = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 0, sittingOut: true }, { participantId: 'bot', seat: 2, stack: 1000, sittingOut: false }] } } };
+    expect(practiceStep(busted, 'h1', 'r')).toMatchObject({ kind: 'manage', operation: 'top-up-to', body: { participantId: 'you', targetStack: 2000 } });
   });
 });

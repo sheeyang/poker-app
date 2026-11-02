@@ -2,7 +2,7 @@ import { createStrategy, isSupportedStrategy, immutableData, type Strategy } fro
 import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
-import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
+import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
 import { defaultTrainerConfiguration, onlineTableCapacity, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, upgradeTableSession, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
@@ -17,7 +17,7 @@ import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
 import { nameKey, validateTrainerConfiguration } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
-import { beforeActionWindow, emptySchedule, nextWakeAt, scheduleTransition } from './schedule.js';
+import { beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, scheduleTransition } from './schedule.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -39,6 +39,12 @@ interface AcceptedHumanIntent { readonly participantId: string; readonly decisio
 export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
   readonly afterCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
+}
+/** Ends a seated Participant's sit-out between Hands; `undefined` when there is nothing to resume. */
+function resumeFromSittingOut(game: CashGame, participantId: string): CashGameResult | undefined {
+  const { state } = game.forParticipant(participantId).getView();
+  const participant = state.participants.find(candidate => candidate.participantId === participantId);
+  return state.status !== 'active-hand' && participant?.seat != null && participant.sittingOut ? game.setSittingOut(participantId, false) : undefined;
 }
 const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
@@ -196,6 +202,12 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * the table FIFO at each wake-up: it wakes the table again at the schedule's next instant, then requests
    * the current Bot decision once its Action Window is open. Later scheduled work (Action Deadlines,
    * after-Hand transitions, Next-Hand Countdowns) belongs here, keyed off `nextWakeAt`.
+   *
+   * The end of a Hand's payout phase (`payoutEndsAt`) is one of those wake-ups: it fires here, in the FIFO,
+   * and `resumeBots` reaches it after a restart. Today nothing is due then, because Deal is gated by the
+   * clock alone (`beforePayoutEnd` in `accept`). Work that must happen when the Hand ends, such as applying
+   * after-Hand requests, runs here when `payoutEndsAt(schedule) <= clock.now()`, and `accept` must run it
+   * before it accepts a Deal that arrives ahead of this wake-up.
    */
   function runSchedule(id: string, session: CommittedSession, forceBot = false) {
     if (stopped || recovering.has(id)) return;
@@ -411,14 +423,24 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
               : !isBot(binding))) result = reject('actor-not-authorized', authority.kind === 'human'
                 ? 'This local identity can act only through its bound human Participant.'
                 : 'Trusted controller commands can act only through a bound Bot.');
-            // No one acts during a Presentation Phase: a human by when the request arrived, a Bot by now.
-            if (!result && kind === 'act' && beforeActionWindow(session.aggregate.schedule, (request as ActRequest).participantId, authority.kind === 'human' ? authority.receivedAt : clock.now()))
+            // Timing is judged by when a human's request arrived, and by now for the server's own work.
+            const arrivedAt = authority.kind === 'human' ? authority.receivedAt : clock.now();
+            // No one acts during a Presentation Phase, and the next Hand is not dealt before the last one is paid out.
+            if (!result && kind === 'act' && beforeActionWindow(session.aggregate.schedule, (request as ActRequest).participantId, arrivedAt))
               result = reject('action-window-not-open', 'This decision’s Action Window opens when the current Presentation Phase ends. Act once it opens.');
+            if (!result && kind === 'start-hand' && beforePayoutEnd(session.aggregate.schedule, arrivedAt))
+              result = reject('payout-phase-not-ended', 'The last Hand is still being paid out. Deal when its payout phase ends.');
             if (!result) {
               const working = session.game.fork();
               const accepted = (() => {
                 switch (kind) {
-                  case 'start-hand': return working.startHand();
+                  case 'start-hand': {
+                    // Deal brings the dealing human back from a sit-out they chose, in the same commit.
+                    const resumed = requester ? resumeFromSittingOut(working, requester.participantId) : undefined;
+                    if (resumed && !resumed.ok) return resumed;
+                    const dealt = working.startHand();
+                    return dealt.ok && resumed ? { ok: true as const, events: [...resumed.events, ...dealt.events] } : dealt;
+                  }
                   case 'act': return working.act((request as ActRequest).participantId, (request as ActRequest).action);
                   case 'seat-participant': return working.seatParticipant((request as SeatParticipantRequest).participantId, (request as SeatParticipantRequest).seat, (request as SeatParticipantRequest).buyIn);
                   case 'stand-up-participant': return working.standUpParticipant((request as StandUpParticipantRequest).participantId);

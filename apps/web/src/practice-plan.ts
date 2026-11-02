@@ -13,10 +13,10 @@ export function practiceStep(table: ObservableTableSession, afterHandId: string 
     if (!seat) throw new Error('There is no open seat. Adjust the players in table options.');
     return { kind: 'seat', tableId, body: { ...metadata, participantId: unseated.participantId, seat, buyIn: table.view.configuration.defaultBuyIn } };
   }
-  const human = state.participants.find(p => p.participantId === table.viewerParticipantId);
-  if (human?.sittingOut) return { kind: 'manage', operation: 'set-sitting-out', tableId, body: { ...metadata, participantId: human.participantId, sittingOut: false } };
-  const emptyStack = state.participants.find(p => p.seat !== null && !p.sittingOut && p.stack === 0);
+  // Deal returns the human from a sit-out they chose in the commit that starts the Hand, so they count as playing.
+  const playing = (p: ObservableTableSession['view']['state']['participants'][number]) => p.seat !== null && (!p.sittingOut || p.participantId === table.viewerParticipantId);
+  const emptyStack = state.participants.find(p => playing(p) && p.stack === 0);
   if (emptyStack) return { kind: 'manage', operation: 'top-up-to', tableId, body: { ...metadata, participantId: emptyStack.participantId, targetStack: table.view.configuration.defaultBuyIn } };
-  if (state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).length < 2) throw new Error('Add an opponent in table options before dealing.');
+  if (state.participants.filter(p => playing(p) && p.stack > 0).length < 2) throw new Error('Add an opponent in table options before dealing.');
   return { kind: 'start', tableId, body: metadata };
 }
