@@ -118,9 +118,13 @@ exposes no fault routes or engine mutation bypasses.
 ## Schedule browser fixture
 
 `schedule-browser.ts` runs the real application with automatic Bots and system
-time, so Presentation Phases and Action Windows run at their real pace. Pair it
-with the `live-transport.ts` relay to drop, hold or replay frames mid-schedule.
-Use three PowerShell terminals:
+time, so Presentation Phases, Action Windows, Action Deadlines and an Online
+Table's Next-Hand Countdowns run at their real pace. Type `restart` in its
+terminal (or `POST /restart` to `POKER_BROWSER_CONTROL_PORT`, if set) to restart
+the server on the same schema and port; every human then counts as disconnected
+until their Trainer reconnects. For two Guests, open the
+Trainer in two isolated browser profiles. Pair it with the `live-transport.ts`
+relay to drop, hold or replay frames mid-schedule. Use three PowerShell terminals:
 
 ```powershell
 $env:POKER_BROWSER_PORT = '4031'; pnpm db:with-test -- node --import tsx apps/server/test/fixtures/schedule-browser.ts
