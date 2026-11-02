@@ -126,6 +126,8 @@ export interface TableOptions {
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
 /** An Online Table holds at most this many joined human Participants. */
 export const onlineTableCapacity = 20;
+/** A Guest cannot create a table while they own this many tables that each have a seated human. */
+export const seatedTableLimit = 10;
 export interface CreateTableSessionRequest {
   readonly requestId: string;
   /** Fixed for the table's life. Defaults to a Practice Table. */
@@ -162,8 +164,13 @@ export interface TopUpToRequest extends PokerMutationMetadata { readonly partici
 export interface SetButtonRequest extends PokerMutationMetadata { readonly seat: number }
 /** Leave Table: stand up if seated, then cease to be at the table. Self-service only. */
 export interface LeaveTableRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
-export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest | LeaveTableRequest;
-export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table';
+/**
+ * Removal: the Table Owner ends a human Participant's membership. During a Hand it waits for the Hand (an
+ * After-Hand Request); when it applies the Guest stands up and can no longer join through any Join Link.
+ */
+export interface RemoveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
+export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest | LeaveTableRequest | RemoveParticipantRequest;
+export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table' | 'remove-participant';
 export interface ActRequest extends PokerMutationMetadata {
   readonly participantId: ParticipantId;
   readonly action: ConcreteAction;
@@ -260,13 +267,13 @@ export interface ActionWindow {
   readonly deadlineAt?: ServerTime;
 }
 /**
- * A change to a seated human Participant that waits for the Hand in progress to end. A weaker request is
- * superseded by a stronger one (`sit-out` < `stand-up` < `leave-table`). Later tickets add the changes the
- * server itself queues, such as Removal.
+ * A change to a human Participant that waits for the Hand in progress to end. A weaker request is superseded by a
+ * stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a Guest asks for undoes the owner's
+ * Removal. Later tickets add the changes the server itself queues.
  */
-export type PendingChange = 'sit-out' | 'stand-up' | 'leave-table';
+export type PendingChange = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
 /** How strong each change is: a request replaces a pending change of the same Participant only if it is stronger. */
-export const changeStrength: Readonly<Record<PendingChange, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3 });
+export const changeStrength: Readonly<Record<PendingChange, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
 /** A pending change, public to everyone at the table. */
 export interface PendingParticipantChange { readonly participantId: ParticipantId; readonly change: PendingChange }
 /** The current Hand's Presentation Phases, in order, and the current decision's Action Window, if any. */
@@ -330,7 +337,7 @@ export type TableSubscriptionResult = {
   readonly tableSessionId: TableSessionId;
 } & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
 /**
- * The last message a Guest's subscription receives after their Participant leaves the table (or, later, is removed).
+ * The last message a Guest's subscription receives after their Participant leaves the table or is removed.
  * Their client returns to its saved tables.
  */
 export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId; readonly reason: 'left' | 'removed' }
@@ -360,6 +367,11 @@ export interface SetTrainerConfigurationRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;
   readonly trainerConfiguration: TrainerConfiguration;
+}
+/** The Table Owner replaces an Online Table's Join Link: the old link stops working at once, and joined Participants stay. */
+export interface ReplaceJoinLinkRequest {
+  readonly requestId: string;
+  readonly expectedSessionRevision: Revision;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
 

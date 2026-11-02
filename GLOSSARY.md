@@ -109,11 +109,11 @@ Ceasing to be at a table, after standing up if seated. A Guest who returns keeps
 _Avoid_: Stand Up, quit, disconnect
 
 **Removal**:
-A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again.
+A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again, through any Join Link. During a Hand it is an After-Hand Request, the strongest one: nothing the Guest asks for undoes it.
 _Avoid_: Ban, kick
 
 **After-Hand Request**:
-A change to a human Participant asked for during a Hand (Sitting Out, Stand Up or Leave Table) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
+A change to a human Participant asked for during a Hand (Sitting Out, Stand Up, Leave Table or Removal) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
 _Avoid_: Queued action, deferred command
 
 **Sitting Out**:

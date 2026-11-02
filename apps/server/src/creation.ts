@@ -2,13 +2,13 @@ import { isSupportedStrategy } from '@poker/strategies';
 import { nameKey, validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { defaultConfiguration, defaultOnlineActionTimeLimitSeconds, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome, type TableOptions } from '@poker/contracts';
+import { defaultConfiguration, defaultOnlineActionTimeLimitSeconds, defaultTrainerConfiguration, seatedTableLimit, type CreateTableSessionRequest, type CreationOutcome, type TableOptions } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
 import { creationRequests, localUsers } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
-import { writeTableSession } from './membership.js';
+import { newJoinToken, writeTableSession } from './membership.js';
 import { emptySchedule } from './schedule.js';
 import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
@@ -16,7 +16,11 @@ export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
 export interface CreationTransactionFaults extends AcceptanceFaults { readonly beforeCommit?: () => Promise<void>; readonly afterCommit?: () => Promise<void> }
-export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy) {
+/**
+ * `seatedTables(userId)` is how many tables the Guest owns that have a seated human. Creation is refused while
+ * that is `seatedTableLimit`: one Guest cannot exhaust the single server by seating people at endless tables.
+ */
+export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, seatedTables: (userId: string) => number = () => 0) {
   const queue = new Map<string, Promise<unknown>>();
   return async (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => {
     const prior = queue.get(ownerUserId) ?? Promise.resolve();
@@ -46,6 +50,8 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         }
         throw new CommitOutcomeUnknown('An earlier creation transaction remains unresolved.');
       }
+      // Judged only for a creation that has not happened yet, and not remembered: the same request goes through once a place is free.
+      if (seatedTables(ownerUserId) >= seatedTableLimit) return { ok: false, rejection: { code: 'table-limit-reached', message: `You already own ${seatedTableLimit} tables that have a player seated. Stand everyone up at one of them, or leave it, before creating another.` } };
       return acceptance.run(scope, fingerprint, async (tx): Promise<CreationOutcome> => {
         const rows = await tx.select().from(creationRequests).where(and(eq(creationRequests.userId, ownerUserId), eq(creationRequests.requestId, requestId)));
         const existing = rows[0];
@@ -78,7 +84,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
             allowLiveAnalysis: request.options?.allowLiveAnalysis ?? true,
           };
           const aggregate: PersistedTableSession = {
-            schemaVersion: 2, tableSessionId, ownerUserId, mode, options, ...(mode === 'online' ? { joinToken: randomBytes(32).toString('base64url') } : {}),
+            schemaVersion: 2, tableSessionId, ownerUserId, mode, options, ...(mode === 'online' ? { joinToken: newJoinToken() } : {}),
             pokerRecord: created.game.toRecord(), bindings,
             pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
           };

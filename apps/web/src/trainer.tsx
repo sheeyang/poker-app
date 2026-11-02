@@ -32,7 +32,7 @@ export function Trainer() {
       useSession.getState().select(null);
       queryClient.removeQueries({ queryKey: ['table-session', ended.tableSessionId] });
       void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      setNotice(ended.reason === 'left' ? 'You left the table.' : 'You are no longer at that table.');
+      setNotice(ended.reason === 'left' ? 'You left the table.' : 'The Table Owner removed you from that table.');
     },
     onReady: lifecycle => { analysis.consumers.onReady?.(lifecycle); summary.consumers.onReady?.(lifecycle); sessionSummary.consumers.onReady?.(lifecycle); },
     onAnalysisUpdate: (update, lifecycle) => { analysis.consumers.onAnalysisUpdate?.(update, lifecycle); summary.consumers.onAnalysisUpdate?.(update, lifecycle); sessionSummary.consumers.onAnalysisUpdate?.(update, lifecycle); },
@@ -92,7 +92,7 @@ export function Trainer() {
       {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} />}
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
     </main>}
-    {joinLinkOpen && current?.joinToken && <JoinLinkDialog token={current.joinToken} close={() => setJoinLinkOpen(false)} />}
+    {joinLinkOpen && current?.joinToken && <JoinLinkDialog table={current} command={command} close={() => setJoinLinkOpen(false)} />}
     {settings && current && <TableSettings table={current} command={command} handOpen={current.view.state.status === 'active-hand' || presentation?.dealOpen === false} close={() => setSettings(false)} />}
   </div>;
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { and, eq, or, sql } from 'drizzle-orm';
 import type { SavedTable, TableMode } from '@poker/contracts';
 import { humanBindings, legacyTableMode, type PersistedTableSession } from './aggregate.js';
@@ -21,6 +22,8 @@ export async function writeTableSession(tx: Database, previous: PersistedTableSe
 }
 /** A Join Link token is 32 random bytes in base64url. Anything else cannot be a link, so is never looked up. */
 export const joinTokenPattern = /^[A-Za-z0-9_-]{43}$/;
+/** A fresh, unguessable Join Link token. */
+export const newJoinToken = () => randomBytes(32).toString('base64url');
 /** The Online Table a Join Link currently opens. A replaced token no longer matches anything. */
 export async function tableOfJoinLink(db: Database, token: string): Promise<string | undefined> {
   if (!joinTokenPattern.test(token)) return undefined;

@@ -515,6 +515,25 @@ installs patch updates to the PostgreSQL 18 and Caddy 2 images. Changes to
 `deploy/deploy.sh` require repeating its `curl` command on the VM (section 5),
 after [setting your values on the VM](#set-your-values-on-the-vm).
 
+### Client addresses and rate limits
+
+The server limits table creation, joining and Join Link replacement per client
+address, and only Caddy can tell it a client's address. `deploy/compose.yaml` therefore
+pins the Compose network to `172.29.77.0/24`, gives Caddy the fixed address
+`172.29.77.2`, and passes that same address to the app as `TRUSTED_PROXIES`. The app
+believes `X-Forwarded-For` only on a connection from Caddy, and Caddy replaces any
+value a client sends with the address it saw, so a client cannot pick its own address
+or dodge a limit by forging a header. Port 3001 is never published; the app is
+reachable only through Caddy. Do not change the address in one place without the
+other (a test checks they agree). Keep IPv6 off, as section 4 does: connections that
+reach Caddy through Docker's IPv6 port proxy would all appear to come from the
+network gateway and share one limit.
+
+The first release that adds this network settings recreates the Compose network, which
+briefly restarts PostgreSQL, the app and Caddy (the database volume is kept). Ordinary
+releases after that are unaffected. Production turns the limits on by default; set
+`POKER_RATE_LIMITS=false` in the app's `environment` only to switch them off.
+
 ### Reboot manually
 
 Security updates install automatically, but nothing reboots by itself. Log in

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
@@ -20,22 +20,6 @@ let base: string;
 async function start() {
   server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
-}
-/**
- * Persistence fixture for the membership no route reaches yet: Removal arrives in a later ticket.
- * Binds another Guest's human Participant with that membership while the server is stopped. Returns its ID.
- * A joined second human joins through the real Join Link instead, and leaves through Leave Table.
- */
-async function bindHuman(t: { id: string }, cookie: string, name: string, membership: 'joined' | 'left' | 'removed' = 'joined') {
-  const token = decodeURIComponent(cookie.slice('poker_local='.length));
-  const userId = (await administration.query(`SELECT id FROM "${schema}".local_users WHERE token_hash = $1`, [createHash('sha256').update(token).digest('hex')])).rows[0].id as string;
-  const participantId = randomUUID();
-  const binding = { participantId, name, controller: { kind: 'human' }, userId, membership, trainerConfiguration: defaultTrainerConfiguration };
-  await server.close();
-  await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = jsonb_set(aggregate, '{bindings}', (aggregate->'bindings') || $1::jsonb) WHERE id = $2`, [JSON.stringify([binding]), t.id]);
-  await administration.query(`INSERT INTO "${schema}".table_memberships (user_id, table_session_id, participant_id, status) VALUES ($1, $2, $3, $4)`, [userId, t.id, participantId, membership]);
-  await start();
-  return participantId;
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await start(); });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -176,7 +160,9 @@ test('each human acts, manages and studies only through their own Participant, a
   const other = (await joined.json()).participantId as string;
   const left = (await (await join(owner, leftCookie)).json()).participantId as string;
   expect((await post('/api/table-sessions/' + owner.id + '/leave-table', leftCookie, { requestId: randomUUID(), expectedPokerRevision: (await read(owner, leftCookie)).pokerRevision, participantId: left })).status).toBe(200);
-  await bindHuman(owner, removedCookie, 'Di', 'removed');
+  // Di joins like anyone else, and the owner removes her.
+  const removedParticipant = (await (await join(owner, removedCookie)).json()).participantId as string;
+  expect((await post('/api/table-sessions/' + owner.id + '/remove-participant', owner.cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(owner)).pokerRevision, participantId: removedParticipant })).status).toBe(200);
   const ben = { ...owner, cookie: otherCookie };
 
   const seen = await read(ben);
