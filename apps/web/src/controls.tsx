@@ -15,8 +15,11 @@ export function CommandFeedback({ command }: { command: Command }) {
   </div>;
 }
 
-/** `actionOpen`: the viewer's Action Window is open now, on the estimated server clock. */
-export function ActionTray({ table, actionOpen, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
+/**
+ * `actionOpen`: the viewer's Action Window is open now, on the estimated server clock.
+ * `dealOpen`: the last Hand's payout phase has ended, so Deal (and Rebuy & deal) is available.
+ */
+export function ActionTray({ table, actionOpen, dealOpen, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; dealOpen: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const participant = state.participants.find(p => p.participantId === humanId);
@@ -28,7 +31,7 @@ export function ActionTray({ table, actionOpen, command, openSettings, review }:
     command.submit(action === 'start' ? { tableId: table.tableSessionId, kind: 'start', body: metadata } : { tableId: table.tableSessionId, kind: 'act', body: { ...metadata, participantId: humanId, action } });
   };
   const sized = state.legalActions.find((a): a is SizedAction => 'minimum' in a);
-  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} openSettings={openSettings} review={review} /> : <NextHand table={table} busy={blocked} openSettings={openSettings} review={review} />;
+  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} openSettings={openSettings} review={review} /> : <NextHand table={table} busy={blocked || !dealOpen} openSettings={openSettings} review={review} />;
   if (state.actorId !== humanId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : participant?.seat == null ? 'You’re watching this hand.' : 'The hand is in play.'}</strong><p>{table.runtimeStatus?.phase === 'failed' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}</p></div><span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
   return <div className="action-tray">
     <div className="action-context"><span>Stack {chips(participant?.stack ?? 0)} chips</span></div>

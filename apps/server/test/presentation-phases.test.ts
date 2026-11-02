@@ -218,7 +218,7 @@ test('a Bot decision is requested only once its Action Window opens, including a
   }
 });
 
-test('an all-in runout schedules its remaining streets one after another and opens no Action Window', async () => {
+test('an all-in runout schedules the reveals, its remaining streets and the payout one after another, and opens no Action Window', async () => {
   const { t, human, bot } = await headsUp();
   await command(t, 'start-hand');
   clock.advance(1500);
@@ -228,12 +228,15 @@ test('an all-in runout schedules its remaining streets one after another and ope
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
   expect(done.view.state.board).toHaveLength(5);
+  // The complete result is already in the view; it is presented step by step at these server times.
   expect(done.schedule).toEqual({
     phases: [
       { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: at - 1500, endsAt: at, durationMs: 1500 },
-      { kind: 'street', handId: 'hand-1', street: 'flop', startsAt: at, endsAt: at + 1000, durationMs: 1000 },
-      { kind: 'street', handId: 'hand-1', street: 'turn', startsAt: at + 1000, endsAt: at + 2000, durationMs: 1000 },
-      { kind: 'street', handId: 'hand-1', street: 'river', startsAt: at + 2000, endsAt: at + 3000, durationMs: 1000 },
+      { kind: 'showdown', handId: 'hand-1', street: 'preflop', startsAt: at, endsAt: at + 2000, durationMs: 2000 },
+      { kind: 'street', handId: 'hand-1', street: 'flop', startsAt: at + 2000, endsAt: at + 3000, durationMs: 1000 },
+      { kind: 'street', handId: 'hand-1', street: 'turn', startsAt: at + 3000, endsAt: at + 4000, durationMs: 1000 },
+      { kind: 'street', handId: 'hand-1', street: 'river', startsAt: at + 4000, endsAt: at + 5000, durationMs: 1000 },
+      { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: at + 5000, endsAt: at + 7000, durationMs: 2000 },
     ],
     actionWindow: null,
   });

@@ -218,16 +218,20 @@ export type TableMode = 'practice' | 'online';
 /** One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left. */
 export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
-/** What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's board cards. */
-export type PresentationPhaseKind = 'deal' | 'street';
+/**
+ * What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's
+ * board cards; the showdown turns the remaining hands up; the payout awards the pots and returns uncalled chips.
+ */
+export type PresentationPhaseKind = 'deal' | 'street' | 'showdown' | 'payout';
 /**
  * A server-timed interval in which no Participant may act. Clients show the step it presents from
  * `startsAt`; the next phase, or the Action Window, begins at `endsAt`. Phases are never poker commands.
+ * A Hand's last phase is its payout, and Deal is accepted when that phase ends.
  */
 export interface PresentationPhase {
   readonly kind: PresentationPhaseKind;
   readonly handId: HandId;
-  /** The street presented: `preflop` for the deal, otherwise the street whose board cards are revealed. */
+  /** The street presented: `preflop` for the deal, the street whose board cards a street reveal shows, and the street the Hand had reached for the showdown and the payout. */
   readonly street: Street;
   readonly startsAt: ServerTime;
   readonly endsAt: ServerTime;

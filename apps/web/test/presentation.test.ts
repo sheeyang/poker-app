@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession, type PresentationPhase, type TableSchedule } from '@poker/contracts';
-import { actionWindowOpen, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample } from '../src/presentation.js';
+import { actionWindowOpen, dealOpen, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample } from '../src/presentation.js';
 
 const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500 });
 const street = (name: 'flop' | 'turn' | 'river', startsAt: number): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
+const showdown = (startsAt: number, name: 'preflop' | 'flop' | 'turn' | 'river'): PresentationPhase => ({ kind: 'showdown', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
+const payout = (startsAt: number): PresentationPhase => ({ kind: 'payout', handId: 'hand-1', street: 'river', startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
 function table(state: Partial<ObservableCashGameState>, schedule: TableSchedule): ObservableTableSession {
-  return { tableSessionId: 't', mode: 'practice', pokerRevision: 5, sessionRevision: 5, serverTime: 0, schedule, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
+  return { tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime: 0, schedule, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'bot', name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { configuration: { ...defaultConfiguration, seatCount: 2 }, history: [], state: {
       status: 'active-hand', buttonSeat: 1, handId: 'hand-1', street: 'preflop', board: [], pots: [], actorId: 'you', decisionId: 'hand-1/decision-1', legalActions: [{ type: 'fold' }, { type: 'call' }],
@@ -54,7 +56,8 @@ describe('revealing received steps at their phase timestamps', () => {
     // A client arriving after the schedule has elapsed shows the received view as it is.
     expect(presentTable(flop, 60_000)).toBe(flop);
   });
-  it('presents an all-in runout street by street and settles it only after its last phase', () => {
+  describe('an all-in runout that the server has already settled', () => {
+    // Everything is in the view when it arrives; each step is shown at its own phase start.
     const settled = table({
       status: 'completed-hand', street: 'river', board: ['2c', '7d', 'Jh', 'Qs', '3d'], actorId: null, decisionId: null, legalActions: [],
       participants: [
@@ -62,12 +65,43 @@ describe('revealing received steps at their phase timestamps', () => {
         { participantId: 'bot', seat: 2, stack: 0, sittingOut: false, inHand: true, cardCount: 2, holeCards: ['9c', '9h'], contribution: 1000, wager: 0 },
       ],
       pots: [{ amount: 2000, eligibleParticipantIds: ['you', 'bot'] }], returns: [], payouts: [{ participantId: 'you', amount: 2000 }],
-    }, { phases: [deal(0), street('flop', 10_000), street('turn', 11_000), street('river', 12_000)], actionWindow: null });
+    }, { phases: [deal(0), showdown(10_000, 'preflop'), street('flop', 12_000), street('turn', 13_000), street('river', 14_000), payout(15_000)], actionWindow: null });
     const during = { status: 'active-hand', stacks: [0, 0], payouts: [] };
-    expect(shown(presentTable(settled, 10_500))).toEqual({ ...during, board: ['2c', '7d', 'Jh'], cards: [2, 2] });
-    expect(shown(presentTable(settled, 11_000))).toEqual({ ...during, board: ['2c', '7d', 'Jh', 'Qs'], cards: [2, 2] });
-    expect(shown(presentTable(settled, 12_999))).toEqual({ ...during, board: ['2c', '7d', 'Jh', 'Qs', '3d'], cards: [2, 2] });
-    expect(shown(presentTable(settled, 13_000))).toEqual({ status: 'completed-hand', board: ['2c', '7d', 'Jh', 'Qs', '3d'], cards: [2, 2], stacks: [2000, 0], payouts: [{ participantId: 'you', amount: 2000 }] });
+    const botCards = (at: number) => presentTable(settled, at).view.state.participants[1]!.holeCards;
+    it('keeps the opponent’s hole cards face down until the showdown phase starts', () => {
+      expect(botCards(9_999)).toBeUndefined();
+      expect(botCards(10_000)).toEqual(['9c', '9h']);
+      expect(presentTable(settled, 9_999).view.state.participants[0]!.holeCards).toEqual(['As', 'Kd']);
+      expect(shown(presentTable(settled, 9_999))).toEqual({ ...during, board: [], cards: [2, 2] });
+    });
+    it('reveals each remaining street at its phase start, after the showdown', () => {
+      expect(shown(presentTable(settled, 11_999))).toEqual({ ...during, board: [], cards: [2, 2] });
+      expect(shown(presentTable(settled, 12_000))).toEqual({ ...during, board: ['2c', '7d', 'Jh'], cards: [2, 2] });
+      expect(shown(presentTable(settled, 13_000))).toEqual({ ...during, board: ['2c', '7d', 'Jh', 'Qs'], cards: [2, 2] });
+      expect(shown(presentTable(settled, 14_999))).toEqual({ ...during, board: ['2c', '7d', 'Jh', 'Qs', '3d'], cards: [2, 2] });
+    });
+    it('pays out, with final stacks, at the payout phase’s start', () => {
+      expect(shown(presentTable(settled, 15_000))).toEqual({ status: 'completed-hand', board: ['2c', '7d', 'Jh', 'Qs', '3d'], cards: [2, 2], stacks: [2000, 0], payouts: [{ participantId: 'you', amount: 2000 }] });
+    });
+    it('shows the received view as it is to a client arriving after the whole schedule', () => {
+      expect(presentTable(settled, 17_000)).toBe(settled);
+      expect(presentTable(settled, 60_000)).toBe(settled);
+    });
+  });
+  it('holds back a pot won by folds, which has no showdown, until its payout phase starts', () => {
+    const folded = table({
+      status: 'completed-hand', actorId: null, decisionId: null, legalActions: [],
+      participants: [
+        { participantId: 'you', seat: 1, stack: 1010, sittingOut: false, inHand: true, cardCount: 2, holeCards: ['As', 'Kd'], contribution: 10, wager: 0 },
+        { participantId: 'bot', seat: 2, stack: 980, sittingOut: false, inHand: true, cardCount: 2, folded: true, contribution: 20, wager: 0 },
+      ], payouts: [{ participantId: 'you', amount: 30 }],
+    }, { phases: [deal(0), payout(4_000)], actionWindow: null });
+    expect(shown(presentTable(folded, 3_999))).toEqual({ status: 'active-hand', board: [], cards: [2, 2], stacks: [980, 980], payouts: [] });
+    expect(shown(presentTable(folded, 4_000))).toEqual({ status: 'completed-hand', board: [], cards: [2, 2], stacks: [1010, 980], payouts: [{ participantId: 'you', amount: 30 }] });
+  });
+  it('shows a Hand completed under an earlier schedule, which has no payout phase, as it is', () => {
+    const earlier = table({ status: 'completed-hand', actorId: null, decisionId: null, legalActions: [], payouts: [{ participantId: 'you', amount: 30 }] }, { phases: [deal(0), street('flop', 5_000)], actionWindow: null });
+    expect(presentTable(earlier, 5_500)).toBe(earlier);
   });
   it('ignores phases of another Hand', () => {
     const t = table({ handId: 'hand-2' }, { phases: [deal(1_000, 'hand-1')], actionWindow: null });
@@ -84,6 +118,28 @@ describe('revealing received steps at their phase timestamps', () => {
     const offset = estimateClockOffset([{ serverTime: 4_000, receivedAt: 104_000 }]);
     expect(shown(presentTable(flop, 104_999 + offset)).board).toEqual([]);
     expect(shown(presentTable(flop, 105_000 + offset)).board).toHaveLength(3);
+  });
+});
+
+describe('Deal follows the payout phase', () => {
+  const completed = { status: 'completed-hand' as const, actorId: null, decisionId: null, legalActions: [] };
+  const paid = table(completed, { phases: [deal(0), payout(4_000)], actionWindow: null });
+  it('opens exactly when the payout phase ends', () => {
+    expect(dealOpen(paid, 4_000)).toBe(false);
+    expect(dealOpen(paid, 5_999)).toBe(false);
+    expect(dealOpen(paid, 6_000)).toBe(true);
+  });
+  it('is the next presentation change once the payout phase has started', () => {
+    expect(nextPresentationChange(paid, 3_999)).toBe(4_000);
+    expect(nextPresentationChange(paid, 4_000)).toBe(6_000);
+    expect(nextPresentationChange(paid, 6_000)).toBeUndefined();
+  });
+  it('is open when no Hand has been paid out yet, or the Hand ended under an earlier schedule', () => {
+    expect(dealOpen(table({ status: 'between-hands', handId: undefined, actorId: null, decisionId: null, legalActions: [] }, { phases: [], actionWindow: null }), 0)).toBe(true);
+    expect(dealOpen(table(completed, { phases: [deal(0), street('flop', 5_000)], actionWindow: null }), 5_500)).toBe(true);
+  });
+  it('ignores the payout phase of another Hand', () => {
+    expect(dealOpen(table({ ...completed, handId: 'hand-2' }, { phases: [deal(0), payout(4_000)], actionWindow: null }), 4_500)).toBe(true);
   });
 });
 

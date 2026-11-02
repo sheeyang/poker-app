@@ -64,17 +64,20 @@ test('Bots automatically complete a Hand while the Table Owner’s human Partici
   expect(JSON.stringify((await read(t)).view)).not.toMatch(/"(?:holeCards|seed|deck|burns)"\s*:/);
 });
 
-test('Bots automatically complete a Hand while the human Participant is sitting out', async () => {
+test('Deal returns a sitting-out human to play, and Bots automatically act around them', async () => {
   const t = await table(2);
   await command(t, 'seat-participant', { participantId: t.bots[0], seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bots[1], seat: 2 });
   await command(t, 'seat-participant', { participantId: t.human, seat: 3 });
   await command(t, 'set-sitting-out', { participantId: t.human, sittingOut: true });
   await command(t, 'start-hand');
+  // The same Deal that started the Hand ended the sit-out the human chose.
+  expect((await read(t)).view.state.participants.find(participant => participant.participantId === t.human)).toMatchObject({ seat: 3, sittingOut: false, inHand: true });
+  await expect.poll(async () => { const state = (await read(t)).view.state; return state.actorId === t.human || state.status === 'completed-hand'; }).toBe(true);
+  if ((await read(t)).view.state.actorId === t.human) await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   await expect.poll(async () => (await read(t)).inspection.completedHands).toEqual([{ handId: 'hand-1', sequence: 1 }]);
   await expect.poll(async () => (await read(t)).runtimeStatus?.phase).toBe('idle');
-  expect(await read(t)).toMatchObject({ pokerRevision: 6, sessionRevision: 6, runtimeStatus: { phase: 'idle' }, view: { state: { status: 'completed-hand', actorId: null, legalActions: [] } } });
-  expect((await read(t)).view.state.participants.find(participant => participant.participantId === t.human)).toMatchObject({ seat: 3, sittingOut: true });
+  expect(await read(t)).toMatchObject({ runtimeStatus: { phase: 'idle' }, view: { state: { status: 'completed-hand', actorId: null, legalActions: [] } } });
 });
 
 test('Bots continue automatically after the human Participant stands up between Hands, and the human keeps watching only public facts', async () => {

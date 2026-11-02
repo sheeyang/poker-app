@@ -59,7 +59,7 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
-| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, until Automatic Dealing exists. |
+| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, until Automatic Dealing exists. Accepted once the previous Hand's payout phase has ended (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
 | `GET /:id/live` | Earlier table-specific WebSocket endpoint, retained for existing transport consumers. |
 
 ## Authorization
@@ -118,29 +118,42 @@ All of it reads one injectable clock, the `clock` server option
 Tests substitute a manually advanced clock.
 
 Each accepted transition schedules its Presentation Phases
-([`schedule.ts`](../apps/server/src/schedule.ts)): a 1.5 s `deal` phase when a
-Hand starts, and a 1 s `street` phase for each street dealt, including every
-street of an all-in runout. Each phase starts when the previous one ends, or at
-the commit. The schedule is persisted in the Persisted Table Session in the same
-transaction as that commit; phases are never poker commands. It holds the current
-Hand's phases (`kind`, `handId`, `street`, `startsAt`, `endsAt`, `durationMs`) and
-the current decision's `actionWindow` (`participantId`, `decisionId`, `opensAt`),
-which opens when the last phase ends. Every complete view and `table-update`
-carries this `schedule` and the `serverTime` at which it was produced, in
-milliseconds since the Unix epoch.
+([`schedule.ts`](../apps/server/src/schedule.ts)), in the order of the
+transition's events: a 1.5 s `deal` phase when a Hand starts, a 2 s `showdown`
+phase when the remaining hands are turned up, a 1 s `street` phase for each
+street dealt, and a 2 s `payout` phase when the Hand completes. An all-in runout
+is one accepted action, so it schedules the showdown, then every remaining
+street, then the payout; a river showdown schedules the showdown and the
+payout; a Hand won by folds has only the payout. For the showdown and the
+payout, `street` is the street the Hand had reached. Each phase starts when the
+previous one ends, or at the commit. The schedule is persisted in the Persisted
+Table Session in the same transaction as that commit; phases are never poker
+commands. It holds the current Hand's phases (`kind`, `handId`, `street`,
+`startsAt`, `endsAt`, `durationMs`) and the current decision's `actionWindow`
+(`participantId`, `decisionId`, `opensAt`), which opens when the last phase ends.
+Every complete view and `table-update` carries this `schedule` and the
+`serverTime` at which it was produced, in milliseconds since the Unix epoch.
+Once no betting decision remains, the view and update that arrive already hold
+the complete result; the schedule says when each step of it is presented.
 
 An `act` for the window's Participant received before `opensAt` is rejected with
 409 `action-window-not-open`; a human request is judged by the time the server
-received it. A Bot's decision is requested only once its window opens: the
-server wakes the table at `opensAt`, including after a restart, which restores
+received it. A `start-hand` (Deal) received before the latest Hand's payout phase
+ends is rejected with 409 `payout-phase-not-ended`, and accepted from that
+instant. At a Practice Table Deal also ends the dealing human's voluntary
+sit-out, as `set-sitting-out` then `start-hand` in one commit (one revision
+step); if the Hand cannot start, neither takes effect. A Bot's decision is
+requested only once its window opens: the server wakes the table at `opensAt`
+and at the end of the payout phase, including after a restart, which restores
 the persisted schedule unchanged. A table written before scheduled play restores
-its current decision with a window open since time 0.
+its current decision with a window open since time 0, and has no payout phase to
+wait for.
 
 The Trainer estimates the server clock from `serverTime` (the least-delayed of
-recent views), shows hole cards and each street from their phase's start, holds a
-completed Hand's result until its last phase ends, and enables action controls
-only inside its own Action Window. Elapsed phases are skipped, and presentation
-never sends or delays a request.
+recent views), shows hole cards, each street, the opponents' hands at showdown
+and the result from their phase's start, enables Deal when the payout phase
+ends, and enables action controls only inside its own Action Window. Elapsed
+phases are skipped, and presentation never sends or delays a request.
 
 Game Configuration defaults and seating rules are documented in
 [ADR-0025](adr/0025-document-standard-cash-game-rules.md). Current Strategy defaults

@@ -10,29 +10,48 @@ const phasesOf = (table: ObservableTableSession) => table.schedule.phases.filter
 
 /**
  * The table as shown at server time `serverNow`. Each Presentation Phase reveals its step from its start:
- * the deal shows hole cards, a street reveal shows that street's board cards. A completed Hand's
- * result (payouts, final stacks) shows once its last phase has ended. Elapsed phases change nothing.
+ * the deal shows hole cards, a street reveal shows that street's board cards, the showdown turns the
+ * opponents' hands up, and the payout shows a completed Hand's result (pot awards, returned chips and
+ * final stacks). A Hand the server settled at once is therefore presented step by step, whatever order its
+ * events arrived in. Elapsed phases change nothing.
  */
 export function presentTable(table: ObservableTableSession, serverNow: number): ObservableTableSession {
   const state = table.view.state;
   const phases = phasesOf(table);
   const upcoming = phases.filter(phase => phase.startsAt > serverNow);
   const undealt = upcoming.some(phase => phase.kind === 'deal');
+  const unrevealed = upcoming.some(phase => phase.kind === 'showdown');
   const boardCount = Math.min(state.board.length, ...upcoming.flatMap(phase => phase.kind === 'street' && phase.street !== 'preflop' ? [boardBefore[phase.street]] : []));
-  const settling = state.status === 'completed-hand' && phases.some(phase => phase.endsAt > serverNow);
-  if (!undealt && boardCount === state.board.length && !settling) return table;
+  const settling = state.status === 'completed-hand' && upcoming.some(phase => phase.kind === 'payout');
+  if (!undealt && !unrevealed && boardCount === state.board.length && !settling) return table;
   const received = (participantId: string, transfers: typeof state.payouts) => (transfers ?? []).filter(t => t.participantId === participantId).reduce((total, t) => total + t.amount, 0);
   return { ...table, view: { ...table.view, state: {
     ...state,
     board: state.board.slice(0, boardCount),
     participants: state.participants.map(p => {
       const shown = settling ? { ...p, stack: p.stack - received(p.participantId, state.payouts) - received(p.participantId, state.returns) } : p;
-      if (!undealt || !p.inHand) return shown;
-      const { holeCards: _hidden, ...rest } = shown;
-      return { ...rest, cardCount: 0 };
+      if (undealt && p.inHand) {
+        const { holeCards: _hidden, ...rest } = shown;
+        return { ...rest, cardCount: 0 };
+      }
+      // Hands turned up at showdown stay face down until its phase starts; your own cards were dealt to you.
+      if (unrevealed && p.participantId !== table.viewerParticipantId) {
+        const { holeCards: _unrevealed, ...rest } = shown;
+        return rest;
+      }
+      return shown;
     }),
     ...(settling ? { status: 'active-hand' as const, payouts: [], returns: [] } : {}),
   } } };
+}
+
+/**
+ * Whether Deal is available at server time `serverNow`: the latest Hand's payout phase has ended, or no
+ * Hand has been paid out under a schedule. Mirrors the server's rule; the server alone decides.
+ */
+export function dealOpen(table: ObservableTableSession, serverNow: number): boolean {
+  const payout = phasesOf(table).findLast(phase => phase.kind === 'payout');
+  return !payout || serverNow >= payout.endsAt;
 }
 
 /** Whether `participantId` may act at server time `serverNow`: their decision is current and its window has opened. */
