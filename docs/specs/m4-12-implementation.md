@@ -14,4 +14,10 @@ Server tests are in `apps/server/test/owner-controls.test.ts`: option changes (v
 
 ## Browser check
 
-(recorded below)
+On 3 November 2026, using the [schedule browser fixture](../local-development.md#schedule-browser-fixture) (system clock, automatic Bots; API port 3142, control port 6042, Vite port 5242, all stopped afterwards, nothing left running) and one Chrome session. Ann created a 4-seat Online Table with the default 30 s limit and opened Table options.
+
+- The owner sees "Add a Bot" and "Table rules" beside the players; a Guest would not (the controls need `viewerParticipantId === ownerParticipantId`). Ann added "Bot 1" with the form's defaults: it sat in the first open Seat with the default buy-in and the form suggested "Bot 2". She sat down, and Automatic Dealing dealt Hands with the Bot.
+- Between Hands the Bot's row offered "Sit out", "Stand up · cash out" and "Remove Bot". During a Hand it read "Sit out after this hand" and "Remove Bot after this hand", with "Stand up" disabled. "Remove Bot after this hand" asked for confirmation ("Bot 1 plays out this hand, then stands up and leaves. Its name stays taken."). Confirming showed "Being removed after this hand" on the row, and the view listed the pending `remove`.
+- Adding "Bot 3" during that Hand worked: it took Seat 4 and was outside the Hand (`inHand` absent). When the Hand ended Bot 1 had stood up, cashing out its 2,020 chips, and was listed in `departedParticipantIds`; Table options no longer listed it. Ann's own Timeout Action sat her out the same way (an After-Hand Request), and she resumed with "Return to play".
+- In "Table rules", with no Hand in progress, 15 seconds and "Allow seat changes" off applied: the summary line read "15 seconds to act · Live Analysis allowed · Seat changes not allowed", and the view showed `actionTimeLimitSeconds: 15` and `allowSeatChanges: false`. During the next Hand the form was disabled with "Rules change between hands, once the payout has been shown."
+- Not seen in the browser (the check used a single Guest): another Guest's screen receiving the changes and the owner not being offered Removal of a Guest who has left. Both are covered by `owner-controls.test.ts` and `removal.test.ts`. The Trainer's snapshot references go stale with every redraw while the clock ticks, so the clicks were made through `eval` of the real buttons.
