@@ -19,12 +19,20 @@ export async function writeTableSession(tx: Database, previous: PersistedTableSe
     .values(changed.map(binding => ({ userId: binding.userId, tableSessionId: next.tableSessionId, participantId: binding.participantId, status: binding.membership })))
     .onConflictDoUpdate({ target: [tableMemberships.userId, tableMemberships.tableSessionId], set: { status: sql`excluded.status` } });
 }
-/** The Guest's joined, unremoved Participant at a table, and whether the Guest owns it, without restoring the table. */
-export async function membership(db: Database, tableSessionId: string, userId: string): Promise<{ participantId: string; owner: boolean } | undefined> {
-  const rows = await db.select({ participantId: tableMemberships.participantId, ownerUserId: tableSessions.ownerUserId })
+/** A Join Link token is 32 random bytes in base64url. Anything else cannot be a link, so is never looked up. */
+export const joinTokenPattern = /^[A-Za-z0-9_-]{43}$/;
+/** The Online Table a Join Link currently opens. A replaced token no longer matches anything. */
+export async function tableOfJoinLink(db: Database, token: string): Promise<string | undefined> {
+  if (!joinTokenPattern.test(token)) return undefined;
+  const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(sql`${tableSessions.aggregate}->>'joinToken' = ${token}`);
+  return rows[0]?.id;
+}
+/** The Guest's joined, unremoved Participant at a table, whether the Guest owns it and its mode, without restoring the table. */
+export async function membership(db: Database, tableSessionId: string, userId: string): Promise<{ participantId: string; owner: boolean; mode: TableMode } | undefined> {
+  const rows = await db.select({ participantId: tableMemberships.participantId, ownerUserId: tableSessions.ownerUserId, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
     .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId), eq(tableMemberships.status, 'joined')));
-  return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId };
+  return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId, mode: rows[0].mode ?? legacyTableMode };
 }
 /** Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left. */
 export async function savedTables(db: Database, userId: string): Promise<SavedTable[]> {

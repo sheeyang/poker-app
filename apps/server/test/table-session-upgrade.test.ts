@@ -69,11 +69,12 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   await start();
   const upgraded = await read(t);
   expect(upgraded).toMatchObject({
-    tableSessionId: t.id, mode: 'practice', pokerRevision: 4, sessionRevision: 5,
+    tableSessionId: t.id, mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, pokerRevision: 4, sessionRevision: 5,
     trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true },
     bindings: [{ participantId: t.human, name: 'You', controller: { kind: 'human' } }, { participantId: t.bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { state: { status: 'completed-hand', handId: 'hand-1', participants: [{ participantId: t.human, stack: 990 }, { participantId: t.bot, stack: 1010 }] } },
   });
+  expect(upgraded).not.toHaveProperty('joinToken');
   expect(upgraded.view.history[0]!.decisions[0]!.state.participants[0]!.holeCards).toHaveLength(2);
   expect(upgraded.view.history[0]!.decisions[0]!.state.participants[1]).not.toHaveProperty('holeCards');
   expect(await (await get('/api/table-sessions', t.cookie)).json()).toEqual({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
@@ -104,6 +105,11 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   await start();
   expect(await read(t)).toEqual(resumed);
   expect(await (await get('/api/table-sessions', t.cookie)).json()).toEqual({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
+  // A version-2 table committed before table options existed gets the Practice defaults.
+  await stop();
+  await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = aggregate - 'options' WHERE id = $1`, [t.id]);
+  await start();
+  expect(await read(t)).toMatchObject({ options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true } });
 });
 
 test('a version-1 table without its Trainer configuration fails restoration instead of receiving a default', async () => {

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { hashKey } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
 import { policyName, strategyName, StrategySelect } from './strategy-select.js';
@@ -7,7 +7,7 @@ import { actionLabel } from './table-model.js';
 import type { useDecisionAnalysis } from './analysis.js';
 import type { useHandSummary, useTableSessionSummary } from './summaries.js';
 import type { Command } from './session.js';
-import { Dialog } from './dialog.js';
+import { sessionSummaryRefreshKey } from './session-summary.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
 import { AnalysisSkeleton, ScoreSkeleton, Skeleton } from './loading-skeleton.js';
 
@@ -15,8 +15,13 @@ type Analysis = ReturnType<typeof useDecisionAnalysis>;
 type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
-export function AnalysisPanel({ table, analysis, summary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; command: Command; close: () => void }) {
+export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void }) {
   const panel = useRef<HTMLElement>(null), viewTabs = useRef<HTMLDivElement>(null);
+  const [sessionTab, setSessionTab] = useState(false);
+  // Opening the tab requests a fresh summary, and so does each Hand that completes while it stays open.
+  const refreshKey = sessionSummaryRefreshKey(table, sessionTab), requestSession = useRef(sessionSummary.request);
+  requestSession.current = sessionSummary.request;
+  useEffect(() => { if (refreshKey !== null) requestSession.current(); }, [refreshKey]);
   useLayoutEffect(() => {
     const root = panel.current, tabs = viewTabs.current;
     if (!root || !tabs) return;
@@ -33,6 +38,8 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   }
   const accepted = analysis.acceptedDecisions.filter(d => d.handId === table.view.state.handId);
   const liveView = analysis.view === 'live';
+  const tab = sessionTab ? 'session' : liveView ? 'live' : 'hand';
+  function selectTab(next: 'live' | 'hand' | 'session') { setSessionTab(next === 'session'); if (next !== 'session') analysis.selectView(next); }
   const selected = liveView ? undefined : accepted.find(d => d.decisionId === analysis.selectedDecisionId);
   const handDecisions = accepted;
   const liveDecision = configuration.liveAnalysis && !!table.view.state.decisionId && table.view.state.legalActions.length > 0;
@@ -48,7 +55,7 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
   const handActions = table.view.history.find(hand => hand.handId === context.handId)?.decisions ?? [];
   const selectedActionIndex = selected ? handActions.findIndex(action => action.decisionId === selected.decisionId) : -1;
   const earlierActions = selected ? selectedActionIndex < 0 ? [] : handActions.slice(0, selectedActionIndex) : handActions;
-  const humanId = table.bindings.find(b => b.controller.kind === 'human')?.participantId;
+  const humanId = table.viewerParticipantId;
   const expandedDecisionId = analysis.expandedDecisionId ?? analysis.selectedDecisionId;
   const showFollow = !liveView && analysis.pinned && selected?.decisionId !== accepted.at(-1)?.decisionId;
   const reference = data?.referenceStrategy ?? configuration.referenceStrategy;
@@ -70,12 +77,13 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
     <div className="analysis-meta"><span>Reference: <strong>{strategyName(reference)}</strong></span><span>Amounts in chips</span></div>
     <section id="analysis-settings" popover="auto" role="dialog" className="analysis-settings" onToggle={event => { if (event.newState === 'open') event.currentTarget.querySelector<HTMLButtonElement>('button')?.focus(); }} aria-labelledby="analysis-settings-title"><div className="analysis-settings-heading"><h3 id="analysis-settings-title">Analysis settings</h3><button className="icon-button" aria-label="Close analysis settings" popoverTarget="analysis-settings" popoverTargetAction="hide"><Icon name="close" size={18} /></button></div><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">Changing the reference recalculates your scores. Bot strategies stay the same.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy} checked={configuration.liveAnalysis} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label></section>
     <div ref={viewTabs} className="analysis-view-tabs" role="tablist" aria-label="Analysis view" onKeyDown={event => {
-      const next = event.key === 'Home' ? 'live' : event.key === 'End' ? 'hand' : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? liveView ? 'hand' : 'live' : undefined;
-      if (next) { event.preventDefault(); analysis.selectView(next); event.currentTarget.querySelector<HTMLButtonElement>(`#analysis-${next}-tab`)?.focus(); }
-    }}><button id="analysis-live-tab" role="tab" aria-selected={liveView} aria-controls="analysis-live-panel" tabIndex={liveView ? 0 : -1} onClick={() => analysis.selectView('live')}>Live</button><button id="analysis-hand-tab" role="tab" aria-selected={!liveView} aria-controls="analysis-hand-panel" tabIndex={liveView ? -1 : 0} onClick={() => analysis.selectView('hand')}>This hand <span>{handDecisions.length}</span></button></div>
-    {liveView && <div className="analysis-mode-line">{!configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn'}</div>}
-    <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={!liveView}>{liveView && (configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
-    <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={liveView}>{!liveView && <>
+      const order = ['live', 'hand', 'session'] as const, index = order.indexOf(tab);
+      const next = event.key === 'Home' ? 'live' : event.key === 'End' ? 'session' : event.key === 'ArrowRight' ? order[(index + 1) % order.length] : event.key === 'ArrowLeft' ? order[(index + order.length - 1) % order.length] : undefined;
+      if (next) { event.preventDefault(); selectTab(next); event.currentTarget.querySelector<HTMLButtonElement>(`#analysis-${next}-tab`)?.focus(); }
+    }}><button id="analysis-live-tab" role="tab" aria-selected={tab === 'live'} aria-controls="analysis-live-panel" tabIndex={tab === 'live' ? 0 : -1} onClick={() => selectTab('live')}>Live</button><button id="analysis-hand-tab" role="tab" aria-selected={tab === 'hand'} aria-controls="analysis-hand-panel" tabIndex={tab === 'hand' ? 0 : -1} onClick={() => selectTab('hand')}>This hand <span>{handDecisions.length}</span></button><button id="analysis-session-tab" role="tab" aria-selected={tab === 'session'} aria-controls="analysis-session-panel" tabIndex={tab === 'session' ? 0 : -1} onClick={() => selectTab('session')}>Session summary</button></div>
+    {tab === 'live' && <div className="analysis-mode-line">{!configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn'}</div>}
+    <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={tab !== 'live'}>{tab === 'live' && (configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
+    <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={tab !== 'hand'}>{tab === 'hand' && <>
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
     {handDecisions.length === 0 && !handSummary && content}
     {(handDecisions.length > 0 || handSummary) && <section className="decision-section decision-review"><div className={`section-heading${handSummary ? ' hand-summary-heading' : ''}`}><div className="decision-heading-copy"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
@@ -93,6 +101,7 @@ export function AnalysisPanel({ table, analysis, summary, command, close }: { ta
       })}</ol>}
     </section>}
     </>}</section>
+    <section id="analysis-session-panel" role="tabpanel" aria-labelledby="analysis-session-tab" tabIndex={0} hidden={tab !== 'session'}>{tab === 'session' && <div className="decision-section session-summary"><p className="summary-intro">Your accepted decisions in completed Hands, scored against your current Reference Strategy. The Hand in progress is not included.</p><SummaryResult summary={sessionSummary} currentReference={table.trainerConfiguration.referenceStrategy} /></div>}</section>
     <details className="analysis-explainer"><summary><Icon name="info" size={16} />About these scores</summary><div className="details-content"><p>Scores compare your play with the Reference Strategy. They do not measure poker skill, EV or profit.</p><p>Decision Score measures alignment with the reference Policy, including bet sizing. Action Rank Score measures the rank of your action type’s probability.</p><p>Probabilities run from 0.00 to 1.00. Bet and raise sizes show their original probabilities. Simple Heuristic uses basic rules; Uniform Choice is a testing baseline.</p></div></details>
   </aside>;
 }
@@ -142,8 +151,4 @@ export function SummaryResult({ summary, currentReference }: { summary: HandSumm
     {data?.status === 'complete' && <div className="summary-averages"><div><span>Mean Decision Score</span><strong>{(data.averages.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{(data.averages.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     {data && (currentReference ? differentReference && <p className="analysis-provenance">Reference Strategy: <strong>{strategyName(data.referenceStrategy)}</strong></p> : <p className="analysis-provenance">{data.decisionCount} {data.decisionCount === 1 ? 'decision' : 'decisions'} · Fixed reference: {policyName(data.referenceStrategy)} + {data.referenceStrategy.selector.id}<br />This summary retains its original decision set and reference.</p>)}
   </>;
-}
-
-export function FinishSession({ summary, close, leave }: { summary: SessionSummary; close: () => void; leave: () => void }) {
-  return <Dialog title="Session summary" close={close}><p className="summary-intro">A snapshot of your accepted decisions against one Reference Strategy.</p><SummaryResult summary={summary} /><div className="finish-actions"><button onClick={close}>Keep playing</button><button className="primary" onClick={leave}>Back to tables <Icon name="arrow" /></button></div><p className="muted">Your Table Session stays saved. You can return to its seats and stacks later.</p></Dialog>;
 }

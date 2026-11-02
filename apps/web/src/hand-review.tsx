@@ -3,7 +3,7 @@ import { chips } from './table-model.js';
 
 export function HandReview({ table }: { table: ObservableTableSession }) {
   const state = table.view.state;
-  const humanId = table.bindings.find(b => b.controller.kind === 'human')?.participantId;
+  const humanId = table.viewerParticipantId;
   const hand = table.view.history.find(h => h.handId === state.handId);
   const decisions = hand?.decisions.filter(d => d.action.participantId === humanId) ?? [];
   const payout = state.payouts?.filter(p => p.participantId === humanId).reduce((n, p) => n + p.amount, 0) ?? 0;

@@ -10,6 +10,7 @@ const paths = {
   info: 'M12 11v6m0-10v.1M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   check: 'm5 12 4 4L19 6',
   exit: 'M9 4H4v16h5m5-13 5 5-5 5m-5-5h13',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
 } as const;
 export function Icon({ name, size = 20 }: { name: keyof typeof paths; size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>;

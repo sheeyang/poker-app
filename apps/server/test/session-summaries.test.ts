@@ -117,6 +117,30 @@ test('unequal Hands produce decision-weighted session means and share member job
   }finally{await f.close();}
 });
 
+test('a session summary requested mid-Hand covers only completed Hands and never the Hand in progress', async () => {
+  const f = await fixture({ automaticBots: true });
+  try {
+    const t = await twoHands(f);
+    const completed = await (await f.post(t, 'session-summaries', {})).json();
+    expect(completed).toMatchObject({ decisionCount: 4, decisionIds: ['hand-1/decision-1', 'hand-2/decision-2', 'hand-2/decision-3', 'hand-2/decision-5'] });
+    await f.command(t, 'start-hand');
+    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+    const passive = (await f.read(t)).view.state.legalActions.some(action => action.type === 'check') ? 'check' : 'call';
+    await f.command(t, 'act', { participantId: t.human, action: { type: passive } });
+    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+    const current = await f.read(t);
+    expect(current.view.state.status).toBe('active-hand');
+    expect(current.view.history.find(hand => hand.handId === 'hand-3')?.decisions.some(decision => decision.action.participantId === t.human)).toBe(true);
+    const midHand = await (await f.post(t, 'session-summaries', {})).json();
+    expect(midHand).toMatchObject({ scope: 'table-session', decisionCount: 4, decisionIds: completed.decisionIds, capturedPokerRevision: current.pokerRevision });
+    expect(midHand.decisionIds.some((id: string) => id.startsWith('hand-3/'))).toBe(false);
+    // The Hand in progress alone leaves nothing to summarize.
+    const fresh = await f.table(); await f.command(fresh, 'seat-participant', { participantId: fresh.human, seat: 1 }); await f.command(fresh, 'seat-participant', { participantId: fresh.bot, seat: 2 }); await f.command(fresh, 'start-hand');
+    await f.command(fresh, 'act', { participantId: fresh.human, action: { type: 'call' } });
+    expect(await (await f.post(fresh, 'session-summaries', {})).json()).toMatchObject({ status: 'empty', decisionCount: 0, decisionIds: [] });
+  } finally { await f.close(); }
+});
+
 test('a new session snapshot reuses an individually completed member after an earlier derived lookup failure',async()=>{
   const f=await fixture();
   try{

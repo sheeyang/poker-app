@@ -30,17 +30,36 @@ must be 1-20 characters of letters, digits, spaces and basic punctuation
 until a name exists, and the human Participant takes the Guest's name at creation
 and keeps it when the Guest later edits their name.
 
+Joining an Online Table uses its Join Link, an unguessable token distinct from the
+Table Session ID (32 random bytes, base64url, found through a unique index on the
+aggregate's `joinToken`). The web Trainer opens it at `/join/:token`. Both routes
+need an established Guest identity (401 otherwise):
+
+| Method and path | Request and result |
+| --- | --- |
+| `GET /api/join-links/:token` | What the link shows: `ownerName`, the public `configuration` and `options`, `joinedCount`, and whether the Guest `alreadyJoined`. 404 `invalid-join-link` for an unknown, malformed or replaced token. |
+| `POST /api/join-links/:token/join` | Requires only `requestId`: the joiner has not seen the table, so there is no expected revision. Joins the Guest as one unseated Participant under their stored display name and returns `{ ok, tableSessionId, participantId, pokerRevision, sessionRevision }`. Joining again, with any request ID, returns the same Participant without another commit, and a Guest who left rejoins as that Participant under the original name. |
+
+Join rejections: 404 `invalid-join-link`; 400 `display-name-required`; 409
+`name-taken` (ignoring case, among all Participants of the table, Bots and departed
+Participants included); 409 `table-full` (20 joined human Participants); 403
+`guest-removed`; 409 `request-id-conflict`. Like creation, definitive rejections are
+remembered per request ID, so retry with a new one after fixing the cause. A
+Participant's name is fixed when they join. Joining is a CashGame `join-table`
+command, so it advances both revisions and the Participant observes from that point.
+
 All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
 | --- | --- |
-| `POST` to the base path | Requires `requestId`; accepts optional observable `configuration` overrides and `bots`, each with `name` and `playingStrategy`. Creates a Practice Table and returns its Table Session ID and safe Participant bindings, without seating them. |
+| `POST` to the base path | Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). The limit is stored and shown only: it is not yet enforced. |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. |
-| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. |
+| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. Only the Table Owner of an Online Table also receives its `joinToken`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
-| `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. |
+| `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
+| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, until Automatic Dealing exists. |
 | `GET /:id/live` | Earlier table-specific WebSocket endpoint, retained for existing transport consumers. |
 
 ## Authorization
@@ -70,7 +89,7 @@ that Participant's Human Controller can read or retry it or receive its
 
 The Persisted Table Session is version 2. It records the table `mode`, and each
 human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
-configuration. Version-1 records load as Practice Tables whose human takes the
+configuration, the table `options`, and an Online Table's `joinToken`. Version-1 records load as Practice Tables whose human takes the
 table-level Trainer configuration, and are rewritten at their next commit. The
 `table_memberships` index (Guest, table, Participant, status) is written in the
 same transaction as every aggregate write that changes a membership (see
@@ -138,6 +157,7 @@ canonical JSON:
 | Request family | Prefix | Canonical JSON input | Attempt scope |
 | --- | --- | --- | --- |
 | Table creation | `create-table-v1:` | Complete request contents excluding `requestId` | Authenticated user and `requestId` |
+| Joining through a Join Link | `join-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | Poker mutation | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller or Trainer configuration mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 

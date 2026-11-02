@@ -18,18 +18,18 @@ export function CommandFeedback({ command }: { command: Command }) {
 /** `actionOpen`: the viewer's Action Window is open now, on the estimated server clock. */
 export function ActionTray({ table, actionOpen, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
   const state = table.view.state;
-  const human = table.bindings.find(b => b.controller.kind === 'human')!;
-  const participant = state.participants.find(p => p.participantId === human.participantId);
+  const humanId = table.viewerParticipantId;
+  const participant = state.participants.find(p => p.participantId === humanId);
   const blocked = command.busy || table.runtimeStatus?.phase === 'recovering';
   // Action controls show during the preceding Presentation Phase but enable only inside the window.
   const busy = blocked || !actionOpen;
   const submit = (action: 'start' | ConcreteAction) => {
     const metadata = { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision };
-    command.submit(action === 'start' ? { tableId: table.tableSessionId, kind: 'start', body: metadata } : { tableId: table.tableSessionId, kind: 'act', body: { ...metadata, participantId: human.participantId, action } });
+    command.submit(action === 'start' ? { tableId: table.tableSessionId, kind: 'start', body: metadata } : { tableId: table.tableSessionId, kind: 'act', body: { ...metadata, participantId: humanId, action } });
   };
   const sized = state.legalActions.find((a): a is SizedAction => 'minimum' in a);
-  if (state.status !== 'active-hand') return <NextHand table={table} busy={blocked} openSettings={openSettings} review={review} />;
-  if (state.actorId !== human.participantId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : 'The hand is in play.'}</strong><p>{table.runtimeStatus?.phase === 'failed' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}</p></div><span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
+  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} openSettings={openSettings} review={review} /> : <NextHand table={table} busy={blocked} openSettings={openSettings} review={review} />;
+  if (state.actorId !== humanId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : participant?.seat == null ? 'You’re watching this hand.' : 'The hand is in play.'}</strong><p>{table.runtimeStatus?.phase === 'failed' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}</p></div><span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
   return <div className="action-tray">
     <div className="action-context"><span>Stack {chips(participant?.stack ?? 0)} chips</span></div>
     <div className="quick-actions">{state.legalActions.filter(a => !('minimum' in a)).map(a => <button className={`action-button action-${a.type}`} key={a.type} disabled={busy} onClick={() => submit({ type: a.type } as ConcreteAction)}><span>{actionLabel({ type: a.type } as ConcreteAction)}</span>{a.type === 'call' && <strong>{chips(state.amountToCall ?? 0)}</strong>}</button>)}</div>
@@ -37,14 +37,29 @@ export function ActionTray({ table, actionOpen, command, openSettings, review }:
   </div>;
 }
 
+/** Online Tables deal Hands themselves, so between Hands a Participant only chooses a seat or reviews. */
+function OnlineBetweenHands({ table, openSettings, review }: { table: ObservableTableSession; openSettings: () => void; review?: (decisionId?: string) => void }) {
+  const state = table.view.state;
+  const you = state.participants.find(p => p.participantId === table.viewerParticipantId);
+  const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === table.viewerParticipantId) ?? [];
+  const seated = you?.seat != null;
+  return <div className="action-tray idle-tray next-hand">
+    <p>{seated ? 'Waiting for the next hand. Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.'}</p>
+    <div className="next-hand-actions">
+      {state.status === 'completed-hand' && review && <button className="quiet-button" disabled={!decisions.length} onClick={() => review(decisions.at(-1)?.decisionId)}>Review hand <Icon name="chart" size={17} /></button>}
+      {!seated && <button className="primary" onClick={openSettings}>Choose a seat <Icon name="arrow" /></button>}
+    </div>
+  </div>;
+}
+
 function NextHand({ table, busy, openSettings, review }: { table: ObservableTableSession; busy: boolean; openSettings: () => void; review?: (decisionId?: string) => void }) {
   const state = table.view.state, setup = useSession(s => s.setup), setSetup = useSession(s => s.setSetup);
-  const human = state.participants.find(p => p.participantId === table.bindings.find(b => b.controller.kind === 'human')?.participantId);
+  const human = state.participants.find(p => p.participantId === table.viewerParticipantId);
   const refills = state.participants.filter(p => p.seat !== null && p.stack === 0 && (!p.sittingOut || p === human));
   const needsSeat = human?.seat == null;
   const available = state.participants.filter(p => p.seat !== null && (!p.sittingOut || p === human)).length + (needsSeat ? 1 : 0);
   const preparing = setup?.tableId === table.tableSessionId;
-  const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === human?.participantId) ?? [];
+  const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === table.viewerParticipantId) ?? [];
   return <div className="action-tray idle-tray next-hand">
     {(preparing || refills.length > 0 || needsSeat || human?.sittingOut) && <p>{preparing ? 'Preparing your next hand…' : refills.length ? `${refills.map(p => p === human ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name).join(', ')}: rebuy to ${chips(table.view.configuration.defaultBuyIn)} chips each.` : needsSeat ? 'We’ll return you to an open seat.' : 'You’ll return from sitting out.'}</p>}
     <div className="next-hand-actions">
@@ -57,7 +72,7 @@ function NextHand({ table, busy, openSettings, review }: { table: ObservableTabl
 function Sizing({ action, table, disabled, submit }: { action: SizedAction; table: ObservableTableSession; disabled: boolean; submit: (action: ConcreteAction) => void }) {
   const [amount, setAmount] = useState(String(action.minimum));
   const help = useId();
-  const humanId = table.bindings.find(b => b.controller.kind === 'human')!.participantId;
+  const humanId = table.viewerParticipantId;
   const wager = table.view.state.participants.find(p => p.participantId === humanId)?.wager ?? 0;
   const total = Number(amount);
   const valid = amount.trim() !== '' && Number.isSafeInteger(total) && total >= action.minimum && total <= action.maximum;
