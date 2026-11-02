@@ -55,7 +55,7 @@ test('sparse three-player seats preserve public position, antes, all street orde
   expect(before.view.state.participants.map(p => [p.seat, p.stack, p.anteContribution, p.wager, p.contribution, p.cardCount])).toEqual([[7, 995, 5, 0, 5, 2], [9, 985, 5, 10, 15, 2], [2, 975, 5, 20, 25, 2]]);
   expect(before.view.state.participants[0]!.holeCards).toHaveLength(2);
   expect(before.view.state.participants[1]).not.toHaveProperty('holeCards'); expect(before.view.state.participants[2]).not.toHaveProperty('holeCards');
-  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['stand-up-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: true }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
+  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['stand-up-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: false }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
     const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: t.revision, ...fields });
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
     expect(await read(t)).toEqual(before);

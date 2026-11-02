@@ -61,6 +61,8 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until its payout phase ends. They are never deferred. |
 | `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left or been removed. Between Hands it applies at once: the Guest stands up (cashing out), leaves the table, and their membership becomes `removed`. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table or join it again, through any Join Link; it leaves their saved list. |
 | `POST /:id/replace-join-link` | Table Owner only, Online Tables only (400 `join-link-unavailable` at a Practice Table). Requires `requestId` and `expectedSessionRevision`. Stores a new token in the aggregate's `joinToken` in the same transaction, so the previous link stops resolving at once (404 `invalid-join-link`); the acknowledgement carries no link, the owner reads the new `joinToken` from the view (and the live update). Joined Participants are untouched. Rate limited, see [Public hosting safeguards](#public-hosting-safeguards). |
+| `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
+| `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
@@ -82,9 +84,10 @@ allowed to make that request:
   `not-your-participant`, even from the Table Owner. This covers every
   Participant-naming kind, `leave-table` included. The one exception is the
   owner's Removal (`remove-participant`), which exists to name another human.
-- Dealing (`start-hand`), `set-button`, managing a Bot (seating, Stand Up, moving,
-  sitting out, top-ups, `set-playing-strategy`, `retry-bot`) and completed-Hand
-  inspection, Removal and replacing the Join Link require Table Ownership. Other
+- Dealing (`start-hand`), `set-button`, adding and removing Bots, managing a Bot (seating,
+  Stand Up, moving, sitting out, top-ups, `set-playing-strategy`, `retry-bot`),
+  `set-table-options`, completed-Hand inspection, Removal and replacing the Join Link
+  require Table Ownership. Other
   Participants receive 403 `table-owner-required`.
 
 At a Practice Table the owner is the only human, so neither applies there. Acting
@@ -196,8 +199,11 @@ this hand". Only the session revision advances; the acknowledgement carries
 `afterHand: true`. A stronger request replaces a weaker pending one
 (`sit-out` < `stand-up` < `leave-table` < `remove`, `changeStrength` in contracts); a weaker or
 equal request, with any request ID, changes nothing. An unseated Participant's
-`leave-table` applies at once, as it needs no Seat. A Bot's management during a Hand
-is still refused (`active-hand`), and so are moves, top-ups and resuming.
+`leave-table` applies at once, as it needs no Seat. The owner's management of a Bot
+is deferred the same way for two requests: `set-sitting-out` (to `true`) and
+`remove-bot` for a seated Bot (see [Owner controls](#owner-controls-bots-and-table-options)).
+Every other management during a Hand is refused (`active-hand`), and so are moves,
+top-ups, Stand Up and resuming.
 
 When the latest Hand's payout phase ends, the server applies every pending change in
 one committed transition: all the engine commands (Stand Up, sitting out, Leave Table)
@@ -223,6 +229,51 @@ in that transaction).
 A Guest whose Participant leaves or is removed receives one `table-membership-ended` live
 message (`reason: 'left'` or `'removed'`) on their subscription, then no more updates for
 that table.
+
+### Owner controls: Bots and table options
+
+The Table Owner fills and tunes the table without waiting for a pause, at either table
+mode. None of this gives the owner any control over, or sight of, another human.
+
+- **`POST /:id/add-bot`** adds a Bot at any time, even during a Hand. It is a poker
+  mutation: `requestId`, `expectedPokerRevision`, `name`, `playingStrategy`, and optionally
+  `seat` and `buyIn`. In one commit it binds a new Bot Participant and seats it (CashGame
+  `seat-participant`) at the named open Seat, or the lowest open one, with the buy-in named
+  (the table's default otherwise). Hand participants are frozen, so a Bot added during a
+  Hand is dealt in from the next one, with no missed blind. The name is trimmed, 1 to 64
+  characters without control characters, and must differ from every other Participant's,
+  ignoring case, departed ones included (409 `name-taken`); other rejections are 400
+  `invalid-bot-name`, `unsupported-strategy`, `no-empty-seat` and CashGame's `invalid-buy-in`,
+  `seat-occupied` and `invalid-seat`. A Guest who is not the owner receives 403
+  `table-owner-required`.
+- **`POST /:id/remove-bot`** removes a Bot (`requestId`, `expectedPokerRevision`,
+  `participantId`). The Bot stands up, cashing out, and leaves the table; its binding stays
+  marked `removed` so its name stays taken and the Hands it played keep their names. A
+  seated Bot is removed after a Hand in progress (an After-Hand Request, `change: 'remove'`,
+  acknowledged with `afterHand: true`); a Bot without a Seat goes at once. Naming a human is
+  refused (403 `not-your-participant`, 400 `participant-not-bot` for the owner's own
+  Participant), and a removed Bot cannot be seated, managed, retuned or removed again (400
+  `bot-removed`).
+- The owner's other Bot management is the existing mutations, owner-only: `set-playing-strategy`
+  (any time), `top-up-to` and `stand-up-participant` and resuming (between Hands), and
+  `set-sitting-out`, which during a Hand is an After-Hand Request like a human's own. At an
+  Online Table a Bot that sat out after a failure is resumed with `set-sitting-out: false`.
+- **`POST /:id/set-table-options`** changes an Online Table's options between Hands. It is
+  the application path (`configure`): `requestId`, `expectedSessionRevision` and
+  `options`, a non-empty partial object of `actionTimeLimitSeconds` (15, 30 or 60),
+  `allowLiveAnalysis` and `allowSeatChanges` (booleans). Anything else is 400
+  `invalid-table-options`. Owner only (403 `table-owner-required`); 403
+  `unavailable-at-practice-tables` at a Practice Table, which keeps the options it was
+  created with; 400 `active-hand` while a Hand is played or its payout phase shown. An option
+  set to its current value is acknowledged without a commit. `allowSeatChanges` is the one
+  option CashGame owns: it runs the `set-seat-changes` command in the same transaction (one
+  poker revision step, `seat-changes-changed` in the live update's `presentationEvents`), so the
+  Observable Game Configuration always shows the current value; the others change the
+  aggregate's `options` only. Every request advances the session revision once. Everyone at
+  the table sees the new options in their next view and live update. Changing an option does
+  not disturb a running Next-Hand Countdown: the Hand it deals uses the new Action Time Limit.
+- **Who has left.** Every complete view lists `departedParticipantIds` once anyone has
+  left: humans who left or were removed, and removed Bots. It is public and carries no reason.
 
 ### Automatic Dealing at Online Tables
 
@@ -343,8 +394,8 @@ canonical JSON:
 | The owner returning to their table | `rejoin-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
 | Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v1:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `away` (the humans sat out) and `deal` | Table Session and `requestId` |
-| Poker mutation | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
-| Controller, Trainer configuration or Join Link replacement mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
+| Poker mutation (`add-bot` and `remove-bot` included) | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
+| Controller, Trainer configuration, table option or Join Link replacement mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
 For poker mutations, `source` is `human`, `bot`, or `server` for the scheduler's
 own Timeout Actions (a human's, and an Online Bot's after its retry failed). `kind` is the command name;
