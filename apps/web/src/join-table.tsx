@@ -22,7 +22,7 @@ export function JoinTable({ token }: { token: string }) {
   const join = useMutation({
     mutationFn: async () => {
       // The name is the Guest's own; saving it first lets the join see it. Each attempt is a fresh request.
-      if (value.trim() !== stored) {
+      if (!returning && value.trim() !== stored) {
         const saved = await api.setDisplayName(value.trim());
         queryClient.setQueryData(['identity'], { ok: true, displayName: saved.displayName });
       }
@@ -34,6 +34,7 @@ export function JoinTable({ token }: { token: string }) {
       await navigate({ to: '/' });
     },
   });
+  const returning = !!preview.data?.returningAs;
   const failure = join.error instanceof RequestFailure ? join.error.message : join.error ? 'Couldn’t join this table. Check your connection and try again.' : undefined;
   const data = preview.data;
   const dead = preview.error instanceof RequestFailure && preview.error.code === 'invalid-join-link';
@@ -46,14 +47,14 @@ export function JoinTable({ token }: { token: string }) {
         ? <><h1>This link doesn’t work.</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/' })}>Go to my tables</button></>
         : <div className="notice-error" role="alert"><p>{preview.error instanceof RequestFailure ? preview.error.message : 'Couldn’t open this table.'}</p><button onClick={() => void preview.refetch()}>Try again</button></div>)}
       {data && <>
-        <h1>{data.alreadyJoined ? 'You’re already at this table.' : `Join ${data.ownerName}’s table`}</h1>
+        <h1>{data.alreadyJoined ? 'You’re already at this table.' : returning ? `Return to ${data.ownerName}’s table` : `Join ${data.ownerName}’s table`}</h1>
         <p className="join-facts">No-limit Hold’em · {chips(data.configuration.smallBlind)} / {chips(data.configuration.bigBlind)} chips · {data.configuration.seatCount} seats{data.options.actionTimeLimitSeconds ? ` · ${data.options.actionTimeLimitSeconds} seconds to act` : ''}<br />{data.joinedCount} of {onlineTableCapacity} players have joined.</p>
-        <form onSubmit={e => { e.preventDefault(); if (!join.isPending && value.trim()) join.mutate(); }}>
-          {data.alreadyJoined ? <p className="muted">You keep your seat, stack and history.</p> : <label>Your name at this table<input name="displayName" value={value} maxLength={40} autoComplete="nickname" required aria-describedby="join-name-hint" aria-invalid={!!failure} onChange={e => { setTyped(e.target.value); if (join.error) join.reset(); }} /><small id="join-name-hint" className="muted">{hint}</small></label>}
+        <form onSubmit={e => { e.preventDefault(); if (!join.isPending && (returning || value.trim())) join.mutate(); }}>
+          {data.alreadyJoined ? <p className="muted">You keep your seat, stack and history.</p> : returning ? <p className="muted">You’ll come back as {data.returningAs}, with your history from before. You stand up when you leave, so choose a seat again when you’re ready.</p> : <label>Your name at this table<input name="displayName" value={value} maxLength={40} autoComplete="nickname" required aria-describedby="join-name-hint" aria-invalid={!!failure} onChange={e => { setTyped(e.target.value); if (join.error) join.reset(); }} /><small id="join-name-hint" className="muted">{hint}</small></label>}
           {failure && <p className="notice-error" role="alert">{failure}</p>}
-          <button className="primary" disabled={join.isPending || !value.trim()}>{join.isPending ? 'Joining…' : data.alreadyJoined ? 'Open table' : 'Join table'}<Icon name="arrow" size={19} /></button>
+          <button className="primary" disabled={join.isPending || !returning && !value.trim()}>{join.isPending ? 'Joining…' : data.alreadyJoined ? 'Open table' : returning ? 'Return to table' : 'Join table'}<Icon name="arrow" size={19} /></button>
         </form>
-        {!data.alreadyJoined && <p className="muted">You’ll watch the table first and can take an open seat whenever you’re ready.</p>}
+        {!data.alreadyJoined && !returning && <p className="muted">You’ll watch the table first and can take an open seat whenever you’re ready.</p>}
       </>}
     </div>
   </main>;

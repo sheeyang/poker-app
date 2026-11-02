@@ -13,6 +13,7 @@ async function request<T>(path: string, init?: RequestInit, acceptAnalysisError 
 }
 export const api = {
   previewJoinLink: (token: string, signal?: AbortSignal) => request<import('@poker/contracts').JoinLinkPreview>('/join-links/' + encodeURIComponent(token), { signal }),
+  rejoinTable: (id: string, body: import('@poker/contracts').JoinTableRequest) => request<import('@poker/contracts').JoinAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/rejoin-table', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   joinTable: (token: string, body: import('@poker/contracts').JoinTableRequest) => request<import('@poker/contracts').JoinAcknowledgement>('/join-links/' + encodeURIComponent(token) + '/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   createSessionSummary: (id: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/session-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
   createHandSummary: (id: string, handId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/hand-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }, true),

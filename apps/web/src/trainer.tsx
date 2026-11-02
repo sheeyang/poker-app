@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, retainNewestTable, useTableSynchronization } from '@poker/client';
 import { Icon } from './icons.js';
 import { SessionBrowser } from './session-browser.js';
@@ -21,10 +21,19 @@ export function Trainer() {
   const selected = useSession(s => s.selectedId);
   const analysisOpen = useSession(s => s.analysisOpen), animations = useSession(s => s.animations);
   const [browse, setBrowse] = useState(false), [settings, setSettings] = useState(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity });
   const table = useQuery({ queryKey: ['table-session', selected], queryFn: ({ signal }) => api.readSession(selected!, signal), enabled: identity.isSuccess && !!selected, structuralSharing: retainNewestTable });
   const analysis = useDecisionAnalysis(table.data), summary = useHandSummary(table.data), sessionSummary = useTableSessionSummary(table.data);
   const live = useTableSynchronization(selected, identity.isSuccess, {
+    // Left after the Hand: the server says so when it happens, and this client returns to the saved tables.
+    onMembershipEnded: ended => {
+      useSession.getState().select(null);
+      queryClient.removeQueries({ queryKey: ['table-session', ended.tableSessionId] });
+      void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
+      setNotice(ended.reason === 'left' ? 'You left the table.' : 'You are no longer at that table.');
+    },
     onReady: lifecycle => { analysis.consumers.onReady?.(lifecycle); summary.consumers.onReady?.(lifecycle); sessionSummary.consumers.onReady?.(lifecycle); },
     onAnalysisUpdate: (update, lifecycle) => { analysis.consumers.onAnalysisUpdate?.(update, lifecycle); summary.consumers.onAnalysisUpdate?.(update, lifecycle); sessionSummary.consumers.onAnalysisUpdate?.(update, lifecycle); },
   });
@@ -60,6 +69,7 @@ export function Trainer() {
     <header className="app-header"><button className="brand" onClick={() => setBrowse(true)} aria-label="Poker Trainer · tables"><span className="brand-mark"><Icon name="spade" size={23} /></span><strong>Poker<span className="brand-divider" /> <span>Trainer</span></strong></button><nav aria-label="Table navigation"><button className={browse || !selected ? 'nav-active' : ''} onClick={() => setBrowse(true)}><Icon name="tables" size={18} /><span>Tables</span></button>{selected && <button onClick={() => setBrowse(false)} className={!browse ? 'nav-active' : ''}><Icon name="cards" size={18} /><span>Your table</span></button>}</nav><span className="identity-status">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span></header>
     <CommandFeedback command={command} />
     {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>Your saved table is still selected.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
+    {notice && !selected && <div className="global-notice" role="status"><div><strong>{notice}</strong></div><button onClick={() => setNotice(null)}>Dismiss</button></div>}
     {!selected || browse ? <SessionBrowser command={command} ready={identity.isSuccess} connecting={identity.isPending} close={selected ? () => setBrowse(false) : undefined} /> : <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
       <div className="play-area">
         <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{current?.joinToken && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}<button className="quiet-button" aria-expanded={analysisOpen} aria-controls="analysis-panel" onClick={() => analysisOpen ? closeAnalysis() : review()}><Icon name="chart" size={18} /><span>{analysisOpen ? 'Return to play' : handDecisions.length ? 'Review decisions' : 'Analysis'}</span></button><button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings(true)}><Icon name="settings" /></button></div></div>
@@ -83,6 +93,6 @@ export function Trainer() {
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
     </main>}
     {joinLinkOpen && current?.joinToken && <JoinLinkDialog token={current.joinToken} close={() => setJoinLinkOpen(false)} />}
-    {settings && current && <TableSettings table={current} command={command} close={() => setSettings(false)} />}
+    {settings && current && <TableSettings table={current} command={command} handOpen={current.view.state.status === 'active-hand' || presentation?.dealOpen === false} close={() => setSettings(false)} />}
   </div>;
 }

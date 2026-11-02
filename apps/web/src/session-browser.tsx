@@ -44,10 +44,17 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
       {!sessions.data && (connecting || ready && sessions.isPending) && <SavedTablesSkeleton />}
       {sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
       {sessions.data?.tables.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
-      <ul className="return-list">{sessions.data?.tables.map(({ tableSessionId: id }) => <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
+      <ul className="return-list">{sessions.data?.tables.map(({ tableSessionId: id, mode: tableMode, left }) => left
+        ? <LeftTable key={id} mode={tableMode} busy={command.busy} returnToTable={() => command.submit({ kind: 'rejoin', tableId: id, body: { requestId: crypto.randomUUID() } })} />
+        : <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
     </section></div>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;
+}
+
+/** An owned table the Guest left: it keeps running without them, and opening it returns them without the Join Link. */
+function LeftTable({ mode, busy, returnToTable }: { mode: TableMode; busy: boolean; returnToTable: () => void }) {
+  return <li className="saved-table"><button onClick={returnToTable} disabled={busy}><span className="saved-table-copy"><strong>Hold’em<small className={`mode-chip mode-${mode}`}>{modeLabel(mode)}</small><small>You left</small></strong><span>This is your table. It keeps running while you’re away.</span></span><span className="resume-label">Return to table <Icon name="arrow" size={17} /></span></button></li>;
 }
 
 function SavedTable({ id, selected, open }: { id: string; selected: boolean; open: () => void }) {

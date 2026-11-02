@@ -160,8 +160,10 @@ export interface MoveParticipantRequest extends PokerMutationMetadata { readonly
 export interface SetSittingOutRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly sittingOut: boolean }
 export interface TopUpToRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly targetStack: ChipAmount }
 export interface SetButtonRequest extends PokerMutationMetadata { readonly seat: number }
-export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest;
-export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
+/** Leave Table: stand up if seated, then cease to be at the table. Self-service only. */
+export interface LeaveTableRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
+export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest | LeaveTableRequest;
+export type ParticipantManagementKind = 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table';
 export interface ActRequest extends PokerMutationMetadata {
   readonly participantId: ParticipantId;
   readonly action: ConcreteAction;
@@ -173,6 +175,8 @@ export interface MutationAcknowledgement {
   readonly tableSessionId: TableSessionId;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
+  /** The request was made during a Hand: it is recorded as pending and applies when the Hand's payout phase ends. */
+  readonly afterHand?: true;
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
 /** Joining carries a request ID but no expected revision: the joiner has not seen the table. */
@@ -189,6 +193,8 @@ export interface JoinLinkPreview {
   readonly joinedCount: number;
   /** The requesting Guest has already joined, so joining returns their own Participant. */
   readonly alreadyJoined: boolean;
+  /** The requesting Guest left this table earlier: joining returns them to their Participant under this original name. */
+  readonly returningAs?: string;
 }
 /** Explicitly authorized completed-Hand Research output; never an Observable Game View. */
 export interface CompletedHandInspection {
@@ -215,8 +221,11 @@ export interface InspectionCapabilities {
 }
 /** Fixed when a Table Session is created. */
 export type TableMode = 'practice' | 'online';
-/** One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left. */
-export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode }
+/**
+ * One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left.
+ * `left` marks an owned table the Guest has left; opening it rejoins them without the Join Link.
+ */
+export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode; readonly left?: true }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
  * What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's
@@ -250,6 +259,16 @@ export interface ActionWindow {
    */
   readonly deadlineAt?: ServerTime;
 }
+/**
+ * A change to a seated human Participant that waits for the Hand in progress to end. A weaker request is
+ * superseded by a stronger one (`sit-out` < `stand-up` < `leave-table`). Later tickets add the changes the
+ * server itself queues, such as Removal.
+ */
+export type PendingChange = 'sit-out' | 'stand-up' | 'leave-table';
+/** How strong each change is: a request replaces a pending change of the same Participant only if it is stronger. */
+export const changeStrength: Readonly<Record<PendingChange, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3 });
+/** A pending change, public to everyone at the table. */
+export interface PendingParticipantChange { readonly participantId: ParticipantId; readonly change: PendingChange }
 /** The current Hand's Presentation Phases, in order, and the current decision's Action Window, if any. */
 export interface TableSchedule {
   readonly phases: readonly PresentationPhase[];
@@ -275,6 +294,8 @@ export interface ObservableTableSession {
   readonly schedule: TableSchedule;
   /** When the server produced this view, so clients can estimate the server clock. */
   readonly serverTime: ServerTime;
+  /** Changes asked for during the Hand in progress, applied together when its payout phase ends. Public. */
+  readonly pendingChanges: readonly PendingParticipantChange[];
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;
@@ -308,7 +329,12 @@ export type TableSubscriptionResult = {
   readonly requestId: string;
   readonly tableSessionId: TableSessionId;
 } & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
-export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate;
+/**
+ * The last message a Guest's subscription receives after their Participant leaves the table (or, later, is removed).
+ * Their client returns to its saved tables.
+ */
+export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId; readonly reason: 'left' | 'removed' }
+export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate | TableMembershipEnded;
 export type ServerLiveMessage = UserChannelReady | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,

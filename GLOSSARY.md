@@ -112,6 +112,10 @@ _Avoid_: Stand Up, quit, disconnect
 A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again.
 _Avoid_: Ban, kick
 
+**After-Hand Request**:
+A change to a human Participant asked for during a Hand (Sitting Out, Stand Up or Leave Table) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
+_Avoid_: Queued action, deferred command
+
 **Sitting Out**:
 A seated Participant's status that excludes them from new Hands, while keeping their Seat and stack, until they resume.
 _Avoid_: Away, inactive, left

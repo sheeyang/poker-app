@@ -53,9 +53,12 @@ All table paths below start with `/api/table-sessions`:
 | Method and path | Request and result |
 | --- | --- |
 | `POST` to the base path | Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A Practice Table enforces its limit through Action Deadlines (see [Play timing](#play-timing)); an Online Table's limit is stored and shown only until Automatic Dealing enforces it. |
-| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. |
+| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left? }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. |
+| `POST /:id/rejoin-table` | Table Owner only: returns the owner to a table they left, without the Join Link, as the same Participant. Requires only `requestId`. Anyone else, left or not, receives 404 `not-found`; a Guest who left a table they do not own rejoins through its Join Link. Same outcome and rejections as a join (`table-full` included). |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. Only the Table Owner of an Online Table also receives its `joinToken`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
+| `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: the table leaves their saved list (unless they own it) and a place is freed. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
+| `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until its payout phase ends. They are never deferred. |
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
@@ -73,7 +76,8 @@ request idempotency, so a remembered outcome is replayed only to a requester
 allowed to make that request:
 
 - A request naming another human's Participant is rejected with 403
-  `not-your-participant`, even from the Table Owner.
+  `not-your-participant`, even from the Table Owner. This covers every
+  Participant-naming kind, `leave-table` included.
 - Dealing (`start-hand`), `set-button`, managing a Bot (seating, Stand Up, moving,
   sitting out, top-ups, `set-playing-strategy`, `retry-bot`) and completed-Hand
   inspection require Table Ownership. Other Participants receive 403
@@ -89,7 +93,8 @@ that Participant's Human Controller can read or retry it or receive its
 
 The Persisted Table Session is version 2. It records the table `mode`, and each
 human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
-configuration, the table `options`, and an Online Table's `joinToken`. Version-1 records load as Practice Tables whose human takes the
+configuration, the table `options`, an Online Table's `joinToken`, and the
+`pendingChanges` (after-Hand requests, empty by default). Version-1 records load as Practice Tables whose human takes the
 table-level Trainer configuration, and are rewritten at their next commit. The
 `table_memberships` index (Guest, table, Participant, status) is written in the
 same transaction as every aggregate write that changes a membership (see
@@ -168,6 +173,38 @@ decisions the human misses in that Hand time out too. The human is never sat out
 and the next Hand waits for their Deal. A deadline that expired while the server
 was down plays its Timeout Action at startup, before any request is served.
 
+### After-Hand requests
+
+A Hand lasts until its payout phase ends, not until its last decision. During it
+([`after-hand.ts`](../apps/server/src/after-hand.ts)), a human's own `set-sitting-out`
+(to `true`), `stand-up-participant` and `leave-table` (when seated) are not applied:
+they are recorded in the Persisted Table Session as `pendingChanges`, one
+`{ participantId, change }` per Participant (`sit-out`, `stand-up` or `leave-table`),
+and every complete view carries them, so everyone at the table sees "leaving after
+this hand". Only the session revision advances; the acknowledgement carries
+`afterHand: true`. A stronger request replaces a weaker pending one
+(`sit-out` < `stand-up` < `leave-table`, `changeStrength` in contracts); a weaker or
+equal request, with any request ID, changes nothing. An unseated Participant's
+`leave-table` applies at once, as it needs no Seat. A Bot's management during a Hand
+is still refused (`active-hand`), and so are moves, top-ups and resuming.
+
+When the latest Hand's payout phase ends, the server applies every pending change in
+one committed transition: all the engine commands (Stand Up, sitting out, Leave Table)
+and the cleared list commit together, as one poker revision step and one session
+revision step, and a Leave Table also marks the binding `left`, which the membership
+index follows in the same transaction. The step runs from the table's wake-up at the
+end of the payout phase (including after a restart, for a Hand that ended during the
+outage) and at the start of every human request, so a Deal can never be accepted
+ahead of it. A Deal that arrives before the wake-up still finds the changes applied,
+and names a poker revision they have made stale (409 `stale-poker-revision`). The
+transition's request ID is derived from the session revision (`after-hand:<n>`), so
+it applies once however often it is retried. The pause between Hands of Automatic
+Dealing begins after this transition.
+
+A Guest whose Participant leaves receives one `table-membership-ended` live message
+(`reason: 'left'`; Removal will use `'removed'`) on their subscription, then no more
+updates for that table.
+
 The Trainer estimates the server clock from `serverTime` (the least-delayed of
 recent views), shows hole cards, each street, the opponents' hands at showdown
 and the result from their phase's start, enables Deal when the payout phase
@@ -191,6 +228,8 @@ canonical JSON:
 | --- | --- | --- | --- |
 | Table creation | `create-table-v1:` | Complete request contents excluding `requestId` | Authenticated user and `requestId` |
 | Joining through a Join Link | `join-table-v1:` | `{ userId }` | Table Session and `requestId` |
+| The owner returning to their table | `rejoin-table-v1:` | `{ userId }` | Table Session and `requestId` |
+| Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
 | Poker mutation | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller or Trainer configuration mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
