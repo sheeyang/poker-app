@@ -7,7 +7,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { startStoredHand } from './fixtures/online.js';
+import { connectLive } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -257,7 +257,10 @@ async function guest(name: string) {
 }
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
-/** An Online Table of Ann (the owner) and Ben, both joined through the link and seated heads-up, with Hand 1 dealt. */
+/**
+ * An Online Table of Ann (the owner) and Ben, both joined through the link, connected and seated heads-up. Automatic
+ * Dealing has dealt Hand 1, and the first Action Window is open.
+ */
 async function onlineHand() {
   const ann = await guest('Ann'), ben = await guest('Ben');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json();
@@ -267,10 +270,12 @@ async function onlineHand() {
   const join = async (cookie: string) => post('/api/join-links/' + token + '/join', cookie, { requestId: randomUUID() });
   const benId = (await (await join(ben)).json()).participantId as string;
   const as = async (cookie: string, kind: string, fields: object) => post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
+  await connectLive(base, ann, id); await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 1 })).status).toBe(200);
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
-  // Online Tables deal themselves in a later ticket; a stored Hand stands in for the first one.
-  await server.close(); await startStoredHand(administration, schema, id); await startServer();
+  clock.advanceTo((await view(ann)).schedule.nextHandCountdown!.endsAt);
+  await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
+  clock.advance(1500);
   const cookieOf = (participantId: string) => participantId === annId ? ann : ben;
   return { ann, ben, id, annId, benId, token, view, join, as, cookieOf };
 }

@@ -37,6 +37,8 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
   const [inspection, setInspection] = useState<{ id: string; generation: number; capabilities: InspectionCapabilities } | null>(null);
   const [events, setEvents] = useState<{ id: string; count: number; recent: readonly ObservablePresentationEvent[] } | null>(null);
   const [runtime, setRuntime] = useState<{ id: string; status: TableRuntimeStatus['status'] } | null>(null);
+  // Who is connected changes without a revision, so the latest live message, not the cached view, says it.
+  const [presence, setPresence] = useState<{ id: string; connected: readonly string[] } | null>(null);
   function control(type: ClientLiveMessage['type'], tableSessionId: string) {
     if (!ready.current || socket.current?.readyState !== WebSocket.OPEN) return;
     const message: ClientLiveMessage = { type, requestId: crypto.randomUUID(), tableSessionId };
@@ -44,7 +46,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
     socket.current.send(JSON.stringify(message));
   }
   useEffect(() => {
-    setEvents(null); setRuntime(null); setInspection(null); setSubscription(null);
+    setEvents(null); setRuntime(null); setPresence(null); setInspection(null); setSubscription(null);
     if (enabled && id) control('subscribe-table', id);
     return () => {
       if (enabled && id) control('unsubscribe-table', id);
@@ -64,7 +66,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
       let lifecycle: UserChannelLifecycle | undefined;
       ready.current = false;
       pendingControls.current.clear();
-      setInspection(null); setRuntime(null); setSubscription(null); setUserChannel(null);
+      setInspection(null); setRuntime(null); setPresence(null); setSubscription(null); setUserChannel(null);
       setConnection({ state: connectedBefore.current ? 'reconnecting' : 'connecting', generation: currentGeneration });
       const url = new URL('/api/live', location.href);
       url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -112,12 +114,16 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
         }
         if (tableId !== selected.current) return;
         if (message.type === 'table-membership-ended') { callbacks.current.onMembershipEnded?.(message); return; }
+        if (message.type === 'table-presence') { setPresence({ id: tableId, connected: message.connectedParticipantIds }); return; }
         if (message.type === 'table-status') {
           setRuntime({ id: tableId, status: message.status });
           queryClient.setQueryData<ObservableTableSession>(key, cached => cached ? { ...cached, runtimeStatus: message.status } : cached);
           return;
         }
         if (message.type !== 'table-update') return;
+        // Every complete update says who is connected as it was sent, even one older than the cached revision.
+        const connected = message.connectedParticipantIds;
+        if (connected) setPresence({ id: tableId, connected });
         // Capabilities are tied to this connection, never taken from HTTP/cache.
         if (message.sessionRevision > inspectionRevision) {
           inspectionRevision = message.sessionRevision;
@@ -134,7 +140,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
         if (!current()) return;
         socket.current = null; ++generation.current;
         ready.current = false;
-        setInspection(null); setUserChannel(null); setSubscription(null);
+        setInspection(null); setUserChannel(null); setSubscription(null); setPresence(null);
         setConnection({ state: 'reconnecting', generation: currentGeneration });
         if (selected.current) void queryClient.cancelQueries({ queryKey: ['table-session', selected.current] });
         timer = setTimeout(connect, Math.min(500 * 2 ** attempts++, 5000));
@@ -160,6 +166,8 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
     eventCount: events?.id === id ? events.count : 0,
     recentEvents: events?.id === id ? events.recent : [],
     runtimeStatus: runtime?.id === id ? runtime.status : undefined,
+    /** At an Online Table, the Participants connected now, from this connection's latest message. */
+    connectedParticipantIds: presence?.id === id ? presence.connected : undefined,
     disconnect: () => setPaused(true),
     reconnect: () => setPaused(false),
   };

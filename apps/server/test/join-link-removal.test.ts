@@ -6,7 +6,7 @@ import { baselinePlayingStrategy, type ObservableTableSession, type ServerLiveMe
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { startStoredHand } from './fixtures/online.js';
+import { connectLive } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -156,14 +156,20 @@ test('between Hands, Removal stands the Guest up at once and ends their membersh
   expect(annId).toBe(table.ownerParticipantId);
 });
 
-/** An Online Table of Ann (the owner) and Ben, seated heads-up, with a Hand in progress (a stored Hand stands in for Automatic Dealing). */
+/**
+ * An Online Table of Ann (the owner) and Ben, connected and seated heads-up. Automatic Dealing has dealt a Hand,
+ * and its first Action Window is open.
+ */
 async function onlineHand() {
   const table = await onlineTable('Ben');
-  const { ann, annId, id, as } = table;
+  const { ann, annId, id, as, view } = table;
   const { cookie: ben, participantId: benId } = table.guests.Ben!;
+  await connectLive(base, ann, id); await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 1 })).status).toBe(200);
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
-  await server.close(); await startStoredHand(administration, schema, id); await startServer();
+  clock.advanceTo((await view(ann)).schedule.nextHandCountdown!.endsAt);
+  await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
+  clock.advance(1500);
   return { ...table, ben, benId };
 }
 

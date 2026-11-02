@@ -4,6 +4,8 @@ import { RequestFailure } from '@poker/client';
 import { Icon } from './icons.js';
 import { actionLabel, chips, potTotal, presetTotal, type SizedAction } from './table-model.js';
 import { useSession, type Command } from './session.js';
+import { nextHandLabel, type NextHandStatus } from './online-status.js';
+import { pendingChangeOf, pendingLabel } from './self-service.js';
 
 export function CommandFeedback({ command }: { command: Command }) {
   if (command.sending || !command.pending && !command.error) return null;
@@ -22,8 +24,9 @@ export function CommandFeedback({ command }: { command: Command }) {
  * `actionOpen`: the viewer's Action Window is open now, on the estimated server clock, and its Action Deadline
  * has not been reached. `countdown`: whole seconds left before the acting Participant's Action Deadline, if any.
  * `dealOpen`: the last Hand's payout phase has ended, so Deal (and Rebuy & deal) is available.
+ * `nextHand`: between Hands at an Online Table, the Next-Hand Countdown or why there is none.
  */
-export function ActionTray({ table, actionOpen, countdown, dealOpen, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; countdown?: number; dealOpen: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
+export function ActionTray({ table, actionOpen, countdown, dealOpen, nextHand, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; countdown?: number; dealOpen: boolean; nextHand?: NextHandStatus; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const participant = state.participants.find(p => p.participantId === humanId);
@@ -35,8 +38,10 @@ export function ActionTray({ table, actionOpen, countdown, dealOpen, command, op
     command.submit(action === 'start' ? { tableId: table.tableSessionId, kind: 'start', body: metadata } : { tableId: table.tableSessionId, kind: 'act', body: { ...metadata, participantId: humanId, action } });
   };
   const sized = state.legalActions.find((a): a is SizedAction => 'minimum' in a);
-  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} openSettings={openSettings} review={review} /> : <NextHand table={table} busy={blocked || !dealOpen} openSettings={openSettings} review={review} />;
-  if (state.actorId !== humanId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : participant?.seat == null ? 'You’re watching this hand.' : 'The hand is in play.'}</strong><p>{table.runtimeStatus?.phase === 'failed' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}</p></div><span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
+  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} nextHand={nextHand} busy={blocked} command={command} openSettings={openSettings} review={review} /> : <NextHand table={table} busy={blocked || !dealOpen} openSettings={openSettings} review={review} />;
+  // A Timeout Action at an Online Table queues the human's sit-out, so they learn it while the Hand plays on.
+  const pending = pendingChangeOf(table, humanId);
+  if (state.actorId !== humanId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : participant?.seat == null ? 'You’re watching this hand.' : 'The hand is in play.'}</strong><p>{pending ? `${pendingLabel(pending)}. ` : ''}{table.runtimeStatus?.phase === 'failed' && table.mode === 'practice' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}</p></div><span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
   return <div className="action-tray">
     {countdown !== undefined && <p className={`action-deadline${countdown <= 5 ? ' deadline-near' : ''}`} role="timer">{countdown > 0
       ? <><strong>{countdown}s</strong> to act</>
@@ -47,16 +52,23 @@ export function ActionTray({ table, actionOpen, countdown, dealOpen, command, op
   </div>;
 }
 
-/** Online Tables deal Hands themselves, so between Hands a Participant only chooses a seat or reviews. */
-function OnlineBetweenHands({ table, openSettings, review }: { table: ObservableTableSession; openSettings: () => void; review?: (decisionId?: string) => void }) {
+/**
+ * Online Tables deal Hands themselves, so between Hands a Participant follows the Next-Hand Countdown, chooses a
+ * seat, returns from sitting out (always their own explicit choice), or reviews.
+ */
+function OnlineBetweenHands({ table, nextHand, busy, command, openSettings, review }: { table: ObservableTableSession; nextHand?: NextHandStatus; busy: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {
   const state = table.view.state;
   const you = state.participants.find(p => p.participantId === table.viewerParticipantId);
   const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === table.viewerParticipantId) ?? [];
   const seated = you?.seat != null;
+  const away = seated && you.sittingOut;
+  const pending = pendingChangeOf(table, table.viewerParticipantId);
+  const resume = () => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'set-sitting-out', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, sittingOut: false } });
   return <div className="action-tray idle-tray next-hand">
-    <p>{seated ? 'Waiting for the next hand. Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.'}</p>
+    <p role="timer"><strong>{nextHandLabel(nextHand) ?? 'Waiting for the next hand.'}</strong>{' '}{pending ? `${pendingLabel(pending)}.` : away ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.'}</p>
     <div className="next-hand-actions">
       {state.status === 'completed-hand' && review && <button className="quiet-button" disabled={!decisions.length} onClick={() => review(decisions.at(-1)?.decisionId)}>Review hand <Icon name="chart" size={17} /></button>}
+      {away && !pending && <button className="primary" disabled={busy || you.stack === 0} onClick={resume}>Return to play <Icon name="arrow" /></button>}
       {!seated && <button className="primary" onClick={openSettings}>Choose a seat <Icon name="arrow" /></button>}
     </div>
   </div>;

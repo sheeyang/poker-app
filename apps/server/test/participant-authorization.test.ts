@@ -4,12 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
-import { startStoredHand } from './fixtures/online.js';
+import { connectLive } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
-import { InstantClock } from './fixtures/clock.js';
+import { ManualClock } from './fixtures/clock.js';
 
-// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
-const clock = new InstantClock();
+// Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
+const clock = new ManualClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -43,16 +43,19 @@ async function command(t: Table, kind: string, contents: object = {}, cookie = t
   const response = await post('/api/table-sessions/' + t.id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, ...contents });
   expect(response.status).toBe(200);
 }
+/** The human, in the button seat, folds the first Hand as soon as its Action Window opens; then its payout phase passes. */
 async function completedHand(t: Table) {
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
   if ((await read(t)).mode === 'online') {
-    // Online Tables reject Deal until Automatic Dealing exists.
-    await server.close();
-    await startStoredHand(administration, schema, t.id);
-    await start();
+    // An Online Table deals by itself once its connected human and the Bot are seated and the countdown runs out.
+    await connectLive(base, t.cookie, t.id);
+    clock.advanceTo((await read(t)).schedule.nextHandCountdown!.endsAt);
+    await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
   } else await command(t, 'start-hand');
+  clock.advance(1500);
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  clock.advance(2000);
 }
 const join = (t: Table, cookie: string) => post('/api/join-links/' + encodeURIComponent(joinTokens.get(t.id)!) + '/join', cookie, { requestId: randomUUID() });
 const joinTokens = new Map<string, string>();

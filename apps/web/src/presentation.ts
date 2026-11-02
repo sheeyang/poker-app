@@ -81,14 +81,30 @@ export function deadlineCountdown(table: ObservableTableSession, serverNow: numb
 }
 
 /**
+ * Whole seconds left before an Online Table's Next-Hand Countdown expires at server time `serverNow`, counted from
+ * its announcement and never below zero; `undefined` when none is announced, or once its Hand is dealt.
+ */
+export function nextHandCountdown(table: ObservableTableSession, serverNow: number): number | undefined {
+  const countdown = table.schedule.nextHandCountdown;
+  if (!countdown || table.view.state.status === 'active-hand') return undefined;
+  return Math.max(0, Math.ceil((countdown.endsAt - Math.max(serverNow, countdown.startsAt)) / 1000));
+}
+
+/** When a countdown to `end`, shown in whole seconds from `start`, next changes; nothing before it starts or after it ends. */
+function nextSecond(start: number, end: number, serverNow: number): number[] {
+  // The countdown shows ceil(remaining / 1 s), so it changes when the remaining time reaches a whole second.
+  return serverNow >= start && serverNow < end ? [end - (Math.ceil((end - serverNow) / 1000) - 1) * 1000] : [];
+}
+
+/**
  * The next server time at which the presentation changes, if any: a phase starting or ending, the window
- * opening, each second of its deadline countdown, or the deadline itself.
+ * opening, each second of its deadline countdown or of the Next-Hand Countdown, or either one's end.
  */
 export function nextPresentationChange(table: ObservableTableSession, serverNow: number): number | undefined {
   const window = currentWindow(table), deadline = window?.deadlineAt;
-  // The countdown shows ceil(remaining / 1 s), so it changes when the remaining time reaches a whole second.
-  const tick = window && deadline !== undefined && serverNow >= window.opensAt && serverNow < deadline ? [deadline - (Math.ceil((deadline - serverNow) / 1000) - 1) * 1000] : [];
-  const instants = [...phasesOf(table).flatMap(phase => [phase.startsAt, phase.endsAt]), ...(table.schedule.actionWindow ? [table.schedule.actionWindow.opensAt] : []), ...(deadline !== undefined ? [deadline] : []), ...tick].filter(at => at > serverNow);
+  const countdown = table.view.state.status === 'active-hand' ? undefined : table.schedule.nextHandCountdown;
+  const ticks = [...(window && deadline !== undefined ? nextSecond(window.opensAt, deadline, serverNow) : []), ...(countdown ? [countdown.startsAt, countdown.endsAt, ...nextSecond(countdown.startsAt, countdown.endsAt, serverNow)] : [])];
+  const instants = [...phasesOf(table).flatMap(phase => [phase.startsAt, phase.endsAt]), ...(table.schedule.actionWindow ? [table.schedule.actionWindow.opensAt] : []), ...(deadline !== undefined ? [deadline] : []), ...ticks].filter(at => at > serverNow);
   return instants.length ? Math.min(...instants) : undefined;
 }
 

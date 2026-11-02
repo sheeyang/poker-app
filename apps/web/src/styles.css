@@ -150,6 +150,11 @@ body:has(.table-active) { overflow: hidden; }
 .folded-seat .hole-cards { opacity: .3; }
 .folded-seat .seat-body { background: #1d2a23; }
 .folded-seat .seat-copy { color: #a5b3a6; }
+/* A disconnected human at an Online Table: dimmed, and named as such so the state never rests on colour alone. */
+.offline-seat .seat-body { border-style: dashed; background: #1d2a23; }
+.offline-seat .avatar { opacity: .6; }
+.seat-copy .connection-label { color: #e0b8a0; margin-top: -3px; }
+.next-hand-countdown { margin: 0; font-size: .85rem; color: #edd7a9; font-variant-numeric: tabular-nums; text-align: center; }
 .dealer-marker { position: absolute; right: -10px; bottom: -5px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #e1decd; color: #25362a; font-size: .73rem; font-weight: 700; }
 .empty-seat { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px dashed #607765; background: #17291fc9; width: 110px; margin: auto; border-radius: 12px; font-size: .8rem; color: #b6c7b6; }
 .empty-seat small { color: #a7bba7; font-size: .7rem; font-weight: 400; }

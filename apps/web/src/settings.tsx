@@ -9,6 +9,7 @@ import { DisplayNameForm, useDisplayName } from './display-name.js';
 import { canManage, chips, modeLabel, playerName } from './table-model.js';
 import { useSession, type Command } from './session.js';
 import { pendingChangeOf, pendingLabel, selfService } from './self-service.js';
+import { connectionOf } from './online-status.js';
 import { canRemove, removalTiming } from './removal.js';
 
 /** `handOpen`: a Hand is in progress for management, being played or still paying out, so changes to a Seat wait for it. */
@@ -60,8 +61,9 @@ function PlayerRow({ table, binding, command, handOpen, busy }: { table: Observa
   const [confirming, setConfirming] = useState(false);
   const p = table.view.state.participants.find(p => p.participantId === binding.participantId);
   const pending = pendingChangeOf(table, binding.participantId);
+  const connection = connectionOf(table, binding.participantId);
   const timing = removalTiming(handOpen);
-  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span>
+  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span>
     {canRemove(table, binding) && (confirming
       ? <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
         <p className="muted">{binding.name} can’t join this table again, even with a new Join Link. {timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}</p>

@@ -17,8 +17,9 @@ import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
 import { nameKey, validateTrainerConfiguration } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
-import { beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition } from './schedule.js';
+import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { applyPendingChanges, handInProgress, requestChange, requestedChange } from './after-hand.js';
+import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -52,12 +53,17 @@ function resumeFromSittingOut(game: CashGame, participantId: string): CashGameRe
 }
 /**
  * The Action Time Limit, in ms, that gives this Participant's Action Window an Action Deadline: only a human's,
- * and only under the table's limit. Bots never have one. Online Tables do not enforce their limit yet (#40 adds
- * their Timeout Action and its after-Hand sit-out), so only a Practice Table's limit applies.
+ * and only under the table's limit, which every Online Table has. Bots never have one.
  */
 function actionTimeLimitMs(aggregate: PersistedTableSession, participantId: string): number | undefined {
   const seconds = aggregate.options.actionTimeLimitSeconds;
-  return seconds !== null && aggregate.mode === 'practice' && isHuman(findBinding(aggregate, participantId)) ? seconds * 1000 : undefined;
+  return seconds !== null && isHuman(findBinding(aggregate, participantId)) ? seconds * 1000 : undefined;
+}
+/** The decision current after a transition that produced `events` on `game`, with its Action Deadline, if any. */
+function decisionAfter(aggregate: PersistedTableSession, game: CashGame, events: readonly CashGameEvent[]): CurrentDecision {
+  const handEvent = events.findLast(event => 'handId' in event);
+  const hand = handEvent && 'handId' in handEvent ? game.getHand(handEvent.handId) : undefined;
+  return hand?.actorId && hand.decisionId ? { participantId: hand.actorId, decisionId: hand.decisionId, actionTimeLimitMs: actionTimeLimitMs(aggregate, hand.actorId) } : null;
 }
 /**
  * Whether a human act received at `receivedAt` is late: it is for the current window and arrived after its
@@ -68,8 +74,10 @@ function missedActionDeadline(aggregate: PersistedTableSession, request: ActRequ
   return pastActionDeadline(aggregate.schedule.actionWindow, request.participantId, receivedAt)
     || timedOut?.pokerRevision === request.expectedPokerRevision && pastActionDeadline(timedOut, request.participantId, receivedAt);
 }
-/** A Timeout Action that could not be saved is tried again after this long. */
+/** Scheduled work that could not be saved (a Timeout Action, a step of Automatic Dealing) is tried again after this long. */
 const timeoutRetryMs = 1000;
+/** A request ID the scheduler may not reuse: its attempt proved never to have committed, or the table has moved on. */
+const retiredRequestId = (outcome: MutationOutcome) => !outcome.ok && ['commit-not-applied', 'request-id-conflict'].includes(outcome.rejection.code);
 const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
 const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options and the Join Link.');
@@ -126,8 +134,12 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   const uncertainHumanActions = new Map<string, AcceptedHumanIntent>();
   const actionKey = (id: string, requestId: string) => JSON.stringify([id, requestId]);
   const subscribers = new Map<string, Set<{ userId: string; publish: (update: TableLiveMessage) => void }>>();
+  /** The connected Participants last published per Online Table, so each change of who is connected is published once. */
+  const presence = new Map<string, string>();
   const statuses = new Map<string, TableRuntimeStatus['status']>();
-  const work = new Map<string, { identity: BotIdentity; handle?: JobHandle<ConcreteAction> }>();
+  /** The Hand in which an Online Bot's failure is being shown: it stays shown until that Hand is over. */
+  const failedHands = new Map<string, string>();
+  const work = new Map<string, { identity: BotIdentity; attempt: number; handle?: JobHandle<ConcreteAction> }>();
   let stopped = false;
   let recoveryTimer: ReturnType<typeof setInterval> | undefined;
   const scheduledRecovery = new Set<string>();
@@ -265,13 +277,19 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * in `accept`). The work that must happen when the Hand ends runs from here once
    * `payoutEndsAt(schedule) <= clock.now()`: applying the after-Hand requests (`settleAfterHand`), queued as
    * its own FIFO task. `accept` runs the same step first, so a request that arrives ahead of this wake-up
-   * still sees them applied. M4-10's pause between Hands and Next-Hand Countdown begin once that step has
-   * committed (see `settleAfterHand`).
+   * still sees them applied.
+   *
+   * At an Online Table, Automatic Dealing (`dealNextHand`) follows: once the pause between Hands has ended and
+   * the after-Hand requests are applied, a Next-Hand Countdown is announced if the table can deal, and an expired
+   * countdown runs its recheck, including one that expired during an outage. A connection change runs the
+   * schedule too, since it can let the table deal.
    */
   async function runSchedule(id: string, session: CommittedSession, forceBot = false): Promise<void> {
     if (stopped || recovering.has(id)) return;
     const window = session.aggregate.schedule.actionWindow;
     if (window && pastActionDeadline(window, window.participantId, clock.now())) { await timeOut(id, window); return; }
+    try { if (await dealNextHand(id)) return; }
+    catch (error) { if (!(error instanceof CommitOutcomeUnknown) && !stopped) wake(id, clock.now() + timeoutRetryMs); return; }
     wake(id, nextWakeAt(session.aggregate.schedule, clock.now()));
     if (afterHandDue(session)) void enqueue(id, () => settleAfterHand(id)).catch(() => {});
     ensureBot(id, session, forceBot);
@@ -290,8 +308,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * accepted ahead of it. Idempotent: it does nothing unless requests are pending, its request ID derives from
    * the session revision they were pending at, and a restart finds the requests still pending or already gone.
    *
-   * Hook for M4-10: Automatic Dealing's pause between Hands starts from the schedule this commit writes, so
-   * it belongs here, in the same transaction as the transition.
+   * At an Online Table the pause between Hands is already in the schedule (it follows the payout phase), and
+   * Automatic Dealing announces no Next-Hand Countdown while requests are pending, so this transition always
+   * comes first, including the sit-outs that Timeout Actions queue.
    */
   async function settleAfterHand(id: string): Promise<void> {
     const session = committed.get(id);
@@ -346,8 +365,86 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       let outcome: MutationOutcome;
       try { outcome = await accept(id, { kind: 'server' }, 'act', { requestId, expectedPokerRevision: session.aggregate.pokerRevision, participantId: window.participantId, action }); }
       catch (error) { if (!(error instanceof CommitOutcomeUnknown) && !stopped) wake(id, clock.now() + timeoutRetryMs); return; }
-      if (outcome.ok || !['commit-not-applied', 'request-id-conflict'].includes(outcome.rejection.code)) return;
+      if (!retiredRequestId(outcome)) return;
     }
+  }
+  /** The public state of the committed table: status, Seats, stacks and sitting out are the same for every viewer. */
+  const tableState = (session: CommittedSession) => session.game.forParticipant(session.aggregate.bindings[0]!.participantId).getView().state;
+  /** Every Participant at the table as Automatic Dealing judges them, with who is connected now. */
+  function dealingParticipants(id: string, session: CommittedSession, state = tableState(session)): DealingParticipant[] {
+    const connected = new Set(connectedParticipants(id, session));
+    return state.participants.map(p => ({ participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, human: isHuman(findBinding(session.aggregate, p.participantId)), connected: connected.has(p.participantId) }));
+  }
+  /**
+   * Automatic Dealing, at Online Tables only (`automatic-dealing.ts`). Announcing a Next-Hand Countdown is a
+   * committed schedule change (`countdown:<session revision>`). At its expiry one committed transition sits out the
+   * humans still disconnected and then either deals (`deal:<Hand ID>`, from the Hand sequence) or cancels the
+   * countdown (`no-deal:<session revision>`). Returns whether it committed, in which case that commit has already
+   * run the schedule again.
+   */
+  async function dealNextHand(id: string): Promise<boolean> {
+    return commitScheduled(id, session => {
+      const { aggregate } = session;
+      if (aggregate.mode !== 'online') return undefined;
+      const state = tableState(session);
+      const participants = dealingParticipants(id, session, state);
+      const now = clock.now();
+      const step = dealingStep({ status: state.status, schedule: aggregate.schedule, pendingChanges: aggregate.pendingChanges.length, participants }, now);
+      const fingerprint = (contents: object) => createHash('sha256').update('next-hand-v1:' + canonical({ sessionRevision: aggregate.sessionRevision, ...contents })).digest('hex');
+      if (step === 'announce') return { requestId: 'countdown:' + aggregate.sessionRevision, fingerprint: fingerprint({ step }), events: [],
+        next: { aggregate: { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule: announceNextHand(aggregate.schedule, now) }, game: session.game } };
+      if (step !== 'expire') return undefined;
+      // Humans still disconnected are sat out first; resuming is theirs to ask for.
+      const working = session.game.fork();
+      const away = stillDisconnected(participants);
+      const events: CashGameEvent[] = away.flatMap(participantId => { const result = working.setSittingOut(participantId, true); return result.ok ? result.events : []; });
+      const dealt = canDeal(participants) ? working.startHand() : undefined;
+      const started = dealt?.ok ? dealt.events.find(event => event.type === 'hand-started') : undefined;
+      if (dealt?.ok) events.push(...dealt.events);
+      const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { pauseBetweenHands: true }) : withoutNextHand(aggregate.schedule);
+      const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule, ...(events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}) };
+      return { requestId: started && 'handId' in started ? 'deal:' + started.handId : 'no-deal:' + aggregate.sessionRevision, fingerprint: fingerprint({ step, away, deal: !!started }), events, next: { aggregate: next, game: working } };
+    });
+  }
+  /**
+   * Commits a transition the scheduler makes by itself, planned from the committed table inside its FIFO turn. Its
+   * request ID derives from the table's state, so retries and restarts resolve to one outcome; only an attempt
+   * proven never to have committed retires it, and a further derived ID (`:2`, `:3`…) takes over. After COMMIT the
+   * transition is published and the schedule runs again. Returns whether this call committed.
+   */
+  async function commitScheduled(id: string, plan: (session: CommittedSession) => { requestId: string; fingerprint: string; next: CommittedSession; events: readonly CashGameEvent[] } | undefined): Promise<boolean> {
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      const session = committed.get(id);
+      if (!session || stopped || recovering.has(id)) return false;
+      const transition = plan(session);
+      if (!transition) return false;
+      const requestId = transition.requestId + (attempt > 1 ? ':' + attempt : '');
+      const known = await resolveRequest(id, requestId, transition.fingerprint);
+      if (known && retiredRequestId(known)) continue;
+      // A remembered outcome means it applied; a table restored meanwhile is planned again by its own schedule run.
+      if (known || committed.get(id) !== session) return false;
+      const context = { tableSessionId: id, requestId };
+      let written = false;
+      try {
+        const outcome = await acceptance.run({ kind: 'table', id, requestId }, transition.fingerprint, async (tx): Promise<MutationOutcome> => {
+          const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
+          if (rows[0]) return rows[0].fingerprint === transition.fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
+          await writeTableSession(tx, session.aggregate, transition.next.aggregate);
+          const result: MutationOutcome = { ok: true, tableSessionId: id, pokerRevision: transition.next.aggregate.pokerRevision, sessionRevision: transition.next.aggregate.sessionRevision };
+          await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint: transition.fingerprint, outcome: result });
+          written = true;
+          return result;
+        }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
+        if (!written) { if (retiredRequestId(outcome)) continue; return false; }
+      } catch (error) {
+        if (error instanceof CommitOutcomeUnknown) pause(id);
+        throw error;
+      }
+      committed.set(id, transition.next); publishCommitted(id, transition.events);
+      await runSchedule(id, transition.next);
+      return true;
+    }
+    return false;
   }
   function wake(id: string, at: number | undefined) {
     const pending = wakes.get(id);
@@ -363,7 +460,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       void enqueue(id, async () => { const session = committed.get(id); if (session) await runSchedule(id, session); }).catch(() => {});
     });
   }
-  function ensureBot(id: string, session: CommittedSession, force = false) {
+  /**
+   * Requests the current Bot decision once its Action Window is open. `attempt` counts the requests for the same
+   * decision at an Online Table, where a failed decision is retried once (`botFailed`).
+   */
+  function ensureBot(id: string, session: CommittedSession, force = false, attempt = 1) {
     if (stopped || recovering.has(id) || !bots || bots.automaticBots === false) return;
     const window = session.aggregate.schedule.actionWindow;
     // A Bot's decision is requested only once its Action Window opens; its wake-up comes back here.
@@ -371,8 +472,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const prior = work.get(id);
     if (!force && prior && current(id, prior.identity)) return;
     retire(id);
-    if (!proposed) { if (statuses.has(id) && statuses.get(id)?.phase !== 'idle') publishStatus(id, { phase: 'idle' }); return; }
-    const pending: { identity: BotIdentity; handle?: JobHandle<ConcreteAction> } = { identity: proposed.identity };
+    if (!proposed) {
+      // An Online Bot failure stays shown until the Hand it happened in is over.
+      const shown = failedHands.get(id) !== undefined && failedHands.get(id) === session.aggregate.schedule.phases[0]?.handId;
+      if (statuses.has(id) && statuses.get(id)?.phase !== 'idle' && !shown) publishStatus(id, { phase: 'idle' });
+      return;
+    }
+    const pending: { identity: BotIdentity; attempt: number; handle?: JobHandle<ConcreteAction> } = { identity: proposed.identity, attempt };
     work.set(id, pending);
     publishStatus(id, { phase: 'thinking', participantId: proposed.identity.participantId });
     pending.handle = bots.runner.submit('bot-decision', { view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
@@ -383,13 +489,30 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (stopped) return;
       return enqueue(id, async () => {
         if (!current(id, pending.identity)) return;
-        if (!result.ok) { publishStatus(id, { phase: 'failed', participantId: pending.identity.participantId, code: result.code }); return; }
+        if (!result.ok) { await botFailed(id, pending, result.code); return; }
         try {
           const outcome = await accept(id, { kind: 'bot', identity: pending.identity }, 'act', { requestId: 'bot:' + pending.identity.evaluationRequestId, expectedPokerRevision: pending.identity.pokerRevision, participantId: pending.identity.participantId, action: result.value });
-          if (!outcome.ok && current(id, pending.identity)) publishStatus(id, { phase: 'failed', participantId: pending.identity.participantId, code: 'failed' });
-        } catch { if (current(id, pending.identity)) publishStatus(id, { phase: 'failed', participantId: pending.identity.participantId, code: 'persistence-unavailable' }); }
+          if (!outcome.ok && current(id, pending.identity)) await botFailed(id, pending, 'failed');
+        } catch { if (current(id, pending.identity)) await botFailed(id, pending, 'persistence-unavailable'); }
       });
     }).catch(() => {});
+  }
+  /**
+   * A Bot decision failed. At a Practice Table the failure is shown and recovery is the owner's: Retry, or another
+   * Playing Strategy (ADR-0018). At an Online Table it is retried once with identical inputs and seeds (`capture`
+   * derives them from the decision). If the retry fails too, the failure is shown to everyone at the table and the
+   * server plays the Bot's Timeout Action, which also sits the Bot out after the Hand (see `accept`).
+   */
+  async function botFailed(id: string, pending: { identity: BotIdentity; attempt: number }, code: NonNullable<TableRuntimeStatus['status']['code']>) {
+    const session = committed.get(id);
+    const failure = { phase: 'failed' as const, participantId: pending.identity.participantId, code };
+    if (!session || session.aggregate.mode !== 'online') { publishStatus(id, failure); return; }
+    if (pending.attempt < 2) { ensureBot(id, session, true, pending.attempt + 1); return; }
+    retire(id);
+    publishStatus(id, failure);
+    failedHands.set(id, pending.identity.handId);
+    const window = session.aggregate.schedule.actionWindow;
+    if (window?.decisionId === pending.identity.decisionId) await timeOut(id, window);
   }
   /** Every view, subscription and route is for the Guest's own joined, unremoved Participant. */
   function viewer(session: CommittedSession | undefined, userId: string) {
@@ -439,15 +562,46 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (entries.size === 0) subscribers.delete(id);
   }
   function publishCommitted(id: string, events: readonly CashGameEvent[] = []) {
-    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode !== false));
+    const connected = connectedParticipants(id);
+    // Every complete update carries who is connected, so it publishes the current list too.
+    presence.set(id, connected.join(','));
+    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode !== false, connected));
+  }
+  /**
+   * The joined human Participants whose Guest has at least one live connection subscribed to the table. Transient:
+   * never persisted, so after a restart every human counts as disconnected until they reconnect.
+   */
+  function connectedParticipants(id: string, session = committed.get(id)): string[] {
+    const entries = subscribers.get(id);
+    if (!session || !entries?.size) return [];
+    const users = new Set([...entries].map(entry => entry.userId));
+    return humanBindings(session.aggregate).filter(binding => binding.membership === 'joined' && users.has(binding.userId)).map(binding => binding.participantId);
+  }
+  /**
+   * After a subscription starts or ends: at an Online Table, publishes a change of who is connected to everyone
+   * subscribed, without a revision, and runs the schedule, since a connection can let the table deal. Practice
+   * Tables have a single human, so their connection changes are not published.
+   */
+  function connectionChanged(id: string) {
+    const session = committed.get(id);
+    if (stopped || session?.aggregate.mode !== 'online') return;
+    const connected = connectedParticipants(id, session);
+    if (presence.get(id) === connected.join(',')) return;
+    presence.set(id, connected.join(','));
+    deliver(id, () => ({ type: 'table-presence', tableSessionId: id, connectedParticipantIds: connected }));
+    void enqueue(id, async () => { const current = committed.get(id); if (current) await runSchedule(id, current); }).catch(() => {});
   }
   function publishStatus(id: string, status: TableRuntimeStatus['status']) {
     if (stopped) return;
     if (recovering.has(id) && status.phase !== 'recovering') return;
+    if (status.phase !== 'failed') failedHands.delete(id);
     const failures: Record<NonNullable<TableRuntimeStatus['status']['code']>, string> = { capacity: 'The computation queue is full. Retry this Bot decision.', cancelled: 'Bot computation was cancelled. Retry this decision.', timeout: 'Bot computation timed out. Retry or change its Playing Strategy.', failed: 'Bot computation failed. Retry or change its Playing Strategy.', incompatible: 'This Playing Strategy does not support the current decision.', 'invalid-policy': 'The Policy returned an invalid distribution. Retry or change its Playing Strategy.', 'selection-failed': 'The Action Selector could not select a valid Choice.', 'persistence-unavailable': 'The Bot action could not be saved. Retry this decision.' };
     const code = status.code && Object.hasOwn(failures, status.code) ? status.code : 'failed';
+    // At an Online Table nobody repairs a Bot mid-Hand: the server has already played its Timeout Action.
+    const online = committed.get(id)?.aggregate.mode === 'online';
+    const message = online ? 'This Bot’s decision failed twice, so the server played its Timeout Action. It sits out after this hand.' : failures[code];
     const safeStatus: TableRuntimeStatus['status'] = { phase: status.phase, ...(status.participantId ? { participantId: status.participantId } : {}),
-      ...(status.phase === 'failed' ? { code, message: failures[code] } : status.phase === 'recovering' ? { message: 'This Table Session is paused while its commit outcome is unknown.' } : {}) };
+      ...(status.phase === 'failed' ? { code, message } : status.phase === 'recovering' ? { message: 'This Table Session is paused while its commit outcome is unknown.' } : {}) };
     statuses.set(id, safeStatus);
     deliver(id, () => ({ type: 'table-status', tableSessionId: id, status: safeStatus }));
   }
@@ -510,7 +664,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const session = committed.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
-      const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode !== false);
+      const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode !== false, connectedParticipants(id, session));
       return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
     }
     async function subscribe(id: string, userId: string, publish: (update: TableLiveMessage) => void) {
@@ -524,14 +678,15 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode !== false), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
+        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode !== false, connectedParticipants(id, session)), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
         entries.delete(entry); if (entries.size === 0) subscribers.delete(id);
         throw error;
       }
-      return () => { entries.delete(entry); if (entries.size === 0) subscribers.delete(id); };
+      connectionChanged(id);
+      return () => { entries.delete(entry); if (entries.size === 0) subscribers.delete(id); connectionChanged(id); };
     }
     /**
      * What a request that changes a Participant becomes while a Hand is in progress (being played, or its payout
@@ -657,13 +812,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   const { tableSessionId: _table, pokerRevision: _revision, ...identity } = authority.identity;
                   return { ...identity, commandIndex: pokerRecord.commands.length - 1 };
                 })() : undefined;
-                // The schedule commits with the transition that produced it.
-                const handEvent = accepted.events.findLast(event => 'handId' in event);
-                const hand = handEvent && 'handId' in handEvent ? working.getHand(handEvent.handId) : undefined;
-                const decision = hand?.actorId && hand.decisionId ? { participantId: hand.actorId, decisionId: hand.decisionId, actionTimeLimitMs: actionTimeLimitMs(session.aggregate, hand.actorId) } : null;
-                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decision, clock.now());
+                // The schedule commits with the transition that produced it; Automatic Dealing pauses between Hands.
+                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { pauseBetweenHands: session.aggregate.mode === 'online' });
+                // At an Online Table a Timeout Action, a human's or a failed Bot's, also sits its Participant out after the Hand.
+                const timedOutAway = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,
                   ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}), ...(timedOutWindow ? { timedOutWindow } : {}), schedule,
+                  ...(timedOutAway ? { pendingChanges: requestChange(session.aggregate.pendingChanges, timedOutAway, 'sit-out') } : {}),
                   ...(ending ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== ending!.participantId), bindings: session.aggregate.bindings.map(item => isHuman(item) && item.participantId === ending!.participantId ? { ...item, membership: ending!.membership } : item) } : {}) };
                 proposed = { aggregate, game: working };
                 await writeTableSession(tx, session.aggregate, aggregate);
@@ -701,6 +856,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (!session || !requester) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
         if (kind !== 'set-trainer-configuration' && session.aggregate.ownerUserId !== userId) return ownerRequired();
+        // Explicit Bot recovery is Practice's: an Online Table retries a failed decision once, then plays its Timeout Action.
+        if (kind === 'retry-bot' && session.aggregate.mode === 'online') return unavailableOnline('At an Online Table the server retries a failed Bot decision itself, then plays its Timeout Action.');
         const { requestId, ...contents } = request;
         const fingerprint = createHash('sha256').update('controller-mutation-v2:' + canonical({ userId, kind, contents })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;

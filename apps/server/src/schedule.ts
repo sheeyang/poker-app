@@ -6,7 +6,10 @@ import type { CashGameEvent } from '@poker/engine';
  * current after it, and the time from the injected clock. The resulting schedule is persisted with
  * the commit that produced it; nothing here is a poker command.
  */
-export const presentationDurations: Readonly<Record<PresentationPhaseKind, number>> = Object.freeze({ deal: 1500, street: 1000, showdown: 2000, payout: 2000 });
+export const presentationDurations: Readonly<Record<PresentationPhaseKind, number>> = Object.freeze({ deal: 1500, street: 1000, showdown: 2000, payout: 2000, pause: 3000 });
+
+/** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
+export const nextHandCountdownMs = 5000;
 
 export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freeze([]), actionWindow: null });
 
@@ -25,9 +28,11 @@ const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, p
  *
  * Phases follow the transition's events in order, so an all-in runout schedules the hole-card reveals
  * (showdown), then each remaining street, then the payout, all from one accepted action. A Hand won by
- * folds has no showdown. The payout phase is always a Hand's last.
+ * folds has no showdown. The payout phase is a Hand's last, except under Automatic Dealing
+ * (`pauseBetweenHands`), where the pause between Hands follows it. A transition with Hand events always
+ * ends any Next-Hand Countdown: the Hand it announced has started.
  */
-export function scheduleTransition(previous: TableSchedule, events: readonly CashGameEvent[], decision: CurrentDecision, now: ServerTime): TableSchedule {
+export function scheduleTransition(previous: TableSchedule, events: readonly CashGameEvent[], decision: CurrentDecision, now: ServerTime, options: { readonly pauseBetweenHands?: boolean } = {}): TableSchedule {
   if (!events.some(event => 'handId' in event)) return previous;
   let phases = [...previous.phases];
   let cursor = Math.max(now, phaseEnd(phases));
@@ -42,7 +47,7 @@ export function scheduleTransition(previous: TableSchedule, events: readonly Cas
     if (event.type === 'hand-started') { phases = []; street = 'preflop'; add('deal', event.handId); }
     if (event.type === 'hole-cards-revealed' && !phases.some(phase => phase.kind === 'showdown' && phase.handId === event.handId)) add('showdown', event.handId);
     if (event.type === 'board-dealt') { street = event.street; add('street', event.handId); }
-    if (event.type === 'hand-completed') add('payout', event.handId);
+    if (event.type === 'hand-completed') { add('payout', event.handId); if (options.pauseBetweenHands) add('pause', event.handId); }
   }
   // A decision that stays current keeps its window, and so its Action Deadline.
   const kept = previous.actionWindow && decision && previous.actionWindow.decisionId === decision.decisionId ? previous.actionWindow : undefined;
@@ -84,10 +89,30 @@ export function beforePayoutEnd(schedule: TableSchedule, at: ServerTime): boolea
 }
 
 /**
+ * When the latest Hand's presentation ends, payout and any pause between Hands included, or `undefined` when no
+ * Hand has been paid out. Automatic Dealing announces the next Next-Hand Countdown from this instant.
+ */
+export function presentationEndsAt(schedule: TableSchedule): ServerTime | undefined {
+  return payoutEndsAt(schedule) === undefined ? undefined : phaseEnd(schedule.phases);
+}
+
+/** The schedule with a Next-Hand Countdown announced at `now`. */
+export function announceNextHand(schedule: TableSchedule, now: ServerTime): TableSchedule {
+  return { ...schedule, nextHandCountdown: { startsAt: now, endsAt: now + nextHandCountdownMs, durationMs: nextHandCountdownMs } };
+}
+
+/** The schedule without its Next-Hand Countdown, as when the countdown is cancelled. */
+export function withoutNextHand(schedule: TableSchedule): TableSchedule {
+  return { phases: schedule.phases, actionWindow: schedule.actionWindow };
+}
+
+/**
  * The next server time at which the table has scheduled work: its Action Window opening, the moment its Action
- * Deadline has passed, or the end of the payout phase.
+ * Deadline has passed, the end of the payout phase and of the pause between Hands, or the expiry of its
+ * Next-Hand Countdown.
  */
 export function nextWakeAt(schedule: TableSchedule, now: ServerTime): ServerTime | undefined {
-  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), payoutEndsAt(schedule)].filter((at): at is ServerTime => at !== undefined && at > now);
+  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), payoutEndsAt(schedule), presentationEndsAt(schedule), schedule.nextHandCountdown?.endsAt]
+    .filter((at): at is ServerTime => at !== undefined && at > now);
   return instants.length ? Math.min(...instants) : undefined;
 }

@@ -52,7 +52,7 @@ All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
 | --- | --- |
-| `POST` to the base path | Refused with 409 `table-limit-reached` while the Guest owns 10 tables that each have a seated human (not remembered, see [Public hosting safeguards](#public-hosting-safeguards)); 429 `rate-limited` when the address is over its limit. Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A Practice Table enforces its limit through Action Deadlines (see [Play timing](#play-timing)); an Online Table's limit is stored and shown only until Automatic Dealing enforces it. |
+| `POST` to the base path | Refused with 409 `table-limit-reached` while the Guest owns 10 tables that each have a seated human (not remembered, see [Public hosting safeguards](#public-hosting-safeguards)); 429 `rate-limited` when the address is over its limit. Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left? }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. |
 | `POST /:id/rejoin-table` | Table Owner only: returns the owner to a table they left, without the Join Link, as the same Participant. Requires only `requestId`. Anyone else, left or not, receives 404 `not-found`; a Guest who left a table they do not own rejoins through its Join Link. Same outcome and rejections as a join (`table-full` included). |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. Only the Table Owner of an Online Table also receives its `joinToken`. At an Online Table `inspection.adminMode` is always `false`. |
@@ -64,7 +64,8 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
-| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, until Automatic Dealing exists. Accepted once the previous Hand's payout phase has ended (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
+| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand's payout phase has ended (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
+| `POST /:id/retry-bot` | Table Owner only, at Practice Tables only: an Online Table retries a failed Bot decision itself, so the owner receives 403 `unavailable-at-online-tables` there. |
 | `GET /:id/live` | Earlier table-specific WebSocket endpoint, retained for existing transport consumers. |
 
 ## Authorization
@@ -129,10 +130,12 @@ Each accepted transition schedules its Presentation Phases
 ([`schedule.ts`](../apps/server/src/schedule.ts)), in the order of the
 transition's events: a 1.5 s `deal` phase when a Hand starts, a 2 s `showdown`
 phase when the remaining hands are turned up, a 1 s `street` phase for each
-street dealt, and a 2 s `payout` phase when the Hand completes. An all-in runout
+street dealt, and a 2 s `payout` phase when the Hand completes. At an Online
+Table a 3 s `pause` phase, the pause between Hands of Automatic Dealing, follows
+the payout. An all-in runout
 is one accepted action, so it schedules the showdown, then every remaining
-street, then the payout; a river showdown schedules the showdown and the
-payout; a Hand won by folds has only the payout. For the showdown and the
+street, then the payout (and, online, the pause); a river showdown schedules the
+showdown and the payout; a Hand won by folds has only the payout. For the showdown and the
 payout, `street` is the street the Hand had reached. Each phase starts when the
 previous one ends, or at the commit. The schedule is persisted in the Persisted
 Table Session in the same transaction as that commit; phases are never poker
@@ -157,9 +160,9 @@ the persisted schedule unchanged. A table written before scheduled play restores
 its current decision with a window open since time 0, and has no payout phase to
 wait for.
 
-Under a Practice Table's Action Time Limit, each human Action Window also carries
-its Action Deadline, `deadlineAt` = `opensAt` plus the limit. Bot windows never
-have one, and an Online Table's limit is not enforced yet. A human `act` that the
+Under the table's Action Time Limit (optional at a Practice Table, always present
+at an Online Table), each human Action Window also carries its Action Deadline,
+`deadlineAt` = `opensAt` plus the limit. Bot windows never have one. A human `act` that the
 server receives after `deadlineAt` is rejected with 409 `action-deadline-passed`,
 both while the Timeout Action is still due and after it has applied (a late act
 that expected the timed-out decision's revision); one received at `deadlineAt` is
@@ -172,9 +175,13 @@ committed is followed by a further derived ID (`timeout:<decisionId>:2`, and so
 on); one that could not be saved is tried again a second later. A Timeout Action
 is the human's own decision: it starts automatic post-action analysis and counts
 in Decision Scores, Action Rank Scores and Hand and Session summaries. Later
-decisions the human misses in that Hand time out too. The human is never sat out,
-and the next Hand waits for their Deal. A deadline that expired while the server
-was down plays its Timeout Action at startup, before any request is served.
+decisions the human misses in that Hand time out too. At a Practice Table the
+human is never sat out, and the next Hand waits for their Deal. At an Online
+Table the commit of each server-played Timeout Action also records a `sit-out`
+after-Hand request for its Participant (see below), so they are sat out once
+the Hand's payout phase ends, connected or not; resuming is their own
+`set-sitting-out` to `false`. A deadline that expired while the server was down
+plays its Timeout Action at startup, before any request is served.
 
 ### After-Hand requests
 
@@ -217,12 +224,66 @@ A Guest whose Participant leaves or is removed receives one `table-membership-en
 message (`reason: 'left'` or `'removed'`) on their subscription, then no more updates for
 that table.
 
+### Automatic Dealing at Online Tables
+
+An Online Table never accepts Deal: the server deals
+([`automatic-dealing.ts`](../apps/server/src/automatic-dealing.ts)). An Eligible
+Participant is seated with chips, not sitting out, and either a Bot or a connected
+human. The table can deal while at least two Eligible Participants remain, at least
+one of them human.
+
+- **Announcing.** Between Hands, once the last Hand's payout phase and pause have
+  ended and its after-Hand requests are applied, the server announces a Next-Hand
+  Countdown if the table can deal: `schedule.nextHandCountdown` =
+  `{ startsAt, endsAt, durationMs }`, 5 s. It is a committed schedule change (a
+  session revision step, delivered as a complete `table-update`). Before the first
+  Hand there is no pause, so the countdown is announced as soon as the table can
+  deal. Otherwise none is announced, and any later commit or connection change that
+  lets the table deal announces one.
+- **Expiry.** When the countdown ends, eligibility is rechecked in one committed
+  transition: every seated human who is not sitting out and is still disconnected
+  is sat out (`set-sitting-out`), then the Hand starts if the table can still deal;
+  otherwise the countdown is cancelled. A disconnect during the countdown does not
+  cancel it. The deal schedules the Hand's deal phase and first Action Window like
+  any Hand start. Nobody is resumed automatically: resuming is always the human's
+  own request.
+- **Request IDs.** The announcement is `countdown:<session revision>`, a deal
+  `deal:<Hand ID>` (from the Hand sequence, such as `deal:hand-3`), and a
+  cancellation `no-deal:<session revision>`, so timers, retries and restarts resolve
+  to one outcome. As for Timeout Actions, only an attempt proven never to have
+  committed retires its ID for `:2`, `:3`…, and work that could not be saved is
+  tried again a second later.
+- **Restarts.** A persisted countdown survives a restart. One that expired during
+  the outage runs its recheck at startup, before any request is served; as every
+  human then counts as disconnected, the seated humans are sat out and nothing is
+  dealt (fairer outage handling belongs to M9).
+
+**Connection status.** A human is connected while at least one live connection of
+their Guest (`/api/live` subscription or the table socket) is subscribed to the
+table. It is public and transient: never persisted, no revision. Every view of an
+Online Table carries `connectedParticipantIds`, and each change is sent to everyone
+subscribed as `{ type: 'table-presence', tableSessionId, connectedParticipantIds }`.
+After a restart every human counts as disconnected until they reconnect. A human
+who disconnects mid-Hand stays in it, and their Action Deadline keeps running.
+Practice Tables have one human, so their views carry no connection status.
+
+**Bot failures.** At an Online Table a failed Bot decision (a Strategy error,
+timeout or capacity failure, an invalid action, or an action that could not be
+saved) is retried once with identical inputs and seeds. If the retry fails too, a
+`table-status` with `phase: 'failed'` goes to everyone at the table, and the server
+plays the Bot's Timeout Action (`timeout:<decisionId>`, source `server`), which also
+records a `sit-out` after-Hand request for the Bot. The failure stays shown until
+the Hand it happened in is over. The owner resumes the Bot with `set-sitting-out`.
+Practice Tables keep explicit Retry and Playing Strategy recovery.
+
 The Trainer estimates the server clock from `serverTime` (the least-delayed of
 recent views), shows hole cards, each street, the opponents' hands at showdown
 and the result from their phase's start, enables Deal when the payout phase
 ends, and enables action controls only inside its own Action Window and before
-its Action Deadline, whose countdown it shows. Elapsed phases are skipped, and
-presentation never sends or delays a request.
+its Action Deadline, whose countdown it shows to everyone. At an Online Table it
+also shows the Next-Hand Countdown (or why none is running), who is disconnected,
+pending sit-outs, a Return to play control and Bot failures. Elapsed phases are
+skipped, and presentation never sends or delays a request.
 
 Game Configuration defaults and seating rules are documented in
 [ADR-0025](adr/0025-document-standard-cash-game-rules.md). Current Strategy defaults
@@ -281,11 +342,12 @@ canonical JSON:
 | Joining through a Join Link | `join-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | The owner returning to their table | `rejoin-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
+| Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v1:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `away` (the humans sat out) and `deal` | Table Session and `requestId` |
 | Poker mutation | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller, Trainer configuration or Join Link replacement mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
 For poker mutations, `source` is `human`, `bot`, or `server` for the scheduler's
-own Timeout Actions. `kind` is the command name;
+own Timeout Actions (a human's, and an Online Bot's after its retry failed). `kind` is the command name;
 `contents` is the complete request body excluding `requestId`. Expected revisions
 and omitted versus explicit `buyIn` therefore affect the fingerprint.
 

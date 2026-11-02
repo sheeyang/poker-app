@@ -237,8 +237,10 @@ export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
  * What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's
  * board cards; the showdown turns the remaining hands up; the payout awards the pots and returns uncalled chips.
+ * The pause, only under Automatic Dealing (Online Tables), follows the payout and presents nothing new: the next
+ * Next-Hand Countdown is announced when it ends.
  */
-export type PresentationPhaseKind = 'deal' | 'street' | 'showdown' | 'payout';
+export type PresentationPhaseKind = 'deal' | 'street' | 'showdown' | 'payout' | 'pause';
 /**
  * A server-timed interval in which no Participant may act. Clients show the step it presents from
  * `startsAt`; the next phase, or the Action Window, begins at `endsAt`. Phases are never poker commands.
@@ -276,10 +278,25 @@ export type PendingChange = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
 export const changeStrength: Readonly<Record<PendingChange, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
 /** A pending change, public to everyone at the table. */
 export interface PendingParticipantChange { readonly participantId: ParticipantId; readonly change: PendingChange }
-/** The current Hand's Presentation Phases, in order, and the current decision's Action Window, if any. */
+/**
+ * The announced server time at which an Online Table deals its next Hand (Automatic Dealing). When it expires
+ * the server rechecks eligibility: it deals if at least two Eligible Participants remain, at least one of them
+ * a connected human, and otherwise cancels the countdown until the condition holds again.
+ */
+export interface NextHandCountdown {
+  readonly startsAt: ServerTime;
+  readonly endsAt: ServerTime;
+  /** The server constant used for this countdown. */
+  readonly durationMs: number;
+}
+/**
+ * The current Hand's Presentation Phases, in order, the current decision's Action Window, if any, and, between
+ * Hands at an Online Table, the announced Next-Hand Countdown.
+ */
 export interface TableSchedule {
   readonly phases: readonly PresentationPhase[];
   readonly actionWindow: ActionWindow | null;
+  readonly nextHandCountdown?: NextHandCountdown;
 }
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
@@ -303,6 +320,12 @@ export interface ObservableTableSession {
   readonly serverTime: ServerTime;
   /** Changes asked for during the Hand in progress, applied together when its payout phase ends. Public. */
   readonly pendingChanges: readonly PendingParticipantChange[];
+  /**
+   * At an Online Table, the human Participants connected to it when the view was produced: their Guest has at least
+   * one live connection subscribed to it. Public and transient: it is never persisted and changes no revision, and
+   * each change is also published live (`table-presence`). A Practice Table, with its single human, has none.
+   */
+  readonly connectedParticipantIds?: readonly ParticipantId[];
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;
@@ -341,7 +364,12 @@ export type TableSubscriptionResult = {
  * Their client returns to its saved tables.
  */
 export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId; readonly reason: 'left' | 'removed' }
-export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate | TableMembershipEnded;
+/**
+ * A change of who is connected at an Online Table, sent to everyone subscribed to it. Transient like
+ * `table-status`: it advances no revision, and every complete view carries the same list.
+ */
+export interface TablePresence { readonly type: 'table-presence'; readonly tableSessionId: TableSessionId; readonly connectedParticipantIds: readonly ParticipantId[] }
+export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate | TableMembershipEnded | TablePresence;
 export type ServerLiveMessage = UserChannelReady | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,

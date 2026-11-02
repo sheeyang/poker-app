@@ -32,13 +32,15 @@ function projectSchedule(schedule: TableSchedule): TableSchedule {
     phases: schedule.phases.map(p => ({ kind: p.kind, handId: p.handId, street: p.street, startsAt: p.startsAt, endsAt: p.endsAt, durationMs: p.durationMs })),
     actionWindow: schedule.actionWindow && { participantId: schedule.actionWindow.participantId, decisionId: schedule.actionWindow.decisionId, opensAt: schedule.actionWindow.opensAt,
       ...(schedule.actionWindow.deadlineAt !== undefined ? { deadlineAt: schedule.actionWindow.deadlineAt } : {}) },
+    ...(schedule.nextHandCountdown ? { nextHandCountdown: { startsAt: schedule.nextHandCountdown.startsAt, endsAt: schedule.nextHandCountdown.endsAt, durationMs: schedule.nextHandCountdown.durationMs } } : {}),
   };
 }
 /**
  * Projects the table for one viewing human Participant, including only that Participant's own study settings.
- * `serverTime` is the injected clock's time at projection.
+ * `serverTime` is the injected clock's time at projection; `connected` lists the human Participants with a live
+ * connection to the table at that time, which an Online Table's view shows.
  */
-export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game: CashGame | undefined, serverTime: number, adminMode = true): ObservableTableSession {
+export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game: CashGame | undefined, serverTime: number, adminMode = true, connected: readonly string[] = []): ObservableTableSession {
   const viewer = findBinding(aggregate, participantId);
   if (!isHuman(viewer)) throw new Error('Table views are projected only for a human Participant.');
   if (!game) {
@@ -58,6 +60,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     trainerConfiguration: structuredClone(viewer.trainerConfiguration),
     schedule: projectSchedule(aggregate.schedule), serverTime,
     pendingChanges: aggregate.pendingChanges.map(entry => ({ participantId: entry.participantId, change: entry.change })),
+    ...(aggregate.mode === 'online' ? { connectedParticipantIds: [...connected] } : {}),
     inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
@@ -69,7 +72,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     },
   };
 }
-export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = true): ObservableTableUpdate {
+export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = true, connected: readonly string[] = []): ObservableTableUpdate {
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
       case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
@@ -90,5 +93,5 @@ export function projectTableUpdate(aggregate: PersistedTableSession, participant
       case 'hand-completed': return { type: event.type, handId: event.handId };
     }
   });
-  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game, serverTime, adminMode), presentationEvents };
+  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game, serverTime, adminMode, connected), presentationEvents };
 }
