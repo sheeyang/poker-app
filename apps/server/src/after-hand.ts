@@ -34,6 +34,7 @@ export function handInProgress(status: 'between-hands' | 'active-hand' | 'comple
 export function requestedChange(kind: string, request: object): PendingChange | undefined {
   if (kind === 'stand-up-participant') return 'stand-up';
   if (kind === 'leave-table') return 'leave-table';
+  if (kind === 'remove-participant') return 'remove';
   if (kind === 'set-sitting-out' && (request as { sittingOut?: unknown }).sittingOut === true) return 'sit-out';
   return undefined;
 }
@@ -41,22 +42,28 @@ export function requestedChange(kind: string, request: object): PendingChange | 
 /**
  * Applies every pending change to `game` (a working copy), in the order asked. A change that no longer
  * applies, because the Participant already stood up or sat out, is skipped: the aim was reached. Returns the
- * accepted events and the Participants whose membership of the table ended (Leave Table).
+ * accepted events and the Participants whose membership of the table ended: by Leave Table (`left`), or by the
+ * owner's Removal (`removed`).
  */
-export function applyPendingChanges(game: CashGame, pending: readonly PendingParticipantChange[]): { events: CashGameEvent[]; left: ParticipantId[] } {
+export function applyPendingChanges(game: CashGame, pending: readonly PendingParticipantChange[]): { events: CashGameEvent[]; left: ParticipantId[]; removed: ParticipantId[] } {
   const events: CashGameEvent[] = [];
   const left: ParticipantId[] = [];
+  const removed: ParticipantId[] = [];
   const run = (result: ReturnType<CashGame['setSittingOut']>) => { if (result.ok) events.push(...result.events); return result; };
   for (const { participantId, change } of pending) {
     if (change === 'sit-out') run(game.setSittingOut(participantId, true));
     else {
       run(game.standUpParticipant(participantId));
-      if (change === 'leave-table') {
+      if (change === 'remove') {
+        // Removal ends the membership whatever CashGame says about its own record of them.
+        run(game.leaveTable(participantId));
+        removed.push(participantId);
+      } else if (change === 'leave-table') {
         // A Participant the table never seated (a Practice human who has not sat down) has nothing to leave.
         const result = run(game.leaveTable(participantId));
         if (result.ok || result.rejection.code === 'participant-not-joined') left.push(participantId);
       }
     }
   }
-  return { events, left };
+  return { events, left, removed };
 }

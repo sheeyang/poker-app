@@ -46,5 +46,5 @@ export function selfService(table: ObservableTableSession, handOpen: boolean): S
   };
 }
 
-const labels: Readonly<Record<PendingChange, string>> = { 'sit-out': 'Sitting out after this hand', 'stand-up': 'Standing up after this hand', 'leave-table': 'Leaving after this hand' };
+const labels: Readonly<Record<PendingChange, string>> = { 'sit-out': 'Sitting out after this hand', 'stand-up': 'Standing up after this hand', 'leave-table': 'Leaving after this hand', remove: 'Being removed after this hand' };
 export const pendingLabel = (change: PendingChange) => labels[change];

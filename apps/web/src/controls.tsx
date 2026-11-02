@@ -14,7 +14,7 @@ export function CommandFeedback({ command }: { command: Command }) {
   // A late action: the server played the Timeout Action instead, and its message says which.
   const late = code === 'action-deadline-passed';
   return <div className={`command-feedback ${command.error ? 'notice-error' : ''}`} role={command.error ? 'alert' : 'status'}>
-    <div><strong>{command.sending ? 'Confirming your request…' : aborted ? 'This attempt was not applied.' : late ? 'Your time ran out.' : command.pending ? 'Waiting for confirmation.' : 'The request was not accepted.'}</strong><p>{command.error?.message ?? 'Your last confirmed table stays visible.'}</p></div>
+    <div><strong>{command.sending ? 'Confirming your request…' : aborted ? 'This attempt was not applied.' : late ? 'Your time ran out.' : code === 'rate-limited' ? 'Too many requests.' : code === 'table-limit-reached' ? 'You have too many active tables.' : command.pending ? 'Waiting for confirmation.' : 'The request was not accepted.'}</strong><p>{command.error?.message ?? 'Your last confirmed table stays visible.'}</p></div>
     {command.pending && !command.sending && !aborted && <button onClick={command.check}>Check status</button>}
     {(!command.pending || aborted) && <button onClick={command.dismiss}>{aborted ? 'Start a new attempt' : 'Dismiss'}</button>}
   </div>;

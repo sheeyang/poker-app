@@ -3,11 +3,11 @@ import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type PendingParticipantChange, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type PendingParticipantChange, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, upgradeTableSession, type PersistedBinding, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { membership, ownsTable, tableOfJoinLink, writeTableSession } from './membership.js';
+import { membership, newJoinToken, ownsTable, tableOfJoinLink, writeTableSession } from './membership.js';
 import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
@@ -28,7 +28,7 @@ type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export class TableSessionRestorationError extends Error {
   constructor() { super('The complete committed Table Session could not be restored.'); }
 }
-export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table';
+export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table' | 'remove-participant';
 /** Internal controller authority. No browser route receives this capability. */
 export interface TableSessionControllerCommands {
   submitAction(tableSessionId: string, request: ActRequest): Promise<MutationOutcome>;
@@ -80,8 +80,9 @@ const timeoutRetryMs = 1000;
 const retiredRequestId = (outcome: MutationOutcome) => !outcome.ok && ['commit-not-applied', 'request-id-conflict'].includes(outcome.rejection.code);
 const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
-const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots or change table options.');
+const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options and the Join Link.');
 const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
+const removedGuest = () => reject('guest-removed', 'The Table Owner removed you from this table, so you cannot join it again.');
 const invalidJoinLink = () => reject('invalid-join-link', 'This Join Link does not work. Ask the Table Owner for a new one.');
 /**
  * Who may ask for what, decided before request idempotency, so a remembered outcome is only ever replayed to
@@ -89,6 +90,14 @@ const invalidJoinLink = () => reject('invalid-join-link', 'This Join Link does n
  */
 function humanMutationDenial(aggregate: PersistedTableSession, requester: PersistedHumanBinding, kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
   const owner = aggregate.ownerUserId === requester.userId;
+  if (kind === 'remove-participant') {
+    // The one request that names another human's Participant: the owner's Removal of a Guest.
+    if (!owner) return ownerRequired();
+    const target = findBinding(aggregate, (request as { participantId?: unknown }).participantId);
+    if (isBot(target)) return reject('participant-not-human', 'Only a human Participant can be removed. Bots are managed by the Table Owner.');
+    if (isHuman(target) && target.userId === aggregate.ownerUserId) return reject('cannot-remove-owner', 'The Table Owner cannot be removed from their own table.');
+    return undefined;
+  }
   if (kind === 'start-hand' && owner && aggregate.mode === 'online') return unavailableOnline('Hands at an Online Table are dealt automatically.');
   if (kind === 'start-hand' || kind === 'set-button') return owner ? undefined : ownerRequired();
   const target = findBinding(aggregate, (request as { participantId?: unknown }).participantId);
@@ -99,7 +108,7 @@ function humanMutationDenial(aggregate: PersistedTableSession, requester: Persis
 function applicationRejection(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
   const commandFields: Record<PokerMutationKind, readonly string[]> = {
     'seat-participant': ['participantId', 'seat', 'buyIn'], 'start-hand': [], act: ['participantId', 'action'],
-    'stand-up-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'], 'leave-table': ['participantId'],
+    'stand-up-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'], 'leave-table': ['participantId'], 'remove-participant': ['participantId'],
   };
   const fields = ['requestId', 'expectedPokerRevision', ...commandFields[kind]];
   if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
@@ -141,6 +150,23 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const next = previous.catch(() => undefined).then(operation);
     queue.set(id, next);
     return next.finally(() => { if (queue.get(id) === next) queue.delete(id); });
+  }
+  /** Whether a human has a Seat at this committed table. Remembered per committed state, which every commit replaces. */
+  const seatedHuman = new WeakMap<CommittedSession, boolean>();
+  function hasSeatedHuman(session: CommittedSession): boolean {
+    let seated = seatedHuman.get(session);
+    if (seated === undefined) {
+      const humans = new Set(humanBindings(session.aggregate).map(binding => binding.participantId));
+      seated = session.game.forParticipant(session.aggregate.bindings[0]!.participantId).getView().state.participants.some(participant => participant.seat !== null && humans.has(participant.participantId));
+      seatedHuman.set(session, seated);
+    }
+    return seated;
+  }
+  /** The tables this Guest owns that have a seated human: what the cap on tables per Guest counts. */
+  function seatedTableCount(userId: string): number {
+    let count = 0;
+    for (const session of committed.values()) if (session.aggregate.ownerUserId === userId && hasSeatedHuman(session)) count++;
+    return count;
   }
   function capture(session: CommittedSession, evaluationRequestId: string) {
     for (const binding of session.aggregate.bindings) {
@@ -306,7 +332,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         events = applied.events;
         const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
           ...(applied.events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
-          bindings: aggregate.bindings.map(binding => isHuman(binding) && applied.left.includes(binding.participantId) ? { ...binding, membership: 'left' as const } : binding) };
+          bindings: aggregate.bindings.map(binding => isHuman(binding) && applied.left.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
+            : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'removed' as const } : binding) };
         proposed = { aggregate: next, game: working };
         await writeTableSession(tx, aggregate, next);
         const result: MutationOutcome = { ok: true, tableSessionId: id, pokerRevision: next.pokerRevision, sessionRevision: next.sessionRevision };
@@ -668,9 +695,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * after the Hand. A Participant who is not seated leaves at once: that needs no Seat and is safe mid-Hand.
      */
     function duringHand(session: CommittedSession, kind: PokerMutationKind, target: PersistedBinding | undefined, request: PokerMutationRequest, now: number): { rejection: ApplicationRejection } | { pending: readonly PendingParticipantChange[] } | undefined {
-      if (kind !== 'leave-table' && !['stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'].includes(kind)) return undefined;
+      if (kind !== 'leave-table' && kind !== 'remove-participant' && !['stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'].includes(kind)) return undefined;
       const { state } = session.game.forParticipant(session.aggregate.bindings[0]!.participantId).getView();
       if (!handInProgress(state.status, session.aggregate.schedule, now)) return undefined;
+      // Removal waits for the Hand whether or not the Guest has a Seat in it, and replaces any weaker pending change.
+      if (kind === 'remove-participant') return { pending: requestChange(session.aggregate.pendingChanges, (request as RemoveParticipantRequest).participantId, 'remove') };
       const mine = isHuman(target) ? state.participants.find(participant => participant.participantId === target.participantId) : undefined;
       if (kind === 'leave-table' && mine?.seat == null) return undefined;
       const change = isHuman(target) ? requestedChange(kind, request) : undefined;
@@ -697,7 +726,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         let proposed: CommittedSession | undefined;
         let acceptedHumanDecision: string | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
-        let leaving: string | undefined;
+        let ending: { participantId: string; membership: 'left' | 'removed' } | undefined;
         const context = { tableSessionId: id, requestId };
         try {
           const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async (tx): Promise<MutationOutcome> => {
@@ -711,6 +740,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (!result && request.expectedPokerRevision !== session.aggregate.pokerRevision) result = reject('stale-poker-revision', 'The table changed. Refresh its committed view before submitting a new attempt.');
             const binding = findBinding(session.aggregate, 'participantId' in request ? request.participantId : undefined);
             if (!result && kind !== 'start-hand' && kind !== 'set-button' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
+            if (!result && kind === 'remove-participant' && !(isHuman(binding) && binding.membership === 'joined')) result = reject('participant-not-joined', 'This Participant has already left the table or been removed.');
             // The scheduler's own Timeout Action may act for whoever holds the expired decision.
             if (!result && kind === 'act' && authority.kind !== 'server' && (authority.kind === 'human'
               ? !isHuman(binding) || binding.userId !== authority.userId
@@ -755,15 +785,16 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   case 'set-sitting-out': return working.setSittingOut((request as SetSittingOutRequest).participantId, (request as SetSittingOutRequest).sittingOut);
                   case 'top-up-to': return working.topUpTo((request as TopUpToRequest).participantId, (request as TopUpToRequest).targetStack);
                   case 'set-button': return working.setButton((request as SetButtonRequest).seat);
-                  case 'leave-table': {
+                  case 'leave-table': case 'remove-participant': {
                     // Stand Up first if seated, then leave. A Practice human who never sat down has not joined CashGame: only the application membership ends.
-                    const participantId = (request as LeaveTableRequest).participantId;
+                    // Removal differs only in what it records: the Guest may not come back.
+                    const participantId = (request as LeaveTableRequest | RemoveParticipantRequest).participantId;
                     const seated = working.forParticipant(participantId).getView().state.participants.find(participant => participant.participantId === participantId)?.seat != null;
                     const stood = seated ? working.standUpParticipant(participantId) : undefined;
                     if (stood && !stood.ok) return stood;
                     const left = working.leaveTable(participantId);
                     if (!left.ok && left.rejection.code !== 'participant-not-joined') return left;
-                    leaving = participantId;
+                    ending = { participantId, membership: kind === 'remove-participant' ? 'removed' : 'left' };
                     return { ok: true as const, events: [...(stood?.events ?? []), ...(left.ok ? left.events : [])] };
                   }
                 }
@@ -788,7 +819,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,
                   ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}), ...(timedOutWindow ? { timedOutWindow } : {}), schedule,
                   ...(timedOutAway ? { pendingChanges: requestChange(session.aggregate.pendingChanges, timedOutAway, 'sit-out') } : {}),
-                  ...(leaving ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== leaving), bindings: session.aggregate.bindings.map(item => isHuman(item) && item.participantId === leaving ? { ...item, membership: 'left' as const } : item) } : {}) };
+                  ...(ending ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== ending!.participantId), bindings: session.aggregate.bindings.map(item => isHuman(item) && item.participantId === ending!.participantId ? { ...item, membership: ending!.membership } : item) } : {}) };
                 proposed = { aggregate, game: working };
                 await writeTableSession(tx, session.aggregate, aggregate);
                 result = { ok: true, tableSessionId: id, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision };
@@ -814,8 +845,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     function submit(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest) {
       return enqueue(id, () => accept(id, authority, kind, request));
     }
-    /** Bot controller changes require Table Ownership; a Trainer configuration change is the requester's own. */
-    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest): Promise<MutationOutcome> {
+    /**
+     * Bot controller changes and replacing the Join Link require Table Ownership; a Trainer configuration change is
+     * the requester's own.
+     */
+    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration' | 'replace-join-link', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest): Promise<MutationOutcome> {
       return enqueue(id, async () => {
         let session = await load(id, userId);
         const requester = session && memberBinding(session.aggregate, userId);
@@ -834,12 +868,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
           const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async tx => {
             const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
             if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
-            const trainer = kind === 'set-trainer-configuration';
-            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])])];
+            const trainer = kind === 'set-trainer-configuration', bot = kind === 'set-playing-strategy' || kind === 'retry-bot';
+            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : bot ? ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])] : [])];
             let result: MutationOutcome | undefined;
             if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
             if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
-            if (!result && !trainer && !isBot(findBinding(session.aggregate, (request as RetryBotRequest).participantId))) result = reject('participant-not-bot', 'Choose a bound Bot.');
+            if (!result && kind === 'replace-join-link' && session.aggregate.mode !== 'online') result = reject('join-link-unavailable', 'Only an Online Table has a Join Link.');
+            if (!result && bot && !isBot(findBinding(session.aggregate, (request as RetryBotRequest).participantId))) result = reject('participant-not-bot', 'Choose a bound Bot.');
             if (!result && kind === 'set-playing-strategy' && !supportsStrategy((request as SetPlayingStrategyRequest).playingStrategy)) result = reject('unsupported-strategy', 'Choose a supported complete Playing Strategy.');
             if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== (request as RetryBotRequest).participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
             if (!result && trainer) {
@@ -851,6 +886,12 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 proposed = { aggregate, game: session.game };
                 await writeTableSession(tx, session.aggregate, aggregate);
               }
+            }
+            if (!result && kind === 'replace-join-link') {
+              // The old token stops resolving in the same transaction that stores the new one.
+              const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, joinToken: newJoinToken() };
+              proposed = { aggregate, game: session.game };
+              await writeTableSession(tx, session.aggregate, aggregate);
             }
             if (!result && kind === 'set-playing-strategy') {
               const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
@@ -864,7 +905,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             return result;
           }, { ...faults, beforeCommit: () => faults?.beforeCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve() });
           if (proposed) { committed.set(id, proposed); publishCommitted(id); }
-          if (fresh && outcome.ok && kind !== 'set-trainer-configuration') await runSchedule(id, proposed ?? session, kind === 'retry-bot');
+          if (fresh && outcome.ok && (kind === 'set-playing-strategy' || kind === 'retry-bot')) await runSchedule(id, proposed ?? session, kind === 'retry-bot');
           return outcome;
         } catch (error) {
           if (error instanceof CommitOutcomeUnknown) pause(id);
@@ -915,7 +956,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             const guest = (await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
             const acknowledged = (participantId: string, next = aggregate): JoinOutcome => ({ ok: true, tableSessionId: id, participantId, pokerRevision: next.pokerRevision, sessionRevision: next.sessionRevision });
             let result: JoinOutcome | undefined;
-            if (binding?.membership === 'removed') result = reject('guest-removed', 'The Table Owner removed you from this table, so you cannot join it again.');
+            if (binding?.membership === 'removed') result = removedGuest();
             else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
             else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
             else if (humanBindings(aggregate).filter(candidate => candidate.membership === 'joined').length >= onlineTableCapacity) result = reject('table-full', 'This table already has ' + onlineTableCapacity + ' players. Ask the Table Owner to make room.');
@@ -948,8 +989,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         }
       });
     }
-    /** What a Join Link shows before joining, for the Guest holding it. */
-    async function previewJoin(userId: string, token: string): Promise<JoinLinkPreview | undefined> {
+    /** What a Join Link shows before joining, for the Guest holding it. A removed Guest is told so instead. */
+    async function previewJoin(userId: string, token: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
       const id = await tableOfJoinLink(db, token);
       if (!id) return undefined;
       return enqueue(id, async () => {
@@ -957,6 +998,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (!session || session.aggregate.joinToken !== token) return undefined;
         const { aggregate } = session;
         const humans = humanBindings(aggregate);
+        if (humans.some(binding => binding.userId === userId && binding.membership === 'removed')) return removedGuest();
         const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
         // Every Participant's view carries the same public configuration.
         const { configuration } = session.game.forParticipant(owner.participantId).getView();
@@ -1033,6 +1075,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     rejoin,
     previewJoin,
     resumeBots,
+    seatedTableCount,
     startRecovery,
     stop,
     close,
