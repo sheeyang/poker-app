@@ -4,13 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import WebSocket from 'ws';
-import { startStoredHand } from './fixtures/online.js';
+import { connectLive } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
-import { InstantClock } from './fixtures/clock.js';
+import { ManualClock } from './fixtures/clock.js';
 
-// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
-const clock = new InstantClock();
+// Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
+const clock = new ManualClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -183,18 +183,23 @@ test('an Online Table holds at most 20 joined Participants', async () => {
 async function command(t: Table, cookie: string, kind: string, contents: object = {}) {
   return post('/api/table-sessions/' + t.id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t, cookie)).pokerRevision, ...contents });
 }
+/**
+ * Automatic Dealing deals the first Hand: the owner, Ann, stays connected so that she counts as an Eligible
+ * Participant, and the Next-Hand Countdown runs out. Then the deal phase passes.
+ */
 async function deal(t: Table) {
-  await server.close();
-  await startStoredHand(administration, schema, t.id);
-  await start();
+  await connectLive(base, t.owner, t.id);
+  clock.advanceTo((await read(t)).schedule.nextHandCountdown!.endsAt);
+  await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
+  clock.advance(1500);
 }
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000 };
 
 test('unseated Participants see the public table and the Hand in progress, and their history begins when they join', async () => {
   const table = await online(await guest('Ann'), { configuration: stakes, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Tim', playingStrategy: baselinePlayingStrategy }] });
-  const [ann, rex, tim] = table.bindings.map(binding => binding.participantId) as [string, string, string];
+  const [ann, rex] = table.bindings.map(binding => binding.participantId) as [string, string, string];
   expect((await command(table, table.owner, 'seat-participant', { participantId: rex, seat: 1 })).status).toBe(200);
-  expect((await command(table, table.owner, 'seat-participant', { participantId: tim, seat: 2, buyIn: 300 })).status).toBe(200);
+  expect((await command(table, table.owner, 'seat-participant', { participantId: ann, seat: 2, buyIn: 300 })).status).toBe(200);
   await deal(table);
   const token = await tokenOf(table);
   const ben = await guest('Ben');
@@ -204,12 +209,13 @@ test('unseated Participants see the public table and the Hand in progress, and t
   const watching = await read(table, ben);
   expect(watching.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', board: [], legalActions: [] });
   expect(watching.view.state.participants.map(participant => [participant.participantId, participant.seat, participant.stack + (participant.wager ?? 0)]))
-    .toEqual(expect.arrayContaining([[rex, 1, 500], [tim, 2, 300], [ann, null, 0], [benParticipant, null, 0]]));
+    .toEqual(expect.arrayContaining([[rex, 1, 500], [ann, 2, 300], [benParticipant, null, 0]]));
   expect(watching.view.state.participants.reduce((total, participant) => total + (participant.contribution ?? 0), 0)).toBe(30);
   expect(watching.view.state.participants.some(participant => participant.holeCards)).toBe(false);
   expect(JSON.stringify(watching)).not.toMatch(/"(?:seed|deck|burns|commands|userId|ownerUserId)"\s*:/);
+  // Rex holds the button, so the Bot acts first.
   const actor = watching.view.state.actorId!;
-  expect([rex, tim]).toContain(actor);
+  expect(actor).toBe(rex);
   expect(watching.view.history.flatMap(hand => hand.decisions)).toEqual([]);
 
   // A Bot's accepted action and the Hand's result are public to everyone who was joined for them.
@@ -230,9 +236,9 @@ test('unseated Participants see the public table and the Hand in progress, and t
 
 test('any Participant takes an empty Seat within the buy-in limits, even during a Hand, and only for themselves', async () => {
   const table = await online(await guest('Ann'), { configuration: stakes, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Tim', playingStrategy: baselinePlayingStrategy }] });
-  const [ann, rex, tim] = table.bindings.map(binding => binding.participantId) as [string, string, string];
+  const [ann, rex] = table.bindings.map(binding => binding.participantId) as [string, string, string];
   await command(table, table.owner, 'seat-participant', { participantId: rex, seat: 1 });
-  await command(table, table.owner, 'seat-participant', { participantId: tim, seat: 2 });
+  await command(table, table.owner, 'seat-participant', { participantId: ann, seat: 2 });
   await deal(table);
   const ben = await guest('Ben');
   const benParticipant = (await (await join(await tokenOf(table), ben)).json()).participantId as string;

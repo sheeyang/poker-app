@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef } from 'react';
 import type { ObservableTableSession } from '@poker/contracts';
 import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextPresentationChange, presentTable, recordClockSample, type ClockSample } from './presentation.js';
+import { nextHandStatus } from './online-status.js';
 
 /**
  * Shows a committed table at the server's pace. Each received view's server time refines the clock
@@ -37,5 +38,7 @@ export function usePresentation(table: ObservableTableSession | undefined, viewe
     actorWindowOpen: actionWindowOpen(table, table.view.state.actorId ?? undefined, serverNow),
     /** The last Hand has been paid out, so Deal is available. */
     dealOpen: dealOpen(table, serverNow),
+    /** Between Hands at an Online Table: the Next-Hand Countdown, or why there is none. */
+    nextHand: nextHandStatus(table, serverNow),
   };
 }

@@ -9,6 +9,7 @@ import { DisplayNameForm, useDisplayName } from './display-name.js';
 import { canManage, chips, modeLabel, playerName } from './table-model.js';
 import { useSession, type Command } from './session.js';
 import { pendingChangeOf, pendingLabel, selfService } from './self-service.js';
+import { connectionOf } from './online-status.js';
 
 /** `handOpen`: a Hand is in progress for management, being played or still paying out, so changes to a Seat wait for it. */
 export function TableSettings({ table, command, handOpen, close }: { table: ObservableTableSession; command: Command; handOpen: boolean; close: () => void }) {
@@ -58,7 +59,8 @@ export function TableSettings({ table, command, handOpen, close }: { table: Obse
 function PlayerRow({ table, binding }: { table: ObservableTableSession; binding: ParticipantBinding }) {
   const p = table.view.state.participants.find(p => p.participantId === binding.participantId);
   const pending = pendingChangeOf(table, binding.participantId);
-  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span></div>;
+  const connection = connectionOf(table, binding.participantId);
+  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span></div>;
 }
 
 function PlayerSettings({ table, binding, command, handOpen, busy, seating }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; handOpen: boolean; busy: boolean; seating: boolean }) {
