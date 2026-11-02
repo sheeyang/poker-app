@@ -59,11 +59,21 @@ function actionTimeLimitMs(aggregate: PersistedTableSession, participantId: stri
   const seconds = aggregate.options.actionTimeLimitSeconds;
   return seconds !== null && isHuman(findBinding(aggregate, participantId)) ? seconds * 1000 : undefined;
 }
-/** The decision current after a transition that produced `events` on `game`, with its Action Deadline, if any. */
+/**
+ * Whether a human's Action Window opening now captures Live Analysis as disallowed: the table's Allow Live Analysis
+ * at that moment. Bots have no Live Analysis.
+ */
+function liveAnalysisDisallowed(aggregate: PersistedTableSession, participantId: string): true | undefined {
+  return !aggregate.options.allowLiveAnalysis && isHuman(findBinding(aggregate, participantId)) ? true : undefined;
+}
+/**
+ * The decision current after a transition that produced `events` on `game`, with its Action Deadline, if any, and
+ * the table's Allow Live Analysis, which its window captures.
+ */
 function decisionAfter(aggregate: PersistedTableSession, game: CashGame, events: readonly CashGameEvent[]): CurrentDecision {
   const handEvent = events.findLast(event => 'handId' in event);
   const hand = handEvent && 'handId' in handEvent ? game.getHand(handEvent.handId) : undefined;
-  return hand?.actorId && hand.decisionId ? { participantId: hand.actorId, decisionId: hand.decisionId, actionTimeLimitMs: actionTimeLimitMs(aggregate, hand.actorId) } : null;
+  return hand?.actorId && hand.decisionId ? { participantId: hand.actorId, decisionId: hand.decisionId, actionTimeLimitMs: actionTimeLimitMs(aggregate, hand.actorId), liveAnalysisDisallowed: liveAnalysisDisallowed(aggregate, hand.actorId) } : null;
 }
 /**
  * Whether a human act received at `receivedAt` is late: it is for the current window and arrived after its
@@ -648,7 +658,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     for (const binding of aggregate.bindings) {
       const { state } = game.forParticipant(binding.participantId).getView();
       if (state.status !== 'active-hand') break;
-      if (state.actorId && state.decisionId) return { phases: [], actionWindow: { participantId: state.actorId, decisionId: state.decisionId, opensAt: 0 } };
+      if (state.actorId && state.decisionId) return { phases: [], actionWindow: { participantId: state.actorId, decisionId: state.decisionId, opensAt: 0, ...(liveAnalysisDisallowed(aggregate, state.actorId) ? { liveAnalysisDisallowed: true as const } : {}) } };
     }
     return emptySchedule;
   }
@@ -893,8 +903,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return enqueue(id, () => accept(id, authority, kind, request));
     }
     /**
-     * Bot controller changes and replacing the Join Link require Table Ownership; a Trainer configuration change is
-     * the requester's own.
+     * Bot controller changes, replacing the Join Link and table options require Table Ownership; a Trainer
+     * configuration change is the requester's own. Table options change only at an Online Table, between Hands.
      */
     async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration' | 'replace-join-link' | 'set-table-options', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest | SetTableOptionsRequest): Promise<MutationOutcome> {
       return enqueue(id, async () => {
@@ -931,6 +941,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (!result && tableOptions) {
               const changes = (request as SetTableOptionsRequest).options, current = session.aggregate.options;
               const next = { actionTimeLimitSeconds: changes.actionTimeLimitSeconds ?? current.actionTimeLimitSeconds, allowLiveAnalysis: changes.allowLiveAnalysis ?? current.allowLiveAnalysis };
+              // Allow Live Analysis takes effect from the next Action Window that opens, which captures it.
               // The seat-change permission is CashGame's: one more command, in the same transaction as the options.
               const working = session.game.fork();
               const seatChanges = changes.allowSeatChanges !== undefined && changes.allowSeatChanges !== tableConfiguration(session).allowSeatChanges ? working.setSeatChanges(changes.allowSeatChanges) : undefined;
@@ -1123,12 +1134,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }),
     captureHandSummary: (id: string, userId: string, handId: string) => captureScoreSummary(id, userId, { scope: 'hand', handId }),
     captureSessionSummary: (id: string, userId: string) => captureScoreSummary(id, userId, { scope: 'table-session' }),
-    captureEvaluation: (id: string, userId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
+    /**
+     * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
+     * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed.
+     */
+    captureEvaluation: (id: string, userId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | 'live-analysis-disallowed' | null | undefined> => {
       const session = await load(id, userId);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      return captureEvaluation(session, participantId, decisionId);
+      const input = captureEvaluation(session, participantId, decisionId);
+      if (!input || input.acceptedAction) return input;
+      const window = session.aggregate.schedule.actionWindow;
+      const disallowed = window?.decisionId === decisionId ? !!window.liveAnalysisDisallowed : !session.aggregate.options.allowLiveAnalysis;
+      return disallowed ? 'live-analysis-disallowed' : input;
     }),
     /** The requesting Guest's joined Participant at a table, and whether they own it; undefined means not-found. */
     access,

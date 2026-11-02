@@ -184,6 +184,10 @@ _Avoid_: Playing Strategy
 Optional evaluation of the Reference Strategy for the human's current decision before they act. Its numerical results comprise the Policy's action probabilities and concrete sizings together with the Action Selector's selected action.
 _Avoid_: Advice, best-action instruction
 
+**Allow Live Analysis**:
+An Online Table option, visible to everyone at the table, that the Table Owner changes between Hands. Each Action Window captures it when it opens, so a change applies from the next decision; while it is off, Live Analysis is refused, and post-action analysis and scoring continue.
+_Avoid_: Live Analysis setting (that is each Participant's own preference)
+
 **Reference Strategy Evaluation**:
 The Policy Result and Action Selector's selected concrete action for one fixed observable decision situation and one complete Reference Strategy. Alignment scores additionally depend on the human's accepted concrete action.
 _Avoid_: Decision Score, selected action alone

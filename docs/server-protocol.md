@@ -62,8 +62,9 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left or been removed. Between Hands it applies at once: the Guest stands up (cashing out), leaves the table, and their membership becomes `removed`. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table or join it again, through any Join Link; it leaves their saved list. |
 | `POST /:id/replace-join-link` | Table Owner only, Online Tables only (400 `join-link-unavailable` at a Practice Table). Requires `requestId` and `expectedSessionRevision`. Stores a new token in the aggregate's `joinToken` in the same transaction, so the previous link stops resolving at once (404 `invalid-join-link`); the acknowledgement carries no link, the owner reads the new `joinToken` from the view (and the live update). Joined Participants are untouched. Rate limited, see [Public hosting safeguards](#public-hosting-safeguards). |
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
-| `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options). |
+| `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
+| `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
 | `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand's payout phase has ended (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
@@ -95,8 +96,11 @@ for a Bot remains the definitive rejection 403 `actor-not-authorized`.
 
 Analysis Results, scores and summaries belong to the Participant whose decisions
 they analyze. Each one uses that Participant's own Reference Strategy, and only
-that Participant's Human Controller can read or retry it or receive its
-`analysis-update`.
+that Participant's Human Controller can capture, read or retry it or receive its
+`analysis-update`. Its inputs are the Participant's own observable view at the
+original decision (`getView({ at })`), so later streets, showdown reveals and later
+Hands never reach it. Responses carry no game view, cards, deck or master seed, only
+the derived evaluation and selection seeds that reproduce them.
 
 The Persisted Table Session is version 2. It records the table `mode`, and each
 human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
@@ -185,6 +189,19 @@ after-Hand request for its Participant (see below), so they are sat out once
 the Hand's payout phase ends, connected or not; resuming is their own
 `set-sitting-out` to `false`. A deadline that expired while the server was down
 plays its Timeout Action at startup, before any request is served.
+
+### Allow Live Analysis
+
+Allow Live Analysis (`options.allowLiveAnalysis`) is an Online Table option, on by
+default, in every Participant's view. The owner changes it between Hands with
+`set-table-options`. Each human Action Window captures it when it opens: a window
+opened while it was off carries `liveAnalysisDisallowed: true`, persisted with the
+schedule and kept through restarts. Live Analysis of that decision (any `analysis`
+request for the current decision before it is accepted) is then refused with 403
+`live-analysis-disallowed`, so a change applies from the next decision. Post-action
+analysis is not affected: an accepted decision, a Timeout Action included, is still
+analyzed automatically, scored, and counted in Hand and Session summaries. A Practice
+Table keeps the option it was created with (on unless the creation request turned it off).
 
 ### After-Hand requests
 
@@ -395,7 +412,7 @@ canonical JSON:
 | Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
 | Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v1:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `away` (the humans sat out) and `deal` | Table Session and `requestId` |
 | Poker mutation (`add-bot` and `remove-bot` included) | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
-| Controller, Trainer configuration, table option or Join Link replacement mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
+| Controller, Trainer configuration, Join Link replacement or table options mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
 For poker mutations, `source` is `human`, `bot`, or `server` for the scheduler's
 own Timeout Actions (a human's, and an Online Bot's after its retry failed). `kind` is the command name;

@@ -284,6 +284,12 @@ export interface ActionWindow {
    * Action (Check, or Fold when Check is not legal) as that Participant's decision. Bots never have one.
    */
   readonly deadlineAt?: ServerTime;
+  /**
+   * Present on a human's window when the table disallowed Live Analysis as the window opened: each window captures
+   * Allow Live Analysis then, so a change between Hands applies from the next decision. Live Analysis of this
+   * decision is refused (`live-analysis-disallowed`); post-action analysis and scoring are not affected.
+   */
+  readonly liveAnalysisDisallowed?: true;
 }
 /**
  * A change to a human Participant that waits for the Hand in progress to end. A weaker request is superseded by a
@@ -429,7 +435,11 @@ export interface TableOptionChanges {
   /** Applied through CashGame, so the Observable Game Configuration shows the current value. */
   readonly allowSeatChanges?: boolean;
 }
-/** The Table Owner changes the table options of an Online Table between Hands. Everyone at the table sees the change. */
+/**
+ * The Table Owner changes the table options of an Online Table between Hands. `options` names only the options to
+ * change, at least one. Everyone at the table sees the change. Allow Live Analysis applies from the next Action Window
+ * that opens: each window captures it.
+ */
 export interface SetTableOptionsRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;
