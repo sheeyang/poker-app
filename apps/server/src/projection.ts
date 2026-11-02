@@ -56,6 +56,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: structuredClone(viewer.trainerConfiguration),
     schedule: projectSchedule(aggregate.schedule), serverTime,
+    pendingChanges: aggregate.pendingChanges.map(entry => ({ participantId: entry.participantId, change: entry.change })),
     inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },

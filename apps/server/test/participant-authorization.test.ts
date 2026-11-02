@@ -22,9 +22,9 @@ async function start() {
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 /**
- * Persistence fixture for the memberships no route reaches yet: Leave Table and Removal arrive in later tickets.
+ * Persistence fixture for the membership no route reaches yet: Removal arrives in a later ticket.
  * Binds another Guest's human Participant with that membership while the server is stopped. Returns its ID.
- * A joined second human joins through the real Join Link instead.
+ * A joined second human joins through the real Join Link instead, and leaves through Leave Table.
  */
 async function bindHuman(t: { id: string }, cookie: string, name: string, membership: 'joined' | 'left' | 'removed' = 'joined') {
   const token = decodeURIComponent(cookie.slice('poker_local='.length));
@@ -174,7 +174,8 @@ test('each human acts, manages and studies only through their own Participant, a
   const joined = await join(owner, otherCookie);
   expect(joined.status).toBe(200);
   const other = (await joined.json()).participantId as string;
-  await bindHuman(owner, leftCookie, 'Cy', 'left');
+  const left = (await (await join(owner, leftCookie)).json()).participantId as string;
+  expect((await post('/api/table-sessions/' + owner.id + '/leave-table', leftCookie, { requestId: randomUUID(), expectedPokerRevision: (await read(owner, leftCookie)).pokerRevision, participantId: left })).status).toBe(200);
   await bindHuman(owner, removedCookie, 'Di', 'removed');
   const ben = { ...owner, cookie: otherCookie };
 

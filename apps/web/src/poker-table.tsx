@@ -3,6 +3,7 @@ import type { ObservablePresentationEvent, ObservableTableSession } from '@poker
 import { Card } from './cards.js';
 import { chips, potTotal, seatPosition, actionLabel } from './table-model.js';
 import { Icon } from './icons.js';
+import { pendingChangeOf, pendingLabel } from './self-service.js';
 
 /** `actorWindowOpen`: the acting Participant's Action Window has opened, so they are now deciding. */
 export function PokerTable({ table, actorWindowOpen, events, animate, eventCount, openSettings }: { table: ObservableTableSession; actorWindowOpen: boolean; events: readonly ObservablePresentationEvent[]; animate: boolean; eventCount: number; openSettings: () => void }) {
@@ -37,11 +38,12 @@ export function PokerTable({ table, actorWindowOpen, events, animate, eventCount
       const dealing = animate && events.some(e => e.type === 'hole-cards-dealt' && e.participantId === participant?.participantId);
       const label = hero ? 'You' : binding?.name;
       const payout = payouts.filter(p => p.participantId === participant?.participantId).reduce((total, p) => total + p.amount, 0);
+      const pending = participant && pendingChangeOf(table, participant.participantId);
       return <div key={seat} className={`table-seat ${hero ? 'hero-seat' : ''} ${actor ? 'acting-seat' : ''} ${participant?.folded ? 'folded-seat' : ''}`} style={seatPosition(index, count) as CSSProperties}>
         {participant ? <>
           {!!participant.cardCount && <div className="hole-cards">{Array.from({ length: participant.cardCount }, (_, i) => <Card key={`${state.handId}-${i}-${dealing ? eventCount : 0}`} card={participant.holeCards?.[i]} small={!hero} dealing={dealing} />)}</div>}
           <div className="seat-body"><span className={`avatar avatar-${index % 4}`} aria-hidden="true">{hero ? 'Y' : binding?.name.replace('Bot ', '').slice(0, 2)}</span><span className="seat-copy"><strong>{label}</strong><span>{chips(participant.stack)} <small>chips</small></span></span>{state.buttonSeat === seat && <span className="dealer-marker" title="Dealer button">D</span>}</div>
-          <div className="seat-caption">{state.status === 'completed-hand' && payout > 0 ? `Won ${chips(payout)}` : state.status === 'completed-hand' && participant.stack === 0 ? 'Rebuy to play' : participant.sittingOut ? 'Sitting out' : actor ? hero ? 'Your turn' : 'Thinking…' : participant.allIn ? 'All-in' : participant.folded ? 'Folded' : recentAction ? actionLabel(recentAction) : ''}</div>
+          <div className="seat-caption">{state.status === 'completed-hand' && payout > 0 ? `Won ${chips(payout)}` : pending ? pendingLabel(pending) : state.status === 'completed-hand' && participant.stack === 0 ? 'Rebuy to play' : participant.sittingOut ? 'Sitting out' : actor ? hero ? 'Your turn' : 'Thinking…' : participant.allIn ? 'All-in' : participant.folded ? 'Folded' : recentAction ? actionLabel(recentAction) : ''}</div>
           {(participant.wager ?? 0) > 0 && <span className={`seat-wager wager-${index}`}><i aria-hidden="true" />{chips(participant.wager!)}{state.smallBlindParticipantId === participant.participantId ? <small>SB</small> : state.bigBlindParticipantId === participant.participantId ? <small>BB</small> : null}</span>}
         </> : <button className="empty-seat" onClick={openSettings} aria-label={`Manage empty seat ${seat}`}><span>Seat {seat}</span><small>{viewerSeat !== null ? 'Open' : 'Sit here'}</small></button>}
       </div>;

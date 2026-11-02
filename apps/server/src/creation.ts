@@ -80,7 +80,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           const aggregate: PersistedTableSession = {
             schemaVersion: 2, tableSessionId, ownerUserId, mode, options, ...(mode === 'online' ? { joinToken: randomBytes(32).toString('base64url') } : {}),
             pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule,
+            pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
           };
           await writeTableSession(tx, undefined, aggregate);
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };

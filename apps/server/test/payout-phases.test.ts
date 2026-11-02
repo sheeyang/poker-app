@@ -183,9 +183,10 @@ test('a restart keeps the payout phase, so Deal still waits for it; a Deal after
 test('Deal resumes a human who sat out by choice in the same commit that starts the Hand', async () => {
   const { t, human, bot } = await headsUp();
   await foldOut(t, human, bot);
+  // Sitting out is a change between Hands: during the payout phase it would only be recorded to apply after it.
+  clock.advance(2000);
   await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
   expect((await read(t)).view.state.participants.find(p => p.participantId === human)).toMatchObject({ sittingOut: true });
-  clock.advance(2000);
   const revision = t.revision;
   const dealt = await command(t, 'start-hand');
   expect(dealt.pokerRevision).toBe(revision + 1);
@@ -198,9 +199,9 @@ test('Deal resumes a human who sat out by choice in the same commit that starts 
 test('a Deal that cannot start the Hand leaves the sitting-out human sitting out', async () => {
   const { t, human, bot } = await headsUp();
   await foldOut(t, human, bot);
+  clock.advance(2000);
   await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
   await command(t, 'stand-up-participant', { participantId: bot });
-  clock.advance(2000);
   const before = await read(t);
   const rejected = await submit(t, 'start-hand', {});
   expect(rejected.status).toBe(400);

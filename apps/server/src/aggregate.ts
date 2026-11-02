@@ -1,4 +1,4 @@
-import type { StrategyDescriptor, TableMode, TableOptions, TableSchedule, TrainerConfiguration } from '@poker/contracts';
+import type { PendingParticipantChange, StrategyDescriptor, TableMode, TableOptions, TableSchedule, TrainerConfiguration } from '@poker/contracts';
 import type { TableSessionRecord } from '@poker/engine';
 import { emptySchedule } from './schedule.js';
 /**
@@ -54,9 +54,15 @@ export interface PersistedTableSession {
    * (`schedule.ts`). Never part of `pokerRecord`.
    */
   readonly schedule: TableSchedule;
+  /**
+   * After-Hand requests: changes to a human Participant asked for during a Hand (`after-hand.ts`). At most one
+   * per Participant, in the order first asked. The server applies them all in one committed transition when
+   * the Hand's payout phase ends, and clears them in the same transaction.
+   */
+  readonly pendingChanges: readonly PendingParticipantChange[];
 }
-/** A version-2 aggregate as stored. Rows written before table options or scheduled play lack those fields. */
-export type StoredTableSessionV2 = Omit<PersistedTableSession, 'options' | 'schedule'> & { readonly options?: TableOptions; readonly schedule?: TableSchedule };
+/** A version-2 aggregate as stored. Rows written before table options, scheduled play or after-Hand requests lack those fields. */
+export type StoredTableSessionV2 = Omit<PersistedTableSession, 'options' | 'schedule' | 'pendingChanges'> & { readonly options?: TableOptions; readonly schedule?: TableSchedule; readonly pendingChanges?: readonly PendingParticipantChange[] };
 /** Written before M4: one owner-human and a table-level Trainer configuration. Read-only. */
 export interface PersistedTableSessionV1 {
   readonly schemaVersion: 1;
@@ -84,11 +90,11 @@ export const defaultPracticeOptions: TableOptions = { actionTimeLimitSeconds: nu
  * recorded Action Window, so the restoring caller opens one (`mutations.ts` `restorable`).
  */
 export function upgradeTableSession(stored: StoredTableSession): PersistedTableSession {
-  if (stored.schemaVersion === 2) return stored.options && stored.schedule ? stored as PersistedTableSession
-    : { ...stored, options: stored.options ?? defaultPracticeOptions, schedule: stored.schedule ?? emptySchedule };
+  if (stored.schemaVersion === 2) return stored.options && stored.schedule && stored.pendingChanges ? stored as PersistedTableSession
+    : { ...stored, options: stored.options ?? defaultPracticeOptions, schedule: stored.schedule ?? emptySchedule, pendingChanges: stored.pendingChanges ?? [] };
   const { trainerConfiguration, ...rest } = stored;
   return {
-    ...rest, schemaVersion: 2, mode: legacyTableMode, options: defaultPracticeOptions, schedule: emptySchedule,
+    ...rest, schemaVersion: 2, mode: legacyTableMode, options: defaultPracticeOptions, schedule: emptySchedule, pendingChanges: [],
     bindings: stored.bindings.map((binding): PersistedBinding => binding.controller.kind === 'human'
       ? { ...binding as Omit<PersistedHumanBinding, 'membership' | 'trainerConfiguration'>, membership: 'joined', trainerConfiguration }
       : binding as PersistedBotBinding),

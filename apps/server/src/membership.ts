@@ -34,10 +34,18 @@ export async function membership(db: Database, tableSessionId: string, userId: s
     .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId), eq(tableMemberships.status, 'joined')));
   return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId, mode: rows[0].mode ?? legacyTableMode };
 }
-/** Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left. */
+/** Whether the Guest owns the table, without restoring it. Ownership is kept after leaving and never transfers. */
+export async function ownsTable(db: Database, tableSessionId: string, userId: string): Promise<boolean> {
+  const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(and(eq(tableSessions.id, tableSessionId), eq(tableSessions.ownerUserId, userId)));
+  return rows.length > 0;
+}
+/**
+ * Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left.
+ * An owned table the Guest has left is marked `left`: opening it rejoins them.
+ */
 export async function savedTables(db: Database, userId: string): Promise<SavedTable[]> {
-  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
     .where(and(eq(tableMemberships.userId, userId), or(eq(tableMemberships.status, 'joined'), eq(tableSessions.ownerUserId, userId))));
-  return rows.map(row => ({ tableSessionId: row.tableSessionId, mode: row.mode ?? legacyTableMode }));
+  return rows.map(row => ({ tableSessionId: row.tableSessionId, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
 }

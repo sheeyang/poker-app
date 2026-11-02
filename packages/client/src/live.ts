@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AnalysisUpdate, ClientLiveMessage, InspectionCapabilities, ObservableTableSession, ObservablePresentationEvent, ServerLiveMessage, TableRuntimeStatus } from '@poker/contracts';
+import type { AnalysisUpdate, ClientLiveMessage, InspectionCapabilities, ObservableTableSession, ObservablePresentationEvent, ServerLiveMessage, TableMembershipEnded, TableRuntimeStatus } from '@poker/contracts';
 
 // React Query applies this to HTTP reads and WebSocket cache writes.
 export function retainNewestTable(previous: unknown, incoming: unknown): ObservableTableSession {
@@ -17,6 +17,8 @@ export interface UserChannelLifecycle { readonly generation: number; readonly re
 export interface LiveConsumers {
   readonly onReady?: (lifecycle: UserChannelLifecycle) => void;
   readonly onAnalysisUpdate?: (update: AnalysisUpdate, lifecycle: UserChannelLifecycle) => void;
+  /** The open table no longer includes this Guest's Participant: they left it (or were removed). */
+  readonly onMembershipEnded?: (ended: TableMembershipEnded) => void;
 }
 /** One app-lifetime socket; changing the open table only changes its subscription. */
 export function useTableSynchronization(id: string | null, enabled: boolean, consumers: LiveConsumers = {}) {
@@ -109,6 +111,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
           return;
         }
         if (tableId !== selected.current) return;
+        if (message.type === 'table-membership-ended') { callbacks.current.onMembershipEnded?.(message); return; }
         if (message.type === 'table-status') {
           setRuntime({ id: tableId, status: message.status });
           queryClient.setQueryData<ObservableTableSession>(key, cached => cached ? { ...cached, runtimeStatus: message.status } : cached);

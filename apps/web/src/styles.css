@@ -343,6 +343,9 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .player-setting > summary > svg { flex-shrink: 0; color: var(--muted); transition: transform .15s; }
 .player-setting[open] > summary > svg { transform: rotate(180deg); }
 .player-setting .details-content { padding-bottom: 14px; }
+.pending-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid #6e7a54; border-radius: 8px; background: #2f3c2b; font-size: .82rem; }
+.player-setting .leave-button { border-color: #805e4d; color: #f0c8af; }
+.player-setting .leave-button:disabled { border-color: var(--line); color: var(--muted); }
 .settings-section { border-top: 1px solid var(--line); padding: 22px 0; }
 .settings-section h3 { margin-bottom: 16px; }
 .settings-section p { margin-top: 12px; }

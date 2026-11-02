@@ -84,7 +84,8 @@ test('owner-only management rejects active, stale, unsupported and disabled-poli
   expect((await submit(t, 'set-button', { requestId: 'button', expectedPokerRevision: 4, seat: 1 })).status).toBe(200);
   expect((await submit(t, 'start-hand', { requestId: 'active', expectedPokerRevision: 5 })).status).toBe(200);
   const active = await read(t);
-  for (const [index, [kind, body]] of commands.entries()) {
+  // A human's own Stand Up and sit-out during a Hand are not refused: they are recorded to apply after it (after-hand-requests.test.ts).
+  for (const [index, [kind, body]] of [...commands.entries()].filter(([, [kind]]) => !['stand-up-participant', 'set-sitting-out'].includes(kind))) {
     const request = { ...body, requestId: 'active-' + index, expectedPokerRevision: 6 };
     const rejected = await (await submit(t, kind, request)).json();
     expect(rejected).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });

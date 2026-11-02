@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, RequestFailure } from '@poker/client';
-import type { ActRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ActRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -12,6 +12,8 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'trainer'; readonly body: SetTrainerConfigurationRequest }
   | { readonly kind: 'strategy'; readonly body: SetPlayingStrategyRequest }
   | { readonly kind: 'retry-bot'; readonly body: RetryBotRequest }
+  /** The Table Owner returns to a table they left, without the Join Link. */
+  | { readonly kind: 'rejoin'; readonly body: JoinTableRequest }
 );
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
@@ -48,6 +50,7 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'trainer': return api.setTrainerConfiguration(tableId, attempt.body);
     case 'strategy': return api.setPlayingStrategy(tableId, attempt.body);
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
+    case 'rejoin': return api.rejoinTable(tableId, attempt.body);
   }
 }
 
@@ -68,6 +71,14 @@ export function useCommand() {
         select(result.tableSessionId);
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       }
+      // Leaving at once ends this Guest's place at the table; leaving after the Hand is announced when it happens.
+      if (attempt.kind === 'manage' && attempt.operation === 'leave-table' && !('afterHand' in result)) {
+        select(null);
+        queryClient.removeQueries({ queryKey: ['table-session', result.tableSessionId] });
+        await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
+        return;
+      }
+      if (attempt.kind === 'rejoin') { select(result.tableSessionId); await queryClient.invalidateQueries({ queryKey: ['table-sessions'] }); }
       await queryClient.invalidateQueries({ queryKey: ['table-session', result.tableSessionId] });
     },
     onError: async (error, attempt) => {

@@ -8,7 +8,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinOutcome, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { savedTables } from './membership.js';
@@ -66,6 +66,11 @@ export async function createServer(options: ServerOptions) {
     return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
   }
   const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'guest-removed'];
+  /** The status of a join or rejoin outcome. */
+  function joinStatus(outcome: JoinOutcome) {
+    const code = outcome.ok ? undefined : outcome.rejection.code;
+    return !code ? 200 : code === 'invalid-join-link' || code === 'not-found' ? 404 : forbidden.includes(code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(code) ? 503 : ['request-id-conflict', 'table-full', 'name-taken'].includes(code) ? 409 : 400;
+  }
   app.get('/api/live', {
     websocket: true,
     preValidation: async (request, reply) => {
@@ -194,12 +199,26 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.join(userId, request.params.token, request.body);
-      const code = outcome.ok ? undefined : outcome.rejection.code;
-      return reply.code(!code ? 200 : code === 'invalid-join-link' ? 404 : forbidden.includes(code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(code) ? 503 : ['request-id-conflict', 'table-full', 'name-taken'].includes(code) ? 409 : 400).send(outcome);
+      return reply.code(joinStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The join outcome is unknown. Try joining again with the same request.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Joining could not be confirmed. Try again.' } });
+    }
+  });
+  app.post<{ Params: { id: string }; Body: JoinTableRequest }>('/api/table-sessions/:id/rejoin-table', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    try {
+      const outcome = await mutations.rejoin(request.params.id, userId, request.body);
+      return reply.code(joinStatus(outcome)).send(outcome);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The outcome is unknown. Try returning to the table again with the same request.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Returning to the table could not be confirmed. Try again.' } });
     }
   });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id', async (request, reply) => {
@@ -215,7 +234,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Table Session is unavailable. Refresh to try reading it again.' } });
     }
   });
-  for (const kind of ['seat-participant', 'start-hand', 'act', 'stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+  for (const kind of ['seat-participant', 'start-hand', 'act', 'stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button', 'leave-table'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
