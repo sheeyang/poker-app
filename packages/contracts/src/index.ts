@@ -267,6 +267,12 @@ export interface ActionWindow {
    * Action (Check, or Fold when Check is not legal) as that Participant's decision. Bots never have one.
    */
   readonly deadlineAt?: ServerTime;
+  /**
+   * Present on a human's window when the table disallowed Live Analysis as the window opened: each window captures
+   * Allow Live Analysis then, so a change between Hands applies from the next decision. Live Analysis of this
+   * decision is refused (`live-analysis-disallowed`); post-action analysis and scoring are not affected.
+   */
+  readonly liveAnalysisDisallowed?: true;
 }
 /**
  * A change to a human Participant that waits for the Hand in progress to end. A weaker request is superseded by a
@@ -400,6 +406,15 @@ export interface SetTrainerConfigurationRequest {
 export interface ReplaceJoinLinkRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;
+}
+/**
+ * The Table Owner changes an Online Table's options between Hands. `options` names only the options to change, at
+ * least one. Allow Live Analysis applies from the next Action Window that opens: each window captures it.
+ */
+export interface SetTableOptionsRequest {
+  readonly requestId: string;
+  readonly expectedSessionRevision: Revision;
+  readonly options: { readonly allowLiveAnalysis?: boolean };
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
 

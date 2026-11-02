@@ -8,7 +8,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinOutcome, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinOutcome, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, SetTableOptionsRequest, RetryBotRequest, ReplaceJoinLinkRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { savedTables } from './membership.js';
@@ -87,7 +87,7 @@ export async function createServer(options: ServerOptions) {
   async function participantAt(tableSessionId: string, userId: string) {
     return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
   }
-  const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'guest-removed'];
+  const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'guest-removed'];
   /** The status of a join or rejoin outcome. */
   function joinStatus(outcome: JoinOutcome) {
     const code = outcome.ok ? undefined : outcome.rejection.code;
@@ -275,7 +275,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The mutation could not be confirmed. Refresh the committed view before submitting another attempt.' } });
     }
   });
-  for (const kind of ['set-playing-strategy', 'retry-bot', 'set-trainer-configuration', 'replace-join-link'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+  for (const kind of ['set-playing-strategy', 'retry-bot', 'set-trainer-configuration', 'replace-join-link', 'set-table-options'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest | SetTableOptionsRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     if (kind === 'replace-join-link') { const limited = refuseIfLimited('join-link-replacement', request, reply); if (limited) return limited; }
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
@@ -344,6 +344,7 @@ export async function createServer(options: ServerOptions) {
       const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });
+      if (input === 'live-analysis-disallowed') return reply.code(403).send({ ok: false, rejection: { code: 'live-analysis-disallowed', message: 'This table did not allow Live Analysis when this decision began. Your decision is analyzed and scored after you act.' } });
       const state = await analysis.getOrStart(input, request.body.live ? 'live-analysis' : 'interactive-analysis');
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }

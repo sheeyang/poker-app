@@ -17,6 +17,11 @@ export function validateTrainerConfiguration(value: unknown, supportsStrategy: (
   if (!supportsStrategy(value.referenceStrategy))
     return { ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Reference Strategy.' } };
 }
+/** A change of table options names at least one option, each with a value of its type. */
+export function validateTableOptionsChange(value: unknown): ApplicationRejection | undefined {
+  if (!object(value) || !Object.keys(value).length || Object.keys(value).some(key => key !== 'allowLiveAnalysis') || typeof value.allowLiveAnalysis !== 'boolean')
+    return { ok: false, rejection: { code: 'invalid-table-options', field: 'options', message: 'Name the table options to change: Allow Live Analysis is on or off.' } };
+}
 export function validateCreationRequest(request: CreateTableSessionRequest, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   const reject = (field: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code: 'invalid-creation-settings', field, message } });
   for (const key of Object.keys(request)) {
