@@ -113,7 +113,7 @@ A Leave Table imposed by the Table Owner that also prevents that Guest from join
 _Avoid_: Ban, kick
 
 **After-Hand Request**:
-A change to a human Participant asked for during a Hand (Sitting Out, Stand Up, Leave Table or Removal) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
+A change to a Participant asked for during a Hand (a human's Sitting Out, Stand Up, Leave Table or Removal, or the Table Owner's Sitting Out or removal of a Bot) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
 _Avoid_: Queued action, deferred command
 
 **Sitting Out**:

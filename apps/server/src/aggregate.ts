@@ -20,6 +20,11 @@ export interface PersistedBotBinding {
   readonly name: string;
   readonly controller: { readonly kind: 'bot'; readonly playingStrategy: StrategyDescriptor };
   readonly assignmentId?: string;
+  /**
+   * The owner removed this Bot: it has stood up and left the table. The binding stays so its name stays taken and
+   * the Hands it played keep their names; it is never seated, managed or asked for a decision again.
+   */
+  readonly removed?: true;
 }
 export type PersistedBinding = PersistedHumanBinding | PersistedBotBinding;
 export interface BotActionProvenance {

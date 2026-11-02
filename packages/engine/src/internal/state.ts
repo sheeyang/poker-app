@@ -51,6 +51,8 @@ export interface CashGameState {
   status: 'between-hands' | 'active-hand' | 'completed-hand';
   buttonSeat: number;
   nextButtonSeat: number | null;
+  /** The current seat-change permission. It starts as the configuration's and changes only between Hands (`set-seat-changes`). */
+  allowSeatChanges: boolean;
   participants: ParticipantState[];
   hands: HandState[];
   commands: CashGameCommand[];

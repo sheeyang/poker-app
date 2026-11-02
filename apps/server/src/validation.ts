@@ -17,10 +17,16 @@ export function validateTrainerConfiguration(value: unknown, supportsStrategy: (
   if (!supportsStrategy(value.referenceStrategy))
     return { ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Reference Strategy.' } };
 }
-/** A change of table options names at least one option, each with a value of its type. */
-export function validateTableOptionsChange(value: unknown): ApplicationRejection | undefined {
-  if (!object(value) || !Object.keys(value).length || Object.keys(value).some(key => key !== 'allowLiveAnalysis') || typeof value.allowLiveAnalysis !== 'boolean')
-    return { ok: false, rejection: { code: 'invalid-table-options', field: 'options', message: 'Name the table options to change: Allow Live Analysis is on or off.' } };
+/** A non-empty partial set of the options an Online Table's owner can change. */
+export function validateTableOptionChanges(value: unknown): ApplicationRejection | undefined {
+  const reject = (field: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code: 'invalid-table-options', field, message } });
+  if (!object(value)) return reject('options', 'Supply the options to change as an object.');
+  const names = Object.keys(value);
+  if (names.length === 0) return reject('options', 'Name at least one option to change.');
+  const unknown = names.find(name => !['actionTimeLimitSeconds', 'allowLiveAnalysis', 'allowSeatChanges'].includes(name));
+  if (unknown) return reject(unknown, 'Only the Action Time Limit, Allow Live Analysis and seat changes can be changed.');
+  if (value.actionTimeLimitSeconds !== undefined && !(actionTimeLimits as readonly unknown[]).includes(value.actionTimeLimitSeconds)) return reject('actionTimeLimitSeconds', 'Choose an Action Time Limit of 15, 30 or 60 seconds.');
+  for (const name of ['allowLiveAnalysis', 'allowSeatChanges'] as const) if (value[name] !== undefined && typeof value[name] !== 'boolean') return reject(name, 'Choose on or off.');
 }
 export function validateCreationRequest(request: CreateTableSessionRequest, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   const reject = (field: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code: 'invalid-creation-settings', field, message } });

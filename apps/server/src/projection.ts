@@ -53,6 +53,8 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   const c = view.configuration;
   // Admin Mode is never available at an Online Table, whatever the server allows.
   const inspectable = adminMode && aggregate.mode === 'practice';
+  // Humans who left or were removed, and Bots the owner removed: public, so nobody is offered what no longer applies.
+  const departed = aggregate.bindings.filter(binding => isHuman(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
   return {
     tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: { ...aggregate.options }, viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     ...(aggregate.joinToken && viewer.userId === aggregate.ownerUserId ? { joinToken: aggregate.joinToken } : {}),
@@ -62,6 +64,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     schedule: projectSchedule(aggregate.schedule), serverTime,
     pendingChanges: aggregate.pendingChanges.map(entry => ({ participantId: entry.participantId, change: entry.change })),
     ...(aggregate.mode === 'online' ? { connectedParticipantIds: [...connected] } : {}),
+    ...(departed.length ? { departedParticipantIds: departed } : {}),
     inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands() : [] },
     view: {
       configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
@@ -83,6 +86,7 @@ export function projectTableUpdate(aggregate: PersistedTableSession, participant
       case 'sitting-out-changed': return { type: event.type, participantId: event.participantId, sittingOut: event.sittingOut };
       case 'participant-topped-up': return { type: event.type, participantId: event.participantId, targetStack: event.targetStack, amount: event.amount };
       case 'button-set': return { type: event.type, seat: event.seat };
+      case 'seat-changes-changed': return { type: event.type, allowSeatChanges: event.allowSeatChanges };
       case 'hand-started': return { type: event.type, handId: event.handId, buttonSeat: event.buttonSeat, smallBlindParticipantId: event.smallBlindParticipantId, bigBlindParticipantId: event.bigBlindParticipantId };
       case 'forced-contribution': return { type: event.type, participantId: event.participantId, kind: event.kind, amount: event.amount };
       case 'hole-cards-dealt': return { type: event.type, participantId: event.participantId, cardCount: event.cardCount, ...(event.cards ? { cards: [...event.cards] } : {}) };

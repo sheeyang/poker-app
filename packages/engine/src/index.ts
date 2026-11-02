@@ -20,6 +20,7 @@ export type CashGameCommand =
   | { readonly type: 'set-sitting-out'; readonly participantId: ParticipantId; readonly sittingOut: boolean }
   | { readonly type: 'top-up-to'; readonly participantId: ParticipantId; readonly targetStack: number }
   | { readonly type: 'set-button'; readonly seat: number }
+  | { readonly type: 'set-seat-changes'; readonly allowSeatChanges: boolean }
   | { readonly type: 'start-hand' }
   | { readonly type: 'act'; readonly participantId: ParticipantId; readonly action: ConcreteAction };
 export type CashGameEvent = ManagementEvent | (Exclude<DraftEvent, ManagementEvent> & { readonly handId: string });
@@ -153,6 +154,9 @@ function replayCommand(game: CashGame, command: CashGameCommand): CashGameResult
     case 'set-button':
       if (!plainFields(command, ['type', 'seat'])) return;
       return game.setButton(command.seat);
+    case 'set-seat-changes':
+      if (!plainFields(command, ['type', 'allowSeatChanges'])) return;
+      return game.setSeatChanges(command.allowSeatChanges);
     case 'act':
       if (!plainFields(command, ['type', 'participantId', 'action'])) return;
       if (!plainFields(command.action, command.action?.type === 'bet' ? ['type', 'betTo'] : command.action?.type === 'raise' ? ['type', 'raiseTo'] : ['type'])) return;
@@ -196,8 +200,11 @@ export class ParticipantCashGame {
 }
 export class CashGame {
   #configuration: GameConfiguration;
-  #state: CashGameState = { status: 'between-hands', buttonSeat: 1, nextButtonSeat: null, participants: [], hands: [], commands: [], bankroll: 0 };
-  private constructor(configuration: GameConfiguration) { this.#configuration = structuredClone(configuration); }
+  #state: CashGameState = { status: 'between-hands', buttonSeat: 1, nextButtonSeat: null, allowSeatChanges: true, participants: [], hands: [], commands: [], bankroll: 0 };
+  private constructor(configuration: GameConfiguration) {
+    this.#configuration = structuredClone(configuration);
+    this.#state.allowSeatChanges = configuration.allowSeatChanges;
+  }
   static create(configuration: GameConfiguration): CashGameConstructionResult {
     const rejection = configurationRejection(configuration);
     if (rejection) return { ok: false, rejection };
@@ -413,10 +420,24 @@ export class CashGame {
       return [{ type: 'button-set', seat }];
     });
   }
+  /**
+   * Allow or disallow seat changes, between Hands. The permission lives in the table state (not the fixed
+   * configuration), so the Observable Game Configuration always shows the current value and `moveParticipant` is the
+   * one place that enforces it. All other Game Configuration stays fixed.
+   */
+  setSeatChanges(allowSeatChanges: boolean): CashGameResult {
+    if (this.#state.status === 'active-hand') return { ok: false, rejection: { code: 'active-hand', message: 'Change the seat-change permission between Hands.' } };
+    if (typeof allowSeatChanges !== 'boolean') return { ok: false, rejection: { code: 'invalid-seat-changes', message: 'Choose whether seat changes are allowed.', field: 'allowSeatChanges' } };
+    if (this.#state.allowSeatChanges === allowSeatChanges) return { ok: false, rejection: { code: 'seat-changes-unchanged', message: 'Seat changes already have the requested permission.' } };
+    return this.#mutate({ type: 'set-seat-changes', allowSeatChanges }, draft => {
+      draft.allowSeatChanges = allowSeatChanges;
+      return [{ type: 'seat-changes-changed', allowSeatChanges }];
+    });
+  }
   moveParticipant(participantId: ParticipantId, seat: number): CashGameResult {
     const rejected = this.#managementRejection(participantId);
     if (rejected) return rejected;
-    if (!this.#configuration.allowSeatChanges) return { ok: false, rejection: { code: 'seat-changes-disabled', message: 'Seat changes are disabled for this Table Session.' } };
+    if (!this.#state.allowSeatChanges) return { ok: false, rejection: { code: 'seat-changes-disabled', message: 'Seat changes are disabled for this Table Session.' } };
     if (!Number.isInteger(seat) || seat < 1 || seat > this.#configuration.seatCount) return { ok: false, rejection: { code: 'invalid-seat', message: 'Choose a valid seat in this table.', field: 'seat' } };
     if (this.#state.participants.some(p => p.seat === seat)) return { ok: false, rejection: { code: 'seat-occupied', message: 'Choose an empty seat.', field: 'seat' } };
     return this.#mutate({ type: 'move-participant', participantId, seat }, draft => {
@@ -475,7 +496,7 @@ export class CashGame {
     validateState(draft, this.#configuration);
     const authoritativeEvents: CashGameEvent[] = events.map(event => {
       switch (event.type) {
-        case 'participant-joined': case 'participant-left': case 'participant-seated': case 'participant-stood-up': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': return event;
+        case 'participant-joined': case 'participant-left': case 'participant-seated': case 'participant-stood-up': case 'participant-moved': case 'sitting-out-changed': case 'participant-topped-up': case 'button-set': case 'seat-changes-changed': return event;
         default: return { ...event, handId: draft.hands.at(-1)!.handId };
       }
     });
@@ -495,6 +516,7 @@ export class CashGame {
         case 'sitting-out-changed': return { type: event.type, participantId: event.participantId, sittingOut: event.sittingOut };
         case 'participant-topped-up': return { type: event.type, participantId: event.participantId, targetStack: event.targetStack, amount: event.amount };
         case 'button-set': return { type: event.type, seat: event.seat };
+        case 'seat-changes-changed': return { type: event.type, allowSeatChanges: event.allowSeatChanges };
         case 'hand-started': return { type: event.type, handId: event.handId, buttonSeat: event.buttonSeat, smallBlindParticipantId: event.smallBlindParticipantId, bigBlindParticipantId: event.bigBlindParticipantId };
         case 'forced-contribution': return { type: event.type, participantId: event.participantId, kind: event.kind, amount: event.amount };
         case 'hole-cards-dealt': return { type: event.type, participantId: event.participantId, cardCount: event.cardCount, ...(event.participantId === participantId && event.cards ? { cards: [...event.cards] } : {}) };
@@ -539,7 +561,7 @@ export class CashGame {
       configuration: {
         seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,
         minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn,
-        allowSeatChanges: c.allowSeatChanges,
+        allowSeatChanges: this.#state.allowSeatChanges,
       },
       state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
         const member = hand?.participants.find(member => member.participantId === p.participantId);

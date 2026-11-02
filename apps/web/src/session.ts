@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, RequestFailure } from '@poker/client';
-import type { ActRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -12,6 +12,10 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'trainer'; readonly body: SetTrainerConfigurationRequest }
   | { readonly kind: 'strategy'; readonly body: SetPlayingStrategyRequest }
   | { readonly kind: 'retry-bot'; readonly body: RetryBotRequest }
+  /** The Table Owner adds a Bot, at any time. */
+  | { readonly kind: 'add-bot'; readonly body: AddBotRequest }
+  /** The Table Owner changes an Online Table's options between Hands. */
+  | { readonly kind: 'options'; readonly body: SetTableOptionsRequest }
   /** The Table Owner replaces the Online Table's Join Link. */
   | { readonly kind: 'replace-link'; readonly body: ReplaceJoinLinkRequest }
   /** The Table Owner returns to a table they left, without the Join Link. */
@@ -54,6 +58,8 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
     case 'rejoin': return api.rejoinTable(tableId, attempt.body);
     case 'replace-link': return api.replaceJoinLink(tableId, attempt.body);
+    case 'add-bot': return api.addBot(tableId, attempt.body);
+    case 'options': return api.setTableOptions(tableId, attempt.body);
   }
 }
 

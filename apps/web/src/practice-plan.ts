@@ -1,5 +1,6 @@
 import type { ObservableTableSession } from '@poker/contracts';
 import type { Attempt } from './session.js';
+import { presentBindings } from './owner-controls.js';
 
 /** Plan one mutation from a fresh authoritative view, never from optimistic seats. */
 export function practiceStep(table: ObservableTableSession, afterHandId: string | null | undefined, requestId: string): Attempt | null {
@@ -7,7 +8,7 @@ export function practiceStep(table: ObservableTableSession, afterHandId: string 
   const started = afterHandId === undefined ? state.handId || table.view.history.length : (state.handId ?? null) !== afterHandId || state.status === 'active-hand';
   if (started) return null;
   const metadata = { requestId, expectedPokerRevision: table.pokerRevision };
-  const unseated = table.bindings.find(b => (afterHandId === undefined || b.participantId === table.viewerParticipantId) && !state.participants.some(p => p.participantId === b.participantId && p.seat !== null));
+  const unseated = presentBindings(table).find(b => (afterHandId === undefined || b.participantId === table.viewerParticipantId) && !state.participants.some(p => p.participantId === b.participantId && p.seat !== null));
   if (unseated) {
     const seat = Array.from({ length: table.view.configuration.seatCount }, (_, i) => i + 1).find(s => !state.participants.some(p => p.seat === s));
     if (!seat) throw new Error('There is no open seat. Adjust the players in table options.');
