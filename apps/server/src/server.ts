@@ -8,7 +8,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinOutcome, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { upgradeTableSession } from './aggregate.js';
@@ -18,6 +18,7 @@ import { validateDisplayName } from './validation.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
+import { outcomeStatus } from './rejections.js';
 
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void;
   /** The clock for all play timing. Defaults to system time; tests substitute a manually advanced clock. */
@@ -85,12 +86,6 @@ export async function createServer(options: ServerOptions) {
   /** The requesting Guest's own joined Participant: the only one whose study results they may read or retry. */
   async function participantAt(tableSessionId: string, userId: string) {
     return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
-  }
-  const forbidden = ['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'guest-removed'];
-  /** The status of a join or rejoin outcome. */
-  function joinStatus(outcome: JoinOutcome) {
-    const code = outcome.ok ? undefined : outcome.rejection.code;
-    return !code ? 200 : code === 'invalid-join-link' || code === 'not-found' ? 404 : forbidden.includes(code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(code) ? 503 : ['request-id-conflict', 'table-full', 'name-taken'].includes(code) ? 409 : 400;
   }
   app.get('/api/live', {
     websocket: true,
@@ -209,7 +204,7 @@ export async function createServer(options: ServerOptions) {
     try {
       const preview = await mutations.previewJoin(userId, request.params.token);
       if (!preview) return reply.code(404).send({ ok: false, rejection: { code: 'invalid-join-link', message: 'This Join Link does not work. Ask the Table Owner for a new one.' } });
-      return preview.ok ? preview : reply.code(joinStatus(preview)).send(preview);
+      return preview.ok ? preview : reply.code(outcomeStatus(preview)).send(preview);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The table could not be read. Try opening the link again.' } });
@@ -223,7 +218,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.join(userId, request.params.token, request.body);
-      return reply.code(joinStatus(outcome)).send(outcome);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The join outcome is unknown. Try joining again with the same request.' } });
@@ -239,7 +234,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.rejoin(request.params.id, userId, request.body);
-      return reply.code(joinStatus(outcome)).send(outcome);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The outcome is unknown. Try returning to the table again with the same request.' } });
@@ -267,7 +262,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : forbidden.includes(outcome.rejection.code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-poker-revision', 'action-window-not-open', 'action-deadline-passed', 'payout-phase-not-ended', 'name-taken', 'table-full'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
@@ -282,7 +277,7 @@ export async function createServer(options: ServerOptions) {
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : forbidden.includes(outcome.rejection.code) ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-session-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The configuration commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
@@ -343,7 +338,7 @@ export async function createServer(options: ServerOptions) {
       const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });
-      if (input === 'live-analysis-disallowed') return reply.code(403).send({ ok: false, rejection: { code: 'live-analysis-disallowed', message: 'This table did not allow Live Analysis when this decision began. Your decision is analyzed and scored after you act.' } });
+      if ('ok' in input) return reply.code(outcomeStatus(input)).send(input);
       const state = await analysis.getOrStart(input, request.body.live ? 'live-analysis' : 'interactive-analysis');
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
