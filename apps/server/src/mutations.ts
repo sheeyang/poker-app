@@ -8,7 +8,7 @@ import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken,
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
 import { membership, newJoinToken, ownsTable, savedTableEntries, tableOfJoinLink, writeTableSession } from './membership.js';
-import { projectTableSession, projectTableUpdate } from './projection.js';
+import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
@@ -1092,10 +1092,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const humans = humanBindings(aggregate);
         if (humans.some(binding => binding.userId === userId && binding.membership === 'removed')) return removedGuest();
         const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
-        // Every Participant's view carries the same public configuration.
-        const { configuration } = session.game.forParticipant(owner.participantId).getView();
         const returning = humans.find(binding => binding.userId === userId && binding.membership === 'left');
-        return { ok: true as const, ownerName: owner.name, configuration, options: { ...aggregate.options },
+        return { ok: true as const, ownerName: owner.name, configuration: projectConfiguration(tableConfiguration(session)), options: projectOptions(aggregate.options),
           placesTaken: placesTaken(aggregate), alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
       });
     }
