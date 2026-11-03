@@ -252,8 +252,26 @@ export type TableMode = 'practice' | 'online';
 /**
  * One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left.
  * `left` marks an owned table the Guest has left; opening it rejoins them without the Join Link.
+ * The table's size, stakes and play state are public facts, so even a Guest who left sees them. They are absent
+ * only while the table cannot be restored.
  */
-export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode; readonly left?: true }
+export interface SavedTable {
+  readonly tableSessionId: TableSessionId;
+  readonly mode: TableMode;
+  readonly left?: true;
+  readonly seatCount?: number;
+  readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly playState?: SavedTablePlayState;
+}
+/** How play stands at a saved table, as everyone there sees it. */
+export interface SavedTablePlayState {
+  readonly status: ObservableCashGameState['status'];
+  /** The Hands completed at the table, whoever played them. */
+  readonly completedHands: number;
+  readonly seatedParticipants: number;
+  /** The Guest's own stack, while their Participant has a Seat. */
+  readonly viewerStack?: ChipAmount;
+}
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
  * What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's

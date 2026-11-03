@@ -58,7 +58,7 @@ test('an Online Table is created with its fixed mode and options, the owner join
   expect(view.joinToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
   expect(view.joinToken).not.toContain(table.id);
   expect((await read(table)).joinToken).toBe(view.joinToken);
-  expect((await (await get('/api/table-sessions', cookie)).json()).tables).toContainEqual({ tableSessionId: table.id, mode: 'online' });
+  expect((await (await get('/api/table-sessions', cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: table.id, mode: 'online' }));
   // A Practice Table keeps its fixed mode, no Join Link, and no Action Time Limit.
   const practice = await (await post('/api/table-sessions', cookie, { requestId: randomUUID() })).json();
   expect(await (await get('/api/table-sessions/' + practice.tableSessionId, cookie)).json()).toMatchObject({ mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true } });
@@ -108,7 +108,7 @@ test('a Guest opens a Join Link, joins as an unseated Participant under their di
   expect(JSON.stringify(seen)).not.toContain(token);
   expect(await read(table)).toMatchObject({ joinToken: token, bindings: expect.arrayContaining([{ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } }]) });
   expect((await read(table)).pokerRevision).toBe(before.pokerRevision + 1);
-  expect((await (await get('/api/table-sessions', ben)).json()).tables).toEqual([{ tableSessionId: table.id, mode: 'online' }]);
+  expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ tableSessionId: table.id, mode: 'online' }]);
   // Retrying the request, or joining again, returns the Guest's existing Participant without another commit.
   expect(await (await join(token, ben, requestId)).json()).toEqual(outcome);
   const again = await (await join(token, ben)).json();
@@ -296,4 +296,26 @@ test('Deal, choosing the dealer button and completed-Hand inspection are unavail
   // Practice Tables keep Admin Mode and explicit Deal.
   const practice = await (await post('/api/table-sessions', table.owner, { requestId: randomUUID() })).json();
   expect((await (await get('/api/table-sessions/' + practice.tableSessionId, table.owner)).json()).inspection.adminMode).toBe(true);
+});
+
+test('saved tables carry each table’s mode, observable stakes and play state, an owned table the Guest has left included', async () => {
+  const table = await online(await guest('Ann'), { configuration: { ...stakes, ante: 5 }, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
+  const ben = await guest('Ben');
+  const benParticipant = (await (await join(await tokenOf(table), ben)).json()).participantId as string;
+  const list = async (cookie: string) => (await (await get('/api/table-sessions', cookie)).json()).tables;
+  const between = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 }, playState: { status: 'between-hands', completedHands: 0, seatedParticipants: 0 } };
+  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...between }]);
+  // Ben and the Bot sit down and a Hand is dealt; the owner watches, then leaves.
+  await connectLive(base, ben, table.id);
+  expect((await command(table, ben, 'seat-participant', { participantId: benParticipant, seat: 1, buyIn: 400 })).status).toBe(200);
+  expect((await command(table, table.owner, 'seat-participant', { participantId: table.bindings[1]!.participantId, seat: 2 })).status).toBe(200);
+  clock.advanceTo((await announcedCountdown(() => read(table, ben))).endsAt);
+  await expect.poll(async () => (await read(table, ben)).view.state.handId).toBe('hand-1');
+  expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
+  const playing = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 }, playState: { status: 'active-hand', completedHands: 0, seatedParticipants: 2 } };
+  const benStack = (await read(table, ben)).view.state.participants.find(participant => participant.participantId === benParticipant)!.stack;
+  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...playing, playState: { ...playing.playState, viewerStack: benStack } }]);
+  // The owner who left cannot read the table, yet their saved list still says what it is and how play stands.
+  expect((await get('/api/table-sessions/' + table.id, table.owner)).status).toBe(404);
+  expect(await list(table.owner)).toContainEqual({ tableSessionId: table.id, mode: 'online', left: true, ...playing });
 });

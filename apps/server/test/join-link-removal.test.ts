@@ -91,7 +91,7 @@ test('replacing the Join Link ends the old link at once, leaves joined Participa
   expect(await (await join(cy, before)).json()).toMatchObject({ ok: false, rejection: { code: 'invalid-join-link' } });
   // Joined Participants are unaffected: they keep their place and the table stays in their saved list.
   expect((await get('/api/table-sessions/' + id, ben)).status).toBe(200);
-  expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [{ tableSessionId: id, mode: 'online' }] });
+  expect(await (await get('/api/table-sessions', ben)).json()).toMatchObject({ tables: [{ tableSessionId: id, mode: 'online' }] });
   // The new link works, and only the owner reads it.
   expect(await (await get('/api/join-links/' + after, cy)).json()).toMatchObject({ ok: true, placesTaken: 2 });
   expect(await (await join(cy, after)).json()).toMatchObject({ ok: true });

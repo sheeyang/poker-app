@@ -3,11 +3,11 @@ import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type PendingParticipantChange, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type PendingParticipantChange, type SavedTable, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBinding, type PersistedBotBinding, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { membership, newJoinToken, ownsTable, tableOfJoinLink, writeTableSession } from './membership.js';
+import { membership, newJoinToken, ownsTable, savedTableEntries, tableOfJoinLink, writeTableSession } from './membership.js';
 import { projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
@@ -1098,6 +1098,21 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
           placesTaken: placesTaken(aggregate), alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
       });
     }
+    /**
+     * The Guest's saved tables (`savedTableEntries`), each with its public size, stakes and play state from the
+     * committed table. Every table is loaded at startup, so this restores nothing in normal running; a table that cannot
+     * be restored is still listed, without them.
+     */
+    async function savedTables(userId: string): Promise<SavedTable[]> {
+      return Promise.all((await savedTableEntries(db, userId)).map(async ({ participantId, ...entry }): Promise<SavedTable> => {
+        const session = await load(entry.tableSessionId).catch(() => undefined);
+        if (!session) return entry;
+        const state = tableState(session), { seatCount, smallBlind, bigBlind, ante } = tableConfiguration(session);
+        const own = state.participants.find(participant => participant.participantId === participantId && participant.seat !== null);
+        return { ...entry, seatCount, stakes: { smallBlind, bigBlind, ante }, playState: { status: state.status, completedHands: session.game.getCompletedHands().length,
+          seatedParticipants: state.participants.filter(participant => participant.seat !== null).length, ...(own ? { viewerStack: own.stack } : {}) } };
+      }));
+    }
     async function readPersistedSession(id: string) {
       const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
       const stored = rows[0]?.aggregate;
@@ -1173,6 +1188,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     join,
     rejoin,
     previewJoin,
+    savedTables,
     resumeBots,
     seatedTableCount,
     startRecovery,

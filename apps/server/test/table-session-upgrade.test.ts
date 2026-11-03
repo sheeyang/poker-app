@@ -77,7 +77,7 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   expect(upgraded).not.toHaveProperty('joinToken');
   expect(upgraded.view.history[0]!.decisions[0]!.state.participants[0]!.holeCards).toHaveLength(2);
   expect(upgraded.view.history[0]!.decisions[0]!.state.participants[1]).not.toHaveProperty('holeCards');
-  expect(await (await get('/api/table-sessions', t.cookie)).json()).toEqual({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
+  expect(await (await get('/api/table-sessions', t.cookie)).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
   const stranger = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!;
   await nameGuest(base, stranger, 'Stranger');
   expect((await get('/api/table-sessions/' + t.id, stranger)).status).toBe(404);
@@ -104,7 +104,7 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   await stop();
   await start();
   expect(await read(t)).toEqual(resumed);
-  expect(await (await get('/api/table-sessions', t.cookie)).json()).toEqual({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
+  expect(await (await get('/api/table-sessions', t.cookie)).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
   // A version-2 table committed before table options existed gets the Practice defaults.
   await stop();
   await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = aggregate - 'options' WHERE id = $1`, [t.id]);

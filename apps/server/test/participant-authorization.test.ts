@@ -177,8 +177,8 @@ test('each human acts, manages and studies only through their own Participant, a
     expect((await get('/api/table-sessions/' + owner.id, cookie)).status).toBe(404);
     expect(await (await get('/api/table-sessions', cookie)).json()).toEqual({ tables: [] });
   }
-  expect(await (await get('/api/table-sessions', otherCookie)).json()).toEqual({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
-  expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual({ tableSessionId: owner.id, mode: 'online' });
+  expect(await (await get('/api/table-sessions', otherCookie)).json()).toMatchObject({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
+  expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: owner.id, mode: 'online' }));
 
   // Trainer configuration belongs to each Participant. Another Guest's identical retry never receives its outcome.
   const ownerStudy = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true };

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { actionTimeLimits, type ActionTimeLimitSeconds, type CreateTableSessionRequest, type TableMode } from '@poker/contracts';
+import { actionTimeLimits, type ActionTimeLimitSeconds, type CreateTableSessionRequest, type SavedTable, type TableMode } from '@poker/contracts';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@poker/client';
 import { defaultPlayingStrategy, defaultConfiguration } from '@poker/contracts';
@@ -9,7 +9,7 @@ import { chips, modeLabel } from './table-model.js';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem } from './online-setup.js';
 import { useSession, type Command } from './session.js';
 import { DisplayNameForm, DisplayNamePrompt, useDisplayName } from './display-name.js';
-import { SavedTableSkeleton, SavedTablesSkeleton } from './loading-skeleton.js';
+import { SavedTablesSkeleton } from './loading-skeleton.js';
 
 export function SessionBrowser({ command, ready, connecting = false, close }: { command: Command; ready: boolean; connecting?: boolean; close?: () => void }) {
   const [players, setPlayers] = useState(6), [depth, setDepth] = useState(100);
@@ -44,26 +44,32 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
       {!sessions.data && (connecting || ready && sessions.isPending) && <SavedTablesSkeleton />}
       {sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
       {sessions.data?.tables.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
-      <ul className="return-list">{sessions.data?.tables.map(({ tableSessionId: id, mode: tableMode, left }) => left
-        ? <LeftTable key={id} mode={tableMode} busy={command.busy} returnToTable={() => command.submit({ kind: 'rejoin', tableId: id, body: { requestId: crypto.randomUUID() } })} />
-        : <SavedTable key={id} id={id} selected={id === selected} open={() => open(id)} />)}</ul>
+      <ul className="return-list">{sessions.data?.tables.map(saved => !readable(saved)
+        ? <li key={saved.tableSessionId} className="saved-table"><p className="muted">This saved table couldn’t be read.</p><button className="text-button" onClick={() => void sessions.refetch()}>Retry</button></li>
+        : saved.left
+          ? <LeftTable key={saved.tableSessionId} saved={saved} busy={command.busy} returnToTable={() => command.submit({ kind: 'rejoin', tableId: saved.tableSessionId, body: { requestId: crypto.randomUUID() } })} />
+          : <SavedTableRow key={saved.tableSessionId} saved={saved} selected={saved.tableSessionId === selected} open={() => open(saved.tableSessionId)} />)}</ul>
     </section></div>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;
 }
 
-/** An owned table the Guest left: it keeps running without them, and opening it returns them without the Join Link. */
-function LeftTable({ mode, busy, returnToTable }: { mode: TableMode; busy: boolean; returnToTable: () => void }) {
-  return <li className="saved-table"><button onClick={returnToTable} disabled={busy}><span className="saved-table-copy"><strong>Hold’em<small className={`mode-chip mode-${mode}`}>{modeLabel(mode)}</small><small>You left</small></strong><span>This is your table. It keeps running while you’re away.</span></span><span className="resume-label">Return to table <Icon name="arrow" size={17} /></span></button></li>;
+/** A saved table that could be read: its format, mode and stakes, then how play stands, all public facts from the list. */
+type ReadableSavedTable = SavedTable & Required<Pick<SavedTable, 'seatCount' | 'stakes' | 'playState'>>;
+const readable = (saved: SavedTable): saved is ReadableSavedTable => saved.seatCount !== undefined && !!saved.stakes && !!saved.playState;
+function SavedTableCopy({ saved, tag, state }: { saved: ReadableSavedTable; tag?: string; state: string }) {
+  const { seatCount, stakes, playState } = saved;
+  return <span className="saved-table-copy"><strong>{seatCount === 2 ? 'Heads-up' : `${seatCount}-player`} Hold’em<small className={`mode-chip mode-${saved.mode}`}>{modeLabel(saved.mode)}</small>{tag && <small>{tag}</small>}</strong><span>{chips(stakes.smallBlind)} / {chips(stakes.bigBlind)} blinds{stakes.ante ? ` · Ante ${chips(stakes.ante)}` : ''} · {playState.completedHands} {playState.completedHands === 1 ? 'hand' : 'hands'} completed</span><span className="saved-table-state">{playState.status === 'active-hand' ? 'Hand in progress' : 'Between hands'}{state}</span></span>;
 }
 
-function SavedTable({ id, selected, open }: { id: string; selected: boolean; open: () => void }) {
-  const table = useQuery({ queryKey: ['table-session', id], queryFn: ({ signal }) => api.readSession(id, signal) });
-  const data = table.data;
-  if (!data) return table.isError ? <li className="saved-table"><p className="muted">This saved table couldn’t be read.</p><button className="text-button" onClick={() => void table.refetch()}>Retry</button></li> : <SavedTableSkeleton />;
-  const participant = data.view.state.participants.find(p => p.participantId === data.viewerParticipantId);
-  const size = data.view.configuration.seatCount;
-  return <li className="saved-table"><button onClick={open}><span className="saved-table-copy"><strong>{size === 2 ? 'Heads-up' : `${size}-player`} Hold’em<small className={`mode-chip mode-${data.mode}`}>{modeLabel(data.mode)}</small>{selected && <small>Current table</small>}</strong><span>{chips(data.view.configuration.smallBlind)} / {chips(data.view.configuration.bigBlind)} blinds · {data.view.history.filter(h => h.result).length} {data.view.history.filter(h => h.result).length === 1 ? 'hand' : 'hands'} completed</span><span className="saved-table-state">{data.view.state.status === 'active-hand' ? 'Hand in progress' : 'Between hands'}{participant?.seat != null ? ` · Your stack ${chips(participant.stack)}` : data.mode === 'online' && ' · Watching'}</span></span><span className="resume-label">Continue <Icon name="arrow" size={17} /></span></button></li>;
+/** An owned table the Guest left: it keeps running without them, and opening it returns them without the Join Link. */
+function LeftTable({ saved, busy, returnToTable }: { saved: ReadableSavedTable; busy: boolean; returnToTable: () => void }) {
+  return <li className="saved-table"><button onClick={returnToTable} disabled={busy}><SavedTableCopy saved={saved} tag="You left" state={` · ${saved.playState.seatedParticipants} seated · It keeps running while you’re away`} /><span className="resume-label">Return to table <Icon name="arrow" size={17} /></span></button></li>;
+}
+
+function SavedTableRow({ saved, selected, open }: { saved: ReadableSavedTable; selected: boolean; open: () => void }) {
+  const stack = saved.playState.viewerStack;
+  return <li className="saved-table"><button onClick={open}><SavedTableCopy saved={saved} tag={selected ? 'Current table' : undefined} state={stack !== undefined ? ` · Your stack ${chips(stack)}` : saved.mode === 'online' ? ' · Watching' : ''} /><span className="resume-label">Continue <Icon name="arrow" size={17} /></span></button></li>;
 }
 
 /** Online creation: the table size up front, everything else under progressive disclosure. */

@@ -11,7 +11,6 @@ import { and, eq } from 'drizzle-orm';
 import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinOutcome, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
-import { savedTables } from './membership.js';
 import { upgradeTableSession } from './aggregate.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
@@ -201,7 +200,7 @@ export async function createServer(options: ServerOptions) {
   app.get('/api/table-sessions', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
-    try { return { tables: await savedTables(db, userId) }; }
+    try { return { tables: await mutations.savedTables(userId) }; }
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
   });
   app.get<{ Params: { token: string } }>('/api/join-links/:token', async (request, reply) => {

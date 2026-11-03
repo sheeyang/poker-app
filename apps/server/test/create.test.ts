@@ -116,7 +116,7 @@ test('a supplied observer or Participant identity cannot authorize reading anoth
 test('the local identity can discover only its owned Table Sessions for reopen', async () => {
   const response = await fetch(base + '/api/table-sessions', { headers: { cookie } });
   expect(response.status).toBe(200);
-  expect((await response.json()).tables).toContainEqual({ tableSessionId, mode: 'practice' });
+  expect((await response.json()).tables).toContainEqual(expect.objectContaining({ tableSessionId, mode: 'practice' }));
   const identity = await fetch(base + '/api/identity');
   const otherCookie = identity.headers.get('set-cookie')!.split(';')[0]!;
   const other = await fetch(base + '/api/table-sessions', { headers: { cookie: otherCookie } });
