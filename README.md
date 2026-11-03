@@ -16,6 +16,19 @@ initialization is required.
 Keep the terminal running. Ctrl+C stops the development processes; database data
 persists in the ignored `.local/postgres` directory.
 
+### Online Tables (beta)
+
+Online Tables, where friends join through a link, are in beta and off by default.
+To enable them, set `POKER_ONLINE_PLAY` to `true` before starting the server:
+
+```powershell
+$env:POKER_ONLINE_PLAY = 'true'
+pnpm dev:trainer
+```
+
+On a hosted server, set `POKER_ONLINE_PLAY: 'true'` in `deploy/compose.yaml` and
+release (see the [deployment guide](docs/deployment_guide.md)).
+
 ## Checks
 
 ```powershell
