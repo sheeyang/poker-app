@@ -125,8 +125,10 @@ ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
 Participants, occupied/invalid seats, duplicate seating, and invalid buy-ins.
 Seating is accepted during an active Hand; the newcomer is dealt in from the
 next Hand. See
-[`validation.ts`](../apps/server/src/validation.ts) and
-[`mutations.ts`](../apps/server/src/mutations.ts) for validation.
+[`validation.ts`](../apps/server/src/validation.ts),
+[`permissions.ts`](../apps/server/src/permissions.ts) (who may ask for what) and
+[`mutations.ts`](../apps/server/src/mutations.ts) for validation, and
+[`rejections.ts`](../apps/server/src/rejections.ts) for the HTTP status of each rejection.
 
 The Trainer uses the authenticated `GET /api/live` WebSocket with typed
 `subscribe-table` and `unsubscribe-table` messages. Its full-view envelopes,
