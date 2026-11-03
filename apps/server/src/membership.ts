@@ -43,12 +43,13 @@ export async function ownsTable(db: Database, tableSessionId: string, userId: st
   return rows.length > 0;
 }
 /**
- * Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left.
- * An owned table the Guest has left is marked `left`: opening it rejoins them.
+ * Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left, with the Guest's
+ * Participant at each. An owned table the Guest has left is marked `left`: opening it rejoins them. The index has no
+ * seating, so the caller adds each table's public stakes and play state.
  */
-export async function savedTables(db: Database, userId: string): Promise<SavedTable[]> {
-  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
+export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left'> & { participantId: string })[]> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, participantId: tableMemberships.participantId, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
     .where(and(eq(tableMemberships.userId, userId), or(eq(tableMemberships.status, 'joined'), eq(tableSessions.ownerUserId, userId))));
-  return rows.map(row => ({ tableSessionId: row.tableSessionId, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
+  return rows.map(row => ({ tableSessionId: row.tableSessionId, participantId: row.participantId, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
 }

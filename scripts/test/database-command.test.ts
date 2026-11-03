@@ -70,9 +70,18 @@ function launch(directory: string, args: string[], options: { packageScript?: bo
   return { child, done, output: () => output };
 }
 
-async function eventually(condition: () => boolean | Promise<boolean>, message: () => string) {
-  const deadline = Date.now() + 20000;
+/**
+ * Each test and the cleanup hook allow a minute: starting or stopping a nested PostgreSQL cluster (initdb, start,
+ * shutdown) can take tens of seconds on a loaded machine. A wait gives up inside that allowance, so its failure
+ * shows the command's output rather than a bare timeout.
+ */
+const allowanceMs = 60000;
+const waitMs = 45000;
+/** Waits for `condition`. With `command`, a command that exits first fails the wait at once: it can no longer satisfy it. */
+async function eventually(condition: () => boolean | Promise<boolean>, message: () => string, command?: { child: ChildProcess }) {
+  const deadline = Date.now() + waitMs;
   while (!(await condition())) {
+    if (command && (command.child.exitCode !== null || command.child.signalCode !== null) && !(await condition())) throw new Error('The command exited first.\n' + message());
     if (Date.now() > deadline) throw new Error(message());
     await new Promise(resolve => setTimeout(resolve, 50));
   }
@@ -102,12 +111,12 @@ afterEach(async () => {
     if (existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))) throw new Error(`Preserving running database: ${directory}`);
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-});
+}, allowanceMs);
 
 test.skipIf(process.platform === 'win32')('Ctrl+C through the package command stops PostgreSQL and releases ownership while retaining development data', async () => {
   const directory = await checkout();
   const command = launch(directory, [], { packageScript: true, env: { POKER_POSTGRES_PORT: String(await freePort()), PROBE_HOLD: '1' } });
-  await eventually(() => command.output().includes('PROBE:'), command.output);
+  await eventually(() => command.output().includes('PROBE:'), command.output, command);
   await interrupt(command.child);
   // Windows shells can ask this after delivering Ctrl+C to their command tree.
   if (!command.child.stdin!.destroyed) command.child.stdin!.end('Y\n');
@@ -115,7 +124,7 @@ test.skipIf(process.platform === 'win32')('Ctrl+C through the package command st
   await eventually(() => !existsSync(path.join(directory, '.local/postgres/owner.lock')), command.output);
   expect(existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))).toBe(false);
   expect((await readFile(path.join(directory, '.local/postgres/data/PG_VERSION'), 'utf8')).trim()).toBe('18');
-}, 60000);
+}, allowanceMs);
 
 function result(output: string): { url: string; value: number; note: string | null; args: string[] } {
   return JSON.parse(output.match(/PROBE:(.+)/)![1]);
@@ -128,7 +137,7 @@ function temporaryData(output: string) {
 test('test invocations have independent databases, ports, and cleanup lifetimes', async () => {
   const directory = await checkout();
   const first = launch(directory, ['test', '--', 'node', 'probe.mjs'], { env: { PROBE_WRITE: '1', PROBE_HOLD: '1', DATABASE_URL: 'postgresql://unused:unused@127.0.0.1:1/development' } });
-  await eventually(() => first.output().includes('PROBE:'), first.output);
+  await eventually(() => first.output().includes('PROBE:'), first.output, first);
   const second = launch(directory, ['test', '--', 'node', 'probe.mjs']);
   expect(await second.done).toBe(0);
   expect(result(first.output()).note).toBe('startup_note');
@@ -139,7 +148,7 @@ test('test invocations have independent databases, ports, and cleanup lifetimes'
   first.child.stdin!.end();
   expect(await first.done).toBe(0);
   expect(existsSync(temporaryData(first.output()))).toBe(false);
-}, 60000);
+}, allowanceMs);
 
 test('development data survives package command exits and is relative to the checkout', async () => {
   const directory = await checkout();
@@ -153,12 +162,12 @@ test('development data survives package command exits and is relative to the che
   expect(result(second.output()).note).toBe('startup_note');
   expect(existsSync(path.join(directory, '.local/postgres/owner.lock'))).toBe(false);
   expect(existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))).toBe(false);
-}, 60000);
+}, allowanceMs);
 
 test('an explicit test URL takes shell precedence, bypasses local startup, and is left running', async () => {
   const ownerDirectory = await checkout();
   const owner = launch(ownerDirectory, ['test', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1', PROBE_WRITE: '1' } });
-  await eventually(() => owner.output().includes('PROBE:'), owner.output);
+  await eventually(() => owner.output().includes('PROBE:'), owner.output, owner);
   const directory = await checkout();
   await writeFile(path.join(directory, '.env'), 'TEST_DATABASE_URL=postgresql://bad:bad@127.0.0.1:1/not_used\n');
   const url = result(owner.output()).url;
@@ -172,7 +181,7 @@ test('an explicit test URL takes shell precedence, bypasses local startup, and i
   expect(existsSync(path.join(directory, '.local'))).toBe(false);
   owner.child.stdin!.end();
   expect(await owner.done).toBe(0);
-}, 60000);
+}, allowanceMs);
 
 test('unreachable configured URLs fail without starting an embedded fallback', async () => {
   const directory = await checkout();
@@ -181,7 +190,7 @@ test('unreachable configured URLs fail without starting an embedded fallback', a
   expect(command.output()).toContain('embedded fallback is disabled');
   expect(command.output()).not.toContain('PROBE:');
   expect(existsSync(path.join(directory, '.local'))).toBe(false);
-}, 60000);
+}, allowanceMs);
 
 test('an occupied development port fails without taking over its listener or leaving ownership', async () => {
   const directory = await checkout();
@@ -196,7 +205,7 @@ test('an occupied development port fails without taking over its listener or lea
     expect(existsSync(path.join(directory, '.local/postgres/owner.lock'))).toBe(false);
     expect(existsSync(path.join(directory, '.local/postgres/data/PG_VERSION'))).toBe(false);
   } finally { await new Promise<void>(resolve => listener.close(() => resolve())); }
-}, 60000);
+}, allowanceMs);
 
 test('a failed child retains its exit status and arguments while its temporary database is removed', async () => {
   const directory = await checkout();
@@ -204,4 +213,4 @@ test('a failed child retains its exit status and arguments while its temporary d
   expect(await command.done).toBe(37);
   expect(result(command.output()).args).toEqual(['argument with spaces', 'literal-$value']);
   expect(existsSync(temporaryData(command.output()))).toBe(false);
-}, 60000);
+}, allowanceMs);

@@ -2,11 +2,11 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import type { ConcreteAction, ObservableGameView, ObservableTableSession, StrategyDescriptor, TableRuntimeStatus } from '@poker/contracts';
-import { createStrategy, HighestProbabilitySelector } from '@poker/strategies';
+import { createStrategy, HighestProbabilitySelector, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive, type LiveConnection } from './fixtures/online.js';
+import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -20,12 +20,26 @@ const plans: ('fail' | ConcreteAction)[] = [];
 /** Every evaluation the Bot was asked for: its input view and seed. */
 const evaluations: { view: ObservableGameView; seed: string }[] = [];
 const fixture: StrategyDescriptor = { policy: { id: 'fixture', version: 'v1', configuration: {} }, selector: { id: 'highest-probability', version: 'v1', configuration: {} } };
+/** While `holdingAnalysis`, every other Strategy's evaluation (a human's analysis here) waits until `releaseAnalyses()`. */
+let holdingAnalysis = false;
+const heldAnalyses: (() => void)[] = [];
+function releaseAnalyses() { holdingAnalysis = false; for (const resume of heldAnalyses.splice(0)) resume(); }
+function held(strategy: Strategy): Strategy {
+  return { actionSelector: strategy.actionSelector, policy: {
+    checkCompatibility: view => strategy.policy.checkCompatibility(view),
+    evaluate: async (view, options) => {
+      if (holdingAnalysis) await new Promise<void>(resume => { heldAnalyses.push(resume); options.signal?.addEventListener('abort', () => resume(), { once: true }); });
+      return strategy.policy.evaluate(view, options);
+    },
+  } };
+}
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  // Bots act by themselves here, through the controllable fixture Strategy.
-  server = await createServer({ clock, databaseUrl: databaseUrl!, schema,
+  // Bots act by themselves here, through the controllable fixture Strategy. Analysis may run one job at a time and
+  // queue none, so a single held analysis fills the computation it may use.
+  server = await createServer({ clock, databaseUrl: databaseUrl!, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 0, timeoutMs: 60_000 },
     supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
-    strategyFactory: descriptor => descriptor.policy.id !== 'fixture' ? createStrategy(descriptor) : {
+    strategyFactory: descriptor => descriptor.policy.id !== 'fixture' ? held(createStrategy(descriptor)) : {
       policy: {
         checkCompatibility: () => ({ compatible: true }),
         evaluate: (view, execution) => {
@@ -40,7 +54,7 @@ beforeAll(async () => {
     } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
-afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
+afterAll(async () => { releaseAnalyses(); await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 
 async function guest(name: string) {
   const cookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!;
@@ -66,7 +80,7 @@ async function botToAct() {
   const annLive = await connectLive(base, ann, id), benLive = await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: rex, seat: 1 })).status).toBe(200);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 2 })).status).toBe(200);
-  clock.advanceTo((await view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => view())).endsAt);
   await expect.poll(async () => (await view()).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   return { id, ann, annId, rex, ben, view, as, annLive, benLive };
@@ -114,4 +128,25 @@ test('when the retry fails too, the server plays the Bot’s Timeout Action, sit
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
   await expect.poll(() => statuses(t.benLive).at(-1)?.phase).toBe('idle');
   expect((await t.view(t.ben)).runtimeStatus).toEqual({ phase: 'idle' });
+});
+
+test('analysis never delays or fails a Bot decision, even when it fills all the computation analysis may use', async () => {
+  plans.splice(0, Infinity, { type: 'call' }, { type: 'bet', betTo: 60 }); evaluations.length = 0;
+  const t = await botToAct();
+  await expect.poll(async () => (await t.view()).view.state.actorId).toBe(t.annId);
+  // Ann's Live Analysis of her decision is held: it takes the one job analysis may run, and nothing may queue behind it.
+  holdingAnalysis = true;
+  try {
+    const decisionId = (await t.view()).view.state.decisionId!;
+    expect((await post('/api/table-sessions/' + t.id + '/analysis', t.ann, { decisionId, live: true })).status).toBe(200);
+    await expect.poll(() => heldAnalyses.length).toBe(1);
+    expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'check' } })).status).toBe(200);
+    clock.advance(1000);
+    expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'check' } })).status).toBe(200);
+    // Rex's decision runs at once and plays what its Strategy chose: no failure, no Timeout Action, no sit-out.
+    await expect.poll(async () => (await t.view()).view.history[0]!.decisions.at(-1)!.action).toEqual({ participantId: t.rex, action: { type: 'bet', betTo: 60 } });
+    expect(heldAnalyses).toHaveLength(1);
+    expect((await t.view()).pendingChanges).toEqual([]);
+    expect(statuses(t.benLive).some(status => status.phase === 'failed')).toBe(false);
+  } finally { releaseAnalyses(); }
 });

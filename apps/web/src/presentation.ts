@@ -46,12 +46,21 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
 }
 
 /**
- * Whether Deal is available at server time `serverNow`: the latest Hand's payout phase has ended, or no
- * Hand has been paid out under a schedule. Mirrors the server's rule; the server alone decides.
+ * Whether the latest Hand has ended at server time `serverNow`: its payout phase is over, or no Hand has been paid
+ * out under a schedule. Until then the Hand is still in progress for management.
  */
-export function dealOpen(table: ObservableTableSession, serverNow: number): boolean {
+export function payoutEnded(table: ObservableTableSession, serverNow: number): boolean {
   const payout = phasesOf(table).findLast(phase => phase.kind === 'payout');
   return !payout || serverNow >= payout.endsAt;
+}
+
+/**
+ * Whether Deal is available at server time `serverNow`: the latest Hand has ended (`payoutEnded`) and no After-Hand
+ * Request is still waiting. The server applies those in their own commit before it accepts a Deal, so a Deal sent
+ * before the view without them arrives would name a stale revision. Mirrors the server's rule; the server alone decides.
+ */
+export function dealOpen(table: ObservableTableSession, serverNow: number): boolean {
+  return payoutEnded(table, serverNow) && table.pendingChanges.length === 0;
 }
 
 /** The Action Window of the current decision, if the schedule has one. */

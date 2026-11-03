@@ -9,7 +9,7 @@ import { CommandFeedback } from './controls.js';
 import { DisplayNameForm, useDisplayName } from './display-name.js';
 import { canManage, chips, modeLabel, playerName } from './table-model.js';
 import { useSession, type Command } from './session.js';
-import { pendingChangeOf, pendingLabel, selfService } from './self-service.js';
+import { afterHandRequestOf, afterHandRequestLabel, selfService } from './self-service.js';
 import { connectionOf } from './online-status.js';
 import { canRemove, removalTiming } from './removal.js';
 
@@ -52,7 +52,7 @@ export function TableSettings({ table, command, handOpen, close }: { table: Obse
       : <PlayerRow key={binding.participantId} table={table} binding={binding} command={command} handOpen={active} busy={busy} />)}</div>
     {owner && <AddBot table={table} command={command} busy={busy || seatingAll} handOpen={active} />}
     {optionControls(table, active).shown && <TableRules table={table} command={command} editable={optionControls(table, active).editable} busy={busy} />}
-    {owner && <details className="settings-section"><summary>Next dealer button</summary><form className="inline-form" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); command.submit({ kind: 'manage', operation: 'set-button', tableId: table.tableSessionId, body: { ...metadata(), seat: Number(data.get('buttonSeat')) } }); }}><label>Seat<select name="buttonSeat" defaultValue={table.view.state.buttonSeat} disabled={disabled}>{table.view.state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).map(p => <option key={p.seat} value={p.seat!}>{p.seat} · {playerName(table, table.bindings.find(b => b.participantId === p.participantId)!)}</option>)}</select></label><button disabled={disabled}>Set button</button></form></details>}
+    {owner && !online && <details className="settings-section"><summary>Next dealer button</summary><form className="inline-form" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); command.submit({ kind: 'manage', operation: 'set-button', tableId: table.tableSessionId, body: { ...metadata(), seat: Number(data.get('buttonSeat')) } }); }}><label>Seat<select name="buttonSeat" defaultValue={table.view.state.buttonSeat} disabled={disabled}>{table.view.state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).map(p => <option key={p.seat} value={p.seat!}>{p.seat} · {playerName(table, table.bindings.find(b => b.participantId === p.participantId)!)}</option>)}</select></label><button disabled={disabled}>Set button</button></form></details>}
     <section className="settings-section"><h3>Presentation</h3><label className="check-label"><input type="checkbox" checked={animations} onChange={e => setAnimations(e.target.checked)} />Card animations</label></section>
     <details className="settings-section"><summary>Your name{displayName ? ` · ${displayName}` : ''}</summary><p className="muted">Applies to tables you create or join from now on, not this one.</p><DisplayNameForm current={displayName} /></details>
     <details className="settings-section"><summary>Session details</summary><label>Table Session ID<input readOnly value={table.tableSessionId} onFocus={e => e.target.select()} /></label><p className="muted">Your table is also in your saved tables.</p></details>
@@ -62,18 +62,30 @@ export function TableSettings({ table, command, handOpen, close }: { table: Obse
 
 /** Another human Participant: visible to everyone, controllable only by their own Guest. The Table Owner can remove them. */
 function PlayerRow({ table, binding, command, handOpen, busy }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; handOpen: boolean; busy: boolean }) {
-  const [confirming, setConfirming] = useState(false);
   const p = table.view.state.participants.find(p => p.participantId === binding.participantId);
-  const pending = pendingChangeOf(table, binding.participantId);
+  const pending = afterHandRequestOf(table, binding.participantId);
   const connection = connectionOf(table, binding.participantId);
   const timing = removalTiming(handOpen);
-  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span>
-    {canRemove(table, binding) && (confirming
-      ? <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
-        <p className="muted">{binding.name} can’t join this table again, even with a new Join Link. {timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}</p>
-        <div className="button-row"><button className="leave-button" disabled={busy} onClick={() => { setConfirming(false); command.submit({ kind: 'manage', operation: 'remove-participant', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: binding.participantId } }); }}>Remove {binding.name}</button><button onClick={() => setConfirming(false)}>Keep {binding.name}</button></div>
-      </div>
-      : <button className="leave-button" disabled={busy} onClick={() => setConfirming(true)}>Remove from table</button>)}
+  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span>
+    {canRemove(table, binding) && <ConfirmedRemoval table={table} binding={binding} command={command} busy={busy} operation="remove-participant" label="Remove from table"
+      explanation={`${binding.name} can’t join this table again, even with a new Join Link. ${timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}`} />}
+  </div>;
+}
+
+/**
+ * A Removal the owner confirms first, of a Guest (`remove-participant`) or of a Bot (`remove-bot`): the confirmation
+ * says what will happen, Remove sends it, and Keep closes it. `row` puts the first button in a button row.
+ */
+function ConfirmedRemoval({ table, binding, command, busy, operation, label, explanation, row = false }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; busy: boolean; operation: 'remove-participant' | 'remove-bot'; label: string; explanation: string; row?: boolean }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    const ask = <button className="leave-button" disabled={busy} onClick={() => setConfirming(true)}>{label}</button>;
+    return row ? <div className="button-row">{ask}</div> : ask;
+  }
+  const remove = () => { setConfirming(false); command.submit({ kind: 'manage', operation, tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: binding.participantId } }); };
+  return <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
+    <p className="muted">{explanation}</p>
+    <div className="button-row"><button className="leave-button" disabled={busy} onClick={remove}>Remove {binding.name}</button><button onClick={() => setConfirming(false)}>Keep {binding.name}</button></div>
   </div>;
 }
 
@@ -93,11 +105,11 @@ function PlayerSettings({ table, binding, command, handOpen, busy, seating }: { 
   const self = own ? selfService(table, handOpen) : undefined;
   const service = self ?? bot;
   const disabled = handOpen || busy;
-  const pending = pendingChangeOf(table, binding.participantId);
+  const pending = afterHandRequestOf(table, binding.participantId);
   const asking = (availability: 'now' | 'after-hand' | 'unavailable' | undefined) => busy || availability === undefined || availability === 'unavailable';
   const manage = (operation: 'set-sitting-out' | 'stand-up-participant' | 'leave-table', sittingOut?: boolean) => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation, body: operation === 'set-sitting-out' ? { ...metadata(), sittingOut: !!sittingOut } : metadata() });
-  return <details className="player-setting" open={binding.participantId === table.viewerParticipantId && !isSeated && table.mode === 'online'}><summary><span><strong>{playerName(table, binding)}</strong><small>{isSeated ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span><Icon name="chevron" size={17} /></summary><div className="details-content">
-    {pending && <p className="pending-note" role="status">{pendingLabel(pending)}. It happens when this hand ends.</p>}
+  return <details className="player-setting" open={binding.participantId === table.viewerParticipantId && !isSeated && table.mode === 'online'}><summary><span><strong>{playerName(table, binding)}</strong><small>{isSeated ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span><Icon name="chevron" size={17} /></summary><div className="details-content">
+    {pending && <p className="pending-note" role="status">{afterHandRequestLabel(pending)}. It happens when this hand ends.</p>}
     {!isSeated ? <form className="inline-form" onSubmit={e => { e.preventDefault(); if (chosenSeat) command.submit({ tableId: table.tableSessionId, kind: 'seat', body: { ...metadata(), seat: chosenSeat, buyIn: topUp } }); }}><label>Seat<select value={chosenSeat ?? ''} onChange={e => setSeat(e.target.value)} disabled={seating}>{emptySeats.map(s => <option key={s}>{s}</option>)}</select></label><label>Buy-in<input type="number" step="1" min={table.view.configuration.minimumBuyIn} max={max} required value={target} onChange={e => setTarget(e.target.value)} disabled={seating} /></label><button disabled={seating || !chosenSeat}>Take seat</button></form> : <>
       <div className="button-row">{p.sittingOut
         ? <button disabled={asking(service?.resume)} onClick={() => manage('set-sitting-out', false)}>Return to play</button>
@@ -115,13 +127,8 @@ function PlayerSettings({ table, binding, command, handOpen, busy, seating }: { 
 
 /** The owner removes a Bot. It stands up, cashing out, and leaves; a Bot in the Hand goes when the Hand ends. */
 function RemoveBot({ table, binding, command, busy, timing }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; busy: boolean; timing: 'now' | 'after-hand' }) {
-  const [confirming, setConfirming] = useState(false);
-  return confirming
-    ? <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
-      <p className="muted">{timing === 'after-hand' ? `${binding.name} plays out this hand, then stands up and leaves.` : `${binding.name} stands up, cashes out and leaves at once.`} Its name stays taken.</p>
-      <div className="button-row"><button className="leave-button" disabled={busy} onClick={() => { setConfirming(false); command.submit({ kind: 'manage', operation: 'remove-bot', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: binding.participantId } }); }}>Remove {binding.name}</button><button onClick={() => setConfirming(false)}>Keep {binding.name}</button></div>
-    </div>
-    : <div className="button-row"><button className="leave-button" disabled={busy} onClick={() => setConfirming(true)}>{timing === 'after-hand' ? 'Remove Bot after this hand' : 'Remove Bot'}</button></div>;
+  return <ConfirmedRemoval table={table} binding={binding} command={command} busy={busy} operation="remove-bot" row label={timing === 'after-hand' ? 'Remove Bot after this hand' : 'Remove Bot'}
+    explanation={`${timing === 'after-hand' ? `${binding.name} plays out this hand, then stands up and leaves.` : `${binding.name} stands up, cashes out and leaves at once.`} Its name stays taken.`} />;
 }
 
 /** The Table Owner adds a Bot at any time; at a table with a Hand in progress it is dealt in from the next one. */
@@ -135,7 +142,7 @@ function AddBot({ table, command, busy, handOpen }: { table: ObservableTableSess
       const data = new FormData(e.currentTarget), seat = Number(data.get('botSeat'));
       command.submit({ kind: 'add-bot', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, name: String(data.get('botName')), playingStrategy: strategy, buyIn: Number(data.get('botBuyIn')), ...(seat ? { seat } : {}) } });
     }}>
-      <label>Name<input name="botName" defaultValue={suggested} maxLength={64} required disabled={busy} /></label>
+      <label>Name<input name="botName" defaultValue={suggested} maxLength={20} required disabled={busy} /></label>
       <label>Playing Strategy<StrategySelect value={strategy} onChange={setStrategy} disabled={busy} /></label>
       <label>Buy-in<input name="botBuyIn" type="number" step="1" min={configuration.minimumBuyIn} max={configuration.maximumBuyIn} defaultValue={configuration.defaultBuyIn} required disabled={busy} /></label>
       <label>Seat<select name="botSeat" disabled={busy || seats.length === 0}><option value="">First open seat</option>{seats.map(s => <option key={s} value={s}>{s}</option>)}</select></label>

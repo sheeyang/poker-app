@@ -1,5 +1,5 @@
 import type { ObservableTableSession, ParticipantBinding } from '@poker/contracts';
-import { pendingChangeOf } from './self-service.js';
+import { afterHandRequestOf } from './self-service.js';
 import { hasDeparted } from './owner-controls.js';
 
 /**
@@ -9,7 +9,7 @@ import { hasDeparted } from './owner-controls.js';
  */
 export function canRemove(table: ObservableTableSession, binding: ParticipantBinding): boolean {
   return table.viewerParticipantId === table.ownerParticipantId && binding.controller.kind === 'human'
-    && binding.participantId !== table.ownerParticipantId && !hasDeparted(table, binding.participantId) && pendingChangeOf(table, binding.participantId) !== 'remove';
+    && binding.participantId !== table.ownerParticipantId && !hasDeparted(table, binding.participantId) && afterHandRequestOf(table, binding.participantId) !== 'remove';
 }
 
 /** During a Hand, Removal waits for it to end (an After-Hand Request); between Hands it applies at once. */

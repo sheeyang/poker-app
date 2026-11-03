@@ -1,7 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
 import { expect, onTestFinished } from 'vitest';
-import type { ServerLiveMessage } from '@poker/contracts';
+import type { NextHandCountdown, ServerLiveMessage, TableSchedule } from '@poker/contracts';
+
+/**
+ * The Next-Hand Countdown the table has announced, once it has. A connection that makes the table dealable runs
+ * the schedule in the table's own turn, after the subscription is confirmed, and reads never wait for that turn:
+ * a test must wait for the announcement before moving the clock to its expiry.
+ */
+export async function announcedCountdown(read: () => Promise<{ readonly schedule: TableSchedule }>): Promise<NextHandCountdown> {
+  let countdown: NextHandCountdown | undefined;
+  await expect.poll(async () => (countdown = (await read()).schedule.nextHandCountdown)).toBeDefined();
+  return countdown!;
+}
 
 /**
  * One live connection (one device or tab) of a Guest, subscribed to a table through `/api/live`. At an Online

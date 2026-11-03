@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type PendingParticipantChange } from '@poker/contracts';
-import { pendingChangeOf, pendingLabel, selfService } from '../src/self-service.js';
+import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type AfterHandRequest } from '@poker/contracts';
+import { afterHandRequestOf, afterHandRequestLabel, selfService } from '../src/self-service.js';
 
-function table(you: { seat: number | null; sittingOut?: boolean }, pendingChanges: PendingParticipantChange[] = [], allowSeatChanges = true): ObservableTableSession {
+function table(you: { seat: number | null; sittingOut?: boolean }, pendingChanges: AfterHandRequest[] = [], allowSeatChanges = true): ObservableTableSession {
   return {
     tableSessionId: 't', mode: 'online', options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'ann',
     pokerRevision: 1, sessionRevision: 1, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
@@ -41,10 +41,10 @@ describe('the viewer’s own controls', () => {
 
 describe('pending changes shown to the table', () => {
   it('names each change in words everyone can follow', () => {
-    expect(['sit-out', 'stand-up', 'leave-table'].map(change => pendingLabel(change as 'sit-out'))).toEqual(['Sitting out after this hand', 'Standing up after this hand', 'Leaving after this hand']);
+    expect(['sit-out', 'stand-up', 'leave-table'].map(change => afterHandRequestLabel(change as 'sit-out'))).toEqual(['Sitting out after this hand', 'Standing up after this hand', 'Leaving after this hand']);
   });
   it('finds a Participant’s pending change', () => {
     const t = table({ seat: 2 }, [{ participantId: 'ann', change: 'sit-out' }]);
-    expect([pendingChangeOf(t, 'ann'), pendingChangeOf(t, 'you')]).toEqual(['sit-out', undefined]);
+    expect([afterHandRequestOf(t, 'ann'), afterHandRequestOf(t, 'you')]).toEqual(['sit-out', undefined]);
   });
 });

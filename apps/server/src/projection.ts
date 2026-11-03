@@ -1,4 +1,4 @@
-import type { ConcreteAction, ObservableCashGameState, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, TableSchedule } from '@poker/contracts';
+import type { ConcreteAction, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
 import { CashGame, type CashGameEvent } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
@@ -16,16 +16,26 @@ function projectState(state: ObservableCashGameState): ObservableCashGameState {
       returns: state.returns?.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: state.payouts?.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}),
   };
 }
+/** A Strategy descriptor, field by field; each declared configuration is plain data and is copied whole. */
+function projectStrategy(strategy: StrategyDescriptor): StrategyDescriptor {
+  return {
+    policy: { id: strategy.policy.id, version: strategy.policy.version, configuration: structuredClone(strategy.policy.configuration) },
+    selector: { id: strategy.selector.id, version: strategy.selector.version, configuration: structuredClone(strategy.selector.configuration) },
+  };
+}
 export function projectBindings(bindings: readonly ParticipantBinding[]): ParticipantBinding[] {
   return bindings.map(b => ({
     participantId: b.participantId, name: b.name,
-    controller: b.controller.kind === 'human' ? { kind: 'human' } : {
-      kind: 'bot', playingStrategy: {
-        policy: { id: b.controller.playingStrategy.policy.id, version: b.controller.playingStrategy.policy.version, configuration: structuredClone(b.controller.playingStrategy.policy.configuration) },
-        selector: { id: b.controller.playingStrategy.selector.id, version: b.controller.playingStrategy.selector.version, configuration: structuredClone(b.controller.playingStrategy.selector.configuration) },
-      },
-    },
+    controller: b.controller.kind === 'human' ? { kind: 'human' } : { kind: 'bot', playingStrategy: projectStrategy(b.controller.playingStrategy) },
   }));
+}
+/** The Observable Game Configuration, field by field (ADR-0017). */
+export function projectConfiguration(c: ObservableGameConfiguration): ObservableGameConfiguration {
+  return { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges };
+}
+/** The table options, field by field (ADR-0017): a field added to the stored options is never projected by accident. */
+export function projectOptions(options: TableOptions): TableOptions {
+  return { actionTimeLimitSeconds: options.actionTimeLimitSeconds, allowLiveAnalysis: options.allowLiveAnalysis };
 }
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {
@@ -50,24 +60,23 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     game = restored.game;
   }
   const view = game.forParticipant(participantId).getView();
-  const c = view.configuration;
   // Admin Mode is never available at an Online Table, whatever the server allows.
   const inspectable = adminMode && aggregate.mode === 'practice';
   // Humans who left or were removed, and Bots the owner removed: public, so nobody is offered what no longer applies.
   const departed = aggregate.bindings.filter(binding => isHuman(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
   return {
-    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: { ...aggregate.options }, viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectOptions(aggregate.options), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     ...(aggregate.joinToken && viewer.userId === aggregate.ownerUserId ? { joinToken: aggregate.joinToken } : {}),
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
-    trainerConfiguration: structuredClone(viewer.trainerConfiguration),
+    trainerConfiguration: { referenceStrategy: projectStrategy(viewer.trainerConfiguration.referenceStrategy), liveAnalysis: viewer.trainerConfiguration.liveAnalysis },
     schedule: projectSchedule(aggregate.schedule), serverTime,
     pendingChanges: aggregate.pendingChanges.map(entry => ({ participantId: entry.participantId, change: entry.change })),
     ...(aggregate.mode === 'online' ? { connectedParticipantIds: [...connected] } : {}),
     ...(departed.length ? { departedParticipantIds: departed } : {}),
-    inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands() : [] },
+    inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands().map(hand => ({ handId: hand.handId, sequence: hand.sequence })) : [] },
     view: {
-      configuration: { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges },
+      configuration: projectConfiguration(view.configuration),
       state: projectState(view.state),
       history: view.history.map(h => ({ handId: h.handId, description: h.description,
         decisions: h.decisions.map(d => ({ decisionId: d.decisionId, state: projectState(d.state), action: { participantId: d.action.participantId, action: projectAction(d.action.action) } })),

@@ -6,7 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive, type LiveConnection } from './fixtures/online.js';
+import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -146,7 +146,7 @@ test('a Practice Table has no option changes after creation', async () => {
 async function rexToAct(t: Table) {
   const live = await t.connect();
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(t.ann, t.annId, 2);
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   return live;
@@ -242,7 +242,7 @@ test('at an Online Table the owner adds a Bot at any time, and it joins the next
   await botActs(t, { type: 'fold' });
   clock.advanceTo(clock.now() + 2000 + 3000);
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
   const second = await t.view(ben.cookie);
   expect(participant(second, cleoId)).toMatchObject({ inHand: true });
@@ -261,7 +261,10 @@ test('a Bot is added with a unique name, a supported Playing Strategy and a buy-
   await refuse('the owner’s name', { ...cleo, name: 'ann' }, 409, 'name-taken');
   await refuse('another Guest’s name', { ...cleo, name: 'BEN' }, 409, 'name-taken');
   await refuse('a Bot’s name', { ...cleo, name: ' rex ' }, 409, 'name-taken');
-  for (const name of ['', '   ', 'x'.repeat(65), 'Bad\u0007Name', 7]) await refuse('name ' + JSON.stringify(name), { ...cleo, name }, 400, 'invalid-bot-name');
+  // A Bot's name follows the rules for every Participant's name: 1 to 20 letters, digits, spaces or basic punctuation.
+  // An invisible character (a zero-width space, a direction isolate) cannot make a second "Ben" either.
+  const invisible = (codePoint: number) => String.fromCodePoint(codePoint);
+  for (const name of ['', '   ', 'x'.repeat(21), 'Bad\u0007Name', 'Ben' + invisible(0x200b), invisible(0x2066) + 'Ben', 'Bot <1>', 7]) await refuse('name ' + JSON.stringify(name), { ...cleo, name }, 400, 'invalid-bot-name');
   await refuse('an unsupported strategy', { ...cleo, playingStrategy: { policy: { id: 'unknown', version: 'v1', configuration: {} }, selector: baselinePlayingStrategy.selector } }, 400, 'unsupported-strategy');
   await refuse('a buy-in above the limit', { ...cleo, buyIn: 1501 }, 400, 'invalid-buy-in');
   await refuse('a buy-in below the limit', { ...cleo, buyIn: 499 }, 400, 'invalid-buy-in');
@@ -386,7 +389,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   const ben = await t.join('Ben');
   await t.connect(ben.cookie);
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(ben.cookie, ben.participantId, 2);
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   await botActs(t, { type: 'call' });
@@ -397,7 +400,9 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   const annSees = await t.view();
   expect(participant(annSees, ben.participantId)).toMatchObject({ inHand: true, cardCount: 2 });
   expect(participant(annSees, ben.participantId).holeCards).toBeUndefined();
-  expect(JSON.stringify(annSees)).not.toContain(benSees.holeCards![0]!);
+  // A card is a JSON string of its own; its two characters alone can occur inside any identifier.
+  const card = JSON.stringify(benSees.holeCards![0]!);
+  expect(JSON.stringify(annSees)).not.toContain(card);
 
   // Every request that names Ben's Participant is refused for the owner, whatever it asks and whether or not a Hand is on.
   const before = await t.view(ben.cookie);
@@ -422,7 +427,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   // The owner's own summary covers none of Ben's decisions, and nobody inspects a completed Hand at an Online Table.
   expect(await (await post('/api/table-sessions/' + t.id + '/session-summaries', t.ann, {})).json()).toMatchObject({ ok: true, status: 'empty', decisionCount: 0 });
   expect(await refusal(await post('/api/table-sessions/' + t.id + '/inspect-hand', t.ann, { handId: 'hand-1' }))).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
-  expect(JSON.stringify(await t.view())).not.toContain(benSees.holeCards![0]!);
+  expect(JSON.stringify(await t.view())).not.toContain(card);
 });
 
 test('the table view says who has left or been removed, humans and Bots alike', async () => {
@@ -455,7 +460,7 @@ test('Bots added and removed, and their names, survive a restart, and an added B
   await t.connect();
   await t.seat(t.ann, t.annId, 2);
   const cleoId = botOf(before, 'Cleo').participantId;
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
   expect(participant(await t.view(), cleoId)).toMatchObject({ inHand: true });
 });

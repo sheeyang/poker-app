@@ -125,7 +125,10 @@ export interface TableOptions {
 }
 /** Online defaults when creation names no option. */
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
-/** An Online Table holds at most this many joined human Participants. */
+/**
+ * An Online Table holds at most this many Participants: its joined humans, the Bots its owner has not removed, and the
+ * Table Owner's own place, which is held after they leave so that they can always return.
+ */
 export const onlineTableCapacity = 20;
 /** A Guest cannot create a table while they own this many tables that each have a seated human. */
 export const seatedTableLimit = 10;
@@ -214,7 +217,8 @@ export interface JoinLinkPreview {
   readonly ownerName: string;
   readonly configuration: ObservableGameConfiguration;
   readonly options: TableOptions;
-  readonly joinedCount: number;
+  /** How many of the table's `onlineTableCapacity` places are taken (see there). Joining is refused once all are. */
+  readonly placesTaken: number;
   /** The requesting Guest has already joined, so joining returns their own Participant. */
   readonly alreadyJoined: boolean;
   /** The requesting Guest left this table earlier: joining returns them to their Participant under this original name. */
@@ -248,8 +252,26 @@ export type TableMode = 'practice' | 'online';
 /**
  * One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left.
  * `left` marks an owned table the Guest has left; opening it rejoins them without the Join Link.
+ * The table's size, stakes and play state are public facts, so even a Guest who left sees them. They are absent
+ * only while the table cannot be restored.
  */
-export interface SavedTable { readonly tableSessionId: TableSessionId; readonly mode: TableMode; readonly left?: true }
+export interface SavedTable {
+  readonly tableSessionId: TableSessionId;
+  readonly mode: TableMode;
+  readonly left?: true;
+  readonly seatCount?: number;
+  readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly playState?: SavedTablePlayState;
+}
+/** How play stands at a saved table, as everyone there sees it. */
+export interface SavedTablePlayState {
+  readonly status: ObservableCashGameState['status'];
+  /** The Hands completed at the table, whoever played them. */
+  readonly completedHands: number;
+  readonly seatedParticipants: number;
+  /** The Guest's own stack, while their Participant has a Seat. */
+  readonly viewerStack?: ChipAmount;
+}
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
  * What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's
@@ -292,15 +314,31 @@ export interface ActionWindow {
   readonly liveAnalysisDisallowed?: true;
 }
 /**
- * A change to a human Participant that waits for the Hand in progress to end. A weaker request is superseded by a
- * stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a Guest asks for undoes the owner's
- * Removal. Later tickets add the changes the server itself queues.
+ * What an After-Hand Request changes: a change to a Participant that waits for the Hand in progress to end. A weaker
+ * request is superseded by a stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a Guest asks for
+ * undoes the owner's Removal. The server queues sit-outs of its own (an Online Timeout Action, a failed Bot).
  */
-export type PendingChange = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
-/** How strong each change is: a request replaces a pending change of the same Participant only if it is stronger. */
-export const changeStrength: Readonly<Record<PendingChange, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
-/** A pending change, public to everyone at the table. */
-export interface PendingParticipantChange { readonly participantId: ParticipantId; readonly change: PendingChange }
+export type AfterHandRequestKind = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
+/** How strong each kind is: a request replaces a pending one of the same Participant only if it is stronger. */
+export const afterHandRequestStrength: Readonly<Record<AfterHandRequestKind, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
+/** The public facts about a Participant that decide whether they are an Eligible Participant at an Online Table. */
+export interface EligibilityFacts {
+  readonly seat: number | null;
+  readonly stack: ChipAmount;
+  readonly sittingOut: boolean;
+  readonly human: boolean;
+  /** For a human: at least one live connection of their Guest is subscribed to the table. */
+  readonly connected: boolean;
+}
+/** An Eligible Participant: seated with chips, not Sitting Out, and either a Bot or a connected human. */
+export const isEligibleParticipant = (participant: EligibilityFacts): boolean => participant.seat !== null && participant.stack > 0 && !participant.sittingOut && (!participant.human || participant.connected);
+/** Automatic Dealing deals only while at least two Eligible Participants remain, at least one of them human: Bots never play on alone. */
+export function canDealNextHand(participants: readonly EligibilityFacts[]): boolean {
+  const ready = participants.filter(isEligibleParticipant);
+  return ready.length >= 2 && ready.some(participant => participant.human);
+}
+/** An After-Hand Request, public to everyone at the table. The view and the Persisted Table Session list them as `pendingChanges`. */
+export interface AfterHandRequest { readonly participantId: ParticipantId; readonly change: AfterHandRequestKind }
 /**
  * The announced server time at which an Online Table deals its next Hand (Automatic Dealing). When it expires
  * the server rechecks eligibility: it deals if at least two Eligible Participants remain, at least one of them
@@ -342,7 +380,7 @@ export interface ObservableTableSession {
   /** When the server produced this view, so clients can estimate the server clock. */
   readonly serverTime: ServerTime;
   /** Changes asked for during the Hand in progress, applied together when its payout phase ends. Public. */
-  readonly pendingChanges: readonly PendingParticipantChange[];
+  readonly pendingChanges: readonly AfterHandRequest[];
   /**
    * At an Online Table, the human Participants connected to it when the view was produced: their Guest has at least
    * one live connection subscribed to it. Public and transient: it is never persisted and changes no revision, and

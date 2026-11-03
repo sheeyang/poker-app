@@ -7,7 +7,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive } from './fixtures/online.js';
+import { connectLive, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -190,7 +190,7 @@ test('a Practice owner who leaves during a Hand is stood up after it, keeps the 
     // Their client is told once, so it leaves the table instead of showing a view it can no longer refresh.
     await expect.poll(() => messages.filter(message => message.type === 'table-membership-ended')).toEqual([{ type: 'table-membership-ended', tableSessionId: t.id, reason: 'left' }]);
     // The table stays in the saved list of its owner, marked as left; the Bot's seat and the freed Seat stay at the table.
-    expect(await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json()).toEqual({ tables: [{ tableSessionId: t.id, mode: 'practice', left: true }] });
+    expect(await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice', left: true }] });
     const strangerCookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, strangerCookie, 'Stranger');
     const refusedStranger = await fetch(base + '/api/table-sessions/' + t.id + '/rejoin-table', { method: 'POST', headers: { 'content-type': 'application/json', cookie: strangerCookie }, body: JSON.stringify({ requestId: randomUUID() }) });
     expect(refusedStranger.status).toBe(404);
@@ -202,7 +202,9 @@ test('a Practice owner who leaves during a Hand is stood up after it, keeps the 
     expect(participant(back, human)).toMatchObject({ seat: null, stack: 0 });
     expect(back.view.history).toEqual(finished.view.history);
     expect(back.view.history).toHaveLength(1);
-    expect(await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json()).toEqual({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
+    const saved = await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json();
+    expect(saved).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
+    expect(saved.tables[0]).not.toHaveProperty('left');
   } finally { socket.terminate(); }
 });
 
@@ -273,7 +275,7 @@ async function onlineHand() {
   await connectLive(base, ann, id); await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 1 })).status).toBe(200);
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
-  clock.advanceTo((await view(ann)).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => view(ann))).endsAt);
   await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   const cookieOf = (participantId: string) => participantId === annId ? ann : ben;
@@ -283,8 +285,8 @@ async function onlineHand() {
 test('at an Online Table a seated Guest who leaves during a Hand is stood up after it, frees a place, and rejoins through the Join Link as the same Participant with their history', async () => {
   const { ann, ben, id, annId, benId, token, view, join, as, cookieOf } = await onlineHand();
   const watcher = await guest('Cy');
-  const joinedCount = async () => (await (await get('/api/join-links/' + token, watcher)).json()).joinedCount as number;
-  expect(await joinedCount()).toBe(2);
+  const placesTaken = async () => (await (await get('/api/join-links/' + token, watcher)).json()).placesTaken as number;
+  expect(await placesTaken()).toBe(2);
   const asked = await as(ben, 'leave-table', { participantId: benId });
   expect(await asked.json()).toMatchObject({ ok: true, afterHand: true });
   // Everyone at the table sees it coming; nothing has changed yet.
@@ -298,7 +300,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   clock.advance(2000);
   await expect.poll(async () => (await get('/api/table-sessions/' + id, ben)).status).toBe(404);
   expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [] });
-  expect(await joinedCount()).toBe(1);
+  expect(await placesTaken()).toBe(1);
   const after = await view(ann);
   expect(after.pendingChanges).toEqual([]);
   expect(participant(after, benId)).toMatchObject({ seat: null, stack: 0 });
@@ -312,7 +314,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   expect(back.bindings.find(b => b.participantId === benId)).toMatchObject({ name: 'Ben' });
   expect(back.view.history).toEqual(decided.view.history);
   expect(back.view.history).toHaveLength(1);
-  expect(await joinedCount()).toBe(2);
+  expect(await placesTaken()).toBe(2);
 });
 
 test('nobody manages another human, and an owner who leaves keeps their table, which keeps running without them', async () => {
@@ -332,7 +334,7 @@ test('nobody manages another human, and an owner who leaves keeps their table, w
   await expect.poll(async () => (await view(ann)).view.state.status).toBe('completed-hand');
   expect((await as(ann, 'leave-table', { participantId: annId })).status).toBe(200);
   expect((await get('/api/table-sessions/' + id, ann)).status).toBe(404);
-  expect(await (await get('/api/table-sessions', ann)).json()).toEqual({ tables: [{ tableSessionId: id, mode: 'online', left: true }] });
+  expect(await (await get('/api/table-sessions', ann)).json()).toMatchObject({ tables: [{ tableSessionId: id, mode: 'online', left: true }] });
   // The table keeps running, and ownership stays with her.
   const running = await view(ben);
   expect(running.ownerParticipantId).toBe(annId);

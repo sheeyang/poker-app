@@ -1,4 +1,4 @@
-import type { PendingParticipantChange, StrategyDescriptor, TableMode, TableOptions, TableSchedule, TrainerConfiguration } from '@poker/contracts';
+import type { AfterHandRequest, StrategyDescriptor, TableMode, TableOptions, TableSchedule, TrainerConfiguration } from '@poker/contracts';
 import type { TableSessionRecord } from '@poker/engine';
 import { emptySchedule } from './schedule.js';
 /**
@@ -64,7 +64,7 @@ export interface PersistedTableSession {
    * per Participant, in the order first asked. The server applies them all in one committed transition when
    * the Hand's payout phase ends, and clears them in the same transaction.
    */
-  readonly pendingChanges: readonly PendingParticipantChange[];
+  readonly pendingChanges: readonly AfterHandRequest[];
   /**
    * The Action Window most recently closed by its Timeout Action, with the poker revision at which it was open.
    * A late act aimed at that decision (same Participant and expected revision) is then told its deadline passed,
@@ -72,8 +72,6 @@ export interface PersistedTableSession {
    */
   readonly timedOutWindow?: { readonly participantId: string; readonly decisionId: string; readonly deadlineAt: number; readonly pokerRevision: number };
 }
-/** A version-2 aggregate as stored. Rows written before table options, scheduled play or after-Hand requests lack those fields. */
-export type StoredTableSessionV2 = Omit<PersistedTableSession, 'options' | 'schedule' | 'pendingChanges'> & { readonly options?: TableOptions; readonly schedule?: TableSchedule; readonly pendingChanges?: readonly PendingParticipantChange[] };
 /** Written before M4: one owner-human and a table-level Trainer configuration. Read-only. */
 export interface PersistedTableSessionV1 {
   readonly schemaVersion: 1;
@@ -88,21 +86,24 @@ export interface PersistedTableSessionV1 {
   readonly botProvenance?: readonly BotActionProvenance[];
 }
 /** Any version found in `table_sessions.aggregate`. Read it only through `upgradeTableSession`. */
-export type StoredTableSession = PersistedTableSessionV1 | StoredTableSessionV2;
+export type StoredTableSession = PersistedTableSessionV1 | PersistedTableSession;
 /** Version-1 tables are Practice Tables. The membership index backfill in schema.sql relies on this too. */
 export const legacyTableMode: TableMode = 'practice';
 /** Practice Tables have no Action Time Limit unless they ask for one. */
 export const defaultPracticeOptions: TableOptions = { actionTimeLimitSeconds: null, allowLiveAnalysis: true };
 
 /**
- * Upgrades every stored version in memory. The row is rewritten in the current version at its next commit.
- * Version 1 loads as a Practice Table whose joined human takes the table-level Trainer configuration.
- * A table written before scheduled play loads with an empty schedule: its current decision, if any, has no
- * recorded Action Window, so the restoring caller opens one (`mutations.ts` `restorable`).
+ * Upgrades every stored version in memory, or `undefined` for a row that is not one of them. The row is rewritten in
+ * the current version at its next commit. Each version names exactly one format (ADR-0032 on ADR-0014): a version-2
+ * row lacking a part of that format is not guessed at.
+ *
+ * Version 1 loads as a Practice Table whose joined human takes the table-level Trainer configuration. It predates
+ * scheduled play, so it loads with an empty schedule: its current decision, if any, has no recorded Action Window,
+ * and the restoring caller opens one (`mutations.ts` `restorable`).
  */
-export function upgradeTableSession(stored: StoredTableSession): PersistedTableSession {
-  if (stored.schemaVersion === 2) return stored.options && stored.schedule && stored.pendingChanges ? stored as PersistedTableSession
-    : { ...stored, options: stored.options ?? defaultPracticeOptions, schedule: stored.schedule ?? emptySchedule, pendingChanges: stored.pendingChanges ?? [] };
+export function upgradeTableSession(stored: StoredTableSession): PersistedTableSession | undefined {
+  if (stored.schemaVersion === 2) return stored.mode && stored.options && stored.schedule && stored.pendingChanges ? stored : undefined;
+  if (stored.schemaVersion !== 1) return undefined;
   const { trainerConfiguration, ...rest } = stored;
   return {
     ...rest, schemaVersion: 2, mode: legacyTableMode, options: defaultPracticeOptions, schedule: emptySchedule, pendingChanges: [],
@@ -117,3 +118,15 @@ export const humanBindings = (aggregate: PersistedTableSession) => aggregate.bin
 /** The joined, unremoved human Participant whose Human Controller is this Guest. */
 export const memberBinding = (aggregate: PersistedTableSession, userId: string) => humanBindings(aggregate).find(binding => binding.userId === userId && binding.membership === 'joined');
 export const findBinding = (aggregate: PersistedTableSession, participantId: unknown) => aggregate.bindings.find(binding => binding.participantId === participantId);
+/**
+ * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant, every Bot the
+ * owner has not removed, and the Table Owner's own place after they leave, so that they can always return to
+ * manage their table.
+ */
+export function placesTaken(aggregate: PersistedTableSession): number {
+  const humans = humanBindings(aggregate);
+  const joined = humans.filter(binding => binding.membership === 'joined').length;
+  const bots = aggregate.bindings.filter(binding => isBot(binding) && !binding.removed).length;
+  const ownerAway = humans.some(binding => binding.userId === aggregate.ownerUserId && binding.membership !== 'joined');
+  return joined + bots + (ownerAway ? 1 : 0);
+}

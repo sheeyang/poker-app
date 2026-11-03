@@ -37,12 +37,14 @@ need an established Guest identity (401 otherwise):
 
 | Method and path | Request and result |
 | --- | --- |
-| `GET /api/join-links/:token` | What the link shows: `ownerName`, the public `configuration` and `options`, `joinedCount`, and whether the Guest `alreadyJoined`. 404 `invalid-join-link` for an unknown, malformed or replaced token. |
+| `GET /api/join-links/:token` | What the link shows: `ownerName`, the public `configuration` and `options`, `placesTaken` (of the table's 20 places, see `table-full` below), and whether the Guest `alreadyJoined`. 404 `invalid-join-link` for an unknown, malformed or replaced token. |
 | `POST /api/join-links/:token/join` | Requires only `requestId`: the joiner has not seen the table, so there is no expected revision. Joins the Guest as one unseated Participant under their stored display name and returns `{ ok, tableSessionId, participantId, pokerRevision, sessionRevision }`. Joining again, with any request ID, returns the same Participant without another commit, and a Guest who left rejoins as that Participant under the original name. |
 
 Join rejections: 404 `invalid-join-link`; 400 `display-name-required`; 409
 `name-taken` (ignoring case, among all Participants of the table, Bots and departed
-Participants included); 409 `table-full` (20 joined human Participants); 403
+Participants included); 409 `table-full` (all 20 places are taken: by the joined humans, by
+the Bots the owner has not removed, and by the Table Owner, whose place is held after they
+leave so that they can always return); 403
 `guest-removed` (the Table Owner removed this Guest: it also answers the preview, and holds for every Join Link the table has ever had); 409 `request-id-conflict`; 429 `rate-limited` (see [Public hosting safeguards](#public-hosting-safeguards)). Like creation, definitive rejections are
 remembered per request ID, so retry with a new one after fixing the cause. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
@@ -53,8 +55,8 @@ All table paths below start with `/api/table-sessions`:
 | Method and path | Request and result |
 | --- | --- |
 | `POST` to the base path | Refused with 409 `table-limit-reached` while the Guest owns 10 tables that each have a seated human (not remembered, see [Public hosting safeguards](#public-hosting-safeguards)); 429 `rate-limited` when the address is over its limit. Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
-| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left? }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. |
-| `POST /:id/rejoin-table` | Table Owner only: returns the owner to a table they left, without the Join Link, as the same Participant. Requires only `requestId`. Anyone else, left or not, receives 404 `not-found`; a Guest who left a table they do not own rejoins through its Join Link. Same outcome and rejections as a join (`table-full` included). |
+| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
+| `POST /:id/rejoin-table` | Table Owner only: returns the owner to a table they left, without the Join Link, as the same Participant. Requires only `requestId`. Anyone else, left or not, receives 404 `not-found`; a Guest who left a table they do not own rejoins through its Join Link. Same outcome and rejections as a join, except that the owner's held place means the table is never full for them. |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. Only the Table Owner of an Online Table also receives its `joinToken`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: the table leaves their saved list (unless they own it) and a place is freed. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
@@ -89,7 +91,9 @@ allowed to make that request:
   Stand Up, moving, sitting out, top-ups, `set-playing-strategy`, `retry-bot`),
   `set-table-options`, completed-Hand inspection, Removal and replacing the Join Link
   require Table Ownership. Other
-  Participants receive 403 `table-owner-required`.
+  Participants receive 403 `table-owner-required`. At an Online Table Dealing and
+  `set-button` are refused even to the owner (403 `unavailable-at-online-tables`):
+  Automatic Dealing deals each Hand and moves the button.
 
 At a Practice Table the owner is the only human, so neither applies there. Acting
 for a Bot remains the definitive rejection 403 `actor-not-authorized`.
@@ -106,7 +110,10 @@ The Persisted Table Session is version 2. It records the table `mode`, and each
 human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
 configuration, the table `options`, an Online Table's `joinToken`, and the
 `pendingChanges` (after-Hand requests, empty by default). Version-1 records load as Practice Tables whose human takes the
-table-level Trainer configuration, and are rewritten at their next commit. The
+table-level Trainer configuration, and are rewritten at their next commit. Each version names one
+format: a version-2 row that lacks part of it fails restoration (503 `record-restoration-failed`)
+rather than receiving defaults ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)
+on ADR-0014). The
 `table_memberships` index (Guest, table, Participant, status) is written in the
 same transaction as every aggregate write that changes a membership (see
 [`membership.ts`](../apps/server/src/membership.ts)). Startup backfills it for
@@ -118,8 +125,10 @@ ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
 Participants, occupied/invalid seats, duplicate seating, and invalid buy-ins.
 Seating is accepted during an active Hand; the newcomer is dealt in from the
 next Hand. See
-[`validation.ts`](../apps/server/src/validation.ts) and
-[`mutations.ts`](../apps/server/src/mutations.ts) for validation.
+[`validation.ts`](../apps/server/src/validation.ts),
+[`permissions.ts`](../apps/server/src/permissions.ts) (who may ask for what) and
+[`mutations.ts`](../apps/server/src/mutations.ts) for validation, and
+[`rejections.ts`](../apps/server/src/rejections.ts) for the HTTP status of each rejection.
 
 The Trainer uses the authenticated `GET /api/live` WebSocket with typed
 `subscribe-table` and `unsubscribe-table` messages. Its full-view envelopes,
@@ -214,7 +223,7 @@ the owner's Removal, `remove`),
 and every complete view carries them, so everyone at the table sees "leaving after
 this hand". Only the session revision advances; the acknowledgement carries
 `afterHand: true`. A stronger request replaces a weaker pending one
-(`sit-out` < `stand-up` < `leave-table` < `remove`, `changeStrength` in contracts); a weaker or
+(`sit-out` < `stand-up` < `leave-table` < `remove`, `afterHandRequestStrength` in contracts); a weaker or
 equal request, with any request ID, changes nothing. An unseated Participant's
 `leave-table` applies at once, as it needs no Seat. The owner's management of a Bot
 is deferred the same way for two requests: `set-sitting-out` (to `true`) and
@@ -257,12 +266,15 @@ mode. None of this gives the owner any control over, or sight of, another human.
   `seat` and `buyIn`. In one commit it binds a new Bot Participant and seats it (CashGame
   `seat-participant`) at the named open Seat, or the lowest open one, with the buy-in named
   (the table's default otherwise). Hand participants are frozen, so a Bot added during a
-  Hand is dealt in from the next one, with no missed blind. The name is trimmed, 1 to 64
-  characters without control characters, and must differ from every other Participant's,
+  Hand is dealt in from the next one, with no missed blind. The name follows the rules for
+  every Participant's name, a Guest's display name included (trimmed, 1-20 letters, digits,
+  spaces and basic punctuation, so no invisible character can disguise a taken name; Bots
+  named at creation follow them too), and must differ from every other Participant's,
   ignoring case, departed ones included (409 `name-taken`); other rejections are 400
   `invalid-bot-name`, `unsupported-strategy`, `no-empty-seat` and CashGame's `invalid-buy-in`,
-  `seat-occupied` and `invalid-seat`. A Guest who is not the owner receives 403
-  `table-owner-required`.
+  `seat-occupied` and `invalid-seat`. An Online Table whose 20 places are all taken (see
+  `table-full` under [Join Links](#join-links)) takes no more Bots: 409 `table-full`. A Guest
+  who is not the owner receives 403 `table-owner-required`.
 - **`POST /:id/remove-bot`** removes a Bot (`requestId`, `expectedPokerRevision`,
   `participantId`). The Bot stands up, cashing out, and leaves the table; its binding stays
   marked `removed` so its name stays taken and the Hands it played keep their names. A
@@ -335,9 +347,8 @@ After a restart every human counts as disconnected until they reconnect. A human
 who disconnects mid-Hand stays in it, and their Action Deadline keeps running.
 Practice Tables have one human, so their views carry no connection status.
 
-**Bot failures.** At an Online Table a failed Bot decision (a Strategy error,
-timeout or capacity failure, an invalid action, or an action that could not be
-saved) is retried once with identical inputs and seeds. If the retry fails too, a
+**Bot failures.** At an Online Table a failed Bot decision (a Strategy error or
+timeout, an invalid action, or an action that could not be saved) is retried once with identical inputs and seeds. If the retry fails too, a
 `table-status` with `phase: 'failed'` goes to everyone at the table, and the server
 plays the Bot's Timeout Action (`timeout:<decisionId>`, source `server`), which also
 records a `sit-out` after-Hand request for the Bot. The failure stays shown until
@@ -410,7 +421,7 @@ canonical JSON:
 | Joining through a Join Link | `join-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | The owner returning to their table | `rejoin-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
-| Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v1:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `away` (the humans sat out) and `deal` | Table Session and `requestId` |
+| Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v2:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `sittingOut` (the disconnected humans sat out) and `deal` | Table Session and `requestId` |
 | Poker mutation (`add-bot` and `remove-bot` included) | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller, Trainer configuration, Join Link replacement or table options mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
@@ -478,7 +489,9 @@ for the fixture recipe.
 
 The [JobRunner](../apps/server/src/job-runner.ts) defaults to two active jobs,
 sixteen queued jobs, and a ten-second logical timeout. Running work retains
-capacity until it actually settles. Arbitrary CPU backends require an isolated
+capacity until it actually settles. Bot decisions have one more running slot that
+no other work may use, and are admitted however full the queue is, so analysis
+never delays or refuses one: a Bot decision never fails for capacity. Arbitrary CPU backends require an isolated
 execution adapter because timers cannot preempt synchronous JavaScript.
 [ADR-0019](adr/0019-route-computation-through-one-job-runner.md) defines scheduling,
 immutable inputs, and result validity.
