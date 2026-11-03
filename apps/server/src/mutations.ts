@@ -524,7 +524,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * A Bot decision failed. At a Practice Table the failure is shown and recovery is the owner's: Retry, or another
    * Playing Strategy (ADR-0018). At an Online Table it is retried once with identical inputs and seeds (`capture`
    * derives them from the decision). If the retry fails too, the failure is shown to everyone at the table and the
-   * server plays the Bot's Timeout Action, which also sits the Bot out after the Hand (see `accept`).
+   * server plays the Bot's Timeout Action, which also sits the Bot out after the Hand (see `accept`). Capacity is never
+   * one of these failures: the JobRunner always admits a Bot decision and keeps a slot for it (`job-runner.ts`).
    */
   async function botFailed(id: string, pending: { identity: BotIdentity; attempt: number }, code: NonNullable<TableRuntimeStatus['status']['code']>) {
     const session = committed.get(id);

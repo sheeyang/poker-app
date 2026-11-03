@@ -342,9 +342,8 @@ After a restart every human counts as disconnected until they reconnect. A human
 who disconnects mid-Hand stays in it, and their Action Deadline keeps running.
 Practice Tables have one human, so their views carry no connection status.
 
-**Bot failures.** At an Online Table a failed Bot decision (a Strategy error,
-timeout or capacity failure, an invalid action, or an action that could not be
-saved) is retried once with identical inputs and seeds. If the retry fails too, a
+**Bot failures.** At an Online Table a failed Bot decision (a Strategy error or
+timeout, an invalid action, or an action that could not be saved) is retried once with identical inputs and seeds. If the retry fails too, a
 `table-status` with `phase: 'failed'` goes to everyone at the table, and the server
 plays the Bot's Timeout Action (`timeout:<decisionId>`, source `server`), which also
 records a `sit-out` after-Hand request for the Bot. The failure stays shown until
@@ -485,7 +484,9 @@ for the fixture recipe.
 
 The [JobRunner](../apps/server/src/job-runner.ts) defaults to two active jobs,
 sixteen queued jobs, and a ten-second logical timeout. Running work retains
-capacity until it actually settles. Arbitrary CPU backends require an isolated
+capacity until it actually settles. Bot decisions have one more running slot that
+no other work may use, and are admitted however full the queue is, so analysis
+never delays or refuses one: a Bot decision never fails for capacity. Arbitrary CPU backends require an isolated
 execution adapter because timers cannot preempt synchronous JavaScript.
 [ADR-0019](adr/0019-route-computation-through-one-job-runner.md) defines scheduling,
 immutable inputs, and result validity.

@@ -153,26 +153,33 @@ test('a queued trusted poker command supersedes returning Bot work and browser r
 });
 
 test('timeouts retain executing capacity until late work settles, bounded retries queue, and late results cannot act', async () => {
-  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 60 } });
+  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 0, timeoutMs: 60 } });
   let socket: WebSocket | undefined;
   try {
     const t = await f.table(descriptor(), 2); const live = f.connect(t); socket = live.socket; await f.botOnlyDecision(t);
     await expect.poll(() => live.messages.find(m => m.type === 'table-status' && m.status.code === 'timeout')).toBeDefined();
     const old = f.evaluations[0]!; expect(old.signal?.aborted).toBe(true);
+    // The timed-out evaluation still runs, so a retry takes the other slot. Later retries replace one another, and the
+    // latest waits: neither cancelled evaluation has settled, so both keep their slots.
     for (let attempt = 0; attempt < 3; attempt++) expect((await f.configure(t, 'retry-bot')).status).toBe(200);
-    expect(f.evaluations.map(e => e.view.state.decisionId)).toEqual([old.view.state.decisionId]);
+    expect(f.evaluations.map(e => e.view.state.decisionId)).toEqual([old.view.state.decisionId, old.view.state.decisionId]);
     expect(await (await f.submit(t, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
     const other = await f.table(descriptor(), 2); const secondLive = f.connect(other);
     try {
+      // A Bot decision is admitted however full the queue is: it waits its turn, and is never refused for capacity.
       await f.botOnlyDecision(other);
-      await expect.poll(() => secondLive.messages.find(m => m.type === 'table-status' && m.status.code === 'capacity')).toBeDefined();
+      await expect.poll(() => secondLive.messages.find(m => m.type === 'table-status' && m.status.phase === 'thinking')).toBeDefined();
       expect(await f.read(other)).toMatchObject({ pokerRevision: 3 });
-      f.answerNext(answer({ type: 'fold' }));
-      old.result.resolve(answer({ type: 'check' })); await expect.poll(() => f.evaluations.length).toBe(2);
-      const fresh = f.evaluations[1]!; expect(fresh.seed).toBe(old.seed);
+      expect(f.evaluations).toHaveLength(2);
+      f.answerNext(answer({ type: 'fold' })); f.answerNext(answer({ type: 'fold' }));
+      old.result.resolve(answer({ type: 'check' })); await expect.poll(() => f.evaluations.length).toBe(4);
+      const fresh = f.evaluations[2]!; expect(fresh.seed).toBe(old.seed);
+      expect(other.bots).toContain(f.evaluations[3]!.view.state.actorId);
       await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(4);
       expect(await f.read(t)).toMatchObject({ view: { state: { status: 'completed-hand' } } });
       expect((await f.commands.readPersistedSession(t.id))?.pokerRecord.commands[3]).toEqual({ type: 'act', participantId: t.bot, action: { type: 'fold' } });
+      await expect.poll(async () => (await f.read(other)).pokerRevision).toBe(4);
+      expect(secondLive.messages.some(m => m.type === 'table-status' && m.status.code === 'capacity')).toBe(false);
     } finally { secondLive.socket.terminate(); }
   } finally { socket?.terminate(); await f.close(); }
 });
@@ -404,8 +411,8 @@ test('a controller change queued ahead of a returning action promotes only after
   } finally { release.resolve(); await changing?.catch(() => {}); socket?.terminate(); await f.close(); }
 });
 
-test('waiting Bot decisions run FIFO ahead of earlier interactive inspection without preempting work or exceeding shared admission', async () => {
-  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 3, timeoutMs: 30000 } });
+test('Bot decisions have a slot of their own and run FIFO ahead of earlier interactive inspection, without preempting work or exceeding admission', async () => {
+  const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 } });
   try {
     const completed = await f.table();
     await f.command(completed, 'seat-participant', { participantId: completed.human, seat: 1 });
@@ -414,32 +421,32 @@ test('waiting Bot decisions run FIFO ahead of earlier interactive inspection wit
     await f.command(completed, 'act', { participantId: completed.human, action: { type: 'fold' } });
     await expect.poll(async () => (await (await f.submit(completed, 'analysis', { decisionId: 'hand-1/decision-1' })).json()).status).toBe('complete');
     const beforeInspection = await f.read(completed);
+    // One Bot decision takes the slot all computation shares; the next takes the one reserved for Bot decisions.
     const running = await f.table(descriptor(), 2); await f.botOnlyDecision(running);
-    await expect.poll(() => f.evaluations.length).toBe(1);
-    let inspectionFinished = false;
-    const inspection = f.submit(completed, 'inspect-hand', { handId: 'hand-1' }).then(response => { inspectionFinished = true; return response; });
     const first = await f.table(descriptor(), 2); await f.botOnlyDecision(first);
-    const second = await f.table(descriptor(), 2); await f.botOnlyDecision(second);
-    expect(await (await f.submit(completed, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
-    expect(inspectionFinished).toBe(false);
-    expect(f.evaluations).toHaveLength(1);
-    expect(f.evaluations[0]!.signal?.aborted).toBe(false);
-    f.evaluations[0]!.result.resolve(answer({ type: 'fold' }));
     await expect.poll(() => f.evaluations.length).toBe(2);
     expect(f.evaluations[1]!.view.state.actorId).toBe(first.bot);
-    expect(await f.read(first)).toMatchObject({ pokerRevision: 3, runtimeStatus: { phase: 'thinking' } });
-    expect(inspectionFinished).toBe(false);
-    f.evaluations[1]!.result.resolve(answer({ type: 'fold' }));
-    await expect.poll(() => f.evaluations.length).toBe(3);
-    expect(f.evaluations[2]!.view.state.actorId).toBe(second.bot);
+    let inspectionFinished = false;
+    const inspection = f.submit(completed, 'inspect-hand', { handId: 'hand-1' }).then(response => { inspectionFinished = true; return response; });
+    const second = await f.table(descriptor(), 2); await f.botOnlyDecision(second);
+    // A Bot decision is always admitted; other work only while its own queue has room.
+    expect(await (await f.submit(completed, 'inspect-hand', { handId: 'hand-1' })).json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
     expect(await f.read(second)).toMatchObject({ pokerRevision: 3, runtimeStatus: { phase: 'thinking' } });
     expect(inspectionFinished).toBe(false);
-    f.evaluations[2]!.result.resolve(answer({ type: 'fold' }));
+    expect(f.evaluations).toHaveLength(2);
+    expect(f.evaluations.map(evaluation => evaluation.signal?.aborted)).toEqual([false, false]);
+    // When a slot frees, the waiting Bot decision starts ahead of the inspection asked for before it.
+    f.evaluations[0]!.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(() => f.evaluations.length).toBe(3);
+    expect(f.evaluations[2]!.view.state.actorId).toBe(second.bot);
+    expect(inspectionFinished).toBe(false);
+    f.evaluations[1]!.result.resolve(answer({ type: 'fold' }));
     const response = await inspection;
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ ok: true, tableSessionId: completed.id, hand: { handId: 'hand-1' } });
     // Deals at the other tables moved the clock on; inspection changed nothing at this one.
     expect(await f.read(completed)).toEqual({ ...beforeInspection, serverTime: expect.any(Number) });
+    f.evaluations[2]!.result.resolve(answer({ type: 'fold' }));
     for (const table of [running, first, second]) await expect.poll(async () => (await f.read(table)).pokerRevision).toBe(4);
   } finally {
     for (let remaining = 0; remaining < 3; remaining++) f.answerNext(answer({ type: 'fold' }));
