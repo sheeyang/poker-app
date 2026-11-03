@@ -261,8 +261,10 @@ mode. None of this gives the owner any control over, or sight of, another human.
   `seat` and `buyIn`. In one commit it binds a new Bot Participant and seats it (CashGame
   `seat-participant`) at the named open Seat, or the lowest open one, with the buy-in named
   (the table's default otherwise). Hand participants are frozen, so a Bot added during a
-  Hand is dealt in from the next one, with no missed blind. The name is trimmed, 1 to 64
-  characters without control characters, and must differ from every other Participant's,
+  Hand is dealt in from the next one, with no missed blind. The name follows the rules for
+  every Participant's name, a Guest's display name included (trimmed, 1-20 letters, digits,
+  spaces and basic punctuation, so no invisible character can disguise a taken name; Bots
+  named at creation follow them too), and must differ from every other Participant's,
   ignoring case, departed ones included (409 `name-taken`); other rejections are 400
   `invalid-bot-name`, `unsupported-strategy`, `no-empty-seat` and CashGame's `invalid-buy-in`,
   `seat-occupied` and `invalid-seat`. An Online Table whose 20 places are all taken (see

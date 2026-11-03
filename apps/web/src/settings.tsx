@@ -135,7 +135,7 @@ function AddBot({ table, command, busy, handOpen }: { table: ObservableTableSess
       const data = new FormData(e.currentTarget), seat = Number(data.get('botSeat'));
       command.submit({ kind: 'add-bot', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, name: String(data.get('botName')), playingStrategy: strategy, buyIn: Number(data.get('botBuyIn')), ...(seat ? { seat } : {}) } });
     }}>
-      <label>Name<input name="botName" defaultValue={suggested} maxLength={64} required disabled={busy} /></label>
+      <label>Name<input name="botName" defaultValue={suggested} maxLength={20} required disabled={busy} /></label>
       <label>Playing Strategy<StrategySelect value={strategy} onChange={setStrategy} disabled={busy} /></label>
       <label>Buy-in<input name="botBuyIn" type="number" step="1" min={configuration.minimumBuyIn} max={configuration.maximumBuyIn} defaultValue={configuration.defaultBuyIn} required disabled={busy} /></label>
       <label>Seat<select name="botSeat" disabled={busy || seats.length === 0}><option value="">First open seat</option>{seats.map(s => <option key={s} value={s}>{s}</option>)}</select></label>

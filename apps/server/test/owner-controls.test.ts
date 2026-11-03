@@ -261,7 +261,10 @@ test('a Bot is added with a unique name, a supported Playing Strategy and a buy-
   await refuse('the owner’s name', { ...cleo, name: 'ann' }, 409, 'name-taken');
   await refuse('another Guest’s name', { ...cleo, name: 'BEN' }, 409, 'name-taken');
   await refuse('a Bot’s name', { ...cleo, name: ' rex ' }, 409, 'name-taken');
-  for (const name of ['', '   ', 'x'.repeat(65), 'Bad\u0007Name', 7]) await refuse('name ' + JSON.stringify(name), { ...cleo, name }, 400, 'invalid-bot-name');
+  // A Bot's name follows the rules for every Participant's name: 1 to 20 letters, digits, spaces or basic punctuation.
+  // An invisible character (a zero-width space, a direction isolate) cannot make a second "Ben" either.
+  const invisible = (codePoint: number) => String.fromCodePoint(codePoint);
+  for (const name of ['', '   ', 'x'.repeat(21), 'Bad\u0007Name', 'Ben' + invisible(0x200b), invisible(0x2066) + 'Ben', 'Bot <1>', 7]) await refuse('name ' + JSON.stringify(name), { ...cleo, name }, 400, 'invalid-bot-name');
   await refuse('an unsupported strategy', { ...cleo, playingStrategy: { policy: { id: 'unknown', version: 'v1', configuration: {} }, selector: baselinePlayingStrategy.selector } }, 400, 'unsupported-strategy');
   await refuse('a buy-in above the limit', { ...cleo, buyIn: 1501 }, 400, 'invalid-buy-in');
   await refuse('a buy-in below the limit', { ...cleo, buyIn: 499 }, 400, 'invalid-buy-in');

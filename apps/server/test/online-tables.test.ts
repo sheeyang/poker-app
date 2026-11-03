@@ -77,6 +77,9 @@ test('Online creation defaults to a 30 second Action Time Limit with Live Analys
   // A table's Participants must be distinguishable by name, ignoring case.
   expect(await rejected({ bots: [{ name: 'BEA', playingStrategy: baselinePlayingStrategy }] })).toEqual({ status: 400, code: 'name-taken' });
   expect(await rejected({ bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'rex', playingStrategy: baselinePlayingStrategy }] })).toEqual({ status: 400, code: 'name-taken' });
+  // Bot names follow the same rules as every Participant's name, at creation as later.
+  for (const name of ['x'.repeat(21), 'Bea' + String.fromCodePoint(0x200b), 'Bot <1>'])
+    expect(await rejected({ bots: [{ name, playingStrategy: baselinePlayingStrategy }] })).toEqual({ status: 400, code: 'invalid-creation-settings' });
 });
 
 const join = (token: string, cookie: string, requestId = randomUUID()) => post('/api/join-links/' + encodeURIComponent(token) + '/join', cookie, { requestId });

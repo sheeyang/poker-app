@@ -3,12 +3,21 @@ import { actionTimeLimits, defaultConfiguration, type ApplicationRejection, type
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 /** The key by which two Participant names at one table are the same name, ignoring case. */
 export const nameKey = (name: string) => name.normalize('NFC').toLowerCase();
-/** Trimmed, 1-20 characters: letters, digits, spaces and basic punctuation; no control characters. */
-export function validateDisplayName(value: unknown): { ok: true; displayName: string } | ApplicationRejection {
+/**
+ * Every Participant's name, a Guest's display name or a Bot's: trimmed, 1-20 characters of letters, digits, spaces
+ * and basic punctuation. Control, format and invisible characters are not letters, so no name can look like another.
+ * `undefined` when the value is no such name.
+ */
+export function participantName(value: unknown): string | undefined {
   const name = typeof value === 'string' ? value.trim() : '';
   const length = [...name].length;
-  if (typeof value !== 'string' || length < 1 || length > 20 || !/^[\p{L}\p{N} .,'’\-_!?()]+$/u.test(name))
-    return { ok: false, rejection: { code: 'invalid-display-name', field: 'displayName', message: 'Use 1 to 20 letters, digits, spaces or basic punctuation (. , \' - _ ! ? and parentheses).' } };
+  return length >= 1 && length <= 20 && /^[\p{L}\p{N} .,'’\-_!?()]+$/u.test(name) ? name : undefined;
+}
+/** What a rejected Participant name is told: the rules of `participantName`. */
+export const participantNameRules = 'Use 1 to 20 letters, digits, spaces or basic punctuation (. , \' - _ ! ? and parentheses).';
+export function validateDisplayName(value: unknown): { ok: true; displayName: string } | ApplicationRejection {
+  const name = participantName(value);
+  if (name === undefined) return { ok: false, rejection: { code: 'invalid-display-name', field: 'displayName', message: participantNameRules } };
   return { ok: true, displayName: name };
 }
 export function validateTrainerConfiguration(value: unknown, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
@@ -53,8 +62,8 @@ export function validateCreationRequest(request: CreateTableSessionRequest, supp
     const seatCount = request.configuration?.seatCount ?? defaultConfiguration.seatCount;
     if (request.bots.length > seatCount - 1) return reject('bots', 'Reserve one Participant for the human and at most one Bot per remaining seat.');
     for (const bot of request.bots) {
-      if (!object(bot) || Object.keys(bot).some(key => !['name', 'playingStrategy'].includes(key)) || typeof bot.name !== 'string' || bot.name.trim().length === 0 || bot.name.length > 64)
-        return reject('bots', 'Each Bot requires a name from 1 to 64 characters and a Playing Strategy.');
+      if (!object(bot) || Object.keys(bot).some(key => !['name', 'playingStrategy'].includes(key)) || participantName(bot.name) === undefined)
+        return reject('bots', 'Each Bot requires a name and a Playing Strategy. ' + participantNameRules);
       if (!supportsStrategy(bot.playingStrategy)) return reject('playingStrategy', 'Choose a supported complete Playing Strategy and its declared configuration.');
     }
   }

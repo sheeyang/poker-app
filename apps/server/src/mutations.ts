@@ -15,7 +15,7 @@ import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
-import { nameKey, validateTableOptionChanges, validateTrainerConfiguration } from './validation.js';
+import { nameKey, participantName, participantNameRules, validateTableOptionChanges, validateTrainerConfiguration } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { applyPendingChanges, handInProgress, requestChange, requestedChange } from './after-hand.js';
@@ -823,10 +823,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   case 'add-bot': {
                     // The Bot is bound and seated in one commit, even mid-Hand: Hand participants are frozen, so it is dealt in next Hand.
                     const intent = request as AddBotRequest;
-                    const name = typeof intent.name === 'string' ? intent.name.trim() : '';
+                    const name = participantName(intent.name);
                     const invalid = (code: string, field: string, message: string) => ({ ok: false as const, rejection: { code, field, message } });
                     if (session.aggregate.mode === 'online' && placesTaken(session.aggregate) >= onlineTableCapacity) return tableFull('Remove a Bot, or wait for someone to leave, before adding another.');
-                    if (!name || [...name].length > 64 || /\p{Cc}/u.test(name)) return invalid('invalid-bot-name', 'name', 'A Bot’s name has 1 to 64 characters and no control characters.');
+                    if (name === undefined) return invalid('invalid-bot-name', 'name', participantNameRules);
                     if (!supportsStrategy(intent.playingStrategy)) return invalid('unsupported-strategy', 'playingStrategy', 'Choose a supported complete Playing Strategy.');
                     if (session.aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(name))) return invalid('name-taken', 'name', 'Someone at this table already uses that name, ignoring case. Choose a different name for the Bot.');
                     const { configuration, state } = working.forParticipant(session.aggregate.bindings[0]!.participantId).getView();
