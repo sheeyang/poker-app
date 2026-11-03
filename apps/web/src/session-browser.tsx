@@ -64,7 +64,7 @@ function SavedTableCopy({ saved, tag, state }: { saved: ReadableSavedTable; tag?
 
 /** An owned table the Guest left: it keeps running without them, and opening it returns them without the Join Link. */
 function LeftTable({ saved, busy, returnToTable }: { saved: ReadableSavedTable; busy: boolean; returnToTable: () => void }) {
-  return <li className="saved-table"><button onClick={returnToTable} disabled={busy}><SavedTableCopy saved={saved} tag="You left" state={` · ${saved.playState.seatedParticipants} seated · It keeps running while you’re away`} /><span className="resume-label">Return to table <Icon name="arrow" size={17} /></span></button></li>;
+  return <li className="saved-table"><button onClick={returnToTable} disabled={busy}><SavedTableCopy saved={saved} tag="You left" state={` · ${saved.playState.seatedParticipants} seated · It keeps running without you`} /><span className="resume-label">Return to table <Icon name="arrow" size={17} /></span></button></li>;
 }
 
 function SavedTableRow({ saved, selected, open }: { saved: ReadableSavedTable; selected: boolean; open: () => void }) {

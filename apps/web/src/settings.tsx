@@ -9,7 +9,7 @@ import { CommandFeedback } from './controls.js';
 import { DisplayNameForm, useDisplayName } from './display-name.js';
 import { canManage, chips, modeLabel, playerName } from './table-model.js';
 import { useSession, type Command } from './session.js';
-import { pendingChangeOf, pendingLabel, selfService } from './self-service.js';
+import { afterHandRequestOf, afterHandRequestLabel, selfService } from './self-service.js';
 import { connectionOf } from './online-status.js';
 import { canRemove, removalTiming } from './removal.js';
 
@@ -64,10 +64,10 @@ export function TableSettings({ table, command, handOpen, close }: { table: Obse
 function PlayerRow({ table, binding, command, handOpen, busy }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; handOpen: boolean; busy: boolean }) {
   const [confirming, setConfirming] = useState(false);
   const p = table.view.state.participants.find(p => p.participantId === binding.participantId);
-  const pending = pendingChangeOf(table, binding.participantId);
+  const pending = afterHandRequestOf(table, binding.participantId);
   const connection = connectionOf(table, binding.participantId);
   const timing = removalTiming(handOpen);
-  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span>
+  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span>
     {canRemove(table, binding) && (confirming
       ? <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
         <p className="muted">{binding.name} can’t join this table again, even with a new Join Link. {timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}</p>
@@ -93,11 +93,11 @@ function PlayerSettings({ table, binding, command, handOpen, busy, seating }: { 
   const self = own ? selfService(table, handOpen) : undefined;
   const service = self ?? bot;
   const disabled = handOpen || busy;
-  const pending = pendingChangeOf(table, binding.participantId);
+  const pending = afterHandRequestOf(table, binding.participantId);
   const asking = (availability: 'now' | 'after-hand' | 'unavailable' | undefined) => busy || availability === undefined || availability === 'unavailable';
   const manage = (operation: 'set-sitting-out' | 'stand-up-participant' | 'leave-table', sittingOut?: boolean) => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation, body: operation === 'set-sitting-out' ? { ...metadata(), sittingOut: !!sittingOut } : metadata() });
-  return <details className="player-setting" open={binding.participantId === table.viewerParticipantId && !isSeated && table.mode === 'online'}><summary><span><strong>{playerName(table, binding)}</strong><small>{isSeated ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{pending ? ` · ${pendingLabel(pending)}` : ''}</small></span><Icon name="chevron" size={17} /></summary><div className="details-content">
-    {pending && <p className="pending-note" role="status">{pendingLabel(pending)}. It happens when this hand ends.</p>}
+  return <details className="player-setting" open={binding.participantId === table.viewerParticipantId && !isSeated && table.mode === 'online'}><summary><span><strong>{playerName(table, binding)}</strong><small>{isSeated ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span><Icon name="chevron" size={17} /></summary><div className="details-content">
+    {pending && <p className="pending-note" role="status">{afterHandRequestLabel(pending)}. It happens when this hand ends.</p>}
     {!isSeated ? <form className="inline-form" onSubmit={e => { e.preventDefault(); if (chosenSeat) command.submit({ tableId: table.tableSessionId, kind: 'seat', body: { ...metadata(), seat: chosenSeat, buyIn: topUp } }); }}><label>Seat<select value={chosenSeat ?? ''} onChange={e => setSeat(e.target.value)} disabled={seating}>{emptySeats.map(s => <option key={s}>{s}</option>)}</select></label><label>Buy-in<input type="number" step="1" min={table.view.configuration.minimumBuyIn} max={max} required value={target} onChange={e => setTarget(e.target.value)} disabled={seating} /></label><button disabled={seating || !chosenSeat}>Take seat</button></form> : <>
       <div className="button-row">{p.sittingOut
         ? <button disabled={asking(service?.resume)} onClick={() => manage('set-sitting-out', false)}>Return to play</button>

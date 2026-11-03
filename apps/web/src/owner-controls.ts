@@ -1,5 +1,5 @@
-import { changeStrength, type ObservableTableSession, type ParticipantBinding, type PendingChange, type TableOptionChanges } from '@poker/contracts';
-import { pendingChangeOf, type Availability } from './self-service.js';
+import { afterHandRequestStrength, type ObservableTableSession, type ParticipantBinding, type AfterHandRequestKind, type TableOptionChanges } from '@poker/contracts';
+import { afterHandRequestOf, type Availability } from './self-service.js';
 
 /**
  * The Table Owner's controls, as pure functions of the committed table: the Trainer shows what the server will
@@ -59,8 +59,8 @@ export function botControls(table: ObservableTableSession, participantId: string
   if (hasDeparted(table, participantId)) return none;
   const bot = table.view.state.participants.find(p => p.participantId === participantId);
   const seated = bot?.seat != null;
-  const pending = pendingChangeOf(table, participantId);
-  const asks = (change: PendingChange) => !pending || changeStrength[pending] < changeStrength[change];
+  const pending = afterHandRequestOf(table, participantId);
+  const asks = (change: AfterHandRequestKind) => !pending || afterHandRequestStrength[pending] < afterHandRequestStrength[change];
   const betweenHands = (available: boolean): Availability => available && !handOpen ? 'now' : 'unavailable';
   return {
     sitOut: !seated || bot.sittingOut || !asks('sit-out') ? 'unavailable' : handOpen ? 'after-hand' : 'now',

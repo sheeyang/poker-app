@@ -127,7 +127,7 @@ export interface TableOptions {
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
 /**
  * An Online Table holds at most this many Participants: its joined humans, the Bots its owner has not removed, and the
- * Table Owner's own place, which is held while they are away so that they can always return.
+ * Table Owner's own place, which is held after they leave so that they can always return.
  */
 export const onlineTableCapacity = 20;
 /** A Guest cannot create a table while they own this many tables that each have a seated human. */
@@ -314,15 +314,15 @@ export interface ActionWindow {
   readonly liveAnalysisDisallowed?: true;
 }
 /**
- * A change to a human Participant that waits for the Hand in progress to end. A weaker request is superseded by a
- * stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a Guest asks for undoes the owner's
- * Removal. Later tickets add the changes the server itself queues.
+ * What an After-Hand Request changes: a change to a Participant that waits for the Hand in progress to end. A weaker
+ * request is superseded by a stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a Guest asks for
+ * undoes the owner's Removal. The server queues sit-outs of its own (an Online Timeout Action, a failed Bot).
  */
-export type PendingChange = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
-/** How strong each change is: a request replaces a pending change of the same Participant only if it is stronger. */
-export const changeStrength: Readonly<Record<PendingChange, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
-/** A pending change, public to everyone at the table. */
-export interface PendingParticipantChange { readonly participantId: ParticipantId; readonly change: PendingChange }
+export type AfterHandRequestKind = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
+/** How strong each kind is: a request replaces a pending one of the same Participant only if it is stronger. */
+export const afterHandRequestStrength: Readonly<Record<AfterHandRequestKind, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
+/** An After-Hand Request, public to everyone at the table. The view and the Persisted Table Session list them as `pendingChanges`. */
+export interface AfterHandRequest { readonly participantId: ParticipantId; readonly change: AfterHandRequestKind }
 /**
  * The announced server time at which an Online Table deals its next Hand (Automatic Dealing). When it expires
  * the server rechecks eligibility: it deals if at least two Eligible Participants remain, at least one of them
@@ -364,7 +364,7 @@ export interface ObservableTableSession {
   /** When the server produced this view, so clients can estimate the server clock. */
   readonly serverTime: ServerTime;
   /** Changes asked for during the Hand in progress, applied together when its payout phase ends. Public. */
-  readonly pendingChanges: readonly PendingParticipantChange[];
+  readonly pendingChanges: readonly AfterHandRequest[];
   /**
    * At an Online Table, the human Participants connected to it when the view was produced: their Guest has at least
    * one live connection subscribed to it. Public and transient: it is never persisted and changes no revision, and

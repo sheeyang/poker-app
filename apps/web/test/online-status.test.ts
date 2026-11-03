@@ -41,7 +41,7 @@ describe('the next Hand at an Online Table, between Hands', () => {
   });
   it('is told in words everyone can follow', () => {
     expect([nextHandLabel({ kind: 'countdown', seconds: 3 }), nextHandLabel({ kind: 'countdown', seconds: 5 }, true), nextHandLabel({ kind: 'countdown', seconds: 0 }), nextHandLabel({ kind: 'soon' }), nextHandLabel({ kind: 'waiting' }), nextHandLabel(undefined)])
-      .toEqual(['Next hand in 3s', 'First hand in 5s', 'Dealing…', 'Next hand coming up', 'Waiting for two players ready to play, one of them a connected person', undefined]);
+      .toEqual(['Next hand in 3s', 'First hand in 5s', 'Dealing…', 'Next hand coming up', 'Waiting for two Participants ready to play, one of them a connected person', undefined]);
   });
   it('says nothing during a Hand or at a Practice Table', () => {
     const playing = table([seated('ann', 1), seated('rex', 2)], ['ann']);

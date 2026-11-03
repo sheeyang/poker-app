@@ -51,7 +51,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         throw new CommitOutcomeUnknown('An earlier creation transaction remains unresolved.');
       }
       // Judged only for a creation that has not happened yet, and not remembered: the same request goes through once a place is free.
-      if (seatedTables(ownerUserId) >= seatedTableLimit) return { ok: false, rejection: { code: 'table-limit-reached', message: `You already own ${seatedTableLimit} tables that have a player seated. Stand everyone up at one of them, or leave it, before creating another.` } };
+      if (seatedTables(ownerUserId) >= seatedTableLimit) return { ok: false, rejection: { code: 'table-limit-reached', message: `You already own ${seatedTableLimit} tables that each have a human Participant seated. Stand everyone up at one of them, or leave it, before creating another.` } };
       return acceptance.run(scope, fingerprint, async (tx): Promise<CreationOutcome> => {
         const rows = await tx.select().from(creationRequests).where(and(eq(creationRequests.userId, ownerUserId), eq(creationRequests.requestId, requestId)));
         const existing = rows[0];

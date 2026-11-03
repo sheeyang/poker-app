@@ -1,4 +1,4 @@
-import { changeStrength, type ParticipantId, type PendingChange, type PendingParticipantChange, type ServerTime, type TableSchedule } from '@poker/contracts';
+import { afterHandRequestStrength, type ParticipantId, type AfterHandRequestKind, type AfterHandRequest, type ServerTime, type TableSchedule } from '@poker/contracts';
 import type { CashGame, CashGameEvent } from '@poker/engine';
 import { beforePayoutEnd } from './schedule.js';
 
@@ -10,14 +10,14 @@ import { beforePayoutEnd } from './schedule.js';
  *
  * The model is a list of `{ participantId, change }` with at most one entry per Participant. A stronger
  * request replaces a weaker one in place; a weaker or equal request changes nothing. Adding a change (the
- * Online timeout and Bot-failure sit-outs, Removal) means adding it to `changeStrength` (in contracts, which
- * the Trainer also reads) and to `applyPendingChanges`, nothing else here.
+ * Online timeout and Bot-failure sit-outs, Removal) means adding it to `afterHandRequestStrength` (in contracts, which
+ * the Trainer also reads) and to `applyAfterHandRequests`, nothing else here.
  */
 /** Records a request, keeping the strongest change per Participant. Returns `pending` itself when nothing changes. */
-export function requestChange(pending: readonly PendingParticipantChange[], participantId: ParticipantId, change: PendingChange): readonly PendingParticipantChange[] {
+export function recordAfterHandRequest(pending: readonly AfterHandRequest[], participantId: ParticipantId, change: AfterHandRequestKind): readonly AfterHandRequest[] {
   const existing = pending.find(entry => entry.participantId === participantId);
   if (!existing) return [...pending, { participantId, change }];
-  if (changeStrength[existing.change] >= changeStrength[change]) return pending;
+  if (afterHandRequestStrength[existing.change] >= afterHandRequestStrength[change]) return pending;
   return pending.map(entry => entry === existing ? { participantId, change } : entry);
 }
 
@@ -31,7 +31,7 @@ export function handInProgress(status: 'between-hands' | 'active-hand' | 'comple
 }
 
 /** The pending change a self-service request becomes during a Hand, or `undefined` when it never waits. */
-export function requestedChange(kind: string, request: object): PendingChange | undefined {
+export function afterHandRequestFor(kind: string, request: object): AfterHandRequestKind | undefined {
   if (kind === 'stand-up-participant') return 'stand-up';
   if (kind === 'leave-table') return 'leave-table';
   if (kind === 'remove-participant') return 'remove';
@@ -45,7 +45,7 @@ export function requestedChange(kind: string, request: object): PendingChange | 
  * accepted events and the Participants whose membership of the table ended: by Leave Table (`left`), or by the
  * owner's Removal (`removed`).
  */
-export function applyPendingChanges(game: CashGame, pending: readonly PendingParticipantChange[]): { events: CashGameEvent[]; left: ParticipantId[]; removed: ParticipantId[] } {
+export function applyAfterHandRequests(game: CashGame, pending: readonly AfterHandRequest[]): { events: CashGameEvent[]; left: ParticipantId[]; removed: ParticipantId[] } {
   const events: CashGameEvent[] = [];
   const left: ParticipantId[] = [];
   const removed: ParticipantId[] = [];

@@ -1,4 +1,4 @@
-import type { PendingParticipantChange, StrategyDescriptor, TableMode, TableOptions, TableSchedule, TrainerConfiguration } from '@poker/contracts';
+import type { AfterHandRequest, StrategyDescriptor, TableMode, TableOptions, TableSchedule, TrainerConfiguration } from '@poker/contracts';
 import type { TableSessionRecord } from '@poker/engine';
 import { emptySchedule } from './schedule.js';
 /**
@@ -64,7 +64,7 @@ export interface PersistedTableSession {
    * per Participant, in the order first asked. The server applies them all in one committed transition when
    * the Hand's payout phase ends, and clears them in the same transaction.
    */
-  readonly pendingChanges: readonly PendingParticipantChange[];
+  readonly pendingChanges: readonly AfterHandRequest[];
   /**
    * The Action Window most recently closed by its Timeout Action, with the poker revision at which it was open.
    * A late act aimed at that decision (same Participant and expected revision) is then told its deadline passed,
@@ -120,7 +120,7 @@ export const memberBinding = (aggregate: PersistedTableSession, userId: string) 
 export const findBinding = (aggregate: PersistedTableSession, participantId: unknown) => aggregate.bindings.find(binding => binding.participantId === participantId);
 /**
  * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant, every Bot the
- * owner has not removed, and the Table Owner's own place while they are away, so that they can always return to
+ * owner has not removed, and the Table Owner's own place after they leave, so that they can always return to
  * manage their table.
  */
 export function placesTaken(aggregate: PersistedTableSession): number {

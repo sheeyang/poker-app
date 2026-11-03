@@ -3,7 +3,7 @@ import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type PendingParticipantChange, type SavedTable, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type AfterHandRequest, type SavedTable, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBinding, type PersistedBotBinding, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
@@ -18,7 +18,7 @@ import type { FrozenScoreSummary } from './summaries.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges, validateTrainerConfiguration } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
-import { applyPendingChanges, handInProgress, requestChange, requestedChange } from './after-hand.js';
+import { applyAfterHandRequests, handInProgress, recordAfterHandRequest, afterHandRequestFor } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
@@ -348,7 +348,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
         if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
         const working = session.game.fork();
-        const applied = applyPendingChanges(working, aggregate.pendingChanges);
+        const applied = applyAfterHandRequests(working, aggregate.pendingChanges);
         events = applied.events;
         const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
           ...(applied.events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
@@ -413,20 +413,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const participants = dealingParticipants(id, session, state);
       const now = clock.now();
       const step = dealingStep({ status: state.status, schedule: aggregate.schedule, pendingChanges: aggregate.pendingChanges.length, participants }, now);
-      const fingerprint = (contents: object) => createHash('sha256').update('next-hand-v1:' + canonical({ sessionRevision: aggregate.sessionRevision, ...contents })).digest('hex');
+      const fingerprint = (contents: object) => createHash('sha256').update('next-hand-v2:' + canonical({ sessionRevision: aggregate.sessionRevision, ...contents })).digest('hex');
       if (step === 'announce') return { requestId: 'countdown:' + aggregate.sessionRevision, fingerprint: fingerprint({ step }), events: [],
         next: { aggregate: { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule: announceNextHand(aggregate.schedule, now) }, game: session.game } };
       if (step !== 'expire') return undefined;
       // Humans still disconnected are sat out first; resuming is theirs to ask for.
       const working = session.game.fork();
-      const away = stillDisconnected(participants);
-      const events: CashGameEvent[] = away.flatMap(participantId => { const result = working.setSittingOut(participantId, true); return result.ok ? result.events : []; });
+      const disconnected = stillDisconnected(participants);
+      const events: CashGameEvent[] = disconnected.flatMap(participantId => { const result = working.setSittingOut(participantId, true); return result.ok ? result.events : []; });
       const dealt = canDeal(participants) ? working.startHand() : undefined;
       const started = dealt?.ok ? dealt.events.find(event => event.type === 'hand-started') : undefined;
       if (dealt?.ok) events.push(...dealt.events);
       const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { pauseBetweenHands: true }) : withoutNextHand(aggregate.schedule);
       const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule, ...(events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}) };
-      return { requestId: started && 'handId' in started ? 'deal:' + started.handId : 'no-deal:' + aggregate.sessionRevision, fingerprint: fingerprint({ step, away, deal: !!started }), events, next: { aggregate: next, game: working } };
+      return { requestId: started && 'handId' in started ? 'deal:' + started.handId : 'no-deal:' + aggregate.sessionRevision, fingerprint: fingerprint({ step, sittingOut: disconnected, deal: !!started }), events, next: { aggregate: next, game: working } };
     });
   }
   /**
@@ -724,22 +724,22 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * ends, as CashGame does mid-Hand. Pending: a human's own sit-out, Stand Up or Leave Table, recorded to apply
      * after the Hand. A Participant who is not seated leaves at once: that needs no Seat and is safe mid-Hand.
      */
-    function duringHand(session: CommittedSession, kind: PokerMutationKind, target: PersistedBinding | undefined, request: PokerMutationRequest, now: number): { rejection: ApplicationRejection } | { pending: readonly PendingParticipantChange[] } | undefined {
+    function duringHand(session: CommittedSession, kind: PokerMutationKind, target: PersistedBinding | undefined, request: PokerMutationRequest, now: number): { rejection: ApplicationRejection } | { pending: readonly AfterHandRequest[] } | undefined {
       if (kind !== 'leave-table' && kind !== 'remove-participant' && kind !== 'remove-bot' && !['stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'].includes(kind)) return undefined;
       const { state } = session.game.forParticipant(session.aggregate.bindings[0]!.participantId).getView();
       if (!handInProgress(state.status, session.aggregate.schedule, now)) return undefined;
       // Removal waits for the Hand whether or not the Guest has a Seat in it, and replaces any weaker pending change.
-      if (kind === 'remove-participant') return { pending: requestChange(session.aggregate.pendingChanges, (request as RemoveParticipantRequest).participantId, 'remove') };
+      if (kind === 'remove-participant') return { pending: recordAfterHandRequest(session.aggregate.pendingChanges, (request as RemoveParticipantRequest).participantId, 'remove') };
       // A Bot with a Seat goes after the Hand; one without has nothing at stake and goes at once.
-      if (kind === 'remove-bot') return state.participants.find(participant => participant.participantId === target?.participantId)?.seat == null ? undefined : { pending: requestChange(session.aggregate.pendingChanges, (request as RemoveBotRequest).participantId, 'remove') };
+      if (kind === 'remove-bot') return state.participants.find(participant => participant.participantId === target?.participantId)?.seat == null ? undefined : { pending: recordAfterHandRequest(session.aggregate.pendingChanges, (request as RemoveBotRequest).participantId, 'remove') };
       const mine = target ? state.participants.find(participant => participant.participantId === target.participantId) : undefined;
       if (kind === 'leave-table' && mine?.seat == null) return undefined;
       // The owner can ask for a Bot's sit-out now too; everything else about a Bot waits for the Hand.
-      const change = isHuman(target) || isBot(target) && kind === 'set-sitting-out' ? requestedChange(kind, request) : undefined;
+      const change = isHuman(target) || isBot(target) && kind === 'set-sitting-out' ? afterHandRequestFor(kind, request) : undefined;
       if (!target || !change) return { rejection: reject('active-hand', 'Manage Participants between Hands.') };
       if (mine?.seat == null) return { rejection: { ok: false, rejection: { code: 'participant-not-seated', message: 'Choose a seated Participant.', field: 'participantId' } } };
       if (kind === 'set-sitting-out' && mine.sittingOut) return { rejection: reject('sitting-out-unchanged', 'This Participant already has the requested sitting-out status.') };
-      return { pending: requestChange(session.aggregate.pendingChanges, target.participantId, change) };
+      return { pending: recordAfterHandRequest(session.aggregate.pendingChanges, target.participantId, change) };
     }
     async function accept(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
         const userId = authority.kind === 'human' ? authority.userId : undefined;
@@ -879,10 +879,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 // The schedule commits with the transition that produced it; Automatic Dealing pauses between Hands.
                 const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { pauseBetweenHands: session.aggregate.mode === 'online' });
                 // At an Online Table a Timeout Action, a human's or a failed Bot's, also sits its Participant out after the Hand.
-                const timedOutAway = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
+                const sitsOutAfterHand = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,
                   ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}), ...(timedOutWindow ? { timedOutWindow } : {}), schedule,
-                  ...(timedOutAway ? { pendingChanges: requestChange(session.aggregate.pendingChanges, timedOutAway, 'sit-out') } : {}),
+                  ...(sitsOutAfterHand ? { pendingChanges: recordAfterHandRequest(session.aggregate.pendingChanges, sitsOutAfterHand, 'sit-out') } : {}),
                   ...(addedBot ? { bindings: [...session.aggregate.bindings, addedBot] } : {}),
                   ...(removedBot ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== removedBot),
                     bindings: session.aggregate.bindings.map(item => isBot(item) && item.participantId === removedBot ? { ...item, removed: true as const } : item) } : {}),
@@ -1050,7 +1050,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (binding?.membership === 'removed') result = removedGuest();
             else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
             else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
-            // The owner's place is held while they are away, so only someone else can find the table full.
+            // The owner's place is held after they leave, so only someone else can find the table full.
             else if (binding?.userId !== aggregate.ownerUserId && placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
             else if (!binding && aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(guest!))) result = reject('name-taken', 'Someone at this table already uses that name, ignoring case. Choose a different display name.');
             if (!result) {

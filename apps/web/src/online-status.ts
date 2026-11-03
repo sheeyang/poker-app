@@ -42,5 +42,5 @@ export function nextHandLabel(status: NextHandStatus, first = false): string | u
   if (!status) return undefined;
   const hand = first ? 'First hand' : 'Next hand';
   if (status.kind === 'countdown') return status.seconds > 0 ? `${hand} in ${status.seconds}s` : 'Dealing…';
-  return status.kind === 'soon' ? `${hand} coming up` : 'Waiting for two players ready to play, one of them a connected person';
+  return status.kind === 'soon' ? `${hand} coming up` : 'Waiting for two Participants ready to play, one of them a connected person';
 }

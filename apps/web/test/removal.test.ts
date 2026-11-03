@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type PendingParticipantChange } from '@poker/contracts';
+import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type AfterHandRequest } from '@poker/contracts';
 import { canRemove, removalTiming } from '../src/removal.js';
-import { pendingLabel, selfService } from '../src/self-service.js';
+import { afterHandRequestLabel, selfService } from '../src/self-service.js';
 
-function table(viewer: 'ann' | 'ben', pendingChanges: PendingParticipantChange[] = []): ObservableTableSession {
+function table(viewer: 'ann' | 'ben', pendingChanges: AfterHandRequest[] = []): ObservableTableSession {
   return {
     tableSessionId: 't', mode: 'online', options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true }, viewerParticipantId: viewer, ownerParticipantId: 'ann',
     pokerRevision: 1, sessionRevision: 1, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
@@ -36,7 +36,7 @@ describe('who can be removed', () => {
 
 describe('a pending Removal', () => {
   it('is named for everyone at the table', () => {
-    expect(pendingLabel('remove')).toBe('Being removed after this hand');
+    expect(afterHandRequestLabel('remove')).toBe('Being removed after this hand');
   });
   it('leaves the removed Guest nothing to ask for: no change of their own outranks it', () => {
     const asked = selfService(table('ben', [{ participantId: 'ben', change: 'remove' }]), true);

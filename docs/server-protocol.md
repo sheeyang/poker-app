@@ -43,8 +43,8 @@ need an established Guest identity (401 otherwise):
 Join rejections: 404 `invalid-join-link`; 400 `display-name-required`; 409
 `name-taken` (ignoring case, among all Participants of the table, Bots and departed
 Participants included); 409 `table-full` (all 20 places are taken: by the joined humans, by
-the Bots the owner has not removed, and by the Table Owner, whose place is held while they are
-away so that they can always return); 403
+the Bots the owner has not removed, and by the Table Owner, whose place is held after they
+leave so that they can always return); 403
 `guest-removed` (the Table Owner removed this Guest: it also answers the preview, and holds for every Join Link the table has ever had); 409 `request-id-conflict`; 429 `rate-limited` (see [Public hosting safeguards](#public-hosting-safeguards)). Like creation, definitive rejections are
 remembered per request ID, so retry with a new one after fixing the cause. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
@@ -221,7 +221,7 @@ the owner's Removal, `remove`),
 and every complete view carries them, so everyone at the table sees "leaving after
 this hand". Only the session revision advances; the acknowledgement carries
 `afterHand: true`. A stronger request replaces a weaker pending one
-(`sit-out` < `stand-up` < `leave-table` < `remove`, `changeStrength` in contracts); a weaker or
+(`sit-out` < `stand-up` < `leave-table` < `remove`, `afterHandRequestStrength` in contracts); a weaker or
 equal request, with any request ID, changes nothing. An unseated Participant's
 `leave-table` applies at once, as it needs no Seat. The owner's management of a Bot
 is deferred the same way for two requests: `set-sitting-out` (to `true`) and
@@ -419,7 +419,7 @@ canonical JSON:
 | Joining through a Join Link | `join-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | The owner returning to their table | `rejoin-table-v1:` | `{ userId }` | Table Session and `requestId` |
 | Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
-| Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v1:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `away` (the humans sat out) and `deal` | Table Session and `requestId` |
+| Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v2:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `sittingOut` (the disconnected humans sat out) and `deal` | Table Session and `requestId` |
 | Poker mutation (`add-bot` and `remove-bot` included) | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller, Trainer configuration, Join Link replacement or table options mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting Guest | Table Session and `requestId` |
 
