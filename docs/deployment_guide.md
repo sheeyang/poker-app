@@ -520,7 +520,9 @@ after [setting your values on the VM](#set-your-values-on-the-vm).
 The server limits table creation, joining and Join Link replacement per client
 address, and only Caddy can tell it a client's address. `deploy/compose.yaml` therefore
 pins the Compose network to `172.29.77.0/24`, gives Caddy the fixed address
-`172.29.77.2`, and passes that same address to the app as `TRUSTED_PROXIES`. The app
+`172.29.77.2`, and passes that same address to the app as `TRUSTED_PROXIES`. Docker
+gives the other containers addresses only from `172.29.77.128/25`, so a container that
+starts before Caddy cannot take Caddy's address. The app
 believes `X-Forwarded-For` only on a connection from Caddy, and Caddy replaces any
 value a client sends with the address it saw, so a client cannot pick its own address
 or dodge a limit by forging a header. Port 3001 is never published; the app is
@@ -529,9 +531,18 @@ other (a test checks they agree). Keep IPv6 off, as section 4 does: connections 
 reach Caddy through Docker's IPv6 port proxy would all appear to come from the
 network gateway and share one limit.
 
-The first release that adds this network settings recreates the Compose network, which
-briefly restarts PostgreSQL, the app and Caddy (the database volume is kept). Ordinary
-releases after that are unaffected. Production turns the limits on by default; set
+A release that changes the network settings recreates the Compose network. Some Compose
+versions then reattach the existing containers without their fixed address or service
+name, so before releasing such a change, stop the stack on the VM:
+
+```bash
+# oracle linux
+sudo -u deploy docker compose --project-directory /opt/poker down
+```
+
+The release then starts every container fresh; the database volume is kept. Production
+stays down from this command until the release finishes. Releases that leave the network
+settings alone are unaffected. Production turns the limits on by default; set
 `POKER_RATE_LIMITS=false` in the app's `environment` only to switch them off.
 
 Online Tables are in beta and off in production: `deploy/compose.yaml` sets
@@ -581,6 +592,7 @@ browsers keep their cookies; the database on the old VM is lost.
 | `Expected one full commit SHA` | The workflow must pass only `$GITHUB_SHA`; nothing else is accepted. |
 | Site unreachable, VM running | Check the DuckDNS IP, the security list (80/443), and the host iptables rule from section 5. |
 | HTTPS certificate errors | Ports 80 and 443 must both be reachable for Let's Encrypt. Check the `caddy` logs (section 9). |
+| Deploy fails with `failed to set up container networking: Address already in use` | Another container holds Caddy's fixed address. Keep `ip_range` in `deploy/compose.yaml` clear of it, [stop the stack](#client-addresses-and-rate-limits), then run Release again. |
 | Authority stays waiting | Another server is holding the authority lock on the same database. Never remove the guard. |
 | Verification times out | Check the `app` logs (section 9) for schema, restoration, or startup errors. No automatic rollback or database reset happens. |
 | Unknown gameplay COMMIT | Use the app's explicit outcome check. See [recovery](server-protocol.md#unknown-commit-resolution). |
