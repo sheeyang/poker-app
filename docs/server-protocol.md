@@ -89,7 +89,9 @@ allowed to make that request:
   Stand Up, moving, sitting out, top-ups, `set-playing-strategy`, `retry-bot`),
   `set-table-options`, completed-Hand inspection, Removal and replacing the Join Link
   require Table Ownership. Other
-  Participants receive 403 `table-owner-required`.
+  Participants receive 403 `table-owner-required`. At an Online Table Dealing and
+  `set-button` are refused even to the owner (403 `unavailable-at-online-tables`):
+  Automatic Dealing deals each Hand and moves the button.
 
 At a Practice Table the owner is the only human, so neither applies there. Acting
 for a Bot remains the definitive rejection 403 `actor-not-authorized`.

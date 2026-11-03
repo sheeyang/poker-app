@@ -116,6 +116,7 @@ function humanMutationDenial(aggregate: PersistedTableSession, requester: Persis
     return undefined;
   }
   if (kind === 'start-hand' && owner && aggregate.mode === 'online') return unavailableOnline('Hands at an Online Table are dealt automatically.');
+  if (kind === 'set-button' && owner && aggregate.mode === 'online') return unavailableOnline('At an Online Table the dealer button moves with Automatic Dealing.');
   if (kind === 'start-hand' || kind === 'set-button' || kind === 'add-bot') return owner ? undefined : ownerRequired();
   const target = findBinding(aggregate, (request as { participantId?: unknown }).participantId);
   if (isHuman(target) && target.participantId !== requester.participantId) return reject('not-your-participant', 'Only its own Human Controller can act for or manage this Participant.');

@@ -258,13 +258,20 @@ test('any Participant takes an empty Seat within the buy-in limits, even during 
   expect((await read(table)).view.state.participants.find(participant => participant.participantId === benParticipant)).toMatchObject({ seat: 3, stack: 200 });
 });
 
-test('Deal and completed-Hand inspection are unavailable at an Online Table, for its owner and its other Participants', async () => {
-  const table = await online(await guest('Ann'));
+test('Deal, choosing the dealer button and completed-Hand inspection are unavailable at an Online Table, for its owner and its other Participants', async () => {
+  const table = await online(await guest('Ann'), { configuration: stakes, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
   const ben = await guest('Ben');
   await join(await tokenOf(table), ben);
   const owner = await refusal(await command(table, table.owner, 'start-hand'));
   expect(owner).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
   expect(await refusal(await command(table, ben, 'start-hand'))).toEqual({ status: 403, code: 'table-owner-required' });
+  // Automatic Dealing moves the button; the owner manages table options, Bots and the Join Link, not the deal.
+  expect((await command(table, table.owner, 'seat-participant', { participantId: table.ownerParticipant, seat: 1 })).status).toBe(200);
+  expect((await command(table, table.owner, 'seat-participant', { participantId: table.bindings[1]!.participantId, seat: 2 })).status).toBe(200);
+  const before = await read(table);
+  expect(await refusal(await command(table, table.owner, 'set-button', { seat: 2 }))).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
+  expect(await refusal(await command(table, ben, 'set-button', { seat: 2 }))).toEqual({ status: 403, code: 'table-owner-required' });
+  expect(await read(table)).toMatchObject({ pokerRevision: before.pokerRevision, view: { state: { buttonSeat: before.view.state.buttonSeat } } });
   expect(await refusal(await post('/api/table-sessions/' + table.id + '/inspect-hand', table.owner, { handId: 'hand-1' }))).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
   expect(await refusal(await post('/api/table-sessions/' + table.id + '/inspect-hand', ben, { handId: 'hand-1' }))).toEqual({ status: 403, code: 'table-owner-required' });
   expect(await refusal(await post('/api/table-sessions/' + table.id + '/inspect-hand', await guest('Cy'), { handId: 'hand-1' }))).toEqual({ status: 404, code: 'not-found' });
