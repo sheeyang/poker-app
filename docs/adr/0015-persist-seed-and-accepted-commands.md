@@ -1,5 +1,7 @@
 # Persist the Master Seed and Accepted Commands
 
+**Amended by [ADR-0032](0032-extend-table-sessions-for-shared-online-play.md):** the seat-change permission can change between Hands through an accepted `set-seat-changes` command, so the record replays it. All other Game Configuration stays fixed for a Table Session's life. M4 upgrades version-1 records when they are loaded: their `leave-participant` commands replay as `stand-up-participant`. This is a convenience, not a compatibility guarantee, and records written since are version 2.
+
 The authoritative Table Session Record will contain version 1 metadata, the complete Game Configuration including its hidden master seed, and the ordered successful Cash Game commands. Each Hand derives an independent seed from the master seed and a stable authoritative Hand sequence, then deterministically shuffles its deck. Shuffled decks, derived Hand seeds, card traces, burn cards, RNG state, rejected commands, and Cash Game events are not separately persisted because they can be reconstructed from the single authoritative record. Research obtains completed-Hand hidden information by replaying that record.
 
 Game Configuration is immutable for the lifetime of a Table Session in M1; different settings require a new Table Session with a newly generated server seed.
