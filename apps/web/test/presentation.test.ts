@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession, type PresentationPhase, type TableSchedule } from '@poker/contracts';
-import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextHandCountdown, nextPresentationChange, presentTable, recordClockSample } from '../src/presentation.js';
+import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextHandCountdown, nextPresentationChange, payoutEnded, presentTable, recordClockSample } from '../src/presentation.js';
 
 const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500 });
 const street = (name: 'flop' | 'turn' | 'river', startsAt: number): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
 const showdown = (startsAt: number, name: 'preflop' | 'flop' | 'turn' | 'river'): PresentationPhase => ({ kind: 'showdown', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
 const payout = (startsAt: number): PresentationPhase => ({ kind: 'payout', handId: 'hand-1', street: 'river', startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
 function table(state: Partial<ObservableCashGameState>, schedule: TableSchedule): ObservableTableSession {
-  return { tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime: 0, schedule, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
+  return { tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime: 0, schedule, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'bot', name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { configuration: { ...defaultConfiguration, seatCount: 2 }, history: [], state: {
       status: 'active-hand', buttonSeat: 1, handId: 'hand-1', street: 'preflop', board: [], pots: [], actorId: 'you', decisionId: 'hand-1/decision-1', legalActions: [{ type: 'fold' }, { type: 'call' }],
@@ -128,6 +128,13 @@ describe('Deal follows the payout phase', () => {
     expect(dealOpen(paid, 4_000)).toBe(false);
     expect(dealOpen(paid, 5_999)).toBe(false);
     expect(dealOpen(paid, 6_000)).toBe(true);
+  });
+  it('stays closed while After-Hand Requests wait, since the server applies them before it accepts a Deal', () => {
+    const waiting = { ...paid, pendingChanges: [{ participantId: 'you', change: 'sit-out' as const }] };
+    expect(dealOpen(waiting, 6_000)).toBe(false);
+    expect(payoutEnded(waiting, 6_000)).toBe(true);
+    // The view that applies them carries none, and Deal opens with it.
+    expect(dealOpen({ ...waiting, pendingChanges: [] }, 6_000)).toBe(true);
   });
   it('is the next presentation change once the payout phase has started', () => {
     expect(nextPresentationChange(paid, 3_999)).toBe(4_000);

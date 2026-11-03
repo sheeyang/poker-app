@@ -23,7 +23,7 @@ export function CommandFeedback({ command }: { command: Command }) {
 /**
  * `actionOpen`: the viewer's Action Window is open now, on the estimated server clock, and its Action Deadline
  * has not been reached. `countdown`: whole seconds left before the acting Participant's Action Deadline, if any.
- * `dealOpen`: the last Hand's payout phase has ended, so Deal (and Rebuy & deal) is available.
+ * `dealOpen`: the last Hand's payout phase has ended and its After-Hand Requests are applied, so Deal (and Rebuy & deal) is available.
  * `nextHand`: between Hands at an Online Table, the Next-Hand Countdown or why there is none.
  */
 export function ActionTray({ table, actionOpen, countdown, dealOpen, nextHand, command, openSettings, review }: { table: ObservableTableSession; actionOpen: boolean; countdown?: number; dealOpen: boolean; nextHand?: NextHandStatus; command: Command; openSettings: () => void; review?: (decisionId?: string) => void }) {

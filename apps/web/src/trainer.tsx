@@ -98,6 +98,6 @@ export function Trainer() {
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
     </main>}
     {joinLinkOpen && current?.joinToken && <JoinLinkDialog table={current} command={command} close={() => setJoinLinkOpen(false)} />}
-    {settings && current && <TableSettings table={current} command={command} handOpen={current.view.state.status === 'active-hand' || presentation?.dealOpen === false} close={() => setSettings(false)} />}
+    {settings && current && <TableSettings table={current} command={command} handOpen={current.view.state.status === 'active-hand' || presentation?.payoutEnded === false} close={() => setSettings(false)} />}
   </div>;
 }
