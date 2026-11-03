@@ -1,20 +1,26 @@
 import { isSupportedStrategy } from '@poker/strategies';
-import { validateCreationRequest } from './validation.js';
+import { nameKey, participantName, validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { defaultConfiguration, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome } from '@poker/contracts';
+import { defaultConfiguration, defaultOnlineActionTimeLimitSeconds, defaultTrainerConfiguration, seatedTableLimit, type CreateTableSessionRequest, type CreationOutcome, type TableOptions } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
-import { creationRequests, tableSessions } from './db/schema.js';
+import { creationRequests, localUsers } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
+import { newJoinToken, writeTableSession } from './membership.js';
+import { emptySchedule } from './schedule.js';
 import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
 export interface CreationTransactionFaults extends AcceptanceFaults { readonly beforeCommit?: () => Promise<void>; readonly afterCommit?: () => Promise<void> }
-export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy) {
+/**
+ * `seatedTables(userId)` is how many tables the Guest owns that have a seated human. Creation is refused while
+ * that is `seatedTableLimit`: one Guest cannot exhaust the single server by seating people at endless tables.
+ */
+export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, seatedTables: (userId: string) => number = () => 0) {
   const queue = new Map<string, Promise<unknown>>();
   return async (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => {
     const prior = queue.get(ownerUserId) ?? Promise.resolve();
@@ -44,26 +50,45 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         }
         throw new CommitOutcomeUnknown('An earlier creation transaction remains unresolved.');
       }
+      // Judged only for a creation that has not happened yet, and not remembered: the same request goes through once a place is free.
+      if (seatedTables(ownerUserId) >= seatedTableLimit) return { ok: false, rejection: { code: 'table-limit-reached', message: `You already own ${seatedTableLimit} tables that each have a human Participant seated. Stand everyone up at one of them, or leave it, before creating another.` } };
       return acceptance.run(scope, fingerprint, async (tx): Promise<CreationOutcome> => {
         const rows = await tx.select().from(creationRequests).where(and(eq(creationRequests.userId, ownerUserId), eq(creationRequests.requestId, requestId)));
         const existing = rows[0];
         if (existing) return existing.fingerprint === fingerprint ? existing.outcome : {
           ok: false, rejection: { code: 'request-id-conflict', message: 'This requestId was already used for different creation contents.' },
         };
-        const created = validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
+        const guest = await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, ownerUserId));
+        const displayName = guest[0]?.displayName;
+        const mode = request.mode ?? 'practice';
+        const created = !displayName ? { ok: false as const, rejection: { code: 'display-name-required', message: 'Choose a display name before creating a table.' } } : validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
+        // At an Online Table everyone is told apart by name, ignoring case, so the owner's name cannot be a Bot's.
+        const names = created.ok ? [displayName, ...(request.bots ?? []).map(bot => participantName(bot.name))].map(name => nameKey(String(name))) : [];
+        const rejection = mode === 'online' && new Set(names).size !== names.length
+          ? { ok: false as const, rejection: { code: 'name-taken', field: 'bots', message: 'Every Participant at an Online Table needs a different name, ignoring case. Rename a Bot.' } } : undefined;
         let outcome: CreationOutcome;
-        if (!created.ok) outcome = { ok: false, rejection: created.rejection };
+        if (rejection) outcome = rejection;
+        else if (!created.ok) outcome = { ok: false, rejection: created.rejection };
         else {
           const tableSessionId = randomUUID();
+          const ownerParticipantId = randomUUID();
           const bindings: PersistedTableSession['bindings'] = [
-            { participantId: randomUUID(), name: 'You', controller: { kind: 'human' }, userId: ownerUserId },
-            ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: b.name, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
+            { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) },
+            ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: participantName(b.name)!, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
           ];
-          const aggregate: PersistedTableSession = {
-            schemaVersion: 1, tableSessionId, ownerUserId, pokerRecord: created.game.toRecord(), bindings,
-            pokerRevision: 0, sessionRevision: 0, adminMode: true, botProvenance: [], trainerConfiguration: structuredClone(defaultTrainerConfiguration),
+          // The Online owner joins unseated, without the Join Link, and observes from creation. A Practice human joins by sitting down.
+          const joined = mode === 'online' ? created.game.joinTable(ownerParticipantId) : undefined;
+          if (joined && !joined.ok) throw new Error('The Online owner could not join their own table.');
+          const options: TableOptions = {
+            actionTimeLimitSeconds: request.options?.actionTimeLimitSeconds !== undefined ? request.options.actionTimeLimitSeconds : mode === 'online' ? defaultOnlineActionTimeLimitSeconds : null,
+            allowLiveAnalysis: request.options?.allowLiveAnalysis ?? true,
           };
-          await tx.insert(tableSessions).values({ id: tableSessionId, ownerUserId, aggregate });
+          const aggregate: PersistedTableSession = {
+            schemaVersion: 2, tableSessionId, ownerUserId, mode, options, ...(mode === 'online' ? { joinToken: newJoinToken() } : {}),
+            pokerRecord: created.game.toRecord(), bindings,
+            pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
+          };
+          await writeTableSession(tx, undefined, aggregate);
           outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };
         }
         await tx.insert(creationRequests).values({ userId: ownerUserId, requestId, fingerprint, outcome });

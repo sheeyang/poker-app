@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -12,7 +17,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -20,15 +25,15 @@ afterAll(async () => {
   await administration.query('DROP SCHEMA "' + schema + '" CASCADE');
   await administration.end();
 });
-async function newTable() {
+async function newTable(botCount = 1) {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const creation = await fetch(base + '/api/table-sessions', {
     method: 'POST', headers: { 'content-type': 'application/json', cookie },
-    body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }),
+    body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: botCount }, (_, index) => ({ name: 'Bot ' + (index + 1), playingStrategy: baselinePlayingStrategy })) }),
   });
   const created = await creation.json();
-  return { cookie, id: created.tableSessionId as string, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+  return { cookie, id: created.tableSessionId as string, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) as string[] };
 }
 type Table = Awaited<ReturnType<typeof newTable>>;
 const submit = (table: Table, body: unknown, cookie = table.cookie) => fetch(base + '/api/table-sessions/' + table.id + '/seat-participant', {
@@ -45,10 +50,27 @@ test('the owner seats a bound Participant durably with both revisions advancing 
   expect(committed).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: table.human, seat: 2, stack: 1000, sittingOut: false }] } } });
   expect(JSON.stringify(committed)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(table)).toEqual(committed);
   expect(await (await submit(table, { requestId: 'human-seat', expectedPokerRevision: 0, participantId: table.human, seat: 2 })).json()).toEqual({ ok: true, tableSessionId: table.id, pokerRevision: 1, sessionRevision: 1 });
+});
+
+test('a Participant seated during a Hand waits for the next Hand to be dealt in', async () => {
+  const table = await newTable(2);
+  const post = async (kind: string, body: object) => fetch(base + '/api/table-sessions/' + table.id + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie: table.cookie }, body: JSON.stringify({ requestId: randomUUID(), expectedPokerRevision: (await read(table)).pokerRevision, ...body }) });
+  await post('seat-participant', { participantId: table.human, seat: 1 }); await post('seat-participant', { participantId: table.bots[0], seat: 2 }); await post('start-hand', {});
+  const response = await post('seat-participant', { participantId: table.bots[1], seat: 4 });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ ok: true, pokerRevision: 4, sessionRevision: 4 });
+  const during = await read(table);
+  expect(during.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', actorId: table.human });
+  expect(during.view.state.participants.find((p: { participantId: string }) => p.participantId === table.bots[1])).toEqual({ participantId: table.bots[1], seat: 4, stack: 1000, sittingOut: false });
+  expect((await post('act', { participantId: table.human, action: { type: 'fold' } })).status).toBe(200);
+  expect((await post('start-hand', {})).status).toBe(200);
+  const next = await read(table);
+  expect(next.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-2' });
+  expect(next.view.state.participants.map((p: { participantId: string; inHand?: boolean }) => [p.participantId, p.inHand ?? false])).toEqual([[table.human, true], [table.bots[0], true], [table.bots[1], true]]);
 });
 
 test('concurrent matching requests seat once and canonical key ordering does not change the fingerprint', async () => {

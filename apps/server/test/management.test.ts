@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -13,13 +18,13 @@ let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(allowSeatChanges = true) {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration: { minimumBuyIn: 100, maximumBuyIn: 2000, allowSeatChanges }, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await response.json();
   return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
@@ -40,7 +45,7 @@ test('owner management commits and retries exactly once through the durable poke
   const t = await completed();
   const initial = await read(t);
   const operations = [
-    ['leave-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2, buyIn: 100 }],
+    ['stand-up-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2, buyIn: 100 }],
     ['top-up-to', { participantId: t.human, targetStack: 1200 }], ['move-participant', { participantId: t.human, seat: 3 }],
     ['set-sitting-out', { participantId: t.bot, sittingOut: true }], ['set-sitting-out', { participantId: t.bot, sittingOut: false }], ['set-button', { seat: 3 }],
   ] as const;
@@ -53,7 +58,7 @@ test('owner management commits and retries exactly once through the durable poke
   const managed = await read(t);
   expect(managed).toMatchObject({ pokerRevision: 11, sessionRevision: 11, view: { state: { buttonSeat: 3, participants: [{ participantId: t.human, seat: 3, stack: 1200 }, { participantId: t.bot, seat: 2, stack: 100 }] } } });
   expect(managed.view.history).toEqual(initial.view.history);
-  await server.close(); server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } }); base = await server.listen({ host: '127.0.0.1', port: 0 });
+  await server.close(); server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } }); base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual(managed);
   expect((await submit(t, 'start-hand', { requestId: 'next', expectedPokerRevision: 11 })).status).toBe(200);
   expect((await read(t)).view.state.buttonSeat).toBe(3);
@@ -63,7 +68,7 @@ test('owner-only management rejects active, stale, unsupported and disabled-poli
   const t = await completed(false);
   const stranger = await table(); const initial = await read(t);
   const commands = [
-    ['leave-participant', { participantId: t.human }], ['move-participant', { participantId: t.human, seat: 2 }],
+    ['stand-up-participant', { participantId: t.human }], ['move-participant', { participantId: t.human, seat: 2 }],
     ['set-sitting-out', { participantId: t.human, sittingOut: true }], ['top-up-to', { participantId: t.human, targetStack: 1200 }], ['set-button', { seat: 4 }],
   ] as const;
   for (const [index, [kind, body]] of commands.entries()) expect((await submit(t, kind, { ...body, requestId: 'foreign-' + index, expectedPokerRevision: 4 }, stranger.cookie)).status).toBe(404);
@@ -79,7 +84,8 @@ test('owner-only management rejects active, stale, unsupported and disabled-poli
   expect((await submit(t, 'set-button', { requestId: 'button', expectedPokerRevision: 4, seat: 1 })).status).toBe(200);
   expect((await submit(t, 'start-hand', { requestId: 'active', expectedPokerRevision: 5 })).status).toBe(200);
   const active = await read(t);
-  for (const [index, [kind, body]] of commands.entries()) {
+  // A human's own Stand Up and sit-out during a Hand are not refused: they are recorded to apply after it (after-hand-requests.test.ts).
+  for (const [index, [kind, body]] of [...commands.entries()].filter(([, [kind]]) => !['stand-up-participant', 'set-sitting-out'].includes(kind))) {
     const request = { ...body, requestId: 'active-' + index, expectedPokerRevision: 6 };
     const rejected = await (await submit(t, kind, request)).json();
     expect(rejected).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
@@ -93,7 +99,7 @@ test('PostgreSQL rollback and held COMMIT withhold management state, identity, h
   const t = await completed();
   const initial = await read(t);
   const operations = [
-    ['leave-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2 }],
+    ['stand-up-participant', { participantId: t.bot }], ['seat-participant', { participantId: t.bot, seat: 2 }],
     ['move-participant', { participantId: t.human, seat: 3 }], ['set-sitting-out', { participantId: t.bot, sittingOut: true }],
     ['top-up-to', { participantId: t.human, targetStack: 1200 }], ['set-button', { seat: 3 }],
   ] as const;

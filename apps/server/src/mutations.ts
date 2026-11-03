@@ -2,49 +2,112 @@ import { createStrategy, isSupportedStrategy, immutableData, type Strategy } fro
 import { JobRunner, type JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
-import { CashGame, deriveSeed, type CashGameEvent } from '@poker/engine';
-import type { ConcreteAction, ObservableGameView, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, LeaveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
-import type { PersistedTableSession, BotActionProvenance } from './aggregate.js';
+import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
-import { creationRequests, processedRequests, tableSessions } from './db/schema.js';
-import { projectTableSession, projectTableUpdate } from './projection.js';
+import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
+import { membership, newJoinToken, ownsTable, savedTableEntries, tableOfJoinLink, writeTableSession } from './membership.js';
+import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
 import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
-import { validateTrainerConfiguration } from './validation.js';
+import { nameKey, participantName, participantNameRules, validateTableOptionChanges, validateTrainerConfiguration } from './validation.js';
+import { systemClock, type ServerClock } from './clock.js';
+import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
+import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
+import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
+import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
+import { invalidJoinLink, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, removedGuest, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
 
-export type AcceptTableJobResult = (tableSessionId: string, ownerUserId: string, accept: () => boolean) => Promise<boolean>;
+/** Accepts a derived job result for a human Participant inside its table's FIFO. */
+export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export class TableSessionRestorationError extends Error {
   constructor() { super('The complete committed Table Session could not be restored.'); }
 }
-export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'leave-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button';
+export type { PokerMutationKind } from './permissions.js';
 /** Internal controller authority. No browser route receives this capability. */
 export interface TableSessionControllerCommands {
   submitAction(tableSessionId: string, request: ActRequest): Promise<MutationOutcome>;
   readPersistedSession(tableSessionId: string): Promise<PersistedTableSession | undefined>;
 }
-type MutationAuthority = { kind: 'human'; userId: string } | { kind: 'bot'; identity?: BotIdentity };
-interface AcceptedHumanIntent { readonly ownerUserId: string; readonly decisionId: string; readonly fingerprint: string }
+/**
+ * A human request carries the server time it was received, which decides Action Window and Action Deadline
+ * timing. `server` is the scheduler itself: it submits Timeout Actions for whoever holds the expired decision.
+ */
+type MutationAuthority = { kind: 'human'; userId: string; receivedAt: number } | { kind: 'bot'; identity?: BotIdentity } | { kind: 'server' };
+interface AcceptedHumanIntent { readonly participantId: string; readonly decisionId: string; readonly fingerprint: string }
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults extends AcceptanceFaults {
   readonly beforeCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
   readonly afterCommit?: (context: { readonly tableSessionId: string; readonly requestId: string }) => Promise<void>;
 }
-const reject = (code: string, message: string): MutationOutcome => ({ ok: false, rejection: { code, message } });
-function applicationRejection(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
-  const commandFields: Record<PokerMutationKind, readonly string[]> = {
-    'seat-participant': ['participantId', 'seat', 'buyIn'], 'start-hand': [], act: ['participantId', 'action'],
-    'leave-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'],
-  };
-  const fields = ['requestId', 'expectedPokerRevision', ...commandFields[kind]];
-  if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
-    return reject('invalid-mutation-request', 'Supply supported mutation fields and a nonnegative expectedPokerRevision.');
+/**
+ * The table's public facts (status, Seats, stacks, sitting out, the Observable Game Configuration), the same from every
+ * Participant's view. They are read from the owner's view, as the owner is always the first binding: the one place
+ * the server reads table-wide facts through a Participant's projection.
+ */
+function publicView(game: CashGame, aggregate: PersistedTableSession) {
+  return game.forParticipant(aggregate.bindings[0]!.participantId).getView();
 }
+/** The public state of the committed table. */
+const tableState = (session: CommittedSession) => publicView(session.game, session.aggregate).state;
+/** The Observable Game Configuration as it stands now: the seat-change permission can change between Hands. */
+const tableConfiguration = (session: CommittedSession) => publicView(session.game, session.aggregate).configuration;
+/** Ends a seated Participant's sit-out between Hands; `undefined` when there is nothing to resume. */
+function resumeFromSittingOut(game: CashGame, participantId: string): CashGameResult | undefined {
+  const { state } = game.forParticipant(participantId).getView();
+  const participant = state.participants.find(candidate => candidate.participantId === participantId);
+  return state.status !== 'active-hand' && participant?.seat != null && participant.sittingOut ? game.setSittingOut(participantId, false) : undefined;
+}
+/**
+ * The Action Time Limit, in ms, that gives this Participant's Action Window an Action Deadline: only a human's,
+ * and only under the table's limit, which every Online Table has. Bots never have one.
+ */
+function actionTimeLimitMs(aggregate: PersistedTableSession, participantId: string): number | undefined {
+  const seconds = aggregate.options.actionTimeLimitSeconds;
+  return seconds !== null && isHuman(findBinding(aggregate, participantId)) ? seconds * 1000 : undefined;
+}
+/**
+ * Whether a human's Action Window opening now captures Live Analysis as disallowed: the table's Allow Live Analysis
+ * at that moment. Bots have no Live Analysis.
+ */
+function liveAnalysisDisallowed(aggregate: PersistedTableSession, participantId: string): true | undefined {
+  return !aggregate.options.allowLiveAnalysis && isHuman(findBinding(aggregate, participantId)) ? true : undefined;
+}
+/**
+ * The decision current after a transition that produced `events` on `game`, with its Action Deadline, if any, and
+ * the table's Allow Live Analysis, which its window captures.
+ */
+function decisionAfter(aggregate: PersistedTableSession, game: CashGame, events: readonly CashGameEvent[]): CurrentDecision {
+  const handEvent = events.findLast(event => 'handId' in event);
+  const hand = handEvent && 'handId' in handEvent ? game.getHand(handEvent.handId) : undefined;
+  return hand?.actorId && hand.decisionId ? { participantId: hand.actorId, decisionId: hand.decisionId, actionTimeLimitMs: actionTimeLimitMs(aggregate, hand.actorId), liveAnalysisDisallowed: liveAnalysisDisallowed(aggregate, hand.actorId) } : null;
+}
+/**
+ * Whether a human act received at `receivedAt` is late: it is for the current window and arrived after its
+ * Action Deadline, or it was aimed at the decision a Timeout Action has since closed.
+ */
+function missedActionDeadline(aggregate: PersistedTableSession, request: ActRequest, receivedAt: number): boolean {
+  const timedOut = aggregate.timedOutWindow;
+  return pastActionDeadline(aggregate.schedule.actionWindow, request.participantId, receivedAt)
+    || timedOut?.pokerRevision === request.expectedPokerRevision && pastActionDeadline(timedOut, request.participantId, receivedAt);
+}
+/** Scheduled work that could not be saved (a Timeout Action, a step of Automatic Dealing) is tried again after this long. */
+const timeoutRetryMs = 1000;
+/** A request ID the scheduler may not reuse: its attempt proved never to have committed, or the table has moved on. */
+const retiredRequestId = (outcome: MutationOutcome) => !outcome.ok && ['commit-not-applied', 'request-id-conflict'].includes(outcome.rejection.code);
+/** How many derived request IDs (`<id>`, `<id>:2`…) scheduled work tries before it waits for its next wake-up. */
+const derivedRequestAttempts = 8;
+const derivedRequestId = (base: string, attempt: number) => base + (attempt > 1 ? ':' + attempt : '');
+type Transaction = Parameters<Parameters<AcceptanceTransactions['run']>[2]>[0];
+/** What a table request's transaction decided: its outcome and, when it changes the table, the session it commits. */
+interface TableDecision<O> { readonly outcome: O; readonly next?: CommittedSession }
 type BotIdentity = Omit<BotActionProvenance, 'commandIndex'> & { readonly tableSessionId: string; readonly pokerRevision: number };
 export interface BotRuntimeOptions {
   readonly runner: JobRunner;
@@ -54,17 +117,23 @@ export interface BotRuntimeOptions {
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
 }
-export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions) {
+export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock) {
   const committed = new Map<string, CommittedSession>();
+  /** One pending wake-up per table, at its schedule's next instant (`nextWakeAt`). */
+  const wakes = new Map<string, { at: number; cancel: () => void }>();
   const loading = new Map<string, Promise<CommittedSession | undefined>>();
   const queue = new Map<string, Promise<unknown>>();
   const recovering = new Set<string>();
   // Only this live process remembers an unproven candidate; restart creates no analysis obligation.
   const uncertainHumanActions = new Map<string, AcceptedHumanIntent>();
   const actionKey = (id: string, requestId: string) => JSON.stringify([id, requestId]);
-  const subscribers = new Map<string, Set<{ ownerUserId: string; publish: (update: TableLiveMessage) => void }>>();
+  const subscribers = new Map<string, Set<{ userId: string; publish: (update: TableLiveMessage) => void }>>();
+  /** The connected Participants last published per Online Table, so each change of who is connected is published once. */
+  const presence = new Map<string, string>();
   const statuses = new Map<string, TableRuntimeStatus['status']>();
-  const work = new Map<string, { identity: BotIdentity; handle?: JobHandle<ConcreteAction> }>();
+  /** The Hand in which an Online Bot's failure is being shown: it stays shown until that Hand is over. */
+  const failedHands = new Map<string, string>();
+  const work = new Map<string, { identity: BotIdentity; attempt: number; handle?: JobHandle<ConcreteAction> }>();
   let stopped = false;
   let recoveryTimer: ReturnType<typeof setInterval> | undefined;
   const scheduledRecovery = new Set<string>();
@@ -76,9 +145,26 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     queue.set(id, next);
     return next.finally(() => { if (queue.get(id) === next) queue.delete(id); });
   }
+  /** Whether a human has a Seat at this committed table. Remembered per committed state, which every commit replaces. */
+  const seatedHuman = new WeakMap<CommittedSession, boolean>();
+  function hasSeatedHuman(session: CommittedSession): boolean {
+    let seated = seatedHuman.get(session);
+    if (seated === undefined) {
+      const humans = new Set(humanBindings(session.aggregate).map(binding => binding.participantId));
+      seated = tableState(session).participants.some(participant => participant.seat !== null && humans.has(participant.participantId));
+      seatedHuman.set(session, seated);
+    }
+    return seated;
+  }
+  /** The tables this Guest owns that have a seated human: what the cap on tables per Guest counts. */
+  function seatedTableCount(userId: string): number {
+    let count = 0;
+    for (const session of committed.values()) if (session.aggregate.ownerUserId === userId && hasSeatedHuman(session)) count++;
+    return count;
+  }
   function capture(session: CommittedSession, evaluationRequestId: string) {
     for (const binding of session.aggregate.bindings) {
-      if (binding.controller.kind !== 'bot') continue;
+      if (!isBot(binding) || binding.removed) continue;
       const view = session.game.forParticipant(binding.participantId).getView();
       if (view.state.actorId !== binding.participantId || !view.state.handId || !view.state.decisionId) continue;
       const masterSeed = session.aggregate.pokerRecord.configuration.seed;
@@ -133,18 +219,18 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await restore(id);
       retire(id); recovering.delete(id);
       publishCommitted(id); publishStatus(id, { phase: 'idle' });
-      const session = committed.get(id); if (session) ensureBot(id, session, true);
+      const session = committed.get(id); if (session) await runSchedule(id, session, true);
     }
     const session = committed.get(id);
     for (const { key, intent } of acceptedHumans) {
       uncertainHumanActions.delete(key);
-      if (session) analyzeAccepted(session, intent.ownerUserId, intent.decisionId);
+      if (session) analyzeAccepted(session, intent.participantId, intent.decisionId);
     }
     return true;
   }
   async function resolveRequest(id: string, requestId: string, fingerprint: string): Promise<MutationOutcome | undefined> {
     const attempt = await acceptance.find({ kind: 'table', id, requestId });
-    if (attempt && attempt.fingerprint !== fingerprint) return reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
+    if (attempt && attempt.fingerprint !== fingerprint) return requestIdConflict();
     if (attempt) {
       const status = await acceptance.status(attempt);
       if (status === 'pending') { pause(id); throw new CommitOutcomeUnknown('The earlier transaction remains unresolved.'); }
@@ -153,7 +239,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }
     if (recovering.has(id)) await reconcile(id);
     const rows = await db.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
-    if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
+    if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : requestIdConflict();
     if (attempt || recovering.has(id)) return reject('session-recovering', 'This Table Session is paused while a commit outcome is unknown.');
   }
   async function startRecovery() {
@@ -168,14 +254,220 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }, 100);
     recoveryTimer.unref();
   }
-  function ensureBot(id: string, session: CommittedSession, force = false) {
+  /**
+   * Brings a table up to date with its committed schedule. It runs in the table FIFO, after every commit and
+   * restore and at each wake-up: it wakes the table again at the schedule's next instant, then requests the
+   * current Bot decision once its Action Window is open. Later scheduled work (after-Hand transitions,
+   * Next-Hand Countdowns) belongs here, keyed off `nextWakeAt`.
+   *
+   * Due work that commits runs first, by calling `accept` directly (never `submit`/`enqueue`, which would wait
+   * on this FIFO turn), and that commit runs `runSchedule` again. Such work handles its own failures, so the
+   * commit that called `runSchedule` keeps its outcome. An Action Deadline that has passed, including
+   * during an outage, resolves as its Timeout Action here (`timeOut`), before any further action is accepted:
+   * a human's late act is rejected with `action-deadline-passed` whichever runs first.
+   *
+   * The end of a Hand's payout phase (`payoutEndsAt`) is one of those wake-ups: it fires here, in the FIFO,
+   * and `resumeBots` reaches it after a restart. Deal itself is gated by the clock alone (`beforePayoutEnd`
+   * in `accept`). The work that must happen when the Hand ends runs from here once
+   * `payoutEndsAt(schedule) <= clock.now()`: applying the after-Hand requests (`settleAfterHand`), queued as
+   * its own FIFO task. `accept` runs the same step first, so a request that arrives ahead of this wake-up
+   * still sees them applied.
+   *
+   * At an Online Table, Automatic Dealing (`dealNextHand`) follows: once the pause between Hands has ended and
+   * the after-Hand requests are applied, a Next-Hand Countdown is announced if the table can deal, and an expired
+   * countdown runs its recheck, including one that expired during an outage. A connection change runs the
+   * schedule too, since it can let the table deal.
+   */
+  async function runSchedule(id: string, session: CommittedSession, forceBot = false): Promise<void> {
+    if (stopped || recovering.has(id)) return;
+    const window = session.aggregate.schedule.actionWindow;
+    if (window && pastActionDeadline(window, window.participantId, clock.now())) { await timeOut(id, window); return; }
+    try { if (await dealNextHand(id)) return; }
+    catch (error) { if (!(error instanceof CommitOutcomeUnknown) && !stopped) wake(id, clock.now() + timeoutRetryMs); return; }
+    wake(id, nextWakeAt(session.aggregate.schedule, clock.now()));
+    if (afterHandDue(session)) void enqueue(id, () => settleAfterHand(id)).catch(() => {});
+    ensureBot(id, session, forceBot);
+  }
+  /** Whether the Hand has ended (its payout phase is over) with after-Hand requests still waiting to be applied. */
+  function afterHandDue(session: CommittedSession): boolean {
+    const { aggregate } = session;
+    if (!aggregate.pendingChanges.length) return false;
+    const { status } = tableState(session);
+    return !handInProgress(status, aggregate.schedule, clock.now());
+  }
+  /**
+   * Applies every after-Hand request in one committed transition once the Hand's payout phase has ended, and
+   * clears them in the same transaction: one poker revision step for all engine commands, one session revision
+   * step. Runs in the table FIFO (from `runSchedule`, or at the start of `accept`), so a Deal can never be
+   * accepted ahead of it. Idempotent: it does nothing unless requests are pending, its request ID derives from
+   * the session revision they were pending at, and a restart finds the requests still pending or already gone.
+   *
+   * At an Online Table the pause between Hands is already in the schedule (it follows the payout phase), and
+   * Automatic Dealing announces no Next-Hand Countdown while requests are pending, so this transition always
+   * comes first, including the sit-outs that Timeout Actions queue.
+   */
+  async function settleAfterHand(id: string): Promise<void> {
+    await commitScheduled(id, session => {
+      if (!afterHandDue(session)) return undefined;
+      const { aggregate } = session;
+      const working = session.game.fork();
+      const applied = applyAfterHandRequests(working, aggregate.pendingChanges);
+      const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
+        ...(applied.events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
+        bindings: aggregate.bindings.map(binding => isHuman(binding) && applied.left.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
+          : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'removed' as const }
+          : isBot(binding) && applied.removed.includes(binding.participantId) ? { ...binding, removed: true as const } : binding) };
+      return { requestId: 'after-hand:' + aggregate.sessionRevision, fingerprint: createHash('sha256').update('after-hand-v1:' + canonical({ changes: aggregate.pendingChanges })).digest('hex'),
+        events: applied.events, next: { aggregate: next, game: working } };
+    });
+  }
+  /**
+   * Plays the Timeout Action of an Action Window whose deadline has passed: Check when it is legal, otherwise
+   * Fold, as an ordinary accepted act for that Participant. Its request ID derives from the decision, so timers,
+   * retries and restarts resolve to one outcome. Only an attempt proven never to have committed retires its ID
+   * (`commit-not-applied`, or `request-id-conflict` once the table has moved on), and a further derived ID takes
+   * over. A Timeout Action that could not be saved is tried again shortly; an unknown COMMIT pauses the table,
+   * whose recovery runs the schedule again.
+   */
+  async function timeOut(id: string, window: ActionWindow) {
+    for (let attempt = 1; attempt <= derivedRequestAttempts; attempt++) {
+      const session = committed.get(id);
+      if (!session || stopped || recovering.has(id)) return;
+      const { state } = session.game.forParticipant(window.participantId).getView();
+      if (state.actorId !== window.participantId || state.decisionId !== window.decisionId) return;
+      const action: ConcreteAction = state.legalActions.some(legal => legal.type === 'check') ? { type: 'check' } : { type: 'fold' };
+      const requestId = derivedRequestId('timeout:' + window.decisionId, attempt);
+      let outcome: MutationOutcome;
+      try { outcome = await accept(id, { kind: 'server' }, 'act', { requestId, expectedPokerRevision: session.aggregate.pokerRevision, participantId: window.participantId, action }); }
+      catch (error) { if (!(error instanceof CommitOutcomeUnknown) && !stopped) wake(id, clock.now() + timeoutRetryMs); return; }
+      if (!retiredRequestId(outcome)) return;
+    }
+  }
+  /** Every Participant at the table as Automatic Dealing judges them, with who is connected now. */
+  function dealingParticipants(id: string, session: CommittedSession, state = tableState(session)): DealingParticipant[] {
+    const connected = new Set(connectedParticipants(id, session));
+    return state.participants.map(p => ({ participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, human: isHuman(findBinding(session.aggregate, p.participantId)), connected: connected.has(p.participantId) }));
+  }
+  /**
+   * Automatic Dealing, at Online Tables only (`automatic-dealing.ts`). Announcing a Next-Hand Countdown is a
+   * committed schedule change (`countdown:<session revision>`). At its expiry one committed transition sits out the
+   * humans still disconnected and then either deals (`deal:<Hand ID>`, from the Hand sequence) or cancels the
+   * countdown (`no-deal:<session revision>`). Returns whether it committed, in which case that commit has already
+   * run the schedule again.
+   */
+  async function dealNextHand(id: string): Promise<boolean> {
+    return commitScheduled(id, session => {
+      const { aggregate } = session;
+      if (aggregate.mode !== 'online') return undefined;
+      const state = tableState(session);
+      const participants = dealingParticipants(id, session, state);
+      const now = clock.now();
+      const step = dealingStep({ status: state.status, schedule: aggregate.schedule, pendingChanges: aggregate.pendingChanges.length, participants }, now);
+      const fingerprint = (contents: object) => createHash('sha256').update('next-hand-v2:' + canonical({ sessionRevision: aggregate.sessionRevision, ...contents })).digest('hex');
+      if (step === 'announce') return { requestId: 'countdown:' + aggregate.sessionRevision, fingerprint: fingerprint({ step }), events: [],
+        next: { aggregate: { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule: announceNextHand(aggregate.schedule, now) }, game: session.game } };
+      if (step !== 'expire') return undefined;
+      // Humans still disconnected are sat out first; resuming is theirs to ask for.
+      const working = session.game.fork();
+      const disconnected = stillDisconnected(participants);
+      const events: CashGameEvent[] = disconnected.flatMap(participantId => { const result = working.setSittingOut(participantId, true); return result.ok ? result.events : []; });
+      const dealt = canDeal(participants) ? working.startHand() : undefined;
+      const started = dealt?.ok ? dealt.events.find(event => event.type === 'hand-started') : undefined;
+      if (dealt?.ok) events.push(...dealt.events);
+      const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { pauseBetweenHands: true }) : withoutNextHand(aggregate.schedule);
+      const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule, ...(events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}) };
+      return { requestId: started && 'handId' in started ? 'deal:' + started.handId : 'no-deal:' + aggregate.sessionRevision, fingerprint: fingerprint({ step, sittingOut: disconnected, deal: !!started }), events, next: { aggregate: next, game: working } };
+    });
+  }
+  /**
+   * Commits a transition the scheduler makes by itself, planned from the committed table inside its FIFO turn. Its
+   * request ID derives from the table's state, so retries and restarts resolve to one outcome; only an attempt
+   * proven never to have committed retires it, and a further derived ID (`:2`, `:3`…) takes over. After COMMIT the
+   * transition is published and the schedule runs again. Returns whether this call committed.
+   */
+  async function commitScheduled(id: string, plan: (session: CommittedSession) => { requestId: string; fingerprint: string; next: CommittedSession; events: readonly CashGameEvent[] } | undefined): Promise<boolean> {
+    for (let attempt = 1; attempt <= derivedRequestAttempts; attempt++) {
+      const session = committed.get(id);
+      if (!session || stopped || recovering.has(id)) return false;
+      const transition = plan(session);
+      if (!transition) return false;
+      const requestId = derivedRequestId(transition.requestId, attempt);
+      const known = await resolveRequest(id, requestId, transition.fingerprint);
+      if (known && retiredRequestId(known)) continue;
+      // A remembered outcome means it applied; a table restored meanwhile is planned again by its own schedule run.
+      if (known || committed.get(id) !== session) return false;
+      const { next } = transition;
+      const { outcome, committed: written } = await commitTableRequest(id, requestId, transition.fingerprint, session.aggregate, () => ({ next,
+        outcome: { ok: true, tableSessionId: id, pokerRevision: next.aggregate.pokerRevision, sessionRevision: next.aggregate.sessionRevision } }));
+      if (!written) { if (retiredRequestId(outcome)) continue; return false; }
+      publishCommitted(id, transition.events);
+      await runSchedule(id, written);
+      return true;
+    }
+    return false;
+  }
+  /**
+   * The one commit path of every table request, a Guest's or the scheduler's. In one transaction it replays the
+   * outcome remembered for this request ID, or refuses its reuse for different contents. Otherwise `decide` judges the
+   * request against the committed table, and its outcome is remembered and the session it stages, if any, written
+   * (`writeTableSession`, with the membership index), all in one COMMIT. After COMMIT the staged session is the table's
+   * committed state; publishing it and running the schedule are the caller's. `decided` tells whether `decide` ran
+   * rather than a remembered outcome being replayed. An unconfirmed COMMIT pauses the table, and is rethrown.
+   */
+  async function commitTableRequest<O extends MutationOutcome>(id: string, requestId: string, fingerprint: string, previous: PersistedTableSession, decide: (tx: Transaction) => Promise<TableDecision<O>> | TableDecision<O>): Promise<{ outcome: O; committed?: CommittedSession; decided: boolean }> {
+    const context = { tableSessionId: id, requestId };
+    let decision: TableDecision<O> | undefined;
+    try {
+      const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async (tx): Promise<O> => {
+        const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
+        if (rows[0]) return (rows[0].fingerprint === fingerprint ? rows[0].outcome : requestIdConflict()) as O;
+        const decided = await decide(tx);
+        if (decided.next) await writeTableSession(tx, previous, decided.next.aggregate);
+        await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: decided.outcome });
+        decision = decided;
+        return decided.outcome;
+      }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
+      const next = (decision as TableDecision<O> | undefined)?.next;
+      if (next) committed.set(id, next);
+      return { outcome, ...(next ? { committed: next } : {}), decided: !!decision };
+    } catch (error) {
+      if (error instanceof CommitOutcomeUnknown) pause(id);
+      throw error;
+    }
+  }
+  function wake(id: string, at: number | undefined) {
+    const pending = wakes.get(id);
+    if (pending?.at === at) return;
+    pending?.cancel(); wakes.delete(id);
+    if (at === undefined) return;
+    const entry = { at, cancel: () => {} };
+    wakes.set(id, entry);
+    entry.cancel = clock.setTimer(at, () => {
+      if (wakes.get(id) !== entry) return;
+      wakes.delete(id);
+      if (stopped) return;
+      void enqueue(id, async () => { const session = committed.get(id); if (session) await runSchedule(id, session); }).catch(() => {});
+    });
+  }
+  /**
+   * Requests the current Bot decision once its Action Window is open. `attempt` counts the requests for the same
+   * decision at an Online Table, where a failed decision is retried once (`botFailed`).
+   */
+  function ensureBot(id: string, session: CommittedSession, force = false, attempt = 1) {
     if (stopped || recovering.has(id) || !bots || bots.automaticBots === false) return;
-    const proposed = capture(session, randomUUID());
+    const window = session.aggregate.schedule.actionWindow;
+    // A Bot's decision is requested only once its Action Window opens; its wake-up comes back here.
+    const proposed = window && clock.now() < window.opensAt ? undefined : capture(session, randomUUID());
     const prior = work.get(id);
     if (!force && prior && current(id, prior.identity)) return;
     retire(id);
-    if (!proposed) { if (statuses.has(id) && statuses.get(id)?.phase !== 'idle') publishStatus(id, { phase: 'idle' }); return; }
-    const pending: { identity: BotIdentity; handle?: JobHandle<ConcreteAction> } = { identity: proposed.identity };
+    if (!proposed) {
+      // An Online Bot failure stays shown until the Hand it happened in is over.
+      const shown = failedHands.get(id) !== undefined && failedHands.get(id) === session.aggregate.schedule.phases[0]?.handId;
+      if (statuses.has(id) && statuses.get(id)?.phase !== 'idle' && !shown) publishStatus(id, { phase: 'idle' });
+      return;
+    }
+    const pending: { identity: BotIdentity; attempt: number; handle?: JobHandle<ConcreteAction> } = { identity: proposed.identity, attempt };
     work.set(id, pending);
     publishStatus(id, { phase: 'thinking', participantId: proposed.identity.participantId });
     pending.handle = bots.runner.submit('bot-decision', { view: proposed.view, descriptor: proposed.identity.playingStrategy, evaluationSeed: proposed.identity.evaluationSeed, selectionSeed: proposed.identity.selectionSeed }, async (input, execution) => {
@@ -186,21 +478,39 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (stopped) return;
       return enqueue(id, async () => {
         if (!current(id, pending.identity)) return;
-        if (!result.ok) { publishStatus(id, { phase: 'failed', participantId: pending.identity.participantId, code: result.code }); return; }
+        if (!result.ok) { await botFailed(id, pending, result.code); return; }
         try {
           const outcome = await accept(id, { kind: 'bot', identity: pending.identity }, 'act', { requestId: 'bot:' + pending.identity.evaluationRequestId, expectedPokerRevision: pending.identity.pokerRevision, participantId: pending.identity.participantId, action: result.value });
-          if (!outcome.ok && current(id, pending.identity)) publishStatus(id, { phase: 'failed', participantId: pending.identity.participantId, code: 'failed' });
-        } catch { if (current(id, pending.identity)) publishStatus(id, { phase: 'failed', participantId: pending.identity.participantId, code: 'persistence-unavailable' }); }
+          if (!outcome.ok && current(id, pending.identity)) await botFailed(id, pending, 'failed');
+        } catch { if (current(id, pending.identity)) await botFailed(id, pending, 'persistence-unavailable'); }
       });
     }).catch(() => {});
   }
-  function observer(session: CommittedSession | undefined, ownerUserId: string) {
-    if (!session || session.aggregate.ownerUserId !== ownerUserId) return undefined;
-    return session.aggregate.bindings.find(b => b.controller.kind === 'human' && b.userId === ownerUserId)?.participantId;
+  /**
+   * A Bot decision failed. At a Practice Table the failure is shown and recovery is the owner's: Retry, or another
+   * Playing Strategy (ADR-0018). At an Online Table it is retried once with identical inputs and seeds (`capture`
+   * derives them from the decision). If the retry fails too, the failure is shown to everyone at the table and the
+   * server plays the Bot's Timeout Action, which also sits the Bot out after the Hand (see `accept`). Capacity is never
+   * one of these failures: the JobRunner always admits a Bot decision and keeps a slot for it (`job-runner.ts`).
+   */
+  async function botFailed(id: string, pending: { identity: BotIdentity; attempt: number }, code: NonNullable<TableRuntimeStatus['status']['code']>) {
+    const session = committed.get(id);
+    const failure = { phase: 'failed' as const, participantId: pending.identity.participantId, code };
+    if (!session || session.aggregate.mode !== 'online') { publishStatus(id, failure); return; }
+    if (pending.attempt < 2) { ensureBot(id, session, true, pending.attempt + 1); return; }
+    retire(id);
+    publishStatus(id, failure);
+    failedHands.set(id, pending.identity.handId);
+    const window = session.aggregate.schedule.actionWindow;
+    if (window?.decisionId === pending.identity.decisionId) await timeOut(id, window);
   }
-  function captureEvaluation(session: CommittedSession, ownerUserId: string, decisionId: string): FrozenEvaluationInput | null {
-    const participantId = observer(session, ownerUserId);
-    if (!participantId) return null;
+  /** Every view, subscription and route is for the Guest's own joined, unremoved Participant. */
+  function viewer(session: CommittedSession | undefined, userId: string) {
+    return session && memberBinding(session.aggregate, userId)?.participantId;
+  }
+  function captureEvaluation(session: CommittedSession, participantId: string, decisionId: string): FrozenEvaluationInput | null {
+    const binding = findBinding(session.aggregate, participantId);
+    if (!isHuman(binding)) return null;
     const participant = session.game.forParticipant(participantId);
     const current = participant.getView();
     const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
@@ -208,19 +518,19 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
     if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
     const masterSeed = session.aggregate.pokerRecord.configuration.seed;
-    return immutableData({ ownerUserId, view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
+    return immutableData({ view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
       tableSessionId: session.aggregate.tableSessionId, participantId, handId: view.state.handId, decisionId,
-      referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy,
+      referenceStrategy: binding.trainerConfiguration.referenceStrategy,
       inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
       evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
       selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
       engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1', evaluationVersion: 'v1',
     } });
   }
-  function analyzeAccepted(session: CommittedSession, ownerUserId: string, decisionId: string) {
+  function analyzeAccepted(session: CommittedSession, participantId: string, decisionId: string) {
     if (stopped || !bots?.onHumanActionAccepted) return;
     try {
-      const input = captureEvaluation(session, ownerUserId, decisionId);
+      const input = captureEvaluation(session, participantId, decisionId);
       if (input?.acceptedAction) void Promise.resolve(bots.onHumanActionAccepted(input)).catch(() => {});
     } catch { /* Derived analysis cannot change a confirmed poker outcome. */ }
   }
@@ -229,33 +539,82 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const entries = subscribers.get(id);
     if (!session || !entries) return;
     for (const entry of entries) {
-      const participantId = observer(session, entry.ownerUserId);
-      if (!participantId) { entries.delete(entry); continue; }
+      const participantId = viewer(session, entry.userId);
+      if (!participantId) {
+        // A Guest whose membership ended is told once, so their client leaves the table; anyone else is dropped silently.
+        const ended = humanBindings(session.aggregate).find(binding => binding.userId === entry.userId && binding.membership !== 'joined')?.membership;
+        if (ended && ended !== 'joined') try { entry.publish({ type: 'table-membership-ended', tableSessionId: id, reason: ended }); } catch { /* The subscriber is gone. */ }
+        entries.delete(entry); continue;
+      }
       // A delivery failure cannot change a confirmed mutation's outcome.
       try { entry.publish(projection(session, participantId)); } catch { entries.delete(entry); }
     }
     if (entries.size === 0) subscribers.delete(id);
   }
   function publishCommitted(id: string, events: readonly CashGameEvent[] = []) {
-    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, events, bots?.adminMode !== false));
+    const connected = connectedParticipants(id);
+    // Every complete update carries who is connected, so it publishes the current list too.
+    presence.set(id, connected.join(','));
+    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode !== false, connected));
+  }
+  /**
+   * The joined human Participants whose Guest has at least one live connection subscribed to the table. Transient:
+   * never persisted, so after a restart every human counts as disconnected until they reconnect.
+   */
+  function connectedParticipants(id: string, session = committed.get(id)): string[] {
+    const entries = subscribers.get(id);
+    if (!session || !entries?.size) return [];
+    const users = new Set([...entries].map(entry => entry.userId));
+    return humanBindings(session.aggregate).filter(binding => binding.membership === 'joined' && users.has(binding.userId)).map(binding => binding.participantId);
+  }
+  /**
+   * After a subscription starts or ends: at an Online Table, publishes a change of who is connected to everyone
+   * subscribed, without a revision, and runs the schedule, since a connection can let the table deal. Practice
+   * Tables have a single human, so their connection changes are not published.
+   */
+  function connectionChanged(id: string) {
+    const session = committed.get(id);
+    if (stopped || session?.aggregate.mode !== 'online') return;
+    const connected = connectedParticipants(id, session);
+    if (presence.get(id) === connected.join(',')) return;
+    presence.set(id, connected.join(','));
+    deliver(id, () => ({ type: 'table-presence', tableSessionId: id, connectedParticipantIds: connected }));
+    void enqueue(id, async () => { const current = committed.get(id); if (current) await runSchedule(id, current); }).catch(() => {});
   }
   function publishStatus(id: string, status: TableRuntimeStatus['status']) {
     if (stopped) return;
     if (recovering.has(id) && status.phase !== 'recovering') return;
+    if (status.phase !== 'failed') failedHands.delete(id);
     const failures: Record<NonNullable<TableRuntimeStatus['status']['code']>, string> = { capacity: 'The computation queue is full. Retry this Bot decision.', cancelled: 'Bot computation was cancelled. Retry this decision.', timeout: 'Bot computation timed out. Retry or change its Playing Strategy.', failed: 'Bot computation failed. Retry or change its Playing Strategy.', incompatible: 'This Playing Strategy does not support the current decision.', 'invalid-policy': 'The Policy returned an invalid distribution. Retry or change its Playing Strategy.', 'selection-failed': 'The Action Selector could not select a valid Choice.', 'persistence-unavailable': 'The Bot action could not be saved. Retry this decision.' };
     const code = status.code && Object.hasOwn(failures, status.code) ? status.code : 'failed';
+    // At an Online Table nobody repairs a Bot mid-Hand: the server has already played its Timeout Action.
+    const online = committed.get(id)?.aggregate.mode === 'online';
+    const message = online ? 'This Bot’s decision failed twice, so the server played its Timeout Action. It sits out after this hand.' : failures[code];
     const safeStatus: TableRuntimeStatus['status'] = { phase: status.phase, ...(status.participantId ? { participantId: status.participantId } : {}),
-      ...(status.phase === 'failed' ? { code, message: failures[code] } : status.phase === 'recovering' ? { message: 'This Table Session is paused while its commit outcome is unknown.' } : {}) };
+      ...(status.phase === 'failed' ? { code, message } : status.phase === 'recovering' ? { message: 'This Table Session is paused while its commit outcome is unknown.' } : {}) };
     statuses.set(id, safeStatus);
     deliver(id, () => ({ type: 'table-status', tableSessionId: id, status: safeStatus }));
   }
-  async function load(id: string, ownerUserId?: string): Promise<CommittedSession | undefined> {
-    if (!recovering.has(id) && (await acceptance.attempts()).some(entry => entry.tableSessionId === id && entry.state === 'pending')) pause(id);
+  /** Membership from the committed aggregate when cached, otherwise from the index, without restoring the table. */
+  async function access(id: string, userId: string): Promise<{ participantId: string; owner: boolean; mode: TableMode } | undefined> {
     const cached = committed.get(id);
-    if (cached) return ownerUserId && cached.aggregate.ownerUserId !== ownerUserId ? undefined : cached;
-    if (ownerUserId) {
-      const owned = await db.select({ id: tableSessions.id }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, ownerUserId)));
-      if (!owned.length) return undefined;
+    if (!cached) return membership(db, id, userId);
+    const binding = memberBinding(cached.aggregate, userId);
+    return binding && { participantId: binding.participantId, owner: cached.aggregate.ownerUserId === userId, mode: cached.aggregate.mode };
+  }
+  /**
+   * With a Guest, loads only a table they have joined: anyone else cannot learn that it exists. A table this
+   * process has not loaded may have an unresolved acceptance journaled for it (an earlier process's, or a creation
+   * whose COMMIT went unconfirmed), so it is paused until recovery proves the outcome. A loaded table needs no such
+   * check: every acceptance this process makes for it pauses it itself when its COMMIT goes unconfirmed, and an
+   * attempt still in flight is not unresolved. Reads therefore never wait on the journal.
+   */
+  async function load(id: string, userId?: string): Promise<CommittedSession | undefined> {
+    if (!committed.has(id) && !recovering.has(id) && (await acceptance.attempts()).some(entry => entry.tableSessionId === id && entry.state === 'pending')) pause(id);
+    const cached = committed.get(id);
+    if (cached) return userId && !viewer(cached, userId) ? undefined : cached;
+    if (userId) {
+      if (!await access(id, userId)) return undefined;
       // Another operation may have promoted a newer game while authorization was read.
       const current = committed.get(id);
       if (current) return current;
@@ -266,50 +625,75 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     loading.set(id, operation);
     try { return await operation; } finally { loading.delete(id); }
   }
-  async function restore(id: string): Promise<CommittedSession | undefined> {
-    const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
-    const aggregate = rows[0]?.aggregate;
-    if (!aggregate) return undefined;
-    if (validateTrainerConfiguration(aggregate.trainerConfiguration, supportsStrategy)) throw new TableSessionRestorationError();
+  /**
+   * A table written before scheduled play may be mid-decision without a recorded Action Window. That
+   * window opened before the upgrade, so it is restored as open since time 0.
+   */
+  function unscheduledWindow(aggregate: PersistedTableSession, game: CashGame): PersistedTableSession['schedule'] {
+    for (const binding of aggregate.bindings) {
+      const { state } = game.forParticipant(binding.participantId).getView();
+      if (state.status !== 'active-hand') break;
+      if (state.actorId && state.decisionId) return { phases: [], actionWindow: { participantId: state.actorId, decisionId: state.decisionId, opensAt: 0, ...(liveAnalysisDisallowed(aggregate, state.actorId) ? { liveAnalysisDisallowed: true as const } : {}) } };
+    }
+    return emptySchedule;
+  }
+  /** Upgrades any stored version and validates it completely, or throws TableSessionRestorationError. */
+  function restorable(stored: StoredTableSession): CommittedSession {
+    const aggregate = upgradeTableSession(stored);
+    if (!aggregate || humanBindings(aggregate).some(binding => validateTrainerConfiguration(binding.trainerConfiguration, supportsStrategy))) throw new TableSessionRestorationError();
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new TableSessionRestorationError();
-    const session = { aggregate, game: restored.game };
+    // Version 1 predates scheduled play; every version-2 row records its schedule.
+    return { aggregate: stored.schemaVersion === 2 ? aggregate : { ...aggregate, schedule: unscheduledWindow(aggregate, restored.game) }, game: restored.game };
+  }
+  async function restore(id: string): Promise<CommittedSession | undefined> {
+    const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
+    const stored = rows[0]?.aggregate;
+    if (!stored) return undefined;
+    const session = restorable(stored);
     committed.set(id, session);
-    if (!stopped) queueMicrotask(() => { void enqueue(id, async () => { const currentSession = committed.get(id); if (currentSession) ensureBot(id, currentSession); }).catch(() => {}); });
+    if (!stopped) queueMicrotask(() => { void enqueue(id, async () => { const currentSession = committed.get(id); if (currentSession) await runSchedule(id, currentSession); }).catch(() => {}); });
     return session;
   }
-    async function read(id: string, ownerUserId: string) {
-      await load(id, ownerUserId);
+    async function read(id: string, userId: string) {
+      await load(id, userId);
       const session = committed.get(id);
-      const participantId = observer(session, ownerUserId);
+      const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
-      const projected = projectTableSession(session.aggregate, participantId, session.game, bots?.adminMode !== false);
+      const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode !== false, connectedParticipants(id, session));
       return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
     }
-    async function subscribe(id: string, ownerUserId: string, publish: (update: TableLiveMessage) => void) {
-      await load(id, ownerUserId);
+    async function subscribe(id: string, userId: string, publish: (update: TableLiveMessage) => void) {
+      await load(id, userId);
       const session = committed.get(id);
-      const participantId = observer(session, ownerUserId);
+      const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
       const entries = subscribers.get(id) ?? new Set();
-      const entry = { ownerUserId, publish };
+      const entry = { userId, publish };
       entries.add(entry);
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, [], bots?.adminMode !== false), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
+        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode !== false, connectedParticipants(id, session)), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
         entries.delete(entry); if (entries.size === 0) subscribers.delete(id);
         throw error;
       }
-      return () => { entries.delete(entry); if (entries.size === 0) subscribers.delete(id); };
+      connectionChanged(id);
+      return () => { entries.delete(entry); if (entries.size === 0) subscribers.delete(id); connectionChanged(id); };
     }
     async function accept(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
-        let session = await load(id, authority.kind === 'human' ? authority.userId : undefined);
-        if (!session || (authority.kind === 'human' && session.aggregate.ownerUserId !== authority.userId)) return { ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } };
+        const userId = authority.kind === 'human' ? authority.userId : undefined;
+        let session = await load(id, userId);
+        // After-Hand requests whose Hand has ended are applied before anything else is judged, Deal included.
+        if (session && afterHandDue(session)) { await settleAfterHand(id); session = await load(id, userId); }
+        const requester = session && authority.kind === 'human' ? memberBinding(session.aggregate, authority.userId) : undefined;
+        if (!session || (authority.kind === 'human' && !requester)) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
+        const denial = requester && humanMutationDenial(session.aggregate, requester, kind, request);
+        if (denial) return denial;
         const { requestId, ...contents } = request;
         const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: authority.kind, kind, contents })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
@@ -318,139 +702,331 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         let proposed: CommittedSession | undefined;
         let acceptedHumanDecision: string | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
-        const context = { tableSessionId: id, requestId };
+        let ending: { participantId: string; membership: 'left' | 'removed' } | undefined;
+        let addedBot: PersistedBotBinding | undefined;
+        let removedBot: string | undefined;
         try {
-          const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async (tx): Promise<MutationOutcome> => {
-            const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
-            const known = rows[0];
-            if (known) return known.fingerprint === fingerprint ? known.outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
-            let result = applicationRejection(kind, request);
+          const { outcome, committed: next } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, (): TableDecision<MutationOutcome> => {
+            let result = malformedPokerRequest(kind, request);
+            // A late act is told so even after its Timeout Action has moved the table on.
+            if (!result && kind === 'act' && authority.kind === 'human' && missedActionDeadline(session.aggregate, request as ActRequest, authority.receivedAt))
+              result = reject('action-deadline-passed', 'Your action reached the server after your Action Deadline, so the Timeout Action was played for you: Check, or Fold when Check was not legal.');
             if (!result && request.expectedPokerRevision !== session.aggregate.pokerRevision) result = reject('stale-poker-revision', 'The table changed. Refresh its committed view before submitting a new attempt.');
-            const participantId = 'participantId' in request ? request.participantId : undefined;
-            const binding = session.aggregate.bindings.find(binding => binding.participantId === participantId);
-            if (!result && kind !== 'start-hand' && kind !== 'set-button' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
-            if (!result && kind === 'act' && (authority.kind === 'human'
-              ? binding?.controller.kind !== 'human' || binding.userId !== authority.userId
-              : binding?.controller.kind !== 'bot')) result = reject('actor-not-authorized', authority.kind === 'human'
+            const binding = findBinding(session.aggregate, 'participantId' in request ? request.participantId : undefined);
+            if (!result && kind !== 'start-hand' && kind !== 'set-button' && kind !== 'add-bot' && !binding) result = reject('participant-not-bound', 'Choose a Participant assigned to this Table Session.');
+            if (!result && isBot(binding) && binding.removed) result = reject('bot-removed', 'The Table Owner removed this Bot from the table.');
+            if (!result && kind === 'remove-participant' && !(isHuman(binding) && binding.membership === 'joined')) result = reject('participant-not-joined', 'This Participant has already left the table or been removed.');
+            // The scheduler's own Timeout Action may act for whoever holds the expired decision.
+            if (!result && kind === 'act' && authority.kind !== 'server' && (authority.kind === 'human'
+              ? !isHuman(binding) || binding.userId !== authority.userId
+              : !isBot(binding))) result = reject('actor-not-authorized', authority.kind === 'human'
                 ? 'This local identity can act only through its bound human Participant.'
                 : 'Trusted controller commands can act only through a bound Bot.');
+            // Timing is judged by when a human's request arrived, and by now for the server's own work.
+            const arrivedAt = authority.kind === 'human' ? authority.receivedAt : clock.now();
+            // No one acts during a Presentation Phase, and the next Hand is not dealt before the last one is paid out.
+            if (!result && kind === 'act' && beforeActionWindow(session.aggregate.schedule, (request as ActRequest).participantId, arrivedAt))
+              result = reject('action-window-not-open', 'This decision’s Action Window opens when the current Presentation Phase ends. Act once it opens.');
+            if (!result && kind === 'start-hand' && beforePayoutEnd(session.aggregate.schedule, arrivedAt))
+              result = reject('payout-phase-not-ended', 'The last Hand is still being paid out. Deal when its payout phase ends.');
+            // Judged when the request is processed, not when it arrived: the Hand ends for management when its payout phase does.
+            const during = !result && authority.kind === 'human' ? duringHand(tableState(session), session.aggregate, kind, binding, request, clock.now()) : undefined;
+            if (during && 'rejection' in during) result = during.rejection;
+            else if (during) {
+              const current = session.aggregate;
+              if (during.pending === current.pendingChanges) result = { ok: true, tableSessionId: id, pokerRevision: current.pokerRevision, sessionRevision: current.sessionRevision, afterHand: true };
+              else {
+                const aggregate: PersistedTableSession = { ...current, sessionRevision: current.sessionRevision + 1, pendingChanges: during.pending };
+                proposed = { aggregate, game: session.game };
+                result = { ok: true, tableSessionId: id, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision, afterHand: true };
+              }
+            }
             if (!result) {
               const working = session.game.fork();
               const accepted = (() => {
                 switch (kind) {
-                  case 'start-hand': return working.startHand();
+                  case 'start-hand': {
+                    // Deal brings the dealing human back from a sit-out they chose, in the same commit.
+                    const resumed = requester ? resumeFromSittingOut(working, requester.participantId) : undefined;
+                    if (resumed && !resumed.ok) return resumed;
+                    const dealt = working.startHand();
+                    return dealt.ok && resumed ? { ok: true as const, events: [...resumed.events, ...dealt.events] } : dealt;
+                  }
                   case 'act': return working.act((request as ActRequest).participantId, (request as ActRequest).action);
                   case 'seat-participant': return working.seatParticipant((request as SeatParticipantRequest).participantId, (request as SeatParticipantRequest).seat, (request as SeatParticipantRequest).buyIn);
-                  case 'leave-participant': return working.leaveParticipant((request as LeaveParticipantRequest).participantId);
+                  case 'stand-up-participant': return working.standUpParticipant((request as StandUpParticipantRequest).participantId);
                   case 'move-participant': return working.moveParticipant((request as MoveParticipantRequest).participantId, (request as MoveParticipantRequest).seat);
                   case 'set-sitting-out': return working.setSittingOut((request as SetSittingOutRequest).participantId, (request as SetSittingOutRequest).sittingOut);
                   case 'top-up-to': return working.topUpTo((request as TopUpToRequest).participantId, (request as TopUpToRequest).targetStack);
                   case 'set-button': return working.setButton((request as SetButtonRequest).seat);
+                  case 'add-bot': {
+                    // The Bot is bound and seated in one commit, even mid-Hand: Hand participants are frozen, so it is dealt in next Hand.
+                    const intent = request as AddBotRequest;
+                    const name = participantName(intent.name);
+                    const invalid = (code: string, field: string, message: string) => ({ ok: false as const, rejection: { code, field, message } });
+                    if (session.aggregate.mode === 'online' && placesTaken(session.aggregate) >= onlineTableCapacity) return tableFull('Remove a Bot, or wait for someone to leave, before adding another.');
+                    if (name === undefined) return invalid('invalid-bot-name', 'name', participantNameRules);
+                    if (!supportsStrategy(intent.playingStrategy)) return invalid('unsupported-strategy', 'playingStrategy', 'Choose a supported complete Playing Strategy.');
+                    if (session.aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(name))) return invalid('name-taken', 'name', 'Someone at this table already uses that name, ignoring case. Choose a different name for the Bot.');
+                    const { configuration, state } = publicView(working, session.aggregate);
+                    const seat = intent.seat ?? Array.from({ length: configuration.seatCount }, (_, index) => index + 1).find(open => !state.participants.some(p => p.seat === open));
+                    if (seat === undefined) return invalid('no-empty-seat', 'seat', 'Every Seat is taken. Make room before adding a Bot.');
+                    const participantId = randomUUID();
+                    const seated = working.seatParticipant(participantId, seat, intent.buyIn);
+                    if (seated.ok) addedBot = { participantId, name, controller: { kind: 'bot', playingStrategy: immutableData(intent.playingStrategy) }, assignmentId: randomUUID() };
+                    return seated;
+                  }
+                  case 'remove-bot': {
+                    const participantId = (request as RemoveBotRequest).participantId;
+                    const left = standUpAndLeave(working, participantId);
+                    if (left.ok) removedBot = participantId;
+                    return left;
+                  }
+                  case 'leave-table': case 'remove-participant': {
+                    // Removal differs only in what it records: the Guest may not come back.
+                    const participantId = (request as LeaveTableRequest | RemoveParticipantRequest).participantId;
+                    const left = standUpAndLeave(working, participantId);
+                    if (left.ok) ending = { participantId, membership: kind === 'remove-participant' ? 'removed' : 'left' };
+                    return left;
+                  }
                 }
               })();
               if (!accepted.ok) result = { ok: false, rejection: accepted.rejection };
               else {
                 acceptedEvents = accepted.events;
-                if (authority.kind === 'human' && kind === 'act') acceptedHumanDecision = session.game.forParticipant((request as ActRequest).participantId).getView().state.decisionId ?? undefined;
+                // A Timeout Action is the human's own decision too, so it is analyzed and scored like one.
+                if (kind === 'act' && isHuman(binding)) acceptedHumanDecision = session.game.forParticipant((request as ActRequest).participantId).getView().state.decisionId ?? undefined;
+                const window = session.aggregate.schedule.actionWindow;
+                const timedOutWindow = kind === 'act' && window?.deadlineAt !== undefined && pastActionDeadline(window, (request as ActRequest).participantId, arrivedAt)
+                  ? { participantId: window.participantId, decisionId: window.decisionId, deadlineAt: window.deadlineAt, pokerRevision: session.aggregate.pokerRevision } : undefined;
                 const pokerRecord = working.toRecord();
                 const provenance = authority.kind === 'bot' && authority.identity ? (() => {
                   const { tableSessionId: _table, pokerRevision: _revision, ...identity } = authority.identity;
                   return { ...identity, commandIndex: pokerRecord.commands.length - 1 };
                 })() : undefined;
-                const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + 1, sessionRevision: session.aggregate.sessionRevision + 1,
-                  ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}) };
+                // The schedule commits with the transition that produced it; Automatic Dealing pauses between Hands.
+                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { pauseBetweenHands: session.aggregate.mode === 'online' });
+                // At an Online Table a Timeout Action, a human's or a failed Bot's, also sits its Participant out after the Hand.
+                const sitsOutAfterHand = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
+                const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,
+                  ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}), ...(timedOutWindow ? { timedOutWindow } : {}), schedule,
+                  ...(sitsOutAfterHand ? { pendingChanges: recordAfterHandRequest(session.aggregate.pendingChanges, sitsOutAfterHand, 'sit-out') } : {}),
+                  ...(addedBot ? { bindings: [...session.aggregate.bindings, addedBot] } : {}),
+                  ...(removedBot ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== removedBot),
+                    bindings: session.aggregate.bindings.map(item => isBot(item) && item.participantId === removedBot ? { ...item, removed: true as const } : item) } : {}),
+                  ...(ending ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== ending!.participantId), bindings: session.aggregate.bindings.map(item => isHuman(item) && item.participantId === ending!.participantId ? { ...item, membership: ending!.membership } : item) } : {}) };
                 proposed = { aggregate, game: working };
-                await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
                 result = { ok: true, tableSessionId: id, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision };
               }
             }
-            await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
-            return result;
-          }, { ...faults, beforeCommit: () => faults?.beforeCommit?.(context) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.(context) ?? Promise.resolve() });
-          if (proposed) {
-            committed.set(id, proposed); publishCommitted(id, acceptedEvents); ensureBot(id, proposed);
-            if (authority.kind === 'human' && acceptedHumanDecision) analyzeAccepted(proposed, authority.userId, acceptedHumanDecision);
+            return { outcome: result, ...(proposed ? { next: proposed } : {}) };
+          });
+          if (next) {
+            publishCommitted(id, acceptedEvents);
+            if (acceptedHumanDecision) analyzeAccepted(next, (request as ActRequest).participantId, acceptedHumanDecision);
+            await runSchedule(id, next);
           }
           return outcome;
         } catch (error) {
-          if (error instanceof CommitOutcomeUnknown) {
-            if (authority.kind === 'human' && acceptedHumanDecision) uncertainHumanActions.set(actionKey(id, requestId), { ownerUserId: authority.userId, decisionId: acceptedHumanDecision, fingerprint });
-            pause(id);
-          }
+          // The table is paused already; its recovery analyzes the human's decision if the COMMIT proves to have happened.
+          if (error instanceof CommitOutcomeUnknown && acceptedHumanDecision) uncertainHumanActions.set(actionKey(id, requestId), { participantId: (request as ActRequest).participantId, decisionId: acceptedHumanDecision, fingerprint });
           throw error;
         }
     }
     function submit(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest) {
       return enqueue(id, () => accept(id, authority, kind, request));
     }
-    async function configure(id: string, ownerUserId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest): Promise<MutationOutcome> {
+    /**
+     * Bot controller changes, replacing the Join Link and table options require Table Ownership; a Trainer
+     * configuration change is the requester's own. Table options change only at an Online Table, between Hands.
+     */
+    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration' | 'replace-join-link' | 'set-table-options', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest | SetTableOptionsRequest): Promise<MutationOutcome> {
       return enqueue(id, async () => {
-        let session = await load(id, ownerUserId);
-        if (!session || session.aggregate.ownerUserId !== ownerUserId) return reject('not-found', 'This Table Session is unavailable to this local identity.');
+        let session = await load(id, userId);
+        const requester = session && memberBinding(session.aggregate, userId);
+        if (!session || !requester) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
+        if (kind !== 'set-trainer-configuration' && session.aggregate.ownerUserId !== userId) return ownerRequired();
+        // Explicit Bot recovery is Practice's: an Online Table retries a failed decision once, then plays its Timeout Action.
+        if (kind === 'retry-bot' && session.aggregate.mode === 'online') return unavailableOnline('At an Online Table the server retries a failed Bot decision itself, then plays its Timeout Action.');
         const { requestId, ...contents } = request;
-        const fingerprint = createHash('sha256').update('controller-mutation-v1:' + canonical({ ownerUserId, kind, contents })).digest('hex');
+        const fingerprint = createHash('sha256').update('controller-mutation-v2:' + canonical({ userId, kind, contents })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
         session = committed.get(id)!;
         let proposed: CommittedSession | undefined;
-        let fresh = false;
-        try {
-          const outcome = await acceptance.run({ kind: 'table', id, requestId }, fingerprint, async tx => {
-            const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
-            if (rows[0]) return rows[0].fingerprint === fingerprint ? rows[0].outcome : reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
-            const trainer = kind === 'set-trainer-configuration';
-            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])])];
+        let optionEvents: readonly CashGameEvent[] = [];
+        const { outcome, committed: next, decided } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, (): TableDecision<MutationOutcome> => {
+            const trainer = kind === 'set-trainer-configuration', bot = kind === 'set-playing-strategy' || kind === 'retry-bot', tableOptions = kind === 'set-table-options';
+            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : tableOptions ? ['options'] : bot ? ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])] : [])];
             let result: MutationOutcome | undefined;
-            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
+            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : tableOptions ? 'invalid-table-options' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
+            if (!result && tableOptions) result = validateTableOptionChanges((request as SetTableOptionsRequest).options);
             if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
-            const binding = !trainer && session.aggregate.bindings.find(binding => binding.participantId === (request as RetryBotRequest).participantId);
-            if (!result && !trainer && (!binding || binding.controller.kind !== 'bot')) result = reject('participant-not-bot', 'Choose a bound Bot.');
+            if (!result && kind === 'replace-join-link' && session.aggregate.mode !== 'online') result = reject('join-link-unavailable', 'Only an Online Table has a Join Link.');
+            if (!result && tableOptions) {
+              // A Practice Table keeps the options it was created with. At an Online Table they change between Hands only: a Hand lasts until its payout phase ends.
+              if (session.aggregate.mode !== 'online') result = reject('unavailable-at-practice-tables', 'A Practice Table keeps the options it was created with.');
+              else if (handInProgress(tableState(session).status, session.aggregate.schedule, clock.now())) result = reject('active-hand', 'Change table options between Hands, once the payout has been shown.');
+            }
+            if (!result && tableOptions) {
+              const changes = (request as SetTableOptionsRequest).options, current = session.aggregate.options;
+              const next = { actionTimeLimitSeconds: changes.actionTimeLimitSeconds ?? current.actionTimeLimitSeconds, allowLiveAnalysis: changes.allowLiveAnalysis ?? current.allowLiveAnalysis };
+              // Allow Live Analysis takes effect from the next Action Window that opens, which captures it.
+              // The seat-change permission is CashGame's: one more command, in the same transaction as the options.
+              const working = session.game.fork();
+              const seatChanges = changes.allowSeatChanges !== undefined && changes.allowSeatChanges !== tableConfiguration(session).allowSeatChanges ? working.setSeatChanges(changes.allowSeatChanges) : undefined;
+              if (seatChanges && !seatChanges.ok) result = { ok: false, rejection: seatChanges.rejection };
+              else if (seatChanges || next.actionTimeLimitSeconds !== current.actionTimeLimitSeconds || next.allowLiveAnalysis !== current.allowLiveAnalysis) {
+                optionEvents = seatChanges?.events ?? [];
+                const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, options: next,
+                  ...(seatChanges ? { pokerRecord: working.toRecord(), pokerRevision: session.aggregate.pokerRevision + 1 } : {}) };
+                proposed = { aggregate, game: seatChanges ? working : session.game };
+              }
+            }
+            if (!result && bot && !isBot(findBinding(session.aggregate, (request as RetryBotRequest).participantId))) result = reject('participant-not-bot', 'Choose a bound Bot.');
+            if (!result && bot && (findBinding(session.aggregate, (request as RetryBotRequest).participantId) as PersistedBotBinding).removed) result = reject('bot-removed', 'The Table Owner removed this Bot from the table.');
             if (!result && kind === 'set-playing-strategy' && !supportsStrategy((request as SetPlayingStrategyRequest).playingStrategy)) result = reject('unsupported-strategy', 'Choose a supported complete Playing Strategy.');
             if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== (request as RetryBotRequest).participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
             if (!result && trainer) {
               const configuration = (request as SetTrainerConfigurationRequest).trainerConfiguration;
               result = validateTrainerConfiguration(configuration, supportsStrategy);
               if (!result) {
-                const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, trainerConfiguration: immutableData(configuration) };
+                const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
+                  bindings: session.aggregate.bindings.map(item => item.participantId === requester.participantId ? { ...requester, trainerConfiguration: immutableData(configuration) } : item) };
                 proposed = { aggregate, game: session.game };
-                await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
               }
+            }
+            if (!result && kind === 'replace-join-link') {
+              // The old token stops resolving in the same transaction that stores the new one.
+              const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, joinToken: newJoinToken() };
+              proposed = { aggregate, game: session.game };
             }
             if (!result && kind === 'set-playing-strategy') {
               const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
-                bindings: session.aggregate.bindings.map(item => item.participantId === (request as SetPlayingStrategyRequest).participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
+                bindings: session.aggregate.bindings.map(item => isBot(item) && item.participantId === (request as SetPlayingStrategyRequest).participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
               proposed = { aggregate, game: session.game };
-              await tx.update(tableSessions).set({ aggregate }).where(eq(tableSessions.id, id));
             }
-            result ??= { ok: true, tableSessionId: id, pokerRevision: session.aggregate.pokerRevision, sessionRevision: proposed?.aggregate.sessionRevision ?? session.aggregate.sessionRevision };
-            await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: result });
-            fresh = true;
-            return result;
-          }, { ...faults, beforeCommit: () => faults?.beforeCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve(), afterCommit: () => faults?.afterCommit?.({ tableSessionId: id, requestId }) ?? Promise.resolve() });
-          if (proposed) { committed.set(id, proposed); publishCommitted(id); }
-          if (fresh && outcome.ok && kind !== 'set-trainer-configuration') ensureBot(id, proposed ?? session, kind === 'retry-bot');
-          return outcome;
-        } catch (error) {
-          if (error instanceof CommitOutcomeUnknown) pause(id);
-          throw error;
-        }
+            result ??= { ok: true, tableSessionId: id, pokerRevision: proposed?.aggregate.pokerRevision ?? session.aggregate.pokerRevision, sessionRevision: proposed?.aggregate.sessionRevision ?? session.aggregate.sessionRevision };
+            return { outcome: result, ...(proposed ? { next: proposed } : {}) };
+        });
+        if (next) publishCommitted(id, optionEvents);
+        if (decided && outcome.ok && (kind === 'set-playing-strategy' || kind === 'retry-bot')) await runSchedule(id, next ?? session, kind === 'retry-bot');
+        return outcome;
       });
+    }
+    /**
+     * Joins the Online Table that this Join Link opens, as the Guest's one Participant there. The link is the
+     * authorization, so there is no expected revision. A Guest who already joined gets their Participant back,
+     * and one who left rejoins as the same Participant under their original name.
+     */
+    async function join(userId: string, token: string, request: JoinTableRequest): Promise<JoinOutcome> {
+      const id = await tableOfJoinLink(db, token);
+      if (!id) return invalidJoinLink();
+      return enterTable(id, userId, request, { token });
+    }
+    /**
+     * Returns the Table Owner to a table they left, without the Join Link: ownership is the authorization, and it
+     * outlives leaving. Anyone else gets the not-found a missing table gives. The owner's Participant is the same
+     * one, and the same place-in-the-table rules as for any Guest apply.
+     */
+    async function rejoin(id: string, userId: string, request: JoinTableRequest): Promise<JoinOutcome> {
+      if (!await ownsTable(db, id, userId)) return notFound();
+      return enterTable(id, userId, request, {});
+    }
+    async function enterTable(id: string, userId: string, request: JoinTableRequest, via: { token?: string }): Promise<JoinOutcome> {
+      return enqueue(id, async () => {
+        let session = await load(id);
+        // The link may have been replaced while this request waited for its turn.
+        if (!session) return via.token !== undefined ? invalidJoinLink() : notFound();
+        if (via.token !== undefined && session.aggregate.joinToken !== via.token) return invalidJoinLink();
+        if (stopped) return reject('server-closing', 'The server is closing.');
+        const { requestId, ...contents } = request;
+        if (Object.keys(contents).length) return reject('invalid-mutation-request', 'Joining carries only a requestId.');
+        const fingerprint = createHash('sha256').update((via.token !== undefined ? 'join-table-v1:' : 'rejoin-table-v1:') + canonical({ userId })).digest('hex');
+        const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
+        session = committed.get(id)!;
+        let proposed: CommittedSession | undefined;
+        let events: readonly CashGameEvent[] = [];
+        const { outcome, committed: next } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, async (tx): Promise<TableDecision<JoinOutcome>> => {
+            const { aggregate } = session;
+            const binding = humanBindings(aggregate).find(candidate => candidate.userId === userId);
+            const guest = (await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
+            const acknowledged = (participantId: string, next = aggregate): JoinOutcome => ({ ok: true, tableSessionId: id, participantId, pokerRevision: next.pokerRevision, sessionRevision: next.sessionRevision });
+            let result: JoinOutcome | undefined;
+            if (binding?.membership === 'removed') result = removedGuest();
+            else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
+            else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
+            // The owner's place is held after they leave, so only someone else can find the table full.
+            else if (binding?.userId !== aggregate.ownerUserId && placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
+            else if (!binding && aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(guest!))) result = reject('name-taken', 'Someone at this table already uses that name, ignoring case. Choose a different display name.');
+            if (!result) {
+              const participantId = binding?.participantId ?? randomUUID();
+              const working = session.game.fork();
+              const joined = working.joinTable(participantId);
+              // An engine that already counts the Participant as joined needs no second command.
+              if (!joined.ok && joined.rejection.code !== 'participant-already-joined') result = { ok: false, rejection: joined.rejection };
+              else {
+                if (joined.ok) events = joined.events;
+                const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1,
+                  ...(joined.ok ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
+                  bindings: binding ? aggregate.bindings.map(candidate => candidate.participantId === participantId ? { ...binding, membership: 'joined' as const } : candidate)
+                    : [...aggregate.bindings, { participantId, name: guest!, controller: { kind: 'human' }, userId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) }] };
+                proposed = { aggregate: next, game: working };
+                result = acknowledged(participantId, next);
+              }
+            }
+            return { outcome: result, ...(proposed ? { next: proposed } : {}) };
+        });
+        if (next) publishCommitted(id, events);
+        return outcome;
+      });
+    }
+    /** What a Join Link shows before joining, for the Guest holding it. A removed Guest is told so instead. */
+    async function previewJoin(userId: string, token: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
+      const id = await tableOfJoinLink(db, token);
+      if (!id) return undefined;
+      return enqueue(id, async () => {
+        const session = await load(id);
+        if (!session || session.aggregate.joinToken !== token) return undefined;
+        const { aggregate } = session;
+        const humans = humanBindings(aggregate);
+        if (humans.some(binding => binding.userId === userId && binding.membership === 'removed')) return removedGuest();
+        const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
+        const returning = humans.find(binding => binding.userId === userId && binding.membership === 'left');
+        return { ok: true as const, ownerName: owner.name, configuration: projectConfiguration(tableConfiguration(session)), options: projectOptions(aggregate.options),
+          placesTaken: placesTaken(aggregate), alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
+      });
+    }
+    /**
+     * The Guest's saved tables (`savedTableEntries`), each with its public size, stakes and play state from the
+     * committed table. Every table is loaded at startup, so this restores nothing in normal running; a table that cannot
+     * be restored is still listed, without them.
+     */
+    async function savedTables(userId: string): Promise<SavedTable[]> {
+      return Promise.all((await savedTableEntries(db, userId)).map(async ({ participantId, ...entry }): Promise<SavedTable> => {
+        const session = await load(entry.tableSessionId).catch(() => undefined);
+        if (!session) return entry;
+        const state = tableState(session), { seatCount, smallBlind, bigBlind, ante } = tableConfiguration(session);
+        const own = state.participants.find(participant => participant.participantId === participantId && participant.seat !== null);
+        return { ...entry, seatCount, stakes: { smallBlind, bigBlind, ante }, playState: { status: state.status, completedHands: session.game.getCompletedHands().length,
+          seatedParticipants: state.participants.filter(participant => participant.seat !== null).length, ...(own ? { viewerStack: own.stack } : {}) } };
+      }));
     }
     async function readPersistedSession(id: string) {
       const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
-      const aggregate = rows[0]?.aggregate;
-      if (!aggregate) return undefined;
-      if (validateTrainerConfiguration(aggregate.trainerConfiguration, supportsStrategy) || !CashGame.fromRecord(aggregate.pokerRecord).ok) throw new TableSessionRestorationError();
-      return immutableData(aggregate);
+      const stored = rows[0]?.aggregate;
+      return stored && immutableData(restorable(stored).aggregate);
     }
     async function resumeBots() {
       const rows = await db.select({ id: tableSessions.id }).from(tableSessions);
       // A corrupt session remains unavailable at its routes without preventing other sessions from starting.
-      await Promise.allSettled(rows.map(row => enqueue(row.id, async () => { const session = await load(row.id); if (session) ensureBot(row.id, session); })));
+      await Promise.allSettled(rows.map(row => enqueue(row.id, async () => { const session = await load(row.id); if (session) await runSchedule(row.id, session); })));
     }
     function stop() {
       stopped = true;
       clearInterval(recoveryTimer);
+      for (const pending of wakes.values()) pending.cancel();
+      wakes.clear();
       uncertainHumanActions.clear();
       for (const id of work.keys()) retire(id);
     }
@@ -459,38 +1035,61 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await bots?.runner.close();
       await Promise.allSettled([...queue.values()]);
     }
-  function captureScoreSummary(id: string, ownerUserId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
+  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
     return enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
-      const session = await load(id, ownerUserId);
-      const participantId = observer(session, ownerUserId);
-      if (!session || !participantId) return undefined;
+      const session = await load(id, userId);
+      const binding = session && memberBinding(session.aggregate, userId);
+      if (!session || !binding) return undefined;
+      const participantId = binding.participantId;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
       if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
       const view = session.game.forParticipant(participantId).getView();
-      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' || hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
-      const members = decisionIds.map(decisionId => captureEvaluation(session, ownerUserId, decisionId)!);
-      return immutableData({ ownerUserId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: session.aggregate.trainerConfiguration.referenceStrategy, decisionIds, members });
+      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+      const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId)!);
+      return immutableData({ participantId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: binding.trainerConfiguration.referenceStrategy, decisionIds, members });
     });
   }
   return {
     // Historical work validates its frozen request/attempt in this queue; live revision may advance.
-    acceptJobResult: (id: string, ownerUserId: string, accept: () => boolean) => enqueue(id, async () => {
-      if (stopped || committed.get(id)?.aggregate.ownerUserId !== ownerUserId) return false;
+    acceptJobResult: (id: string, participantId: string, accept: () => boolean) => enqueue(id, async () => {
+      const session = committed.get(id);
+      if (stopped || !session || !isHuman(findBinding(session.aggregate, participantId))) return false;
       return accept();
     }),
-    captureHandSummary: (id: string, ownerUserId: string, handId: string) => captureScoreSummary(id, ownerUserId, { scope: 'hand', handId }),
-    captureSessionSummary: (id: string, ownerUserId: string) => captureScoreSummary(id, ownerUserId, { scope: 'table-session' }),
-    captureEvaluation: (id: string, ownerUserId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | null | undefined> => {
-      const session = await load(id, ownerUserId);
-      const participantId = observer(session, ownerUserId);
+    captureHandSummary: (id: string, userId: string, handId: string) => captureScoreSummary(id, userId, { scope: 'hand', handId }),
+    captureSessionSummary: (id: string, userId: string) => captureScoreSummary(id, userId, { scope: 'table-session' }),
+    /**
+     * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
+     * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed.
+     */
+    captureEvaluation: (id: string, userId: string, decisionId: string) => enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
+      const session = await load(id, userId);
+      const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      return captureEvaluation(session, ownerUserId, decisionId);
+      const input = captureEvaluation(session, participantId, decisionId);
+      if (!input || input.acceptedAction) return input;
+      const window = session.aggregate.schedule.actionWindow;
+      const disallowed = window?.decisionId === decisionId ? !!window.liveAnalysisDisallowed : !session.aggregate.options.allowLiveAnalysis;
+      return disallowed ? liveAnalysisRefused() : input;
     }),
+    /** The requesting Guest's joined Participant at a table, and whether they own it; undefined means not-found. */
+    access,
+    /** The Guest to notify for a joined human Participant of a loaded table. */
+    controllerOf(id: string, participantId: string): string | undefined {
+      const session = committed.get(id);
+      const binding = session && findBinding(session.aggregate, participantId);
+      return isHuman(binding) && binding.membership === 'joined' ? binding.userId : undefined;
+    },
     read,
     subscribe,
     configure,
+    join,
+    rejoin,
+    previewJoin,
+    savedTables,
     resumeBots,
+    seatedTableCount,
     startRecovery,
     stop,
     close,
@@ -498,7 +1097,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     /** Use only after promoting confirmed durable state, including application-only mutations. */
     publishCommitted,
     publishStatus,
-    submit: (id: string, ownerUserId: string, kind: PokerMutationKind, request: PokerMutationRequest) => submit(id, { kind: 'human', userId: ownerUserId }, kind, request),
+    submit: (id: string, userId: string, kind: PokerMutationKind, request: PokerMutationRequest) => submit(id, { kind: 'human', userId, receivedAt: clock.now() }, kind, request),
     submitControllerAction: (id: string, request: ActRequest) => submit(id, { kind: 'bot' }, 'act', request),
   };
 }

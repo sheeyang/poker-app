@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -13,13 +18,13 @@ let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table() {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const creation = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await creation.json();
   return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
@@ -53,7 +58,7 @@ test('the owner starts a durable heads-up Hand, the bound human Folds, and resta
   expect(await (await submit(t, 'act', fold)).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 4, sessionRevision: 4 });
   expect(await read(t)).toEqual(completed);
   await server.close();
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual(completed);
 });
@@ -69,7 +74,7 @@ test('owner management does not authorize browser actions as a Bot, and wrong hu
   expect((await submit(t, 'act', botAction)).status).toBe(403);
   expect(await (await submit(t, 'act', botAction)).json()).toMatchObject({ ok: false, rejection: { code: 'actor-not-authorized' } });
   expect(await (await submit(t, 'start-hand', { requestId: 'already-active', expectedPokerRevision: 3 })).json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
-  expect(await (await submit(t, 'seat-participant', { requestId: 'active-setup', expectedPokerRevision: 3, participantId: t.human, seat: 2 })).json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
+  expect(await (await submit(t, 'seat-participant', { requestId: 'active-setup', expectedPokerRevision: 3, participantId: t.human, seat: 2 })).json()).toMatchObject({ ok: false, rejection: { code: 'participant-already-seated' } });
   expect(await (await submit(t, 'act', { requestId: 'illegal-check', expectedPokerRevision: 3, participantId: t.human, action: { type: 'check' } })).json()).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
   expect(await read(t)).toEqual(decision);
   await submit(t, 'act', { requestId: 'fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } });

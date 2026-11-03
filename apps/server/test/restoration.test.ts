@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ObservableTableSession, type ObservableTableUpdate } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -14,14 +19,14 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
 async function startServer() {
-  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 type Table = { id: string; cookie: string; human: string; bot: string; observer: string };
 async function table(): Promise<Table> {
-  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration: { minimumBuyIn: 100, maximumBuyIn: 2000 }, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }, { name: 'Observer', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await response.json();
   return { id: created.tableSessionId, cookie, human: created.bindings[0].participantId, bot: created.bindings[1].participantId, observer: created.bindings[2].participantId };
@@ -65,7 +70,7 @@ test('restart resumes an exact human decision and between-Hand state across mana
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   await command(t, 'top-up-to', { participantId: t.human, targetStack: 1200 });
   await command(t, 'move-participant', { participantId: t.human, seat: 2 });
-  await command(t, 'leave-participant', { participantId: t.bot });
+  await command(t, 'stand-up-participant', { participantId: t.bot });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 6, buyIn: 1000 });
   await command(t, 'set-button', { seat: 2 });
   await command(t, 'start-hand');
@@ -81,7 +86,7 @@ test('restart resumes an exact human decision and between-Hand state across mana
   expect((await response(t, stranger.cookie)).status).toBe(404);
   expect((await fetch(base + '/api/table-sessions/' + t.id)).status).toBe(401);
   const list = await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json();
-  expect(list.tableSessionIds).toContain(t.id);
+  expect(list.tables).toContainEqual(expect.objectContaining({ tableSessionId: t.id, mode: 'practice' }));
   await command(t, 'top-up-to', { participantId: t.human, targetStack: 1500 });
   await command(t, 'set-button', { seat: 2 }); await command(t, 'start-hand');
   const decision = await read(t);

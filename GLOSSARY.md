@@ -73,7 +73,7 @@ The private durable representation from which an authoritative Table Session can
 _Avoid_: Observable Session History, live Cash Game object, event log
 
 **Persisted Table Session**:
-The complete application-owned durable representation of a Table Session, containing its Table Session Record, participant controller assignments, and Trainer configuration needed to continue the session.
+The complete application-owned durable representation of a Table Session, containing its Table Session Record, its mode, participant controller assignments with each human Participant's Guest and membership, and each human Participant's Trainer configuration needed to continue the session.
 _Avoid_: Table Session Record, Cash Game state
 
 **Table Owner**:
@@ -109,8 +109,12 @@ Ceasing to be at a table, after standing up if seated. A Guest who returns keeps
 _Avoid_: Stand Up, quit, disconnect
 
 **Removal**:
-A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again.
+A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again, through any Join Link. During a Hand it is an After-Hand Request, the strongest one: nothing the Guest asks for undoes it.
 _Avoid_: Ban, kick
+
+**After-Hand Request**:
+A change to a Participant asked for during a Hand (a human's Sitting Out, Stand Up, Leave Table or Removal, or the Table Owner's Sitting Out or removal of a Bot) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
+_Avoid_: Queued action, deferred command
 
 **Sitting Out**:
 A seated Participant's status that excludes them from new Hands, while keeping their Seat and stack, until they resume.
@@ -179,6 +183,10 @@ _Avoid_: Playing Strategy
 **Live Analysis**:
 Optional evaluation of the Reference Strategy for the human's current decision before they act. Its numerical results comprise the Policy's action probabilities and concrete sizings together with the Action Selector's selected action.
 _Avoid_: Advice, best-action instruction
+
+**Allow Live Analysis**:
+An Online Table option, visible to everyone at the table, that the Table Owner changes between Hands. Each Action Window captures it when it opens, so a change applies from the next decision; while it is off, Live Analysis is refused, and post-action analysis and scoring continue.
+_Avoid_: Live Analysis setting (that is each Participant's own preference)
 
 **Reference Strategy Evaluation**:
 The Policy Result and Action Selector's selected concrete action for one fixed observable decision situation and one complete Reference Strategy. Alignment scores additionally depend on the human's accepted concrete action.

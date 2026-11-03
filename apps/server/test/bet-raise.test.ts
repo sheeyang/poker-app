@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ConcreteAction, type ObservableTableSession, type ObservableTableUpdate } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -15,7 +20,7 @@ let base: string;
 let controllers: TableSessionControllerCommands;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 async function startServer() {
-  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) }, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) }, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
@@ -27,7 +32,7 @@ const humanAct = (t: Table, revision: number, action: ConcreteAction, requestId:
 const botAct = (t: Table, revision: number, action: ConcreteAction, requestId: string = randomUUID()) => controllers.submitAction(t.id, { requestId, expectedPokerRevision: revision, participantId: t.bot, action });
 async function table(): Promise<Table> {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const created = await (await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) })).json();
   const t = { id: created.tableSessionId, cookie, human: created.bindings[0].participantId, bot: created.bindings[1].participantId };
   expect((await submit(t, 'seat-participant', { requestId: 'seat-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(200);

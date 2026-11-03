@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ConcreteAction } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource, type LiveConsumers } from '@poker/client';
+import { liveAnalysisOn } from './live-analysis.js';
 
 function identity(value: unknown): string {
   if (Array.isArray(value)) return '[' + value.map(identity).join(',') + ']';
@@ -11,11 +12,12 @@ function identity(value: unknown): string {
 export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string; handId?: string; newestAccepted?: string; collapsed?: boolean }>();
   const [viewSelection, setViewSelection] = useState<{ tableId: string; view: 'live' | 'hand' }>();
-  const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
+  const human = table?.viewerParticipantId;
   const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.handId !== table.view.state.handId ? [] : hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
   const newestAccepted = acceptedDecisions.at(-1)?.decisionId;
   const currentDecisionId = table?.view.state.legalActions.length ? table.view.state.decisionId : undefined;
-  const liveEnabled = table?.trainerConfiguration.liveAnalysis ?? false;
+  // Live Analysis runs only while the viewer has it on and the table allows it for their decision.
+  const liveEnabled = table ? liveAnalysisOn(table) : false;
   const view = table && viewSelection?.tableId === table.tableSessionId ? viewSelection!.view : liveEnabled ? 'live' : 'hand';
   useEffect(() => {
     if (table && viewSelection?.tableId !== table.tableSessionId) setViewSelection({ tableId: table.tableSessionId, view: liveEnabled ? 'live' : 'hand' });

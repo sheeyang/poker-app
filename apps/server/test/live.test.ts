@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ObservableTableUpdate, type TableLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -17,13 +22,13 @@ let afterCommit: () => Promise<void> = async () => {};
 let controllers: TableSessionControllerCommands;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() }, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() }, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(configuration?: { maximumBuyIn: number }) {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await response.json();
   return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
@@ -159,6 +164,28 @@ test('lost COMMIT confirmation publishes recovery feedback before proven committ
     } finally { reconnected.socket.terminate(); }
   } finally { afterCommit = async () => {}; live.socket.terminate(); }
 });
+test('reading and subscribing while a COMMIT is still being confirmed neither pauses the table nor shows it recovering', async () => {
+  const t = await table();
+  const live = connect(t);
+  const confirming = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let held: Promise<Response> | undefined;
+  try {
+    await live.next(0);
+    // COMMIT has run and its journal entry is still pending while the acceptance confirms it.
+    afterCommit = async () => { confirming.resolve(); await release.promise; };
+    held = submit(t, 'seat-participant', { requestId: 'confirming', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+    await confirming.promise;
+    expect(await read(t)).toMatchObject({ pokerRevision: 0, runtimeStatus: { phase: 'idle' } });
+    const another = connect(t);
+    try { expect(await another.next(0)).toMatchObject({ runtimeStatus: { phase: 'idle' } }); } finally { another.socket.terminate(); }
+    release.resolve();
+    expect((await held).status).toBe(200);
+    expect(await live.next(1)).toMatchObject({ pokerRevision: 1 });
+    expect(await read(t)).toMatchObject({ pokerRevision: 1, runtimeStatus: { phase: 'idle' } });
+    expect(live.messages.filter(m => m.type === 'table-status')).toEqual([]);
+  } finally { afterCommit = async () => {}; release.resolve(); await held; live.socket.terminate(); }
+});
 test('committed management commands automatically synchronize their complete views and explicit safe presentation events', async () => {
   const t = await table({ maximumBuyIn: 2000 });
   const live = connect(t);
@@ -172,7 +199,7 @@ test('committed management commands automatically synchronize their complete vie
       ['set-sitting-out', { participantId: t.bot, sittingOut: true }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: true }],
       ['set-sitting-out', { participantId: t.bot, sittingOut: false }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: false }],
       ['set-button', { seat: 1 }, { type: 'button-set', seat: 1 }],
-      ['leave-participant', { participantId: t.bot }, { type: 'participant-left', participantId: t.bot, seat: 2, cashOut: 1000 }],
+      ['stand-up-participant', { participantId: t.bot }, { type: 'participant-stood-up', participantId: t.bot, seat: 2, cashOut: 1000 }],
     ] as const;
     for (let index = 0; index < steps.length; index++) {
       const [kind, contents, event] = steps[index]!;

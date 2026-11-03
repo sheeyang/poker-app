@@ -8,16 +8,36 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, ServerFeatures } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
+import { upgradeTableSession } from './aggregate.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
+import { validateDisplayName } from './validation.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
+import { systemClock, type ServerClock } from './clock.js';
+import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
+import { outcomeStatus } from './rejections.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void }
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void;
+  /** The clock for all play timing. Defaults to system time; tests substitute a manually advanced clock. */
+  readonly clock?: ServerClock;
+  /**
+   * Addresses (or CIDR ranges) of the reverse proxy in front of the server. Forwarding headers such as
+   * `X-Forwarded-For` are believed only on a connection from one of these, and `request.ip` is then the client's
+   * address; from anyone else they are ignored. Omitted: no proxy is trusted.
+   */
+  readonly trustedProxies?: readonly string[];
+  /** Per-client-address limits on creation, joining and Join Link replacement. A kind left out is unlimited. */
+  readonly rateLimits?: Partial<RateLimits>;
+  /**
+   * Whether Guests may create and join Online Tables. Defaults to on here; the hosted environment turns it off
+   * unless `POKER_ONLINE_PLAY=true`. Existing Online Tables stay playable for the Participants already at them.
+   */
+  readonly onlinePlay?: boolean }
 export async function createServer(options: ServerOptions) {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({ logger: options.logger ?? false, trustProxy: options.trustedProxies?.length ? [...options.trustedProxies] : false });
   let closing = false;
   app.addHook('onSend', async (_request, reply) => { if (closing) reply.header('connection', 'close'); });
   const { pool, db } = openDatabase(options.databaseUrl, options.schema);
@@ -38,21 +58,45 @@ export async function createServer(options: ServerOptions) {
     reply.setCookie('poker_local', token, { httpOnly: true, sameSite: 'strict', secure: options.secureCookies ?? false, path: '/', maxAge: 31536000 });
     return id;
   }
+  const limiter = createRateLimiter(options.rateLimits ?? {}, options.clock ?? systemClock);
+  const limitMessages: Record<RateLimitKind, string> = {
+    creation: 'Too many tables were created from your network recently.',
+    joining: 'Too many join attempts were made from your network recently.',
+    'join-link-replacement': 'Join Links were replaced from your network too often.',
+  };
+  /** Answers 429 with when to try again if this address has used up its allowance for `kind`; otherwise records the request. */
+  function refuseIfLimited(kind: RateLimitKind, request: FastifyRequest, reply: FastifyReply) {
+    const decision = limiter.take(kind, request.ip);
+    if (decision.allowed) return undefined;
+    return reply.code(429).header('retry-after', String(decision.retryAfterSeconds))
+      .send({ ok: false, rejection: { code: 'rate-limited', message: `${limitMessages[kind]} Try again in ${waitText(decision.retryAfterSeconds)}.` } });
+  }
+  const onlinePlay = options.onlinePlay ?? true;
+  /** Answers 403 when Online Tables are turned off on this server. */
+  function refuseIfOnlinePlayDisabled(reply: FastifyReply) {
+    if (onlinePlay) return undefined;
+    return reply.code(403).send({ ok: false, rejection: { code: 'online-play-disabled', message: 'Online tables are in beta and turned off on this server. You can still play at a Practice Table.' } });
+  }
   const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema);
-  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy);
+  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy, userId => mutations.seatedTableCount(userId));
   const jobRunner = new JobRunner(options.jobRunnerOptions);
-  const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis') });
+  const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis') }, options.clock);
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult);
   const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult);
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
-  // The user channel is independent of open table subscriptions. Analysis publishes here
-  // only after establishing the request owner's authorization and making HTTP state readable.
+  // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
+  // reaching only its Human Controller, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
-  function publishUserUpdate(userId: string, message: AnalysisUpdate) {
-    for (const deliver of userChannels.get(userId) ?? []) deliver(message);
+  function publishUserUpdate(participantId: string, message: AnalysisUpdate) {
+    const userId = mutations.controllerOf(message.tableSessionId, participantId);
+    for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message);
+  }
+  /** The requesting Guest's own joined Participant: the only one whose study results they may read or retry. */
+  async function participantAt(tableSessionId: string, userId: string) {
+    return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
   }
   app.get('/api/live', {
     websocket: true,
@@ -131,14 +175,31 @@ export async function createServer(options: ServerOptions) {
       else unsubscribe = subscription;
     }).catch(() => socket.close(1011, 'The committed view could not be loaded.'));
   });
-  app.get('/api/identity', async (request, reply) => { await ensureIdentity(request, reply); return { ok: true }; });
+  app.get('/api/features', async () => ({ ok: true, onlinePlay } satisfies ServerFeatures));
+  app.get('/api/identity', async (request, reply) => {
+    const userId = await ensureIdentity(request, reply);
+    const displayName = (await db.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
+    return displayName ? { ok: true, displayName } : { ok: true };
+  });
+  app.put<{ Body: { displayName?: unknown } }>('/api/display-name', async (request, reply) => {
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    const body = request.body as unknown;
+    const checked = validateDisplayName(body && typeof body === 'object' && !Array.isArray(body) ? (body as { displayName?: unknown }).displayName : undefined);
+    if (!checked.ok) return reply.code(400).send(checked);
+    try { await db.update(localUsers).set({ displayName: checked.displayName }).where(eq(localUsers.id, userId)); }
+    catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The display name could not be saved. Try again.' } }); }
+    return { ok: true, displayName: checked.displayName };
+  });
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
+    if (request.body?.mode === 'online') { const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled; }
+    const limited = refuseIfLimited('creation', request, reply); if (limited) return limited;
     const ownerUserId = await ensureIdentity(request, reply);
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const result = await create(ownerUserId, request.body);
-      return reply.code(result.ok ? 201 : result.rejection.code === 'request-id-conflict' ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
+      return reply.code(result.ok ? 201 : ['request-id-conflict', 'table-limit-reached'].includes(result.rejection.code) ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
     } catch (error) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The creation commit outcome is unknown. Check owned sessions or explicitly retry this requestId to resolve it.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Creation could not be confirmed. No definitive domain rejection has been stored.' } });
@@ -147,8 +208,54 @@ export async function createServer(options: ServerOptions) {
   app.get('/api/table-sessions', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
-    const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(eq(tableSessions.ownerUserId, userId));
-    return { tableSessionIds: rows.map(row => row.id) };
+    try { return { tables: await mutations.savedTables(userId) }; }
+    catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
+  });
+  app.get<{ Params: { token: string } }>('/api/join-links/:token', async (request, reply) => {
+    const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled;
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    try {
+      const preview = await mutations.previewJoin(userId, request.params.token);
+      if (!preview) return reply.code(404).send({ ok: false, rejection: { code: 'invalid-join-link', message: 'This Join Link does not work. Ask the Table Owner for a new one.' } });
+      return preview.ok ? preview : reply.code(outcomeStatus(preview)).send(preview);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The table could not be read. Try opening the link again.' } });
+    }
+  });
+  app.post<{ Params: { token: string }; Body: JoinTableRequest }>('/api/join-links/:token/join', async (request, reply) => {
+    const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled;
+    const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    try {
+      const outcome = await mutations.join(userId, request.params.token, request.body);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The join outcome is unknown. Try joining again with the same request.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Joining could not be confirmed. Try again.' } });
+    }
+  });
+  app.post<{ Params: { id: string }; Body: JoinTableRequest }>('/api/table-sessions/:id/rejoin-table', async (request, reply) => {
+    const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled;
+    const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
+    const userId = await authenticatedUser(request.cookies.poker_local);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    try {
+      const outcome = await mutations.rejoin(request.params.id, userId, request.body);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The outcome is unknown. Try returning to the table again with the same request.' } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Returning to the table could not be confirmed. Try again.' } });
+    }
   });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
@@ -163,7 +270,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Table Session is unavailable. Refresh to try reading it again.' } });
     }
   });
-  for (const kind of ['seat-participant', 'start-hand', 'act', 'leave-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+  for (const kind of ['seat-participant', 'start-hand', 'act', 'stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button', 'leave-table', 'remove-participant', 'add-bot', 'remove-bot'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
@@ -171,21 +278,22 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : outcome.rejection.code === 'actor-not-authorized' ? 403 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-poker-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The mutation could not be confirmed. Refresh the committed view before submitting another attempt.' } });
     }
   });
-  for (const kind of ['set-playing-strategy', 'retry-bot', 'set-trainer-configuration'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+  for (const kind of ['set-playing-strategy', 'retry-bot', 'set-trainer-configuration', 'replace-join-link', 'set-table-options'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest | SetTableOptionsRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
+    if (kind === 'replace-join-link') { const limited = refuseIfLimited('join-link-replacement', request, reply); if (limited) return limited; }
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
-      return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'not-found' ? 404 : ['session-recovering', 'commit-not-applied'].includes(outcome.rejection.code) ? 503 : ['request-id-conflict', 'stale-session-revision'].includes(outcome.rejection.code) ? 409 : 400).send(outcome);
+      return reply.code(outcomeStatus(outcome)).send(outcome);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The configuration commit outcome is unknown. This Table Session is paused pending durable recovery.' } });
@@ -197,7 +305,8 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     try {
-      const state = await summaries.retry(request.params.id, request.params.requestId, userId);
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && await summaries.retry(request.params.id, request.params.requestId, participantId);
       if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be retried. Read its state before trying again.' } }); }
@@ -205,8 +314,11 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    const state = summaries.read(request.params.id, request.params.requestId, userId);
-    return state ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+    try {
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && summaries.read(request.params.id, request.params.requestId, participantId);
+      return state || reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string }; Body: Record<string, never> }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
@@ -242,6 +354,7 @@ export async function createServer(options: ServerOptions) {
       const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });
+      if ('ok' in input) return reply.code(outcomeStatus(input)).send(input);
       const state = await analysis.getOrStart(input, request.body.live ? 'live-analysis' : 'interactive-analysis');
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
@@ -252,7 +365,8 @@ export async function createServer(options: ServerOptions) {
     if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Retry uses the original analysis inputs. Supply an empty request.' } });
     try {
-      const state = await analysis.retry(request.params.id, request.params.requestId, userId);
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && await analysis.retry(request.params.id, request.params.requestId, participantId);
       if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be retried. Try reading it again.' } }); }
@@ -262,7 +376,8 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
     try {
-      const state = await analysis.read(request.params.id, request.params.requestId, userId);
+      const participantId = await participantAt(request.params.id, userId);
+      const state = participantId && await analysis.read(request.params.id, request.params.requestId, participantId);
       if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
       return state;
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
@@ -275,11 +390,16 @@ export async function createServer(options: ServerOptions) {
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId'))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-inspection-request', message: 'Supply only the completed Hand ID.' } });
     try {
-      const input = await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
+      const access = await mutations.access(request.params.id, userId);
+      if (access && !access.owner) return reply.code(403).send({ ok: false, rejection: { code: 'table-owner-required', message: 'Only the Table Owner can inspect completed Hands.' } });
+      if (access?.mode === 'online') return reply.code(403).send({ ok: false, rejection: { code: 'unavailable-at-online-tables', message: 'Admin Mode and completed-Hand inspection are not available at Online Tables.' } });
+      const input = access && await loadCompletedHandInspection(request.params.id, request.body.handId, async id => {
         // Load authorized durable inputs; reconstruction belongs to the admitted Research job.
         const owned = await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(and(eq(tableSessions.id, id), eq(tableSessions.ownerUserId, userId)));
-        const aggregate = owned[0]?.aggregate;
-        return aggregate?.ownerUserId === userId ? { pokerRecord: aggregate.pokerRecord } : undefined;
+        if (!owned[0]) return undefined;
+        const aggregate = upgradeTableSession(owned[0].aggregate);
+        if (!aggregate) throw new TableSessionRestorationError();
+        return aggregate.ownerUserId === userId ? { pokerRecord: aggregate.pokerRecord } : undefined;
       });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
       const result = await jobRunner.submit('interactive-analysis', input, inspectCompletedHand).result;

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
@@ -8,6 +9,10 @@ import { createServer } from '../src/server.js';
 import { JobRunner } from '../src/job-runner.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { baselineStrategy, type Strategy } from '@poker/strategies';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -18,13 +23,13 @@ let controllers: TableSessionControllerCommands;
 const botParticipants = new Set<string>();
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(bots = 1) {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const result = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: bots }, (_, i) => ({ name: 'Bot ' + i, playingStrategy: baselinePlayingStrategy })) }) });
   const created = await result.json();
   for (const binding of created.bindings.slice(1)) botParticipants.add(binding.participantId);
@@ -141,7 +146,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   expect(await read(t)).toEqual(before);
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual({ ...before, inspection: { adminMode: false, completedHands: [] } });
   expect(await (await inspect(t)).json()).toMatchObject({ ok: false, rejection: { code: 'admin-mode-disabled' } });
@@ -154,7 +159,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   } finally { socket.terminate(); }
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } });
 });
@@ -206,21 +211,43 @@ test.each(['invalid suffix', 'null record', 'missing record'])('inspection rejec
   await expect(controllers.readPersistedSession(t.id)).rejects.toThrow('The complete committed Table Session could not be restored.');
 });
 
-test('queued inspection retains its captured active-Hand rejection after the live Hand completes', async () => {
-  await server.close();
-  const release = Promise.withResolvers<void>();
-  const evaluating = Promise.withResolvers<void>();
+/**
+ * The Strategy of a server whose shared computation slot a test fills: Bots check or call at once, and their Policy
+ * view is kept. Once `hold()` is called, a human's analysis waits for `release()`, holding the one slot that analysis
+ * and inspection share. Bot decisions have a slot of their own (ADR-0019), so they never wait behind it.
+ */
+function sharedSlotStrategy() {
+  const released = Promise.withResolvers<void>(), evaluating = Promise.withResolvers<void>();
+  let holding = false;
+  let botView: unknown;
   const strategy: Strategy = {
-    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => { if (!botParticipants.has(view.state.actorId ?? '')) return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution); evaluating.resolve(); await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
+    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => {
+      if (botParticipants.has(view.state.actorId ?? '')) { botView = view; return { choices: [{ action: view.state.legalActions.some(a => a.type === 'check') ? { type: 'check' } : { type: 'call' }, probability: 1 }] }; }
+      if (holding) { evaluating.resolve(); await released.promise; }
+      return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution);
+    } },
     actionSelector: { select: choices => choices[0]!.action },
   };
-  server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  return { strategy, hold() { holding = true; }, evaluating: evaluating.promise, release: () => released.resolve(), botView: () => botView };
+}
+/** The next Hand starts, the Bot calls, and the human's analysis of their own current decision holds the shared slot. */
+async function holdSharedSlot(t: Table, shared: ReturnType<typeof sharedSlotStrategy>) {
+  await command(t, 'start-hand');
+  await expect.poll(async () => (await read(t)).view.state.actorId).toBe(t.human);
+  shared.hold();
+  const { decisionId } = (await read(t)).view.state;
+  expect((await fetch(base + '/api/table-sessions/' + t.id + '/analysis', { method: 'POST', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ decisionId }) })).status).toBe(200);
+  await shared.evaluating;
+}
+
+test('queued inspection retains its captured active-Hand rejection after the live Hand completes', async () => {
+  await server.close();
+  const shared = sharedSlotStrategy();
+  server = await createServer({ clock, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();
-    await command(t, 'start-hand');
-    await evaluating.promise;
-    const active = await read(t);
+    await holdSharedSlot(t, shared);
     const captured = await controllers.readPersistedSession(t.id);
     const replay = vi.spyOn(CashGame, 'fromRecord');
     try {
@@ -230,12 +257,12 @@ test('queued inspection retains its captured active-Hand rejection after the liv
       expect(await (await inspect(t, 'hand-2')).json()).toMatchObject({ rejection: { code: 'inspection-capacity' } });
       expect(finished).toBe(false);
       expect(replay).not.toHaveBeenCalled();
-      expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: active.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } })).toMatchObject({ ok: true });
+      await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
       const completedView = await read(t);
       expect(completedView.view.state.status).toBe('completed-hand');
       const committed = await controllers.readPersistedSession(t.id);
       replay.mockClear();
-      release.resolve();
+      shared.release();
       const response = await queued;
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
@@ -246,33 +273,27 @@ test('queued inspection retains its captured active-Hand rejection after the liv
       expect(await read(t)).toEqual(completedView);
       expect(await controllers.readPersistedSession(t.id)).toEqual(committed);
     } finally { replay.mockRestore(); }
-  } finally { release.resolve(); }
+  } finally { shared.release(); }
 });
 
-test('inspection shares Bot capacity, waits outside mutation acceptance and retains a completed result when later poker advances', async () => {
+test('inspection shares the analysis capacity of the one JobRunner, waits outside mutation acceptance and retains a completed result when later poker advances', async () => {
   await server.close();
-  const release = Promise.withResolvers<void>();
-  let policyView: unknown;
-  const strategy: Strategy = {
-    policy: { checkCompatibility: () => ({ compatible: true }), evaluate: async (view, execution) => { if (!botParticipants.has(view.state.actorId ?? '')) return baselineStrategy(baselinePlayingStrategy).policy.evaluate(view, execution); policyView = view; await release.promise; return { choices: [{ action: { type: 'fold' }, probability: 1 }] }; } },
-    actionSelector: { select: choices => choices[0]!.action },
-  };
-  server = await createServer({ databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  const shared = sharedSlotStrategy();
+  server = await createServer({ clock, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();
     const corrupt = await completed();
     await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(aggregate, \'{pokerRecord,commands}\', (aggregate #> \'{pokerRecord,commands}\') || $1::jsonb) WHERE id = $2', [JSON.stringify([{ type: 'act', participantId: corrupt.bots[0], action: { type: 'fold' } }]), corrupt.id]);
     const first = await read(t);
-    await command(t, 'start-hand');
-    await expect.poll(() => policyView).toBeDefined();
+    await holdSharedSlot(t, shared);
     const replay = vi.spyOn(CashGame, 'fromRecord');
     let queued: Promise<Response>;
     try {
       ({ response: queued } = await queueInspection(t));
       let finished = false;
       void queued.then(() => { finished = true; });
-      // Capacity proves this is the same runner as the executing Bot, not a second Research runner.
+      // Capacity proves this is the same runner as the held analysis, not a second Research runner.
       expect(await (await inspect(t)).json()).toMatchObject({ rejection: { code: 'inspection-capacity' } });
       expect(finished).toBe(false);
       const rejected = await inspect(corrupt);
@@ -280,15 +301,16 @@ test('inspection shares Bot capacity, waits outside mutation acceptance and reta
       expect(await rejected.json()).toMatchObject({ ok: false, rejection: { code: 'inspection-capacity' } });
       expect(replay).not.toHaveBeenCalled();
     } finally { replay.mockRestore(); }
-    const active = await read(t);
-    expect(JSON.stringify(policyView)).not.toMatch(/"(?:inspection|deck|burns|seed|configurationSeed|commands|pokerRecord)"\s*:/);
-    await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: active.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } });
+    expect(shared.botView()).toBeDefined();
+    expect(JSON.stringify(shared.botView())).not.toMatch(/"(?:inspection|deck|burns|seed|configurationSeed|commands|pokerRecord)"\s*:/);
+    // Play goes on while the inspection waits.
+    await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
     await command(t, 'start-hand');
     expect((await read(t)).view.state.legalActions).toContainEqual({ type: 'fold' });
     await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
     const advanced = await read(t);
     const record = await controllers.readPersistedSession(t.id);
-    release.resolve();
+    shared.release();
     const response = await queued;
     expect(response.status).toBe(200);
     const result = await response.json();
@@ -298,5 +320,5 @@ test('inspection shares Bot capacity, waits outside mutation acceptance and reta
     expect(await read(t)).toEqual(advanced);
     expect(await controllers.readPersistedSession(t.id)).toEqual(record);
     expect(advanced.view.history[0]!.decisions).toEqual(first.view.history[0]!.decisions);
-  } finally { release.resolve(); }
+  } finally { shared.release(); }
 });

@@ -6,7 +6,7 @@ import { api, createAnalysisTarget, useAnalysisResource } from '@poker/client';
 export function useHandSummary(table: ObservableTableSession | undefined) {
   const handId = table?.view.state.handId;
   const scope = hashKey([table?.tableSessionId, handId]);
-  const human = table?.bindings.find(binding => binding.controller.kind === 'human')?.participantId;
+  const human = table?.viewerParticipantId;
   const decisionIds = table?.view.history.find(hand => hand.handId === handId)?.decisions.filter(decision => decision.action.participantId === human).map(decision => decision.decisionId) ?? [];
   // Settings alone retain the recorded snapshot. The next accepted action captures the then-current reference.
   const key = hashKey([scope, decisionIds]);

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api, RequestFailure } from '@poker/client';
-import type { ActRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -12,6 +12,14 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'trainer'; readonly body: SetTrainerConfigurationRequest }
   | { readonly kind: 'strategy'; readonly body: SetPlayingStrategyRequest }
   | { readonly kind: 'retry-bot'; readonly body: RetryBotRequest }
+  /** The Table Owner adds a Bot, at any time. */
+  | { readonly kind: 'add-bot'; readonly body: AddBotRequest }
+  /** The Table Owner changes an Online Table's options between Hands. */
+  | { readonly kind: 'options'; readonly body: SetTableOptionsRequest }
+  /** The Table Owner replaces the Online Table's Join Link. */
+  | { readonly kind: 'replace-link'; readonly body: ReplaceJoinLinkRequest }
+  /** The Table Owner returns to a table they left, without the Join Link. */
+  | { readonly kind: 'rejoin'; readonly body: JoinTableRequest }
 );
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
@@ -48,6 +56,10 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'trainer': return api.setTrainerConfiguration(tableId, attempt.body);
     case 'strategy': return api.setPlayingStrategy(tableId, attempt.body);
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
+    case 'rejoin': return api.rejoinTable(tableId, attempt.body);
+    case 'replace-link': return api.replaceJoinLink(tableId, attempt.body);
+    case 'add-bot': return api.addBot(tableId, attempt.body);
+    case 'options': return api.setTableOptions(tableId, attempt.body);
   }
 }
 
@@ -68,6 +80,14 @@ export function useCommand() {
         select(result.tableSessionId);
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       }
+      // Leaving at once ends this Guest's place at the table; leaving after the Hand is announced when it happens.
+      if (attempt.kind === 'manage' && attempt.operation === 'leave-table' && !('afterHand' in result)) {
+        select(null);
+        queryClient.removeQueries({ queryKey: ['table-session', result.tableSessionId] });
+        await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
+        return;
+      }
+      if (attempt.kind === 'rejoin') { select(result.tableSessionId); await queryClient.invalidateQueries({ queryKey: ['table-sessions'] }); }
       await queryClient.invalidateQueries({ queryKey: ['table-session', result.tableSessionId] });
     },
     onError: async (error, attempt) => {
@@ -83,7 +103,7 @@ export function useCommand() {
     },
     launch: (body: CreateTableSessionRequest) => {
       if (useSession.getState().pending || mutation.isPending) return;
-      useSession.getState().setSetup({ requestId: body.requestId });
+      if (body.mode !== 'online') useSession.getState().setSetup({ requestId: body.requestId });
       const attempt: Attempt = { kind: 'create', body };
       setPending(attempt); mutation.mutate(attempt);
     },

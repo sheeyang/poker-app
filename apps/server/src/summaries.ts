@@ -5,8 +5,9 @@ import { calculateScoreSummary } from '@poker/research';
 import type { createAnalysis, FrozenEvaluationInput } from './analysis.js';
 import type { JobRunner } from './job-runner.js';
 import type { AcceptTableJobResult } from './mutations.js';
+/** `participantId` keys the summary: only that Participant's Human Controller reads or retries it. */
 interface FrozenSummaryMetadata {
-  readonly ownerUserId: string; readonly tableSessionId: string;
+  readonly participantId: string; readonly tableSessionId: string;
   readonly capturedPokerRevision: number; readonly referenceStrategy: StrategyDescriptor; readonly decisionIds: readonly string[];
   readonly members: readonly FrozenEvaluationInput[];
 }
@@ -15,7 +16,7 @@ interface Failure { readonly code: AnalysisFailureCode; readonly message: string
 interface Dependency { readonly input: FrozenEvaluationInput; readonly consumers: Set<Entry>; state?: DecisionAnalysis; failure?: Failure; running: boolean; queued: boolean; retryRequested: boolean; starting: boolean; observedAttempt?: string; readonly settlements: Map<string, Promise<void>>; readonly settledAttempts: Set<string> }
 interface Entry { readonly input: FrozenScoreSummary; identity: ScoreSummaryIdentity; state: ScoreSummary; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string }
 /** All scopes/owners share this one bounded coordinator and the application's existing runner. */
-export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>, runner: JobRunner, publish: (ownerUserId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
+export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>, runner: JobRunner, publish: (participantId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
   const requests = new Map<string, Entry>();
   const dependencies = new Map<string, Dependency>();
   const waiting: (Dependency | Entry)[] = [];
@@ -27,11 +28,11 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
   function terminal(entry: Entry) {
     if (stopped || entry.state.status === 'pending' || entry.state.status === 'empty' || entry.notified === entry.state.attemptId) return;
     entry.notified = entry.state.attemptId;
-    try { publish(entry.input.ownerUserId, { type: 'analysis-update', resource: 'summary', tableSessionId: entry.state.tableSessionId, requestId: entry.state.requestId, attemptId: entry.state.attemptId, status: entry.state.status }); } catch { /* HTTP state remains readable. */ }
+    try { publish(entry.input.participantId, { type: 'analysis-update', resource: 'summary', tableSessionId: entry.state.tableSessionId, requestId: entry.state.requestId, attemptId: entry.state.attemptId, status: entry.state.status }); } catch { /* HTTP state remains readable. */ }
   }
   async function reduce(entry: Entry) {
     const attemptId = entry.state.attemptId;
-    await acceptJobResult(entry.input.tableSessionId, entry.input.ownerUserId, () => {
+    await acceptJobResult(entry.input.tableSessionId, entry.input.participantId, () => {
       if (stopped || entry.state.attemptId !== attemptId || entry.state.status !== 'pending') return false;
       const failure = entry.members.map(member => member.retryRequested || member.starting ? undefined : member.failure ?? (member.state?.status === 'error' ? member.state.error : undefined)).find(Boolean);
       if (failure) { entry.state = immutableData({ ...entry.identity, status: 'error', error: failure }); terminal(entry); return true; }
@@ -51,12 +52,12 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
   }
   function watch(dependency: Dependency, state: DecisionAnalysis) {
     dependency.observedAttempt = state.attemptId; dependency.state = state;
-    dependency.settlements.set(state.attemptId, analysis.waitForSettlement(state.tableSessionId, state.requestId, dependency.input.ownerUserId, state.attemptId).then(() => { dependency.settledAttempts.add(state.attemptId); }));
+    dependency.settlements.set(state.attemptId, analysis.waitForSettlement(state.tableSessionId, state.requestId, dependency.input.identity.participantId, state.attemptId).then(() => { dependency.settledAttempts.add(state.attemptId); }));
     changed(dependency); void observe(dependency, state);
   }
   async function observe(dependency: Dependency, initial: DecisionAnalysis) {
     try {
-      const result = initial.status === 'pending' ? await analysis.waitForResult(initial.tableSessionId, initial.requestId, dependency.input.ownerUserId) : initial;
+      const result = initial.status === 'pending' ? await analysis.waitForResult(initial.tableSessionId, initial.requestId, dependency.input.identity.participantId) : initial;
       if (stopped || !result || dependency.observedAttempt !== initial.attemptId) return;
       if (result.attemptId !== initial.attemptId) { watch(dependency, result); return; }
       if (result.status === 'complete' && dependency.input.acceptedAction && !result.scores) {
@@ -75,7 +76,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
     if (retry && previous?.status === 'error' && !dependency.settledAttempts.has(previous.attemptId)) { dependency.starting = false; watch(dependency, previous); return; }
     dependency.retryRequested = false;
     try {
-      if (retry && previous?.status === 'error') await analysis.retry(previous.tableSessionId, previous.requestId, dependency.input.ownerUserId);
+      if (retry && previous?.status === 'error') await analysis.retry(previous.tableSessionId, previous.requestId, dependency.input.identity.participantId);
       const state = await analysis.getOrStart(dependency.input, 'summary-analysis');
       dependency.failure = undefined; dependency.starting = false; watch(dependency, state);
     }
@@ -85,7 +86,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
     const attemptId = entry.state.attemptId;
     const scores = entry.members.flatMap(member => member.state?.status === 'complete' && member.state.scores ? [member.state.scores] : []);
     const handle = runner.submit('summary-analysis', scores, calculateScoreSummary);
-    const completion = handle.result.then(result => acceptJobResult(entry.input.tableSessionId, entry.input.ownerUserId, () => {
+    const completion = handle.result.then(result => acceptJobResult(entry.input.tableSessionId, entry.input.participantId, () => {
       if (stopped || entry.state.attemptId !== attemptId || entry.state.status !== 'pending') return false;
       entry.state = immutableData(result.ok && result.value ? { ...entry.identity, status: 'complete', averages: result.value } : { ...entry.identity, status: 'error', error: { code: result.ok ? 'failed' : result.code, message: 'The summary could not complete.' } });
       terminal(entry); return true;
@@ -105,7 +106,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
   }
   return {
     async create(input: FrozenScoreSummary): Promise<ScoreSummary> {
-      const { ownerUserId: _owner, members: _members, ...metadata } = input;
+      const { participantId: _participant, members: _members, ...metadata } = input;
       const identity = immutableData({ ok: true as const, ...metadata, requestId: randomUUID(), attemptId: randomUUID(), decisionCount: input.decisionIds.length });
       const members = input.members.map(member => {
         const key = analysis.matchingKey(member);
@@ -129,9 +130,9 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       if (members.length) { await reduce(entry); await pump(); await reduce(entry); }
       return entry.state;
     },
-    async retry(tableSessionId: string, requestId: string, ownerUserId: string): Promise<ScoreSummary | undefined> {
+    async retry(tableSessionId: string, requestId: string, participantId: string): Promise<ScoreSummary | undefined> {
       const entry = requests.get(requestId);
-      if (!entry || entry.input.ownerUserId !== ownerUserId || entry.state.tableSessionId !== tableSessionId) return undefined;
+      if (!entry || entry.input.participantId !== participantId || entry.state.tableSessionId !== tableSessionId) return undefined;
       if (entry.state.status !== 'error') return entry.state;
       entry.identity = immutableData({ ...entry.identity, attemptId: randomUUID() });
       entry.state = immutableData({ ...entry.identity, status: 'pending' }); entry.aggregating = false;
@@ -143,9 +144,9 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       }
       await reduce(entry); await pump(); await reduce(entry); return entry.state;
     },
-    read(tableSessionId: string, requestId: string, ownerUserId: string) {
+    read(tableSessionId: string, requestId: string, participantId: string) {
       const entry = requests.get(requestId);
-      return entry?.input.ownerUserId === ownerUserId && entry.state.tableSessionId === tableSessionId ? entry.state : undefined;
+      return entry?.input.participantId === participantId && entry.state.tableSessionId === tableSessionId ? entry.state : undefined;
     },
     stop() { stopped = true; waiting.length = 0; },
   };

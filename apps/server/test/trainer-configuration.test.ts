@@ -1,9 +1,14 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -13,7 +18,7 @@ let base: string;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
 async function start() {
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => {
@@ -23,7 +28,7 @@ beforeAll(async () => {
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(playingStrategy = baselinePlayingStrategy) {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const creation = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy }] }) });
   expect(creation.status).toBe(201);
   const result = await creation.json();
@@ -161,8 +166,8 @@ test('lost commit confirmation resolves to one original preference outcome and r
 test('an incompatible pre-release record fails restoration instead of silently replacing its missing Trainer configuration', async () => {
   const t = await table();
   await server.close();
-  // An external persistence fixture simulates an older pre-release record format.
-  await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = aggregate - \'trainerConfiguration\' WHERE id = $1', [t.id]);
+  // An external persistence fixture simulates a record whose human Participant lacks its Trainer configuration.
+  await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(aggregate, \'{bindings,0}\', (aggregate #> \'{bindings,0}\') - \'trainerConfiguration\') WHERE id = $1', [t.id]);
   await start();
   const response = await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } });
   expect(response.status).toBe(503);

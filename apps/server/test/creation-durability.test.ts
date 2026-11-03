@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
 const schema = 'test_' + randomUUID().replaceAll('-', '');
@@ -12,7 +17,7 @@ let beforeCommit: () => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false,
+  server = await createServer({ clock, automaticBots: false,
     databaseUrl, schema,
     transactionFaults: { beforeCommit: () => beforeCommit(), afterCommit: () => afterCommit() },
   });
@@ -25,13 +30,15 @@ afterAll(async () => {
 });
 async function newUser() {
   const identity = await fetch(base + '/api/identity');
-  return identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  await nameGuest(base, cookie);
+  return cookie;
 }
 function submit(cookie: string, requestId: string) {
   return fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId }) });
 }
 async function list(cookie: string) {
-  return (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tableSessionIds;
+  return (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tables.map((table: { tableSessionId: string }) => table.tableSessionId);
 }
 test('a working creation remains unavailable until its real PostgreSQL transaction commits', async () => {
   const cookie = await newUser();

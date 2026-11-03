@@ -1,10 +1,15 @@
 import { afterAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type HandScoreSummary, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type ServerLiveMessage } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const administration = new Pool({ connectionString: databaseUrl });
@@ -19,14 +24,14 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false, supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id), strategyFactory: descriptor => ({
+    server = await createServer({ clock, databaseUrl, schema, automaticBots: false, supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id), strategyFactory: descriptor => ({
       policy: { checkCompatibility: () => ({ compatible: true }), evaluate: (view, execution) => { if (descriptor.policy.id !== 'fixture') { const action = view.state.legalActions.find(action => action.type === 'call' || action.type === 'check') ?? view.state.legalActions[0]!; return { choices: [{ action: action.type === 'bet' ? { type: 'bet', betTo: action.minimum } : action.type === 'raise' ? { type: 'raise', raiseTo: action.minimum } : { type: action.type }, probability: 1 }] }; } const result = Promise.withResolvers<PolicyResult>(); const evaluation = { view, seed: execution.evaluationSeed, signal: execution.signal, result }; evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation), () => held.delete(evaluation)); return result.promise; } }, actionSelector: new HighestProbabilitySelector(),
     }), ...options });
     base = await server.listen({ host: '127.0.0.1', port: 0 });
   }
   await start();
   async function table() {
-    const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+    const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), configuration: { maximumBuyIn: 2000 }, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
     expect(response.status).toBe(201); const created = await response.json();
     return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };

@@ -2,6 +2,14 @@
 # /opt/poker/.env supplies APP_HOST, APP_IMAGE_REPOSITORY, POSTGRES_PASSWORD, and APP_REVISION.
 name: poker
 
+# Caddy has a fixed address so that the app can believe forwarding headers (the client's real address, which its
+# per-IP rate limits use) from Caddy and from nothing else. Keep TRUSTED_PROXIES equal to Caddy's address.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.29.77.0/24
+
 services:
   postgres:
     image: postgres:18
@@ -33,6 +41,9 @@ services:
       SERVE_WEB: 'true'
       SINGLE_SERVER_GUARD: 'true'
       POKER_ADMIN_MODE: 'false'
+      # Online Tables are in beta and off by default. To enable them, set 'true' and release.
+      POKER_ONLINE_PLAY: 'false'
+      TRUSTED_PROXIES: 172.29.77.2
       DEPLOYMENT_REVISION: ${APP_REVISION}
       DATABASE_URL: postgresql://poker:${POSTGRES_PASSWORD}@postgres:5432/poker
     # Shutdown stops queues and jobs before releasing the authority lock (ADR-0030).
@@ -44,7 +55,11 @@ services:
     depends_on:
       - app
     # Obtains and renews the HTTPS certificate for APP_HOST; WebSockets pass through.
+    # Caddy replaces any X-Forwarded-For a client sends with the address it saw, which the app then reads.
     command: caddy reverse-proxy --from ${APP_HOST:?Set APP_HOST in .env} --to app:3001
+    networks:
+      default:
+        ipv4_address: 172.29.77.2
     ports:
       - '80:80'
       - '443:443'

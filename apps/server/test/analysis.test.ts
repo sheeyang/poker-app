@@ -1,10 +1,15 @@
 import { afterAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type ServerLiveMessage } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const administration = new Pool({ connectionString: databaseUrl });
@@ -20,7 +25,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false,
+    server = await createServer({ clock, databaseUrl, schema, automaticBots: false,
       supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: descriptor => {
         let compatibilityView: ObservableGameView;
@@ -41,7 +46,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   }
   await start();
   async function table() {
-    const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+    const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
     expect(response.status).toBe(201); const created = await response.json();
     return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };

@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { nameGuest } from './fixtures/guest.js';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
 import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type TableLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 // Randomness is a system boundary. Only creation's seed draw is fixed; identity
 // cookies and UUIDs retain real entropy. No game state or durable record is injected.
@@ -27,14 +32,14 @@ let base: string;
 let controllers: TableSessionControllerCommands;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 async function startServer() {
-  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; }, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; }, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 type Table = { id: string; cookie: string; ids: string[]; revision: number };
 async function table(count: number, configuration: Partial<ObservableGameConfiguration> = {}, seed = '0'.repeat(64)): Promise<Table> {
-  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   randomness.seed = seed;
   let response: Response;
   try { response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration: { seatCount: 9, minimumBuyIn: 1, defaultBuyIn: 1000, maximumBuyIn: 2000, ...configuration }, bots: Array.from({ length: count - 1 }, (_, i) => ({ name: 'Bot ' + (i + 1), playingStrategy: baselinePlayingStrategy })) }) }); }

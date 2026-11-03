@@ -1,8 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy } from '@poker/contracts';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -14,7 +19,7 @@ let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Pr
 let afterCommit: () => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context), afterCommit: () => afterCommit() } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -24,7 +29,7 @@ afterAll(async () => {
 });
 async function table() {
   const identity = await fetch(base + '/api/identity');
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const response = await fetch(base + '/api/table-sessions', {
     method: 'POST', headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }),
@@ -87,7 +92,7 @@ test('lost COMMIT confirmation recovers its original outcome live and after rest
   // M1-15 replaces the interim permanent recovery gate with durable live resolution.
   expect(await (await submit(t, 'ambiguous')).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });
   await server.close();
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: t.human, seat: 1, stack: 1000 }] } } });
   expect(await (await submit(t, 'ambiguous')).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });

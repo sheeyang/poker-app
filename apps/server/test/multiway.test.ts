@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { nameGuest } from './fixtures/guest.js';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -14,7 +19,7 @@ let base: string;
 let controllers: TableSessionControllerCommands;
 let beforeCommit: (context: { tableSessionId: string; requestId: string }) => Promise<void> = async () => {};
 async function startServer() {
-  server = await createServer({ automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; }, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; }, mutationTransactionFaults: { beforeCommit: context => beforeCommit(context) } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
@@ -23,7 +28,7 @@ type Table = { id: string; cookie: string; ids: string[]; revision: number };
 const submit = (t: Table, kind: string, body: unknown) => fetch(base + '/api/table-sessions/' + t.id + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie: t.cookie }, body: JSON.stringify(body) });
 const read = async (t: Table): Promise<ObservableTableSession> => (await (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json());
 async function table(count: number, configuration: Partial<ObservableGameConfiguration> = {}): Promise<Table> {
-  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration: { seatCount: 9, minimumBuyIn: 0, defaultBuyIn: 1000, maximumBuyIn: 2000, ...configuration }, bots: Array.from({ length: count - 1 }, (_, i) => ({ name: 'Bot ' + (i + 1), playingStrategy: baselinePlayingStrategy })) }) });
   expect(response.status).toBe(201); const created = await response.json();
   return { id: created.tableSessionId, cookie, ids: created.bindings.map((b: { participantId: string }) => b.participantId), revision: 0 };
@@ -50,7 +55,7 @@ test('sparse three-player seats preserve public position, antes, all street orde
   expect(before.view.state.participants.map(p => [p.seat, p.stack, p.anteContribution, p.wager, p.contribution, p.cardCount])).toEqual([[7, 995, 5, 0, 5, 2], [9, 985, 5, 10, 15, 2], [2, 975, 5, 20, 25, 2]]);
   expect(before.view.state.participants[0]!.holeCards).toHaveLength(2);
   expect(before.view.state.participants[1]).not.toHaveProperty('holeCards'); expect(before.view.state.participants[2]).not.toHaveProperty('holeCards');
-  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['leave-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: true }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
+  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['stand-up-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: false }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
     const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: t.revision, ...fields });
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
     expect(await read(t)).toEqual(before);
@@ -71,7 +76,7 @@ test('sparse three-player seats preserve public position, antes, all street orde
   expect(completed.view.history[0]!.decisions[0]!.state.participants[1]!.anteContribution).toBe(5);
   expect(JSON.stringify(completed)).not.toMatch(/"(?:seed|deck|burns|drawnCardCount|commands)"\s*:/);
   await server.close(); await startServer(); expect(await read(t)).toEqual(completed);
-  await command(t, 'move-participant', { participantId: human, seat: 8 }); await command(t, 'leave-participant', { participantId: bob }); await command(t, 'start-hand');
+  await command(t, 'move-participant', { participantId: human, seat: 8 }); await command(t, 'stand-up-participant', { participantId: bob }); await command(t, 'start-hand');
   const next = await read(t);
   expect(next.view.state).toMatchObject({ buttonSeat: 8, smallBlindParticipantId: human, bigBlindParticipantId: carol, actorId: human });
   expect(next.view.history[0]!.result!.buttonSeat).toBe(7); expect(next.view.history[0]!.result!.participants.map(p => p.seat)).toEqual([7, 9, 2]);

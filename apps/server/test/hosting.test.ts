@@ -1,4 +1,5 @@
 import { afterAll, afterEach, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -36,7 +37,7 @@ test('rolling replacement gates APIs until shutdown, then restores the same cook
   const first = start(namespace, 'first'); const original = await first.listening; await first.ready;
   const identity = await fetch(original + '/api/identity');
   expect(identity.headers.get('set-cookie')).toMatch(/; Secure;/);
-  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(original, cookie);
   const created = await (await fetch(original + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID() }) })).json();
   const seated = await fetch(original + '/api/table-sessions/' + created.tableSessionId + '/seat-participant', {
     method: 'POST', headers: { cookie, 'content-type': 'application/json' },
@@ -106,7 +107,7 @@ test('authority loss with an in-flight pre-COMMIT mutation rolls back before the
   const held = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
   const first = start(namespace, 'first', undefined, { mutationTransactionFaults: { beforeCommit: async () => { held.resolve(); await release.promise; } } });
   const original = await first.listening; await first.ready;
-  const identity = await fetch(original + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const identity = await fetch(original + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(original, cookie);
   const created = await (await fetch(original + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID() }) })).json();
   const contents = { expectedPokerRevision: 0, participantId: created.bindings[0].participantId, seat: 1 };
   const pending = fetch(original + '/api/table-sessions/' + created.tableSessionId + '/seat-participant', {

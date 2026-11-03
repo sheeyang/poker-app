@@ -12,7 +12,7 @@ in [the ADRs](adr/); concrete server behavior is described in
 | [`packages/solver`](../packages/solver) | Deferred Solver capability boundary. |
 | [`packages/simulation`](../packages/simulation) | Deferred automated simulation boundary. |
 | [`packages/research`](../packages/research) | Server-only analysis and authorized completed-Hand inspection. |
-| [`apps/server`](../apps/server) | Fastify authorization, identity, ownership, controllers, PostgreSQL/Drizzle persistence, and durable orchestration. |
+| [`apps/server`](../apps/server) | Fastify authorization, identity, ownership, controllers, PostgreSQL/Drizzle persistence, durable orchestration, and play timing through an injectable clock. |
 | [`apps/web`](../apps/web) | React/Vite, TanStack Router/Query, and Zustand Trainer UI. |
 | [`packages/client`](../packages/client) | Shared HTTP, live synchronization, and analysis-resource reconciliation. |
 

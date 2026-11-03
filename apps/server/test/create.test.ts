@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { createServer } from '../src/server.js';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -14,7 +19,7 @@ let tableSessionId: string;
 
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -28,6 +33,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
   expect(identity.status).toBe(200);
   expect(identity.headers.get('set-cookie')).toContain('HttpOnly');
   cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  await nameGuest(base, cookie);
   const create = await fetch(base + '/api/table-sessions', {
     method: 'POST', headers: { 'content-type': 'application/json', cookie },
     body: JSON.stringify({ requestId: 'first-creation', configuration: {} }),
@@ -49,7 +55,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
   });
   expect(JSON.stringify(before)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
-  server = await createServer({ automaticBots: false, databaseUrl, schema });
+  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   const after = await fetch(base + '/api/table-sessions/' + tableSessionId, { headers: { cookie } });
   expect(await after.json()).toEqual(before);
@@ -110,9 +116,9 @@ test('a supplied observer or Participant identity cannot authorize reading anoth
 test('the local identity can discover only its owned Table Sessions for reopen', async () => {
   const response = await fetch(base + '/api/table-sessions', { headers: { cookie } });
   expect(response.status).toBe(200);
-  expect((await response.json()).tableSessionIds).toContain(tableSessionId);
+  expect((await response.json()).tables).toContainEqual(expect.objectContaining({ tableSessionId, mode: 'practice' }));
   const identity = await fetch(base + '/api/identity');
   const otherCookie = identity.headers.get('set-cookie')!.split(';')[0]!;
   const other = await fetch(base + '/api/table-sessions', { headers: { cookie: otherCookie } });
-  expect(await other.json()).toEqual({ tableSessionIds: [] });
+  expect(await other.json()).toEqual({ tables: [] });
 });

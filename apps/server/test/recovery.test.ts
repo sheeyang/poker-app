@@ -1,10 +1,15 @@
 import { expect, test } from 'vitest';
+import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
 import { createServer, type ServerOptions } from '../src/server.js';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy } from '@poker/contracts';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { baselineStrategy, HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
+import { InstantClock } from './fixtures/clock.js';
+
+// Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
+const clock = new InstantClock();
 
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 async function fixture(options: Partial<ServerOptions> = {}) {
@@ -35,7 +40,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     },
   };
   async function start() {
-    server = await createServer({ databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
+    server = await createServer({ clock, databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
       strategyFactory: options.strategyFactory && (descriptor => {
         const controlled = options.strategyFactory!(descriptor); const reference = baselineStrategy(descriptor);
         return { ...controlled, policy: { ...controlled.policy, evaluate: (view, execution) => humans.has(view.state.actorId ?? '') ? reference.policy.evaluate(view, execution) : controlled.policy.evaluate(view, execution) } };
@@ -43,7 +48,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     base = await server.listen({ host: '127.0.0.1', port: 0 });
   }
   await start();
-  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!;
+  const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   async function post(path: string, body: object, auth = cookie) {
     return fetch(base + '/api' + path, { method: 'POST', headers: { cookie: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   }
@@ -52,8 +57,9 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     expect(response.status).toBe(201); const created = await response.json(); humans.add(created.bindings[0].participantId); return created;
   }
   const read = async (id: string) => (await fetch(base + '/api/table-sessions/' + id, { headers: { cookie } })).json();
-  const list = async () => (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tableSessionIds;
-  return { schema, table, read, post, list, get commands() { return commands!; }, hold(id: string) { heldId = id; }, async resolve(sql: 'COMMIT' | 'ROLLBACK') { terminal!.resolve(sql); await Promise.all([...targets]); heldId = undefined; }, async restart() { await server.close(); await start(); }, async close() { terminal?.resolve('ROLLBACK'); await Promise.allSettled([...targets]); await server.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); } };
+  const list = async () => (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tables.map((table: { tableSessionId: string }) => table.tableSessionId);
+  async function newOwner() { const c = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, c); return c; }
+  return { schema, table, read, post, list, newOwner, get commands() { return commands!; }, hold(id: string) { heldId = id; }, async resolve(sql: 'COMMIT' | 'ROLLBACK') { terminal!.resolve(sql); await Promise.all([...targets]); heldId = undefined; }, async restart() { await server.close(); await start(); }, async close() { terminal?.resolve('ROLLBACK'); await Promise.allSettled([...targets]); await server.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); } };
 }
 
 test('a missing outcome during an unresolved real transaction pauses only its table, then restores eventual commit without duplicate seating', async () => {
@@ -184,7 +190,7 @@ test('creation recovery before a Table Session ID survives restart, commits one 
     expect(await f.list()).toEqual([]);
     expect((await f.post('/table-sessions', body)).status).toBe(503);
     expect((await f.post('/table-sessions', { requestId: 'different-creation' })).status).toBe(503);
-    expect((await f.post('/table-sessions', { requestId: 'independent-owner' }, '')).status).toBe(201);
+    expect((await f.post('/table-sessions', { requestId: 'independent-owner' }, await f.newOwner())).status).toBe(201);
     expect(await (await f.post('/table-sessions', { ...body, bots: [] })).json()).toMatchObject({ rejection: { code: 'request-id-conflict' } });
     await f.restart();
     expect((await f.post('/table-sessions', body)).status).toBe(503);
