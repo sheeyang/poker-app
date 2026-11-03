@@ -15,6 +15,7 @@ export function DeadlineBar({ seconds, length }: { seconds: number; length: numb
 /** Ways out of the tray at an Online Table: sitting down, sharing the Join Link (owner only) and adding a Bot (owner only). */
 export interface OnlineTrayActions {
   readonly chooseSeat: () => void;
+  readonly rebuy?: () => void;
   readonly openJoinLink?: () => void;
   readonly addBot?: () => void;
 }
@@ -56,7 +57,7 @@ export function ActionTray({ table, actionOpen, countdown, countdownLength, deal
   const watching = participant?.seat == null;
   if (state.actorId !== humanId) return <div className="action-tray idle-tray" role="status"><div><strong>{participant?.folded ? 'You folded.' : participant?.allIn ? 'You’re all-in.' : participant?.sittingOut ? 'You’re sitting out.' : watching ? 'You’re watching this hand.' : 'The hand is in play.'}</strong><p>{pending ? `${afterHandRequestLabel(pending)}. ` : ''}{table.runtimeStatus?.phase === 'failed' && table.mode === 'practice' ? 'Use Retry bot decision above the table to continue.' : `Waiting for ${table.bindings.find(b => b.participantId === state.actorId)?.name ?? 'the table'}.`}{watching && online ? ' Sit down now to be dealt in from the next hand.' : ''}</p></div>
     {/* Taking a Seat at an Online Table never waits for the Hand: the newcomer is dealt in from the next one. */}
-    {watching && online ? <button className="primary" disabled={blocked} onClick={online.chooseSeat}>Choose a seat <Icon name="arrow" /></button> : <span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span>}</div>;
+    <span className="waiting-dots" aria-hidden="true"><i /><i /><i /></span></div>;
   return <div className="action-tray">
     {countdown !== undefined && <p className={`action-deadline${countdown <= 5 ? ' deadline-near' : ''}`} role="timer">{countdown > 0
       ? <><strong>{countdown}s</strong> to act</>
@@ -83,7 +84,7 @@ function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSetti
   const reason = nextHand?.kind === 'waiting' ? waitingReason(table) : undefined;
   const needsPlayers = reason?.kind === 'players';
   const resume = () => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'set-sitting-out', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, sittingOut: false } });
-  const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, !!online?.openJoinLink) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
+  const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, !!online?.openJoinLink, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
   return <div className="action-tray idle-tray next-hand online-next-hand">
     <div className="next-hand-copy" role="timer"><strong>{nextHandLabel(nextHand) ?? 'Waiting for the next hand'}</strong><p>{detail}</p></div>
     <div className="next-hand-actions">
@@ -92,9 +93,8 @@ function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSetti
       {needsPlayers && online?.openJoinLink && <button className="primary" onClick={online.openJoinLink}><Icon name="link" size={18} />Share join link</button>}
       {/* A stack shows its winnings once the payout is presented, so an empty stack waits for it before offering a rebuy. */}
       {seated && !pending && (you.stack === 0
-        ? settled && <button className="primary" disabled={busy} onClick={openSettings}>Rebuy <Icon name="arrow" /></button>
+        ? settled && <button className="primary" disabled={busy} onClick={online?.rebuy ?? openSettings}>Rebuy <Icon name="arrow" /></button>
         : sittingOut && <button className="primary" disabled={busy} onClick={resume}>Return to play <Icon name="arrow" /></button>)}
-      {!seated && <button className="primary" disabled={busy} onClick={online?.chooseSeat ?? openSettings}>Choose a seat <Icon name="arrow" /></button>}
     </div>
   </div>;
 }
@@ -111,7 +111,7 @@ function NextHand({ table, busy, openSettings, review }: { table: ObservableTabl
     {(preparing || refills.length > 0 || needsSeat || human?.sittingOut) && <p>{preparing ? 'Preparing your next hand…' : refills.length ? `${refills.map(p => p === human ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name).join(', ')}: rebuy to ${chips(table.view.configuration.defaultBuyIn)} chips each.` : needsSeat ? 'We’ll return you to an open seat.' : 'You’ll return from sitting out.'}</p>}
     <div className="next-hand-actions">
     {state.status === 'completed-hand' && review && <button className="quiet-button" disabled={!decisions.length} onClick={() => review(decisions.at(-1)?.decisionId)}>Review hand <Icon name="chart" size={17} /></button>}
-    {available < 2 ? <button className="primary" onClick={openSettings}>Add an opponent <Icon name="arrow" /></button> : <button className="primary deal-button" disabled={busy || preparing} onClick={() => setSetup({ requestId: crypto.randomUUID(), tableId: table.tableSessionId, afterHandId: state.handId ?? null })}><Icon name="cards" />{refills.length ? 'Rebuy & deal' : human?.sittingOut || needsSeat ? 'Return & deal' : state.handId ? 'Deal next hand' : 'Deal first hand'}</button>}
+    {available < 2 ? state.participants.filter(p => p.seat !== null).length < table.view.configuration.seatCount && <button className="primary" onClick={openSettings}>Add an opponent <Icon name="arrow" /></button> : <button className="primary deal-button" disabled={busy || preparing} onClick={() => setSetup({ requestId: crypto.randomUUID(), tableId: table.tableSessionId, afterHandId: state.handId ?? null })}><Icon name="cards" />{refills.length ? 'Rebuy & deal' : human?.sittingOut || needsSeat ? 'Return & deal' : state.handId ? 'Deal next hand' : 'Deal first hand'}</button>}
     </div>
   </div>;
 }

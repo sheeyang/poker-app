@@ -93,16 +93,16 @@ export function nextHandLabel(status: NextHandStatus, first = false): string | u
  * What the tray says about a waiting table, and what it offers: its explanation of `reason`. `owner`: the viewer is the
  * Table Owner, who can share the Join Link and add Bots.
  */
-export function waitingDetail(reason: WaitingReason, owner: boolean): string {
+export function waitingDetail(reason: WaitingReason, owner: boolean, canAddBot = true): string {
   switch (reason.kind) {
     case 'take-seat': return 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
     case 'sitting-out': return 'You’re sitting out, so you’re not dealt in. Return to play when you’re ready.';
-    case 'no-chips': return 'You’re out of chips. Rebuy from Table options to be dealt in.';
+    case 'no-chips': return 'You’re out of chips. Rebuy to be dealt in.';
     case 'players': {
       const one = reason.needed === 1, others = one ? 'one more player' : `${reason.needed} more players`;
       const state = (names: readonly string[], what: string) => names.length ? `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} ${what}. ` : '';
       const absent = state(reason.reconnecting, 'disconnected') + state(reason.sittingOut, 'sitting out');
-      const invite = owner ? ' Share the join link, or add a Bot.' : '';
+      const invite = owner ? canAddBot ? ' Share the join link, or add a Bot.' : ' Manage participants directly from the table.' : '';
       // Someone seated could make up the numbers by coming back; otherwise a newcomer has to sit down.
       return absent ? `${absent}Hands start once ${others} ${one ? 'is' : 'are'} ready.${invite}` : owner ? `Hands start once ${others} ${one ? 'is' : 'are'} seated.${invite}` : `Hands start once ${others} ${one ? 'takes' : 'take'} a seat.`;
     }

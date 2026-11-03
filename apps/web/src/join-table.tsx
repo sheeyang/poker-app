@@ -20,10 +20,11 @@ export function JoinTable({ token }: { token: string }) {
   const [typed, setTyped] = useState<string>();
   const stored = identity.data?.displayName ?? '';
   const value = typed ?? stored;
+  const autoOpened = useRef<string | null>(null);
   const join = useMutation({
     mutationFn: async () => {
       // The name is the Guest's own; saving it first lets the join see it. Each attempt is a fresh request.
-      if (!returning && value.trim() !== stored) {
+      if (!returning && !preview.data?.alreadyJoined && value.trim() !== stored) {
         const saved = await api.setDisplayName(value.trim());
         queryClient.setQueryData(['identity'], { ok: true, displayName: saved.displayName });
       }
@@ -32,12 +33,15 @@ export function JoinTable({ token }: { token: string }) {
     onSuccess: async result => {
       select(result.tableSessionId);
       await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      await navigate({ to: '/' });
+      await navigate({ to: '/', replace: true });
     },
   });
   const returning = !!preview.data?.returningAs;
   const failure = join.error instanceof RequestFailure ? join.error.message : join.error ? 'Couldn’t join this table. Check your connection and try again.' : undefined;
   const data = preview.data;
+  useEffect(() => {
+    if (data?.alreadyJoined && autoOpened.current !== token) { autoOpened.current = token; join.mutate(); }
+  }, [data?.alreadyJoined, token, join.mutate]);
   // A replaced link and a removal are final: trying again changes nothing.
   const dead = preview.error instanceof RequestFailure && ['invalid-join-link', 'guest-removed', 'online-play-disabled'].includes(preview.error.code);
   const removed = preview.error instanceof RequestFailure && preview.error.code === 'guest-removed';
@@ -50,7 +54,7 @@ export function JoinTable({ token }: { token: string }) {
       {preview.isError && (dead
         ? <><h1>{removed ? 'You can’t join this table.' : offline ? 'Online tables are in beta and turned off.' : 'This link doesn’t work.'}</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/' })}>Go to my tables</button></>
         : <div className="notice-error" role="alert"><p>{preview.error instanceof RequestFailure ? preview.error.message : 'Couldn’t open this table.'}</p><button onClick={() => void preview.refetch()}>Try again</button></div>)}
-      {data && <>
+      {data?.alreadyJoined ? <div className="dialog-stack"><p role="status" className="muted">Opening your table…</p>{failure && <div className="notice-error" role="alert"><p>{failure}</p><button className="primary" disabled={join.isPending} onClick={() => join.mutate()}>Try opening again</button></div>}</div> : data && <>
         <h1>{data.alreadyJoined ? 'You’re already at this table.' : returning ? `Return to ${data.ownerName}’s table` : `Join ${data.ownerName}’s table`}</h1>
         <dl className="join-facts">
           <div><dt>Blinds</dt><dd>{chips(data.configuration.smallBlind)} / {chips(data.configuration.bigBlind)}</dd></div>

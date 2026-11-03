@@ -9,22 +9,22 @@ import { PokerTable } from './poker-table.js';
 import { ActionTray, CommandFeedback } from './controls.js';
 import { TableSettings } from './settings.js';
 import { JoinLinkDialog } from './join-table.js';
-import { TakeSeatDialog } from './take-seat.js';
-import { nextHandLabel, watchingNames } from './online-status.js';
+import { nextHandLabel } from './online-status.js';
+import { useTableInteractions } from './table-interactions.js';
+import { openSeats, presentBindings } from './owner-controls.js';
+import { participantActions } from './participant-actions.js';
 import { useDecisionAnalysis } from './analysis.js';
 import { useHandSummary, useTableSessionSummary } from './summaries.js';
 import { AnalysisPanel, AnalysisPanelSkeleton } from './analysis-panel.js';
 import { TableSkeleton } from './loading-skeleton.js';
 import { HandReview } from './hand-review.js';
-import { actionLabel, chips, modeLabel } from './table-model.js';
+import { actionLabel, chips, modeLabel, playerName } from './table-model.js';
 import { usePresentation } from './use-presentation.js';
 
 export function Trainer() {
   const selected = useSession(s => s.selectedId);
   const analysisOpen = useSession(s => s.analysisOpen), animations = useSession(s => s.animations);
-  const [browse, setBrowse] = useState(false), [settings, setSettings] = useState<false | 'all' | 'add-bot'>(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
-  // The Seat a watching Guest asked to sit in: a number from the felt, or `0` for the first open one.
-  const [seatChoice, setSeatChoice] = useState<number | null>(null);
+  const [browse, setBrowse] = useState(false), [settings, setSettings] = useState<false | 'all'>(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity });
@@ -46,7 +46,7 @@ export function Trainer() {
   const setup = usePracticeSetup(table.data, command);
   const preparing = setup?.tableId === selected && !!setup;
   const lastSelected = useRef(selected);
-  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setJoinLinkOpen(false); setSeatChoice(null); useSession.setState({ analysisOpen: false }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
+  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setJoinLinkOpen(false); useSession.setState({ analysisOpen: false }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
   useEffect(() => { if (browse) window.scrollTo({ top: 0 }); }, [browse]);
   const runtime = live.runtimeStatus ?? table.data?.runtimeStatus;
   // Runtime status and who is connected are transient: the live connection's latest word wins over the cached view.
@@ -65,9 +65,9 @@ export function Trainer() {
   const online = current?.mode === 'online';
   const owner = !!current && current.viewerParticipantId === current.ownerParticipantId;
   const ownerName = current?.bindings.find(b => b.participantId === current.ownerParticipantId)?.name;
-  const watching = current ? watchingNames(current) : [];
-  const viewerSeated = !!current?.view.state.participants.some(p => p.participantId === humanId && p.seat !== null);
-  const onlineActions = online ? { chooseSeat: () => setSeatChoice(0), ...(current?.joinToken ? { openJoinLink: () => setJoinLinkOpen(true) } : {}), ...(owner ? { addBot: () => setSettings('add-bot') } : {}) } : undefined;
+  const watching = current ? presentBindings(current).filter(binding => !current.view.state.participants.some(p => p.participantId === binding.participantId && p.seat !== null)) : [];
+  const interactions = useTableInteractions(current, command, handOpen);
+  const onlineActions = online ? { chooseSeat: () => interactions.chooseSeats(), rebuy: interactions.rebuy, ...(current?.joinToken ? { openJoinLink: () => setJoinLinkOpen(true) } : {}), ...(owner && current && openSeats(current).length > 0 ? { addBot: () => interactions.chooseSeats() } : {}) } : undefined;
   const nextHandShort = online && shown?.view.state.handId ? nextHandLabel(presentation?.nextHand) : undefined;
   function review(id?: string) {
     if (id) analysis.selectDecision(id);
@@ -104,11 +104,12 @@ export function Trainer() {
             ? <div className="notice-error" role="status"><strong>{current.bindings.find(b => b.participantId === runtime.participantId)?.name ?? 'A bot'}’s decision failed.</strong><p>{runtime.message}</p></div>
             : <div className="notice-error" role="alert"><strong>A bot’s decision is paused.</strong><p>{runtime.message}</p><button disabled={command.busy} onClick={() => command.submit({ tableId: current.tableSessionId, kind: 'retry-bot', body: { requestId: crypto.randomUUID(), expectedSessionRevision: current.sessionRevision, participantId: runtime.participantId! } })}>Retry bot decision</button></div>)}
           {preparing ? <section className="practice-preparing" role="status"><Icon name="cards" size={38} /><h2>{setup.paused ? 'Your setup is saved.' : setup.afterHandId === undefined ? 'Getting everyone to the table…' : 'Preparing the next hand…'}</h2><p>{setup.paused ?? (setup.afterHandId === undefined ? `${current.view.state.participants.filter(p => p.seat !== null).length} of ${current.bindings.length} players seated. Your hand starts next.` : 'Returning players and refilling empty stacks before the deal.')}</p>{setup.paused && <div className="button-row"><button className="primary" disabled={command.busy} onClick={() => { command.dismiss(); useSession.getState().setSetup({ ...setup, paused: undefined }); }}>Continue setup</button><button onClick={() => { useSession.getState().setSetup(null); setSettings('all'); }}>Table options</button></div>}</section> : <>
-            <PokerTable table={shown} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} countdownLength={presentation.countdownLength} nextHand={presentation.nextHand} events={live.recentEvents} eventCount={live.eventCount} animate={animations} openSettings={() => setSettings('all')} chooseSeat={online && !viewerSeated ? seat => setSeatChoice(seat) : undefined} />
+            <PokerTable table={shown} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} countdownLength={presentation.countdownLength} nextHand={presentation.nextHand} events={live.recentEvents} eventCount={live.eventCount} animate={animations} handOpen={handOpen} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} />
+            {interactions.choosing && <div className="seat-selection-prompt"><span role="status">Choose an open seat{interactions.choosing === current.viewerParticipantId ? '.' : ` for ${current.bindings.find(b => b.participantId === interactions.choosing)?.name ?? 'the participant'}.`}</span><button className="text-button" onClick={interactions.cancelChoosing}>Cancel</button></div>}
             {shown.view.state.status === 'completed-hand' && shown.view.state.handId && <HandReview table={shown} />}
-            <div id="play-controls" className="play-controls" tabIndex={-1}><ActionTray table={shown} actionOpen={presentation.actionOpen} countdown={presentation.countdown} countdownLength={presentation.countdownLength} dealOpen={presentation.dealOpen} nextHand={presentation.nextHand} command={command} openSettings={() => setSettings('all')} review={review} online={onlineActions} /></div>
+            <div id="play-controls" className="play-controls" tabIndex={-1}><ActionTray table={shown} actionOpen={presentation.actionOpen} countdown={presentation.countdown} countdownLength={presentation.countdownLength} dealOpen={presentation.dealOpen} nextHand={presentation.nextHand} command={command} openSettings={() => interactions.chooseSeats()} review={review} online={onlineActions} /></div>
           </>}
-          <div className="below-table">{watching.length > 0 && <p className="table-watchers"><span>Watching</span> {watching.join(', ')}</p>}<details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === humanId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details></div>
+          <div className="below-table">{watching.length > 0 && <p className="table-watchers"><span>Watching</span>{watching.map(binding => participantActions(current, binding.participantId, handOpen).length ? <button key={binding.participantId} className="watching-player" data-table-participant={binding.participantId} aria-label={`${playerName(current, binding)} actions`} aria-haspopup="menu" onClick={event => interactions.openParticipant(binding.participantId, event.currentTarget)}>{playerName(current, binding)}</button> : <span key={binding.participantId}>{playerName(current, binding)}</span>)}</p>}<details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === humanId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details></div>
           <footer className="table-footer"><span>All amounts in chips</span></footer>
         </>}
       </div>
@@ -116,7 +117,7 @@ export function Trainer() {
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
     </main>}
     {joinLinkOpen && current?.joinToken && <JoinLinkDialog table={current} command={command} close={() => setJoinLinkOpen(false)} />}
-    {settings && current && <TableSettings table={current} command={command} handOpen={handOpen} openSection={settings === 'add-bot' ? 'add-bot' : undefined} close={() => setSettings(false)} />}
-    {seatChoice !== null && current && <TakeSeatDialog table={current} seat={seatChoice || undefined} command={command} handOpen={handOpen} close={() => setSeatChoice(null)} />}
+    {settings && current && <TableSettings table={current} command={command} handOpen={handOpen} close={() => setSettings(false)} />}
+    {interactions.overlays}
   </div>;
 }

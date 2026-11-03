@@ -843,6 +843,24 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .seat-form .primary > span { font-weight: 600; font-variant-numeric: tabular-nums; }
 .empty-seat-open:hover { border-color: var(--gold); color: var(--text); background: #1d3326; }
 .empty-seat-open:hover small { color: var(--gold); }
+.empty-seat-open { min-height: 48px; align-items: center; justify-content: center; }
+.table-stage.choosing-seats .empty-seat { border-style: solid; border-color: var(--gold); color: var(--gold); }
+.table-seat .seat-body { padding: 0; }
+.seat-target { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 60px; padding: 11px; text-align: left; border: 0; border-radius: inherit; background: transparent; font-weight: inherit; color: inherit; }
+button.seat-target:hover { background: #304238; }
+.seat-selection-prompt { display: flex; gap: 16px; align-items: center; justify-content: center; color: var(--gold); font-size: .86rem; margin-bottom: 20px; }
+.watching-player { background: transparent; border: 1px solid var(--line); padding: 6px 10px; margin: 4px; font-size: .8rem; min-height: 40px; }
+.context-menu { position: fixed; inset: auto; margin: 0; border: 0; padding: 6px; width: min(250px, calc(100vw - 24px)); max-height: calc(100svh - 24px); overflow-y: auto; background: var(--raised); color: var(--text); border-radius: 10px; box-shadow: 0 10px 30px #0006; }
+.context-menu::backdrop { background: transparent; }
+.context-menu-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 10px 8px; border-bottom: 1px solid #46594d; margin-bottom: 4px; }
+.context-menu-heading strong { font-size: .93rem; overflow-wrap: anywhere; }
+.context-menu-heading .icon-button { min-height: 32px; width: 32px; padding: 6px; }
+.context-menu [role=menuitem] { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; width: 100%; min-height: 44px; border: 0; padding: 10px; text-align: left; background: transparent; border-radius: 5px; font-size: .93rem; }
+.context-menu [role=menuitem]:hover:enabled { background: var(--surface); }
+.context-menu [role=menuitem]:disabled { opacity: 1; color: var(--muted); }
+.context-menu [role=menuitem] small { font-size: .8rem; font-weight: 400; color: var(--muted); }
+.context-menu > [role=menu] > p { padding: 10px; font-size: .86rem; }
+@media (max-width: 720px) { .table-seat .seat-target { gap: 4px; padding: 8px; min-height: 52px; } .dense-table .seat-target { padding: 5px; min-height: 44px; } }
 
 /* How much of an Action Window is left. It steps each second; reduced motion keeps the steps. */
 .deadline-bar { display: block; height: 3px; border-radius: 2px; background: #0d17125c; overflow: hidden; }

@@ -97,6 +97,7 @@ export function useCommand() {
   });
   return {
     pending, error: mutation.error, busy: mutation.isPending || !!pending, sending: mutation.isPending,
+    confirmedRequestId: mutation.isSuccess ? mutation.variables?.body.requestId : undefined,
     submit: (attempt: Attempt) => {
       if (useSession.getState().pending || mutation.isPending) return;
       setPending(attempt); mutation.mutate(attempt);

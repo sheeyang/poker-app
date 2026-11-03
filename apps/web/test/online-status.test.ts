@@ -61,7 +61,10 @@ describe('the next Hand at an Online Table, between Hands', () => {
     expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] }, false)).toBe('Hands start once one more player takes a seat.');
     expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: ['Ann'], sittingOut: ['Rex'] }, false)).toBe('Ann is disconnected. Rex is sitting out. Hands start once one more player is ready.');
   });
-  it('lists the other humans watching without a Seat', () => {
+    it('does not suggest adding a Bot when no Seat is open', () => {
+      expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: ['Rex'] }, true, false)).toBe('Rex is sitting out. Hands start once one more player is ready. Manage participants directly from the table.');
+    });
+    it('lists the other humans watching without a Seat', () => {
     expect(watchingNames(table([seated('you', 2)], ['ann', 'you']))).toEqual(['Ann']);
     // The viewer is told in the tray that they are watching, not in this list.
     expect(watchingNames(table([seated('ann', 1)], ['ann', 'you']))).toEqual([]);
