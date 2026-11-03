@@ -1,5 +1,5 @@
-import { afterHandRequestStrength, type ObservableTableSession, type ParticipantBinding, type AfterHandRequestKind, type TableOptionChanges } from '@poker/contracts';
-import { afterHandRequestOf, type Availability } from './self-service.js';
+import { actionTimeLimits, type AfterHandRequestKind, type ObservableTableSession, type ParticipantBinding, type TableOptionChanges } from '@poker/contracts';
+import { betweenHandsOnly, outranksPending, type Availability } from './self-service.js';
 
 /**
  * The Table Owner's controls, as pure functions of the committed table: the Trainer shows what the server will
@@ -31,10 +31,14 @@ export function optionControls(table: ObservableTableSession, handOpen: boolean)
   return { shown: table.mode === 'online' && table.viewerParticipantId === table.ownerParticipantId, editable: !handOpen };
 }
 
-/** What the owner's form changes: only the options whose value differs from the table's. `undefined`: nothing to send. */
+/**
+ * What the owner's form changes: only the options whose value differs from the table's, and only an Action Time Limit
+ * the table can offer. `undefined`: nothing to send.
+ */
 export function optionChanges(table: ObservableTableSession, form: { actionTimeLimitSeconds: number; allowSeatChanges: boolean; allowLiveAnalysis: boolean }): TableOptionChanges | undefined {
+  const limit = actionTimeLimits.find(seconds => seconds === form.actionTimeLimitSeconds);
   const changes = {
-    ...(form.actionTimeLimitSeconds !== table.options.actionTimeLimitSeconds ? { actionTimeLimitSeconds: form.actionTimeLimitSeconds as 15 | 30 | 60 } : {}),
+    ...(limit !== undefined && limit !== table.options.actionTimeLimitSeconds ? { actionTimeLimitSeconds: limit } : {}),
     ...(form.allowSeatChanges !== table.view.configuration.allowSeatChanges ? { allowSeatChanges: form.allowSeatChanges } : {}),
     ...(form.allowLiveAnalysis !== table.options.allowLiveAnalysis ? { allowLiveAnalysis: form.allowLiveAnalysis } : {}),
   };
@@ -59,9 +63,8 @@ export function botControls(table: ObservableTableSession, participantId: string
   if (hasDeparted(table, participantId)) return none;
   const bot = table.view.state.participants.find(p => p.participantId === participantId);
   const seated = bot?.seat != null;
-  const pending = afterHandRequestOf(table, participantId);
-  const asks = (change: AfterHandRequestKind) => !pending || afterHandRequestStrength[pending] < afterHandRequestStrength[change];
-  const betweenHands = (available: boolean): Availability => available && !handOpen ? 'now' : 'unavailable';
+  const asks = (kind: AfterHandRequestKind) => outranksPending(table, participantId, kind);
+  const betweenHands = (available: boolean) => betweenHandsOnly(available, handOpen);
   return {
     sitOut: !seated || bot.sittingOut || !asks('sit-out') ? 'unavailable' : handOpen ? 'after-hand' : 'now',
     resume: betweenHands(seated && bot.sittingOut),

@@ -321,6 +321,22 @@ export interface ActionWindow {
 export type AfterHandRequestKind = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
 /** How strong each kind is: a request replaces a pending one of the same Participant only if it is stronger. */
 export const afterHandRequestStrength: Readonly<Record<AfterHandRequestKind, number>> = Object.freeze({ 'sit-out': 1, 'stand-up': 2, 'leave-table': 3, remove: 4 });
+/** The public facts about a Participant that decide whether they are an Eligible Participant at an Online Table. */
+export interface EligibilityFacts {
+  readonly seat: number | null;
+  readonly stack: ChipAmount;
+  readonly sittingOut: boolean;
+  readonly human: boolean;
+  /** For a human: at least one live connection of their Guest is subscribed to the table. */
+  readonly connected: boolean;
+}
+/** An Eligible Participant: seated with chips, not Sitting Out, and either a Bot or a connected human. */
+export const isEligibleParticipant = (participant: EligibilityFacts): boolean => participant.seat !== null && participant.stack > 0 && !participant.sittingOut && (!participant.human || participant.connected);
+/** Automatic Dealing deals only while at least two Eligible Participants remain, at least one of them human: Bots never play on alone. */
+export function canDealNextHand(participants: readonly EligibilityFacts[]): boolean {
+  const ready = participants.filter(isEligibleParticipant);
+  return ready.length >= 2 && ready.some(participant => participant.human);
+}
 /** An After-Hand Request, public to everyone at the table. The view and the Persisted Table Session list them as `pendingChanges`. */
 export interface AfterHandRequest { readonly participantId: ParticipantId; readonly change: AfterHandRequestKind }
 /**

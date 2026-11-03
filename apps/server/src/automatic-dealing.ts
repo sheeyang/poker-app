@@ -1,4 +1,4 @@
-import type { ObservableCashGameState, ParticipantId, ServerTime, TableSchedule } from '@poker/contracts';
+import { canDealNextHand, type EligibilityFacts, type ObservableCashGameState, type ParticipantId, type ServerTime, type TableSchedule } from '@poker/contracts';
 import { presentationEndsAt } from './schedule.js';
 
 /**
@@ -11,24 +11,12 @@ import { presentationEndsAt } from './schedule.js';
  * can still deal, and otherwise the countdown is cancelled. A cancelled countdown is replaced by a fresh one as
  * soon as a commit or a connection change lets the table deal again.
  */
-export interface DealingParticipant {
+export interface DealingParticipant extends EligibilityFacts {
   readonly participantId: ParticipantId;
-  readonly seat: number | null;
-  readonly stack: number;
-  readonly sittingOut: boolean;
-  readonly human: boolean;
-  /** For a human: at least one live connection of their Guest is subscribed to the table. */
-  readonly connected: boolean;
 }
 
-/** An Eligible Participant: seated with chips, not Sitting Out, and either a Bot or a connected human. */
-export const eligible = (participant: DealingParticipant) => participant.seat !== null && participant.stack > 0 && !participant.sittingOut && (!participant.human || participant.connected);
-
-/** The table deals only while at least two Eligible Participants remain, at least one of them human: Bots never play on alone. */
-export function canDeal(participants: readonly DealingParticipant[]): boolean {
-  const ready = participants.filter(eligible);
-  return ready.length >= 2 && ready.some(participant => participant.human);
-}
+/** The table deals only while at least two Eligible Participants remain, one of them human (contracts, which the Trainer shares). */
+export const canDeal = (participants: readonly DealingParticipant[]): boolean => canDealNextHand(participants);
 
 /** The humans an expired countdown sits out first: seated, not sitting out, and still disconnected. */
 export function stillDisconnected(participants: readonly DealingParticipant[]): ParticipantId[] {

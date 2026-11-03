@@ -62,18 +62,30 @@ export function TableSettings({ table, command, handOpen, close }: { table: Obse
 
 /** Another human Participant: visible to everyone, controllable only by their own Guest. The Table Owner can remove them. */
 function PlayerRow({ table, binding, command, handOpen, busy }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; handOpen: boolean; busy: boolean }) {
-  const [confirming, setConfirming] = useState(false);
   const p = table.view.state.participants.find(p => p.participantId === binding.participantId);
   const pending = afterHandRequestOf(table, binding.participantId);
   const connection = connectionOf(table, binding.participantId);
   const timing = removalTiming(handOpen);
   return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span>
-    {canRemove(table, binding) && (confirming
-      ? <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
-        <p className="muted">{binding.name} can’t join this table again, even with a new Join Link. {timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}</p>
-        <div className="button-row"><button className="leave-button" disabled={busy} onClick={() => { setConfirming(false); command.submit({ kind: 'manage', operation: 'remove-participant', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: binding.participantId } }); }}>Remove {binding.name}</button><button onClick={() => setConfirming(false)}>Keep {binding.name}</button></div>
-      </div>
-      : <button className="leave-button" disabled={busy} onClick={() => setConfirming(true)}>Remove from table</button>)}
+    {canRemove(table, binding) && <ConfirmedRemoval table={table} binding={binding} command={command} busy={busy} operation="remove-participant" label="Remove from table"
+      explanation={`${binding.name} can’t join this table again, even with a new Join Link. ${timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}`} />}
+  </div>;
+}
+
+/**
+ * A Removal the owner confirms first, of a Guest (`remove-participant`) or of a Bot (`remove-bot`): the confirmation
+ * says what will happen, Remove sends it, and Keep closes it. `row` puts the first button in a button row.
+ */
+function ConfirmedRemoval({ table, binding, command, busy, operation, label, explanation, row = false }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; busy: boolean; operation: 'remove-participant' | 'remove-bot'; label: string; explanation: string; row?: boolean }) {
+  const [confirming, setConfirming] = useState(false);
+  if (!confirming) {
+    const ask = <button className="leave-button" disabled={busy} onClick={() => setConfirming(true)}>{label}</button>;
+    return row ? <div className="button-row">{ask}</div> : ask;
+  }
+  const remove = () => { setConfirming(false); command.submit({ kind: 'manage', operation, tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: binding.participantId } }); };
+  return <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
+    <p className="muted">{explanation}</p>
+    <div className="button-row"><button className="leave-button" disabled={busy} onClick={remove}>Remove {binding.name}</button><button onClick={() => setConfirming(false)}>Keep {binding.name}</button></div>
   </div>;
 }
 
@@ -115,13 +127,8 @@ function PlayerSettings({ table, binding, command, handOpen, busy, seating }: { 
 
 /** The owner removes a Bot. It stands up, cashing out, and leaves; a Bot in the Hand goes when the Hand ends. */
 function RemoveBot({ table, binding, command, busy, timing }: { table: ObservableTableSession; binding: ParticipantBinding; command: Command; busy: boolean; timing: 'now' | 'after-hand' }) {
-  const [confirming, setConfirming] = useState(false);
-  return confirming
-    ? <div className="remove-confirm" role="group" aria-label={`Remove ${binding.name}`}>
-      <p className="muted">{timing === 'after-hand' ? `${binding.name} plays out this hand, then stands up and leaves.` : `${binding.name} stands up, cashes out and leaves at once.`} Its name stays taken.</p>
-      <div className="button-row"><button className="leave-button" disabled={busy} onClick={() => { setConfirming(false); command.submit({ kind: 'manage', operation: 'remove-bot', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: binding.participantId } }); }}>Remove {binding.name}</button><button onClick={() => setConfirming(false)}>Keep {binding.name}</button></div>
-    </div>
-    : <div className="button-row"><button className="leave-button" disabled={busy} onClick={() => setConfirming(true)}>{timing === 'after-hand' ? 'Remove Bot after this hand' : 'Remove Bot'}</button></div>;
+  return <ConfirmedRemoval table={table} binding={binding} command={command} busy={busy} operation="remove-bot" row label={timing === 'after-hand' ? 'Remove Bot after this hand' : 'Remove Bot'}
+    explanation={`${timing === 'after-hand' ? `${binding.name} plays out this hand, then stands up and leaves.` : `${binding.name} stands up, cashes out and leaves at once.`} Its name stays taken.`} />;
 }
 
 /** The Table Owner adds a Bot at any time; at a table with a Hand in progress it is dealt in from the next one. */

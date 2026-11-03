@@ -27,13 +27,25 @@ export function afterHandRequestOf(table: ObservableTableSession, participantId:
   return table.pendingChanges.find(entry => entry.participantId === participantId)?.change;
 }
 
+/**
+ * Whether asking for an After-Hand Request of `kind` for a Participant would change anything: nothing is pending for
+ * them, or only a weaker request is. A weaker or equal request changes nothing, at the server too.
+ */
+export const outranksPending = (table: ObservableTableSession, participantId: string, kind: AfterHandRequestKind) => {
+  const pending = afterHandRequestOf(table, participantId);
+  return !pending || afterHandRequestStrength[pending] < afterHandRequestStrength[kind];
+};
+
+/** A change that never waits for a Hand: available now between Hands, and not at all while one is in progress. */
+export const betweenHandsOnly = (available: boolean, handOpen: boolean): Availability => available && !handOpen ? 'now' : 'unavailable';
+
 export function selfService(table: ObservableTableSession, handOpen: boolean): SelfService {
   const me = table.view.state.participants.find(participant => participant.participantId === table.viewerParticipantId);
   const seated = me?.seat != null;
   const pending = afterHandRequestOf(table, table.viewerParticipantId);
-  const asks = (change: AfterHandRequestKind) => !pending || afterHandRequestStrength[pending] < afterHandRequestStrength[change];
+  const asks = (kind: AfterHandRequestKind) => outranksPending(table, table.viewerParticipantId, kind);
   const waits = (available: boolean): Availability => !available ? 'unavailable' : handOpen ? 'after-hand' : 'now';
-  const betweenHands = (available: boolean): Availability => available && !handOpen ? 'now' : 'unavailable';
+  const betweenHands = (available: boolean) => betweenHandsOnly(available, handOpen);
   return {
     pending,
     sitOut: waits(seated && !me.sittingOut && asks('sit-out')),

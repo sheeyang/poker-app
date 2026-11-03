@@ -1,4 +1,4 @@
-import type { ObservableTableSession } from '@poker/contracts';
+import { canDealNextHand, type ObservableTableSession } from '@poker/contracts';
 import { nextHandCountdown } from './presentation.js';
 
 /**
@@ -12,13 +12,12 @@ export function connectionOf(table: ObservableTableSession, participantId: strin
   return table.connectedParticipantIds?.includes(participantId) ? 'connected' : 'disconnected';
 }
 
-/**
- * Whether the table can deal: at least two Eligible Participants, one of them human. An Eligible Participant is
- * seated with chips, not sitting out, and a Bot or a connected human.
- */
+/** Whether the table can deal: the server's rule (`canDealNextHand` in contracts), on the view's public facts. */
 function canDeal(table: ObservableTableSession): boolean {
-  const eligible = table.view.state.participants.filter(p => p.seat !== null && p.stack > 0 && !p.sittingOut && connectionOf(table, p.participantId) !== 'disconnected');
-  return eligible.length >= 2 && eligible.some(p => connectionOf(table, p.participantId) === 'connected');
+  return canDealNextHand(table.view.state.participants.map(p => {
+    const connection = connectionOf(table, p.participantId);
+    return { seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, human: connection !== undefined, connected: connection === 'connected' };
+  }));
 }
 
 export type NextHandStatus = { readonly kind: 'countdown'; readonly seconds: number } | { readonly kind: 'soon' | 'waiting' } | undefined;
