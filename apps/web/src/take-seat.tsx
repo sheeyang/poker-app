@@ -25,14 +25,17 @@ export function TakeSeatDialog({ table, seat, command, handOpen, close }: { tabl
   const busy = command.busy || table.runtimeStatus?.phase === 'recovering';
   const seated = table.view.state.participants.some(p => p.participantId === table.viewerParticipantId && p.seat !== null);
   useEffect(() => { if (seated) close(); }, [seated, close]);
-  return <Dialog title="Take a seat" close={close}>
+  // A Seat pointed at on the felt is the choice; the picker appears only without one, or once someone else takes it.
+  const pointed = seat !== undefined && open.includes(seat);
+  return <Dialog title={pointed ? `Take seat ${seat}` : 'Take a seat'} close={close}>
     <div className="dialog-stack">
       <CommandFeedback command={command} />
       {target === undefined ? <>
         <p className="muted">Every seat is taken. Keep watching; you can sit down when a seat opens.</p>
         <button className="primary" data-autofocus onClick={close}>Keep watching</button>
       </> : <form className="seat-form" onSubmit={e => { e.preventDefault(); if (valid && !busy) command.submit({ tableId: table.tableSessionId, kind: 'seat', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, seat: target, buyIn: amount } }); }}>
-        <fieldset className="seat-picker"><legend>Open seats</legend><div className="seat-options">{open.map(s => <button type="button" key={s} aria-pressed={s === target} aria-label={`Seat ${s}`} onClick={() => setChosen(s)}>{s}</button>)}</div></fieldset>
+        {!pointed && seat !== undefined && <p className="muted">Seat {seat} was just taken. Choose another open seat.</p>}
+        {!pointed && <fieldset className="seat-picker"><legend>Open seats</legend><div className="seat-options">{open.map(s => <button type="button" key={s} aria-pressed={s === target} aria-label={`Seat ${s}`} onClick={() => setChosen(s)}>{s}</button>)}</div></fieldset>}
         <label>Buy-in · chips<input type="number" inputMode="numeric" step="1" min={minimumBuyIn} max={maximumBuyIn} required value={buyIn} aria-describedby="seat-buy-in-hint" aria-invalid={!valid} onChange={e => setBuyIn(e.target.value)} /><small id="seat-buy-in-hint">{chips(minimumBuyIn)}–{chips(maximumBuyIn)} chips{valid ? ` · ${bigBlinds.format(amount / bigBlind)} big blinds` : ''}</small></label>
         <p className="muted">{handOpen ? 'A hand is in progress. You sit down now and are dealt in from the next one.' : 'You’re dealt in from the next hand.'}</p>
         <button className="primary" data-autofocus disabled={busy || !valid}>{command.sending ? 'Taking your seat…' : `Sit in seat ${target}`}<span>{valid ? `${chips(amount)} chips` : ''}</span></button>
