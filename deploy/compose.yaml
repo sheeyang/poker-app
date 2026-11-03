@@ -41,6 +41,8 @@ services:
       SERVE_WEB: 'true'
       SINGLE_SERVER_GUARD: 'true'
       POKER_ADMIN_MODE: 'false'
+      # Online Tables are in beta and off by default. To enable them, set 'true' and release.
+      POKER_ONLINE_PLAY: 'false'
       TRUSTED_PROXIES: 172.29.77.2
       DEPLOYMENT_REVISION: ${APP_REVISION}
       DATABASE_URL: postgresql://poker:${POSTGRES_PASSWORD}@postgres:5432/poker

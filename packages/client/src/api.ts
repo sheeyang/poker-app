@@ -29,6 +29,7 @@ export const api = {
   inspectHand: (id: string, handId: string) => request<Extract<import('@poker/contracts').CompletedHandInspectionOutcome, { ok: true }>>('/table-sessions/' + encodeURIComponent(id) + '/inspect-hand', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }),
   setPlayingStrategy: (id: string, body: SetPlayingStrategyRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-playing-strategy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   retryBot: (id: string, body: RetryBotRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/retry-bot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  readFeatures: () => request<import('@poker/contracts').ServerFeatures>('/features'),
   establishIdentity: () => request<{ ok: true; displayName?: string }>('/identity'),
   setDisplayName: (displayName: string) => request<{ ok: true; displayName: string }>('/display-name', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName }) }),
   listSessions: () => request<import('@poker/contracts').SavedTables>('/table-sessions'),

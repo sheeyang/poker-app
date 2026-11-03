@@ -534,6 +534,9 @@ briefly restarts PostgreSQL, the app and Caddy (the database volume is kept). Or
 releases after that are unaffected. Production turns the limits on by default; set
 `POKER_RATE_LIMITS=false` in the app's `environment` only to switch them off.
 
+Online Tables are in beta and off in production: `deploy/compose.yaml` sets
+`POKER_ONLINE_PLAY: 'false'`. To enable them, change it to `'true'` and release.
+
 ### Reboot manually
 
 Security updates install automatically, but nothing reboots by itself. Log in

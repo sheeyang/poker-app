@@ -376,6 +376,15 @@ captured analyses retain their original descriptors.
 The hosted product is open to the public, so the server limits what one address and one
 Guest can ask of it.
 
+**Online play switch.** Online Tables are in beta. The `onlinePlay` server option
+(environment `POKER_ONLINE_PLAY`) decides whether they are offered. The environment leaves it off unless set to
+`true`; the option itself defaults on, so tests exercise Online Tables. `GET /api/features`
+returns `{ ok: true, onlinePlay }`, and the web client shows the Online table type only
+when it is `true`. While it is off, creating an Online Table, previewing or using a Join
+Link, and `rejoin-table` answer 403 `online-play-disabled`. Online Tables that already exist
+stay playable for the Participants already at them, so turning the switch off never strands
+chips. Practice Tables are unaffected.
+
 **Client addresses.** The `trustedProxies` server option (environment `TRUSTED_PROXIES`,
 comma-separated addresses or CIDR ranges) names the reverse proxy in front of the server.
 Forwarding headers such as `X-Forwarded-For` are believed only on a connection from one of
