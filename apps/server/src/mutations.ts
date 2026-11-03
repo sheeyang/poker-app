@@ -633,9 +633,15 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const binding = memberBinding(cached.aggregate, userId);
     return binding && { participantId: binding.participantId, owner: cached.aggregate.ownerUserId === userId, mode: cached.aggregate.mode };
   }
-  /** With a Guest, loads only a table they have joined: anyone else cannot learn that it exists. */
+  /**
+   * With a Guest, loads only a table they have joined: anyone else cannot learn that it exists. A table this
+   * process has not loaded may have an unresolved acceptance journaled for it (an earlier process's, or a creation
+   * whose COMMIT went unconfirmed), so it is paused until recovery proves the outcome. A loaded table needs no such
+   * check: every acceptance this process makes for it pauses it itself when its COMMIT goes unconfirmed, and an
+   * attempt still in flight is not unresolved. Reads therefore never wait on the journal.
+   */
   async function load(id: string, userId?: string): Promise<CommittedSession | undefined> {
-    if (!recovering.has(id) && (await acceptance.attempts()).some(entry => entry.tableSessionId === id && entry.state === 'pending')) pause(id);
+    if (!committed.has(id) && !recovering.has(id) && (await acceptance.attempts()).some(entry => entry.tableSessionId === id && entry.state === 'pending')) pause(id);
     const cached = committed.get(id);
     if (cached) return userId && !viewer(cached, userId) ? undefined : cached;
     if (userId) {

@@ -6,7 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive, type LiveConnection } from './fixtures/online.js';
+import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -79,7 +79,7 @@ async function act(t: Table, cookieOf: (participantId: string) => string | undef
 const annOnly = (t: Table) => (id: string) => id === t.annId ? t.ann : undefined;
 /** Lets the announced countdown run out and the deal phase pass: the first Action Window of the Hand is open. */
 async function dealt(t: Table, handId = 'hand-1') {
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe(handId);
   clock.advance(1500);
 }
@@ -153,7 +153,7 @@ test('when a countdown expires, humans still disconnected are sat out first, and
   const ben = await t.join('Ben');
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
   await t.seat(t.ann, t.annId, 1); await t.seat(ben.cookie, ben.participantId, 2); await t.seat(t.ann, t.botIds[0]!, 3);
-  const { endsAt } = (await t.view()).schedule.nextHandCountdown!;
+  const { endsAt } = await announcedCountdown(() => t.view());
   // A disconnect does not cancel the countdown: eligibility is rechecked when it expires.
   await benLive.close();
   await expect.poll(async () => (await t.view()).connectedParticipantIds).toEqual([t.annId]);
@@ -310,7 +310,7 @@ test('a countdown survives a restart, and one that expired during the outage run
   const ben = await t.join('Ben');
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
   await t.seat(t.ann, t.annId, 1); await t.seat(ben.cookie, ben.participantId, 2); await t.seat(t.ann, t.botIds[0]!, 3);
-  const countdown = (await t.view()).schedule.nextHandCountdown!;
+  const countdown = await announcedCountdown(() => t.view());
   // A restart before it expires keeps the countdown; a Guest who reconnects in time is dealt in.
   await annLive.close(); await benLive.close();
   await server.close(); clock.advance(1000); await startServer();
@@ -374,8 +374,9 @@ test('a deal that could not be saved is tried again shortly and starts exactly o
   beforeCommit = async ({ tableSessionId, requestId }) => { if (tableSessionId === t.id && requestId.startsWith('deal:') && failures++ === 0) throw new Error('controlled deal rollback'); };
   onTestFinished(() => { beforeCommit = async () => {}; });
   await t.seat(t.ann, t.annId, 1); await t.seat(t.ann, t.botIds[0]!, 2);
+  const { endsAt } = await announcedCountdown(() => t.view());
   const before = await t.view();
-  clock.advanceTo(before.schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo(endsAt);
   await expect.poll(() => failures).toBe(1);
   expect((await t.view()).pokerRevision).toBe(before.pokerRevision);
   await expect.poll(async () => { clock.advance(250); return (await t.view()).view.state.handId; }).toBe('hand-1');

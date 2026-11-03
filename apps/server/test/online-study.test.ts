@@ -6,7 +6,7 @@ import { createStrategy, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive, type LiveConnection } from './fixtures/online.js';
+import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it.
 const clock = new ManualClock();
@@ -101,7 +101,7 @@ async function headsUp() {
 /** Lets the announced Next-Hand Countdown run out and the deal phase pass: the Hand's first Action Window is open. */
 async function dealt(t: Table, handId: string) {
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe(handId);
   clock.advance(1500);
   return t.view();
@@ -146,7 +146,7 @@ test('Allow Live Analysis is an Online Table option, on by default and visible t
   await t.connect();
   expect((await t.as(t.ann, 'seat-participant', { participantId: t.annId, seat: 1 })).status).toBe(200);
   expect((await t.as(ben.cookie, 'seat-participant', { participantId: ben.participantId, seat: 2 })).status).toBe(200);
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.status).toBe('active-hand');
   expect(await refusal(await t.options({ allowLiveAnalysis: true }))).toEqual({ status: 400, code: 'active-hand' });
   clock.advance(1500);
@@ -248,7 +248,7 @@ test('held analysis never delays an action, an Action Deadline or the next deal'
   // The next Hand is announced after the payout and the pause, and dealt when its countdown runs out.
   clock.advance(5000);
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
   for (const [cookie, requestId] of [[cookieOf(first), live.requestId], [cookieOf(second), secondLive.requestId]] as const)
     expect(await t.result(cookie, requestId)).toMatchObject({ status: 'pending' });

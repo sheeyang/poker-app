@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import WebSocket from 'ws';
-import { connectLive } from './fixtures/online.js';
+import { connectLive, announcedCountdown } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { ManualClock } from './fixtures/clock.js';
@@ -189,7 +189,7 @@ async function command(t: Table, cookie: string, kind: string, contents: object 
  */
 async function deal(t: Table) {
   await connectLive(base, t.owner, t.id);
-  clock.advanceTo((await read(t)).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
   clock.advance(1500);
 }

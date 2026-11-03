@@ -6,7 +6,7 @@ import { createStrategy, HighestProbabilitySelector } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive, type LiveConnection } from './fixtures/online.js';
+import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -66,7 +66,7 @@ async function botToAct() {
   const annLive = await connectLive(base, ann, id), benLive = await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: rex, seat: 1 })).status).toBe(200);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 2 })).status).toBe(200);
-  clock.advanceTo((await view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => view())).endsAt);
   await expect.poll(async () => (await view()).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   return { id, ann, annId, rex, ben, view, as, annLive, benLive };

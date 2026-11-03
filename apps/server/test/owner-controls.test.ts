@@ -6,7 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive, type LiveConnection } from './fixtures/online.js';
+import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -146,7 +146,7 @@ test('a Practice Table has no option changes after creation', async () => {
 async function rexToAct(t: Table) {
   const live = await t.connect();
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(t.ann, t.annId, 2);
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   return live;
@@ -242,7 +242,7 @@ test('at an Online Table the owner adds a Bot at any time, and it joins the next
   await botActs(t, { type: 'fold' });
   clock.advanceTo(clock.now() + 2000 + 3000);
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
   const second = await t.view(ben.cookie);
   expect(participant(second, cleoId)).toMatchObject({ inHand: true });
@@ -386,7 +386,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   const ben = await t.join('Ben');
   await t.connect(ben.cookie);
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(ben.cookie, ben.participantId, 2);
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   await botActs(t, { type: 'call' });
@@ -455,7 +455,7 @@ test('Bots added and removed, and their names, survive a restart, and an added B
   await t.connect();
   await t.seat(t.ann, t.annId, 2);
   const cleoId = botOf(before, 'Cleo').participantId;
-  clock.advanceTo((await t.view()).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
   expect(participant(await t.view(), cleoId)).toMatchObject({ inHand: true });
 });

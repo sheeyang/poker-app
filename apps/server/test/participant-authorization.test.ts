@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
-import { connectLive } from './fixtures/online.js';
+import { connectLive, announcedCountdown } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
 import { ManualClock } from './fixtures/clock.js';
 
@@ -50,7 +50,7 @@ async function completedHand(t: Table) {
   if ((await read(t)).mode === 'online') {
     // An Online Table deals by itself once its connected human and the Bot are seated and the countdown runs out.
     await connectLive(base, t.cookie, t.id);
-    clock.advanceTo((await read(t)).schedule.nextHandCountdown!.endsAt);
+    clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
     await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
   } else await command(t, 'start-hand');
   clock.advance(1500);

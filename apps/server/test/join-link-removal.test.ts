@@ -6,7 +6,7 @@ import { baselinePlayingStrategy, type ObservableTableSession, type ServerLiveMe
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { connectLive } from './fixtures/online.js';
+import { connectLive, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -167,7 +167,7 @@ async function onlineHand() {
   await connectLive(base, ann, id); await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 1 })).status).toBe(200);
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
-  clock.advanceTo((await view(ann)).schedule.nextHandCountdown!.endsAt);
+  clock.advanceTo((await announcedCountdown(() => view(ann))).endsAt);
   await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   return { ...table, ben, benId };
