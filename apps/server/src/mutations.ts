@@ -674,11 +674,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   /** Upgrades any stored version and validates it completely, or throws TableSessionRestorationError. */
   function restorable(stored: StoredTableSession): CommittedSession {
     const aggregate = upgradeTableSession(stored);
-    if (humanBindings(aggregate).some(binding => validateTrainerConfiguration(binding.trainerConfiguration, supportsStrategy))) throw new TableSessionRestorationError();
+    if (!aggregate || humanBindings(aggregate).some(binding => validateTrainerConfiguration(binding.trainerConfiguration, supportsStrategy))) throw new TableSessionRestorationError();
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new TableSessionRestorationError();
-    const scheduled = stored.schemaVersion === 2 && !!stored.schedule;
-    return { aggregate: scheduled ? aggregate : { ...aggregate, schedule: unscheduledWindow(aggregate, restored.game) }, game: restored.game };
+    // Version 1 predates scheduled play; every version-2 row records its schedule.
+    return { aggregate: stored.schemaVersion === 2 ? aggregate : { ...aggregate, schedule: unscheduledWindow(aggregate, restored.game) }, game: restored.game };
   }
   async function restore(id: string): Promise<CommittedSession | undefined> {
     const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));

@@ -105,11 +105,20 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   await start();
   expect(await read(t)).toEqual(resumed);
   expect(await (await get('/api/table-sessions', t.cookie)).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
-  // A version-2 table committed before table options existed gets the Practice defaults.
-  await stop();
-  await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = aggregate - 'options' WHERE id = $1`, [t.id]);
-  await start();
-  expect(await read(t)).toMatchObject({ options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true } });
+  // Version 2 names one format: a version-2 row without a part of it is not guessed at, but fails restoration.
+  const intact = (await administration.query(`SELECT aggregate FROM "${schema}".table_sessions WHERE id = $1`, [t.id])).rows[0].aggregate;
+  expect(intact.schemaVersion).toBe(2);
+  for (const part of ['options', 'schedule', 'pendingChanges', 'mode']) {
+    await stop();
+    await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = aggregate - $2::text WHERE id = $1`, [t.id, part]);
+    await start();
+    const response = await get('/api/table-sessions/' + t.id, t.cookie);
+    expect({ part, status: response.status, code: (await response.json()).rejection?.code }).toEqual({ part, status: 503, code: 'record-restoration-failed' });
+    await stop();
+    await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = $2 WHERE id = $1`, [t.id, intact]);
+    await start();
+  }
+  expect(await read(t)).toEqual(resumed);
 });
 
 test('a version-1 table without its Trainer configuration fails restoration instead of receiving a default', async () => {

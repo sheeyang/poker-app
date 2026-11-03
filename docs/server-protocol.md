@@ -110,7 +110,10 @@ The Persisted Table Session is version 2. It records the table `mode`, and each
 human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
 configuration, the table `options`, an Online Table's `joinToken`, and the
 `pendingChanges` (after-Hand requests, empty by default). Version-1 records load as Practice Tables whose human takes the
-table-level Trainer configuration, and are rewritten at their next commit. The
+table-level Trainer configuration, and are rewritten at their next commit. Each version names one
+format: a version-2 row that lacks part of it fails restoration (503 `record-restoration-failed`)
+rather than receiving defaults ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)
+on ADR-0014). The
 `table_memberships` index (Guest, table, Participant, status) is written in the
 same transaction as every aggregate write that changes a membership (see
 [`membership.ts`](../apps/server/src/membership.ts)). Startup backfills it for
