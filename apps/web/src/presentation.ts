@@ -89,6 +89,12 @@ export function deadlineCountdown(table: ObservableTableSession, serverNow: numb
   return Math.max(0, Math.ceil((window.deadlineAt - Math.max(serverNow, window.opensAt)) / 1000));
 }
 
+/** The whole seconds the current decision's Action Window lasts, from opening to its Action Deadline; `undefined` without one. */
+export function deadlineLength(table: ObservableTableSession): number | undefined {
+  const window = currentWindow(table);
+  return window?.deadlineAt === undefined ? undefined : Math.max(1, Math.round((window.deadlineAt - window.opensAt) / 1000));
+}
+
 /**
  * Whole seconds left before an Online Table's Next-Hand Countdown expires at server time `serverNow`, counted from
  * its announcement and never below zero; `undefined` when none is announced, or once its Hand is dealt.

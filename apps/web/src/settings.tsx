@@ -13,8 +13,11 @@ import { afterHandRequestOf, afterHandRequestLabel, selfService } from './self-s
 import { connectionOf } from './online-status.js';
 import { canRemove, removalTiming } from './removal.js';
 
-/** `handOpen`: a Hand is in progress for management, being played or still paying out, so changes to a Seat wait for it. */
-export function TableSettings({ table, command, handOpen, close }: { table: ObservableTableSession; command: Command; handOpen: boolean; close: () => void }) {
+/**
+ * `handOpen`: a Hand is in progress for management, being played or still paying out, so changes to a Seat wait for it.
+ * `openSection`: a section to open on arrival, for a shortcut that leads straight to it.
+ */
+export function TableSettings({ table, command, handOpen, openSection, close }: { table: ObservableTableSession; command: Command; handOpen: boolean; openSection?: 'add-bot'; close: () => void }) {
   const [seatingAll, setSeatingAll] = useState(false);
   const { displayName } = useDisplayName();
   const animations = useSession(s => s.animations), setAnimations = useSession(s => s.setAnimations);
@@ -50,7 +53,7 @@ export function TableSettings({ table, command, handOpen, close }: { table: Obse
     <div className="player-settings">{present.map(binding => canManage(table, binding)
       ? <PlayerSettings key={binding.participantId} table={table} binding={binding} command={command} handOpen={active} busy={busy || seatingAll} seating={busy || seatingAll || active && !online} />
       : <PlayerRow key={binding.participantId} table={table} binding={binding} command={command} handOpen={active} busy={busy} />)}</div>
-    {owner && <AddBot table={table} command={command} busy={busy || seatingAll} handOpen={active} />}
+    {owner && <AddBot table={table} command={command} busy={busy || seatingAll} handOpen={active} open={openSection === 'add-bot'} />}
     {optionControls(table, active).shown && <TableRules table={table} command={command} editable={optionControls(table, active).editable} busy={busy} />}
     {owner && !online && <details className="settings-section"><summary>Next dealer button</summary><form className="inline-form" onSubmit={e => { e.preventDefault(); const data = new FormData(e.currentTarget); command.submit({ kind: 'manage', operation: 'set-button', tableId: table.tableSessionId, body: { ...metadata(), seat: Number(data.get('buttonSeat')) } }); }}><label>Seat<select name="buttonSeat" defaultValue={table.view.state.buttonSeat} disabled={disabled}>{table.view.state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).map(p => <option key={p.seat} value={p.seat!}>{p.seat} · {playerName(table, table.bindings.find(b => b.participantId === p.participantId)!)}</option>)}</select></label><button disabled={disabled}>Set button</button></form></details>}
     <section className="settings-section"><h3>Presentation</h3><label className="check-label"><input type="checkbox" checked={animations} onChange={e => setAnimations(e.target.checked)} />Card animations</label></section>
@@ -66,7 +69,7 @@ function PlayerRow({ table, binding, command, handOpen, busy }: { table: Observa
   const pending = afterHandRequestOf(table, binding.participantId);
   const connection = connectionOf(table, binding.participantId);
   const timing = removalTiming(handOpen);
-  return <div className="player-setting player-row"><span><strong>{binding.name}</strong>{binding.participantId === table.ownerParticipantId && <small> · Table Owner</small>}<small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span>
+  return <div className="player-setting player-row"><span><strong>{binding.name}{binding.participantId === table.ownerParticipantId && <small className="owner-tag">Table Owner</small>}</strong><small>{p?.seat != null ? `Seat ${p.seat} · ${chips(p.stack)} chips${p.sittingOut ? ' · Sitting out' : ''}` : 'Not seated'}{connection ? ` · ${connection === 'connected' ? 'Connected' : 'Disconnected'}` : ''}{pending ? ` · ${afterHandRequestLabel(pending)}` : ''}</small></span>
     {canRemove(table, binding) && <ConfirmedRemoval table={table} binding={binding} command={command} busy={busy} operation="remove-participant" label="Remove from table"
       explanation={`${binding.name} can’t join this table again, even with a new Join Link. ${timing === 'after-hand' ? 'They stay until this hand ends, then stand up and leave.' : 'They stand up and leave at once.'}`} />}
   </div>;
@@ -132,17 +135,18 @@ function RemoveBot({ table, binding, command, busy, timing }: { table: Observabl
 }
 
 /** The Table Owner adds a Bot at any time; at a table with a Hand in progress it is dealt in from the next one. */
-function AddBot({ table, command, busy, handOpen }: { table: ObservableTableSession; command: Command; busy: boolean; handOpen: boolean }) {
+function AddBot({ table, command, busy, handOpen, open = false }: { table: ObservableTableSession; command: Command; busy: boolean; handOpen: boolean; open?: boolean }) {
   const [strategy, setStrategy] = useState<StrategyDescriptor>(defaultPlayingStrategy);
   const seats = openSeats(table), configuration = table.view.configuration;
   const suggested = nextBotName(table);
-  return <details className="settings-section"><summary>Add a Bot</summary>
+  const [initiallyOpen] = useState(open);
+  return <details className="settings-section" open={initiallyOpen || undefined}><summary>Add a Bot</summary>
     <form key={suggested} className="inline-form" onSubmit={e => {
       e.preventDefault();
       const data = new FormData(e.currentTarget), seat = Number(data.get('botSeat'));
       command.submit({ kind: 'add-bot', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, name: String(data.get('botName')), playingStrategy: strategy, buyIn: Number(data.get('botBuyIn')), ...(seat ? { seat } : {}) } });
     }}>
-      <label>Name<input name="botName" defaultValue={suggested} maxLength={20} required disabled={busy} /></label>
+      <label>Name<input name="botName" defaultValue={suggested} maxLength={20} required disabled={busy} data-autofocus={initiallyOpen || undefined} /></label>
       <label>Playing Strategy<StrategySelect value={strategy} onChange={setStrategy} disabled={busy} /></label>
       <label>Buy-in<input name="botBuyIn" type="number" step="1" min={configuration.minimumBuyIn} max={configuration.maximumBuyIn} defaultValue={configuration.defaultBuyIn} required disabled={busy} /></label>
       <label>Seat<select name="botSeat" disabled={busy || seats.length === 0}><option value="">First open seat</option>{seats.map(s => <option key={s} value={s}>{s}</option>)}</select></label>

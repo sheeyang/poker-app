@@ -39,14 +39,14 @@ export function SessionBrowser({ command, ready, connecting = false, close }: { 
           <div className="practice-preview"><span>No-limit Hold’em · {players} players{timeLimit ? ` · ${timeLimit} seconds to act` : ''}</span><strong>{chips(bigBlind * depth)} chips each <span>· {chips(smallBlind)} / {chips(bigBlind)} blinds</span></strong></div>
           <button className="primary start-practice" type="submit" disabled={!valid}>{command.busy ? 'Preparing your table…' : 'Start practice'}<Icon name="arrow" size={19} /></button>
         </fieldset>
-      </form> : <OnlineForm command={command} ready={ready} launch={request => displayName ? command.launch(request) : setAwaitingName(request)} />}
+      </form> : <OnlineForm command={command} ready={ready} displayName={displayName} launch={request => displayName ? command.launch(request) : setAwaitingName(request)} />}
       <details className="practice-custom"><summary>Your name{displayName ? ` · ${displayName}` : ''}</summary><div className="details-content"><p className="muted">Used at tables you create from now on. Existing tables keep the name they started with.</p><DisplayNameForm current={displayName} /></div></details>
       <p className="baseline-note"><Icon name="info" size={16} /><span>Simple Heuristic uses basic hand strength and modest bets. Scores compare your play with a reference; they don’t measure poker skill.</span></p>
     </section>
     <section className="practice-return" aria-labelledby="return-title"><h2 id="return-title">Pick up where you left off</h2><p className="muted">Your tables are saved automatically.</p>
       {!sessions.data && (connecting || ready && sessions.isPending) && <SavedTablesSkeleton />}
       {sessions.isError && <div className="notice-error"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
-      {sessions.data?.tables.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>Start practice to play your first hand.</p></div>}
+      {sessions.data?.tables.length === 0 && <div className="practice-empty"><Icon name="cards" size={30} /><h3>No saved tables yet.</h3><p>{shownMode === 'online' ? 'Create an online table, or open a join link from a friend.' : 'Start practice to play your first hand.'}</p></div>}
       <ul className="return-list">{sessions.data?.tables.map(saved => !readable(saved)
         ? <li key={saved.tableSessionId} className="saved-table"><p className="muted">This saved table couldn’t be read.</p><button className="text-button" onClick={() => void sessions.refetch()}>Retry</button></li>
         : saved.left
@@ -75,15 +75,17 @@ function SavedTableRow({ saved, selected, open }: { saved: ReadableSavedTable; s
   return <li className="saved-table"><button onClick={open}><SavedTableCopy saved={saved} tag={selected ? 'Current table' : undefined} state={stack !== undefined ? ` · Your stack ${chips(stack)}` : saved.mode === 'online' ? ' · Watching' : ''} /><span className="resume-label">Continue <Icon name="arrow" size={17} /></span></button></li>;
 }
 
-/** Online creation: the table size up front, everything else under progressive disclosure. */
-function OnlineForm({ command, ready, launch }: { command: Command; ready: boolean; launch: (request: CreateTableSessionRequest) => void }) {
+/** Online creation: the table size up front, as at a Practice Table, and everything else under progressive disclosure. */
+function OnlineForm({ command, ready, displayName, launch }: { command: Command; ready: boolean; displayName?: string; launch: (request: CreateTableSessionRequest) => void }) {
   const [setup, setSetup] = useState(defaultOnlineSetup);
   const problem = onlineSetupProblem(setup);
   const number = (key: keyof typeof setup) => (e: { target: { value: string } }) => setSetup({ ...setup, [key]: Number(e.target.value) });
+  const seats = (seatCount: number) => setSetup({ ...setup, seatCount, bots: Math.min(setup.bots, seatCount - 1) });
   return <form onSubmit={e => { e.preventDefault(); const request = onlineCreationRequest(setup, crypto.randomUUID()); if (request) launch(request); }}>
     <fieldset disabled={command.busy || !ready}>
-      <label>Seats<select value={setup.seatCount} onChange={e => setSetup({ ...setup, seatCount: Number(e.target.value), bots: Math.min(setup.bots, Number(e.target.value) - 1) })}>{Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 2}>{i + 2} seats</option>)}</select></label>
+      <fieldset className="format-picker"><legend>Table size</legend><div className="format-options">{[{ n: 2, title: 'Heads-up', text: '2 seats' }, { n: 6, title: '6-max', text: '6 seats' }, { n: 9, title: 'Full ring', text: '9 seats' }].map(f => <label key={f.n} className={setup.seatCount === f.n ? 'format-selected' : ''}><input type="radio" name="online-format" checked={setup.seatCount === f.n} onChange={() => seats(f.n)} /><strong>{f.title}</strong><span>{f.text}</span></label>)}</div></fieldset>
       <details className="practice-custom"><summary>Table options</summary><div className="details-content">
+        <label>Seats<select value={setup.seatCount} onChange={e => seats(Number(e.target.value))}>{Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 2}>{i + 2} seats</option>)}</select></label>
         <div className="form-pair"><label>Small blind<input required type="number" min="1" step="1" value={setup.smallBlind} onChange={number('smallBlind')} /></label><label>Big blind<input required type="number" min={setup.smallBlind} step="1" value={setup.bigBlind} onChange={number('bigBlind')} /></label></div>
         <div className="form-pair"><label>Ante<input required type="number" min="0" step="1" value={setup.ante} onChange={number('ante')} /></label><label>Starting stack · BB<input required type="number" min={setup.minimumBuyInBB} max={setup.maximumBuyInBB} step="1" value={setup.startingStackBB} onChange={number('startingStackBB')} /></label></div>
         <div className="form-pair"><label>Minimum buy-in · BB<input required type="number" min="1" max={setup.startingStackBB} step="1" value={setup.minimumBuyInBB} onChange={number('minimumBuyInBB')} /></label><label>Maximum buy-in · BB<input required type="number" min={setup.startingStackBB} step="1" value={setup.maximumBuyInBB} onChange={number('maximumBuyInBB')} /></label></div>
@@ -93,7 +95,7 @@ function OnlineForm({ command, ready, launch }: { command: Command; ready: boole
         <div className="form-pair"><label>Bots<select value={setup.bots} onChange={number('bots')}>{Array.from({ length: setup.seatCount }, (_, i) => <option key={i} value={i}>{i === 0 ? 'No bots' : i === 1 ? '1 bot' : `${i} bots`}</option>)}</select></label>{setup.bots > 0 && <label>Bot Playing Strategy<StrategySelect value={setup.botStrategy} onChange={botStrategy => setSetup({ ...setup, botStrategy })} /></label>}</div>
       </div></details>
       {problem && <p className="notice-error" role="alert">{problem}</p>}
-      <div className="practice-preview"><span>No-limit Hold’em · {setup.seatCount} seats · {setup.actionTimeLimitSeconds} seconds to act</span><strong>{chips(setup.bigBlind * setup.startingStackBB)} chips each <span>· {chips(setup.smallBlind)} / {chips(setup.bigBlind)} blinds</span></strong><p>You join first and choose your seat. You’ll get a link to share.</p></div>
+      <div className="practice-preview"><span>No-limit Hold’em · {setup.seatCount} seats · {setup.actionTimeLimitSeconds} seconds to act</span><strong>{chips(setup.bigBlind * setup.startingStackBB)} chips each <span>· {chips(setup.smallBlind)} / {chips(setup.bigBlind)} blinds</span></strong><p>{displayName ? `You join first as ${displayName} and choose your seat.` : 'You join first and choose your seat.'} You’ll get a link to share.</p></div>
       <button className="primary start-practice" type="submit" disabled={!!problem}>{command.busy ? 'Creating your table…' : 'Create online table'}<Icon name="arrow" size={19} /></button>
     </fieldset>
   </form>;

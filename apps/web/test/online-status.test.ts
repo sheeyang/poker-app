@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableParticipant, type ObservableTableSession, type TableSchedule } from '@poker/contracts';
-import { connectionOf, nextHandLabel, nextHandStatus } from '../src/online-status.js';
+import { connectionOf, nextHandLabel, nextHandStatus, waitingDetail, waitingReason, watchingNames } from '../src/online-status.js';
 
 const seated = (participantId: string, seat: number, extra: Partial<ObservableParticipant> = {}): ObservableParticipant => ({ participantId, seat, stack: 1000, sittingOut: false, ...extra });
 function table(participants: ObservableParticipant[], connected: string[], schedule: TableSchedule = { phases: [], actionWindow: null }, mode: 'online' | 'practice' = 'online'): ObservableTableSession {
@@ -41,7 +41,30 @@ describe('the next Hand at an Online Table, between Hands', () => {
   });
   it('is told in words everyone can follow', () => {
     expect([nextHandLabel({ kind: 'countdown', seconds: 3 }), nextHandLabel({ kind: 'countdown', seconds: 5 }, true), nextHandLabel({ kind: 'countdown', seconds: 0 }), nextHandLabel({ kind: 'soon' }), nextHandLabel({ kind: 'waiting' }), nextHandLabel(undefined)])
-      .toEqual(['Next hand in 3s', 'First hand in 5s', 'Dealing…', 'Next hand coming up', 'Waiting for two Participants ready to play, one of them a connected person', undefined]);
+      .toEqual(['Next hand in 3s', 'First hand in 5s', 'Dealing…', 'Next hand coming up', 'Waiting for players', undefined]);
+  });
+  it('names what a waiting table needs from the viewer, or from others', () => {
+    // You are watching: sitting down is your way in.
+    expect(waitingReason(table([seated('ann', 1)], ['ann', 'you']))).toEqual({ kind: 'take-seat' });
+    // You are seated but sitting out; with no chips, the rebuy comes first.
+    expect(waitingReason(table([seated('ann', 1), seated('you', 2, { sittingOut: true })], ['you']))).toEqual({ kind: 'sitting-out' });
+    expect(waitingReason(table([seated('ann', 1), seated('you', 2, { sittingOut: true, stack: 0 })], ['you']))).toEqual({ kind: 'no-chips' });
+    // You are ready alone: one more player, and Ann would count once she reconnects.
+    expect(waitingReason(table([seated('ann', 1), seated('you', 2)], ['you']))).toEqual({ kind: 'players', needed: 1, reconnecting: ['Ann'], sittingOut: [] });
+    expect(waitingReason(table([seated('ann', 1, { sittingOut: true }), seated('you', 2)], ['ann', 'you']))).toEqual({ kind: 'players', needed: 1, reconnecting: [], sittingOut: ['Ann'] });
+    expect(waitingReason(table([seated('you', 2)], ['you']))).toEqual({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] });
+    // A table that can deal waits for nothing.
+    expect(waitingReason(table([seated('you', 1), seated('rex', 2)], ['you']))).toBeUndefined();
+  });
+  it('explains the wait in plain words, offering the owner the Join Link and Bots', () => {
+    expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] }, true)).toBe('Hands start once one more player is seated. Share the join link, or add a Bot.');
+    expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] }, false)).toBe('Hands start once one more player takes a seat.');
+    expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: ['Ann'], sittingOut: ['Rex'] }, false)).toBe('Ann is disconnected. Rex is sitting out. Hands start once one more player is ready.');
+  });
+  it('lists the other humans watching without a Seat', () => {
+    expect(watchingNames(table([seated('you', 2)], ['ann', 'you']))).toEqual(['Ann']);
+    // The viewer is told in the tray that they are watching, not in this list.
+    expect(watchingNames(table([seated('ann', 1)], ['ann', 'you']))).toEqual([]);
   });
   it('says nothing during a Hand or at a Practice Table', () => {
     const playing = table([seated('ann', 1), seated('rex', 2)], ['ann']);

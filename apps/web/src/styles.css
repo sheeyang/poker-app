@@ -154,7 +154,6 @@ body:has(.table-active) { overflow: hidden; }
 .offline-seat .seat-body { border-style: dashed; background: #1d2a23; }
 .offline-seat .avatar { opacity: .6; }
 .seat-copy .connection-label { color: var(--muted); margin-top: -3px; }
-.next-hand-countdown { margin: 0; font-size: .85rem; color: #edd7a9; font-variant-numeric: tabular-nums; text-align: center; }
 .dealer-marker { position: absolute; right: -10px; bottom: -5px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: #e1decd; color: #25362a; font-size: .73rem; font-weight: 700; }
 .empty-seat { display: flex; flex-direction: column; gap: 3px; padding: 10px; border: 1px dashed #607765; background: #17291fc9; width: 110px; margin: auto; border-radius: 12px; font-size: .8rem; color: #b6c7b6; }
 .empty-seat small { color: #a7bba7; font-size: .7rem; font-weight: 400; }
@@ -349,7 +348,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .player-setting > summary > span:first-child { display: flex; flex-direction: column; gap: 5px; }
 .player-setting small { color: var(--muted); font-size: .76rem; }
 .player-setting > summary > svg { flex-shrink: 0; color: var(--muted); transition: transform .15s; }
-.player-setting[open] > summary > svg { transform: rotate(180deg); }
+.player-setting[open] > summary > svg { transform: rotate(90deg); }
 .player-setting .details-content { padding-bottom: 14px; }
 .pending-note { margin: 0 0 12px; padding: 10px 12px; border: 1px solid #6e7a54; border-radius: 8px; background: #2f3c2b; font-size: .82rem; }
 .player-setting .leave-button { border-color: #805e4d; color: #f0c8af; }
@@ -810,4 +809,67 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .join-card form { display: grid; gap: 16px; }
 .join-card label { display: grid; gap: 8px; }
 .join-card .brand-mark { justify-self: start; }
-.join-facts { color: #c3d4c7; font-size: .86rem; line-height: 1.7; }
+.join-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin: 0; padding: 16px 0; border-block: 1px solid var(--line); }
+.join-facts > div { min-width: 0; }
+.join-facts dt { color: var(--muted); font-size: .76rem; margin-bottom: 4px; }
+.join-facts dd { margin: 0; font-size: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.join-card label small { font-weight: 400; line-height: 1.5; }
+
+/* Simple dialogs stack their content on one rhythm. */
+.dialog-stack { display: grid; gap: 18px; }
+.dialog-stack > .command-feedback { margin: 0; }
+.name-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 10px; }
+.name-form > label { grid-column: 1 / -1; }
+.name-form > p { grid-column: 1 / -1; margin: 0; }
+.name-form .primary { min-height: 42px; }
+.link-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; }
+.link-field input { font-size: .85rem; text-overflow: ellipsis; }
+.link-field .primary { min-height: 42px; }
+.link-field .link-status { grid-column: 1 / -1; margin: 0; }
+.link-field .link-status:empty { display: none; }
+.replace-link { display: grid; gap: 10px; padding-top: 20px; border-top: 1px solid var(--line); }
+.replace-link h3, .replace-link p { margin: 0; }
+
+/* Taking a Seat: the open Seats as a compact choice, then the buy-in. */
+.seat-form { display: grid; gap: 18px; }
+.seat-picker { display: block; }
+.seat-picker legend { font-size: .86rem; font-weight: 600; color: #c1cfc3; margin-bottom: 10px; padding: 0; }
+.seat-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.seat-options button { min-width: 48px; background: transparent; font-variant-numeric: tabular-nums; }
+.seat-options [aria-pressed="true"] { color: var(--gold); border-color: var(--gold); background: #2b382c; }
+.seat-form label small { color: var(--muted); font-weight: 400; }
+.seat-form > p { margin: 0; }
+.seat-form .primary { width: 100%; justify-content: space-between; min-height: 48px; }
+.seat-form .primary > span { font-weight: 600; font-variant-numeric: tabular-nums; }
+.empty-seat-open:hover { border-color: var(--gold); color: var(--text); background: #1d3326; }
+.empty-seat-open:hover small { color: var(--gold); }
+
+/* How much of an Action Window is left. It steps each second; reduced motion keeps the steps. */
+.deadline-bar { display: block; height: 3px; border-radius: 2px; background: #0d17125c; overflow: hidden; }
+.deadline-bar > i { display: block; height: 100%; border-radius: inherit; background: #edd7a9; transform-origin: left center; transition: transform 1s linear, background-color 150ms; }
+.deadline-bar.deadline-near > i { background: #f0c8af; }
+.seat-body > .deadline-bar { position: absolute; left: 11px; right: 14px; bottom: 5px; }
+.action-deadline > .deadline-bar { flex: 1; max-width: 240px; align-self: center; margin-left: 6px; background: #35453d; }
+
+/* Online Tables: whose table it is, who is watching, and what the next Hand waits for. */
+.hand-status-next { color: #edd7a9; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.below-table { flex-wrap: wrap; }
+.table-watchers { order: 2; color: #c3d4c7; font-size: .8rem; line-height: 34px; margin: 0; overflow-wrap: anywhere; }
+.table-watchers > span { color: var(--muted); margin-right: 6px; }
+.online-next-hand { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
+.online-next-hand .next-hand-copy { flex: 1 1 320px; min-width: 0; }
+.online-next-hand .next-hand-copy strong { display: block; font-size: 1rem; font-variant-numeric: tabular-nums; }
+.online-next-hand .next-hand-copy p { margin-top: 4px; }
+.online-next-hand .next-hand-actions { margin-left: auto; }
+.player-row strong { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.owner-tag { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: #c3d4c7; font-size: .7rem; font-weight: 400; }
+/* Where the title stacks, the mode badge lines up with it rather than centering. */
+@media (min-width: 1001px) and (max-width: 1200px) { .table-title .mode-badge { align-self: flex-start; } }
+@media (max-width: 650px) {
+  .online-next-hand { flex-direction: column; align-items: stretch; gap: 12px; }
+  .online-next-hand .next-hand-copy { flex: none; }
+  .online-next-hand .next-hand-actions { margin-left: 0; }
+  .table-watchers { font-size: .73rem; }
+  .seat-body > .deadline-bar { left: 8px; right: 14px; bottom: 3px; height: 2px; }
+  .table-title .mode-badge { align-self: flex-start; }
+}
