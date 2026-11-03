@@ -283,8 +283,8 @@ async function onlineHand() {
 test('at an Online Table a seated Guest who leaves during a Hand is stood up after it, frees a place, and rejoins through the Join Link as the same Participant with their history', async () => {
   const { ann, ben, id, annId, benId, token, view, join, as, cookieOf } = await onlineHand();
   const watcher = await guest('Cy');
-  const joinedCount = async () => (await (await get('/api/join-links/' + token, watcher)).json()).joinedCount as number;
-  expect(await joinedCount()).toBe(2);
+  const placesTaken = async () => (await (await get('/api/join-links/' + token, watcher)).json()).placesTaken as number;
+  expect(await placesTaken()).toBe(2);
   const asked = await as(ben, 'leave-table', { participantId: benId });
   expect(await asked.json()).toMatchObject({ ok: true, afterHand: true });
   // Everyone at the table sees it coming; nothing has changed yet.
@@ -298,7 +298,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   clock.advance(2000);
   await expect.poll(async () => (await get('/api/table-sessions/' + id, ben)).status).toBe(404);
   expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [] });
-  expect(await joinedCount()).toBe(1);
+  expect(await placesTaken()).toBe(1);
   const after = await view(ann);
   expect(after.pendingChanges).toEqual([]);
   expect(participant(after, benId)).toMatchObject({ seat: null, stack: 0 });
@@ -312,7 +312,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   expect(back.bindings.find(b => b.participantId === benId)).toMatchObject({ name: 'Ben' });
   expect(back.view.history).toEqual(decided.view.history);
   expect(back.view.history).toHaveLength(1);
-  expect(await joinedCount()).toBe(2);
+  expect(await placesTaken()).toBe(2);
 });
 
 test('nobody manages another human, and an owner who leaves keeps their table, which keeps running without them', async () => {

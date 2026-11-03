@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
 import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type PendingParticipantChange, type TableMode, type ObservableGameView, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
-import { findBinding, humanBindings, isBot, isHuman, memberBinding, upgradeTableSession, type PersistedBinding, type PersistedBotBinding, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
+import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBinding, type PersistedBotBinding, type PersistedHumanBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
 import { membership, newJoinToken, ownsTable, tableOfJoinLink, writeTableSession } from './membership.js';
@@ -94,6 +94,7 @@ const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner
 const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
 const removedGuest = () => reject('guest-removed', 'The Table Owner removed you from this table, so you cannot join it again.');
 const invalidJoinLink = () => reject('invalid-join-link', 'This Join Link does not work. Ask the Table Owner for a new one.');
+const tableFull = (advice: string) => reject('table-full', `This table already has ${onlineTableCapacity} Participants, Bots included. ${advice}`);
 /**
  * Who may ask for what, decided before request idempotency, so a remembered outcome is only ever replayed to
  * a requester who may make that request. Unknown Participants and acting as a Bot stay definitive rejections.
@@ -824,6 +825,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                     const intent = request as AddBotRequest;
                     const name = typeof intent.name === 'string' ? intent.name.trim() : '';
                     const invalid = (code: string, field: string, message: string) => ({ ok: false as const, rejection: { code, field, message } });
+                    if (session.aggregate.mode === 'online' && placesTaken(session.aggregate) >= onlineTableCapacity) return tableFull('Remove a Bot, or wait for someone to leave, before adding another.');
                     if (!name || [...name].length > 64 || /\p{Cc}/u.test(name)) return invalid('invalid-bot-name', 'name', 'A Bot’s name has 1 to 64 characters and no control characters.');
                     if (!supportsStrategy(intent.playingStrategy)) return invalid('unsupported-strategy', 'playingStrategy', 'Choose a supported complete Playing Strategy.');
                     if (session.aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(name))) return invalid('name-taken', 'name', 'Someone at this table already uses that name, ignoring case. Choose a different name for the Bot.');
@@ -1047,7 +1049,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (binding?.membership === 'removed') result = removedGuest();
             else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
             else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
-            else if (humanBindings(aggregate).filter(candidate => candidate.membership === 'joined').length >= onlineTableCapacity) result = reject('table-full', 'This table already has ' + onlineTableCapacity + ' players. Ask the Table Owner to make room.');
+            // The owner's place is held while they are away, so only someone else can find the table full.
+            else if (binding?.userId !== aggregate.ownerUserId && placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
             else if (!binding && aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(guest!))) result = reject('name-taken', 'Someone at this table already uses that name, ignoring case. Choose a different display name.');
             if (!result) {
               const participantId = binding?.participantId ?? randomUUID();
@@ -1092,7 +1095,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const { configuration } = session.game.forParticipant(owner.participantId).getView();
         const returning = humans.find(binding => binding.userId === userId && binding.membership === 'left');
         return { ok: true as const, ownerName: owner.name, configuration, options: { ...aggregate.options },
-          joinedCount: humans.filter(binding => binding.membership === 'joined').length, alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
+          placesTaken: placesTaken(aggregate), alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
       });
     }
     async function readPersistedSession(id: string) {

@@ -125,7 +125,10 @@ export interface TableOptions {
 }
 /** Online defaults when creation names no option. */
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
-/** An Online Table holds at most this many joined human Participants. */
+/**
+ * An Online Table holds at most this many Participants: its joined humans, the Bots its owner has not removed, and the
+ * Table Owner's own place, which is held while they are away so that they can always return.
+ */
 export const onlineTableCapacity = 20;
 /** A Guest cannot create a table while they own this many tables that each have a seated human. */
 export const seatedTableLimit = 10;
@@ -214,7 +217,8 @@ export interface JoinLinkPreview {
   readonly ownerName: string;
   readonly configuration: ObservableGameConfiguration;
   readonly options: TableOptions;
-  readonly joinedCount: number;
+  /** How many of the table's `onlineTableCapacity` places are taken (see there). Joining is refused once all are. */
+  readonly placesTaken: number;
   /** The requesting Guest has already joined, so joining returns their own Participant. */
   readonly alreadyJoined: boolean;
   /** The requesting Guest left this table earlier: joining returns them to their Participant under this original name. */

@@ -88,7 +88,7 @@ test('a Guest opens a Join Link, joins as an unseated Participant under their di
   const token = await tokenOf(table);
   const ben = await guest('Ben');
   expect(await (await get('/api/join-links/' + token, ben)).json()).toEqual({
-    ok: true, ownerName: 'Ann', joinedCount: 1, alreadyJoined: false,
+    ok: true, ownerName: 'Ann', placesTaken: 2, alreadyJoined: false,
     configuration: { seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000, allowSeatChanges: true },
     options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true },
   });
@@ -111,7 +111,7 @@ test('a Guest opens a Join Link, joins as an unseated Participant under their di
   const again = await (await join(token, ben)).json();
   expect(again).toMatchObject({ ok: true, participantId: outcome.participantId, pokerRevision: outcome.pokerRevision, sessionRevision: outcome.sessionRevision });
   expect(await refusal(await join(token, await guest('Cy'), requestId))).toEqual({ status: 409, code: 'request-id-conflict' });
-  expect(await (await get('/api/join-links/' + token, ben)).json()).toMatchObject({ joinedCount: 2, alreadyJoined: true });
+  expect(await (await get('/api/join-links/' + token, ben)).json()).toMatchObject({ placesTaken: 3, alreadyJoined: true });
   // The membership and the Join Link survive a restart.
   await server.close();
   await start();
@@ -168,16 +168,29 @@ test('an invalid Join Link, a missing name, and a name already used at the table
   expect((await read(table, unnamed)).bindings.map(binding => binding.name)).toEqual(['Fay', 'Rex', 'Hal', 'FAY2', 'rex2', 'hal2']);
 });
 
-test('an Online Table holds at most 20 joined Participants', async () => {
-  const table = await online(await guest('Owner'));
+test('an Online Table holds at most 20 Participants, Bots included, and keeps a place for its owner while they are away', async () => {
+  const table = await online(await guest('Owner'), { bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Tim', playingStrategy: baselinePlayingStrategy }] });
   const token = await tokenOf(table);
-  for (let index = 1; index < 20; index++) expect((await join(token, await guest('Guest ' + index))).status).toBe(200);
+  const placesTaken = async (cookie: string) => (await (await get('/api/join-links/' + token, cookie)).json()).placesTaken;
+  // The owner and the two Bots take three of the twenty places.
+  for (let index = 1; index <= 17; index++) expect((await join(token, await guest('Guest ' + index))).status).toBe(200);
   const late = await guest('Late');
   expect(await refusal(await join(token, late))).toEqual({ status: 409, code: 'table-full' });
   expect((await get('/api/table-sessions/' + table.id, late)).status).toBe(404);
-  expect(await (await get('/api/join-links/' + token, late)).json()).toMatchObject({ joinedCount: 20 });
+  expect(await placesTaken(late)).toBe(20);
+  // A full table takes no more Bots either.
+  expect(await refusal(await command(table, table.owner, 'add-bot', { name: 'Zed', playingStrategy: baselinePlayingStrategy }))).toEqual({ status: 409, code: 'table-full' });
   // Someone already at a full table still gets their own Participant back.
   expect((await join(token, table.owner)).status).toBe(200);
+  // The owner's place is held while they are away, so they can always return to manage their table.
+  expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
+  expect(await placesTaken(late)).toBe(20);
+  expect(await refusal(await join(token, late))).toEqual({ status: 409, code: 'table-full' });
+  expect(await (await post('/api/table-sessions/' + table.id + '/rejoin-table', table.owner, { requestId: randomUUID() })).json()).toMatchObject({ ok: true, participantId: table.ownerParticipant });
+  // A Bot the owner removes frees its place.
+  expect((await command(table, table.owner, 'remove-bot', { participantId: table.bindings[1]!.participantId })).status).toBe(200);
+  expect(await placesTaken(late)).toBe(19);
+  expect((await join(token, late)).status).toBe(200);
 });
 
 async function command(t: Table, cookie: string, kind: string, contents: object = {}) {

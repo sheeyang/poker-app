@@ -34,7 +34,7 @@ M4 opens the hosted product to the public and establishes the shared lifecycle b
 - Joining makes the Guest an unseated Participant who sees public table information. That includes every Action Window, the Next-Hand Countdown, and each Participant's connection and sitting-out status.
   - Their Observable Session History begins when they join.
   - Names are fixed when the Guest joins and are unique within the table, ignoring case.
-  - An Online Table admits at most 20 joined Participants and shows a clear message when full. Leave Table frees a place.
+  - An Online Table admits at most 20 Participants, Bots included, and shows a clear message when full. Leave Table frees a place; the Table Owner's place is held while they are away.
 - A returning Guest keeps the same Participant. Control from more than one device waits for accounts.
 - A Participant may take an empty Seat at any time, including during a Hand, with a buy-in within the table limits. They are dealt in from the next Hand. At either table mode, owners may likewise add Bots at any time. No missed-blind obligation applies.
 - For their own Participant, a human may:

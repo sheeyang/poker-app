@@ -397,7 +397,9 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   const annSees = await t.view();
   expect(participant(annSees, ben.participantId)).toMatchObject({ inHand: true, cardCount: 2 });
   expect(participant(annSees, ben.participantId).holeCards).toBeUndefined();
-  expect(JSON.stringify(annSees)).not.toContain(benSees.holeCards![0]!);
+  // A card is a JSON string of its own; its two characters alone can occur inside any identifier.
+  const card = JSON.stringify(benSees.holeCards![0]!);
+  expect(JSON.stringify(annSees)).not.toContain(card);
 
   // Every request that names Ben's Participant is refused for the owner, whatever it asks and whether or not a Hand is on.
   const before = await t.view(ben.cookie);
@@ -422,7 +424,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   // The owner's own summary covers none of Ben's decisions, and nobody inspects a completed Hand at an Online Table.
   expect(await (await post('/api/table-sessions/' + t.id + '/session-summaries', t.ann, {})).json()).toMatchObject({ ok: true, status: 'empty', decisionCount: 0 });
   expect(await refusal(await post('/api/table-sessions/' + t.id + '/inspect-hand', t.ann, { handId: 'hand-1' }))).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
-  expect(JSON.stringify(await t.view())).not.toContain(benSees.holeCards![0]!);
+  expect(JSON.stringify(await t.view())).not.toContain(card);
 });
 
 test('the table view says who has left or been removed, humans and Bots alike', async () => {

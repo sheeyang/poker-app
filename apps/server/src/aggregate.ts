@@ -117,3 +117,15 @@ export const humanBindings = (aggregate: PersistedTableSession) => aggregate.bin
 /** The joined, unremoved human Participant whose Human Controller is this Guest. */
 export const memberBinding = (aggregate: PersistedTableSession, userId: string) => humanBindings(aggregate).find(binding => binding.userId === userId && binding.membership === 'joined');
 export const findBinding = (aggregate: PersistedTableSession, participantId: unknown) => aggregate.bindings.find(binding => binding.participantId === participantId);
+/**
+ * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant, every Bot the
+ * owner has not removed, and the Table Owner's own place while they are away, so that they can always return to
+ * manage their table.
+ */
+export function placesTaken(aggregate: PersistedTableSession): number {
+  const humans = humanBindings(aggregate);
+  const joined = humans.filter(binding => binding.membership === 'joined').length;
+  const bots = aggregate.bindings.filter(binding => isBot(binding) && !binding.removed).length;
+  const ownerAway = humans.some(binding => binding.userId === aggregate.ownerUserId && binding.membership !== 'joined');
+  return joined + bots + (ownerAway ? 1 : 0);
+}

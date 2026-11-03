@@ -93,7 +93,7 @@ test('replacing the Join Link ends the old link at once, leaves joined Participa
   expect((await get('/api/table-sessions/' + id, ben)).status).toBe(200);
   expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [{ tableSessionId: id, mode: 'online' }] });
   // The new link works, and only the owner reads it.
-  expect(await (await get('/api/join-links/' + after, cy)).json()).toMatchObject({ ok: true, joinedCount: 2 });
+  expect(await (await get('/api/join-links/' + after, cy)).json()).toMatchObject({ ok: true, placesTaken: 2 });
   expect(await (await join(cy, after)).json()).toMatchObject({ ok: true });
   expect(await view(ben)).not.toHaveProperty('joinToken');
 });
@@ -152,7 +152,7 @@ test('between Hands, Removal stands the Guest up at once and ends their membersh
   expect((await post('/api/table-sessions/' + id + '/rejoin-table', ben, { requestId: randomUUID() })).status).toBe(404);
   // Still not joined after all of that, and the place he held is free for someone else.
   expect((await get('/api/table-sessions/' + id, ben)).status).toBe(404);
-  expect(await (await get('/api/join-links/' + replacement, await guest('Dee'))).json()).toMatchObject({ ok: true, joinedCount: 2 });
+  expect(await (await get('/api/join-links/' + replacement, await guest('Dee'))).json()).toMatchObject({ ok: true, placesTaken: 2 });
   expect(annId).toBe(table.ownerParticipantId);
 });
 
