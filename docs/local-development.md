@@ -50,6 +50,15 @@ workspace dependency directions. To run only the recovery tests:
 pnpm test apps/server/test/recovery.test.ts
 ```
 
+### Concurrent test runs
+
+Server tests run real servers against PostgreSQL, so many files at once starve each other's waits. Two limits keep a run reliable:
+
+- A run uses at most four Vitest workers. `POKER_TEST_WORKERS` changes the number.
+- At most two test runs share the machine, across every checkout and worktree. A further run prints `[test] Waiting for a free test slot` and starts when one ends. `POKER_TEST_SLOTS` changes the limit. Slot files live in `poker-test-slots` under the OS temporary directory, and a slot whose process has exited is reclaimed automatically.
+
+When a test needs something the server does asynchronously (an announced countdown, a live update, a Bot decision), wait for it with `expect.poll` or a fixture helper such as `announcedCountdown` in `apps/server/test/fixtures/online.ts`. A read straight after a connection or commit can precede the server's own turn.
+
 To run the compiled server, configure `DATABASE_URL` for an already running
 database, then run:
 
