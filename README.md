@@ -1,5 +1,7 @@
 # Poker Trainer
 
+[Try the live demo](https://pokertrainer.duckdns.org/).
+
 ## Development setup
 
 Install Node.js 24 or newer and pnpm 11.25.0, then run from the repository root:
