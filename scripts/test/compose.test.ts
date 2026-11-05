@@ -23,8 +23,8 @@ test('the app believes forwarding headers from Caddy’s fixed address and from 
   expect(trusted).toBe(caddy);
   expect(within(caddy!, subnet!)).toBe(true);
   // Nothing else is published: the app is reachable only through Caddy.
-  expect(service('app')).not.toMatch(/^    ports:/m);
-  expect(service('postgres')).not.toMatch(/^    ports:/m);
+  expect(service('app')).not.toMatch(/^ {4}ports:/m);
+  expect(service('postgres')).not.toMatch(/^ {4}ports:/m);
 });
 
 test('Docker never gives Caddy’s fixed address to a container that starts before Caddy', () => {

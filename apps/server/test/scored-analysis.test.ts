@@ -230,7 +230,7 @@ test('an unavailable evaluation store produces a readable scored error rather th
     const t = await f.decision();
     // Accepting the action starts automatic scoring, so the store must already be unavailable.
     await administration.query('ALTER TABLE "' + f.schema + '".analysis_evaluations RENAME TO unavailable_evaluations');
-    let failure;
+    let failure: { requestId: string };
     try {
       await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });      failure = await (await f.request(t)).json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'persistence-unavailable' } });
     }

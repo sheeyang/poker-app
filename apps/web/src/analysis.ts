@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import type { DecisionAnalysis, ObservableTableSession, ConcreteAction } from '@poker/contracts';
+import type { DecisionAnalysis, ObservableTableSession } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource, type LiveConsumers } from '@poker/client';
 import { liveAnalysisOn } from './live-analysis.js';
 

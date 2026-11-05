@@ -85,7 +85,7 @@ export function useAnalysisResource<T extends ResourceState>(target: Target<T> |
     },
     retry: async () => {
       const active = current.current;
-      if (!active?.data || active.data.status !== 'error' || active.retrying || active.retired) return;
+      if (active?.data?.status !== 'error' || active.retrying || active.retired) return;
       const requestId = active.data.requestId, version = ++active.version, signals = active.signals, generation = connection.current;
       active.retrying = true;
       setDisplay({ key: active.key, loading: false, retrying: true, data: active.data });

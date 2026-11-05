@@ -198,6 +198,7 @@ async function run() {
       if (lock && directory) await unlink(path.join(directory, 'owner.lock'));
       if (mode === 'test' && directory) {
         if (path.dirname(directory) !== path.resolve(tmpdir()) || !path.basename(directory).startsWith(temporaryPrefix)) {
+          // biome-ignore lint/correctness/noUnsafeFinally: cleanup must refuse to remove a directory outside the owned temporary location.
           throw new Error('Refusing to remove a directory outside the owned temporary database location.');
         }
         await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

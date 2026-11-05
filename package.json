@@ -11,21 +11,23 @@
     "dev:trainer": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter @poker/server --filter @poker/web dev",
     "dev:trainer:online": "node scripts/dev-trainer-online.mjs",
     "test": "node --import tsx scripts/with-database.ts test -- node node_modules/vitest/vitest.mjs run",
+    "lint": "biome lint .",
     "typecheck": "tsc -p scripts/tsconfig.json && pnpm -r --if-present typecheck",
     "build": "pnpm -r --if-present build",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "db:init": "node --import tsx scripts/with-database.ts dev -- pnpm --filter @poker/server db:init",
     "db:with-test": "node --import tsx scripts/with-database.ts test --",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:boundaries"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm check:boundaries"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.5",
     "@types/node": "26.6.4",
     "@types/pg": "8.23.1",
     "embedded-postgres": "18.4.0-beta.17",
+    "esbuild": "0.28.2",
     "pg": "8.23.1",
     "tsx": "4.23.15",
     "typescript": "5.9.3",
-    "vitest": "5.0.3",
-    "esbuild": "0.28.2"
+    "vitest": "5.0.3"
   }
 }

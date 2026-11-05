@@ -51,7 +51,7 @@ export function ParticipantDialog({ table, command, handOpen, close, participant
   </div></Dialog>;
 }
 
-export function AddBotDialog({ table, command, handOpen, close, seat, chooseAgain }: Props & { seat: number; chooseAgain: () => void }) {
+export function AddBotDialog({ table, command, close, seat, chooseAgain }: Props & { seat: number; chooseAgain: () => void }) {
   const [name, setName] = useState(() => nextBotName(table));
   const [strategy, setStrategy] = useState<StrategyDescriptor>(defaultPlayingStrategy);
   const [amount, setAmount] = useState(String(table.view.configuration.defaultBuyIn));

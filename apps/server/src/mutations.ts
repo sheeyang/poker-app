@@ -1,16 +1,16 @@
 import { createStrategy, isSupportedStrategy, immutableData, type Strategy } from '@poker/strategies';
-import { JobRunner, type JobHandle } from './job-runner.js';
+import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, AddBotRequest, RemoveBotRequest, ActRequest, MutationOutcome, TableLiveMessage, TableRuntimeStatus, PokerMutationRequest, SeatParticipantRequest, StandUpParticipantRequest, RemoveParticipantRequest, MoveParticipantRequest, SetSittingOutRequest, TopUpToRequest, SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type ReplaceJoinLinkRequest, type SetTableOptionsRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
 import { membership, newJoinToken, ownsTable, savedTableEntries, tableOfJoinLink, writeTableSession } from './membership.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate } from './projection.js';
 import { CommitOutcomeUnknown } from './creation.js';
-import { AcceptanceTransactions, type AcceptanceFaults } from './db/acceptance.js';
+import type { AcceptanceTransactions, AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
@@ -496,7 +496,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   async function botFailed(id: string, pending: { identity: BotIdentity; attempt: number }, code: NonNullable<TableRuntimeStatus['status']['code']>) {
     const session = committed.get(id);
     const failure = { phase: 'failed' as const, participantId: pending.identity.participantId, code };
-    if (!session || session.aggregate.mode !== 'online') { publishStatus(id, failure); return; }
+    if (session?.aggregate.mode !== 'online') { publishStatus(id, failure); return; }
     if (pending.attempt < 2) { ensureBot(id, session, true, pending.attempt + 1); return; }
     retire(id);
     publishStatus(id, failure);
@@ -514,7 +514,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const participant = session.game.forParticipant(participantId);
     const current = participant.getView();
     const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
-    let view;
+    let view: ObservableGameView;
     try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
     if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
     const masterSeed = session.aggregate.pokerRecord.configuration.seed;

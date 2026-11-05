@@ -47,7 +47,7 @@ export const useSession = create<SessionState>()(persist(set => ({
 
 function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAcknowledgement> {
   if (attempt.kind === 'create') return api.createSession(attempt.body);
-  const { tableId, body } = attempt;
+  const { tableId } = attempt;
   switch (attempt.kind) {
     case 'start': return api.startHand(tableId, attempt.body);
     case 'act': return api.act(tableId, attempt.body);
