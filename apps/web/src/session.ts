@@ -47,7 +47,7 @@ export const useSession = create<SessionState>()(persist(set => ({
 
 function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAcknowledgement> {
   if (attempt.kind === 'create') return api.createSession(attempt.body);
-  const { tableId, body } = attempt;
+  const { tableId } = attempt;
   switch (attempt.kind) {
     case 'start': return api.startHand(tableId, attempt.body);
     case 'act': return api.act(tableId, attempt.body);
@@ -97,6 +97,7 @@ export function useCommand() {
   });
   return {
     pending, error: mutation.error, busy: mutation.isPending || !!pending, sending: mutation.isPending,
+    confirmedRequestId: mutation.isSuccess ? mutation.variables?.body.requestId : undefined,
     submit: (attempt: Attempt) => {
       if (useSession.getState().pending || mutation.isPending) return;
       setPending(attempt); mutation.mutate(attempt);

@@ -329,7 +329,7 @@ test('Retry after a real PostgreSQL result failure saves a new attempt and makes
     await expect.poll(() => f.evaluations.length).toBe(2);
     expect(f.evaluations[1]!.seed).toBe(f.evaluations[0]!.seed);
     const live = f.connect(t); await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
-    const reads: Promise<any>[] = []; live.socket.on('message', data => { const message = JSON.parse(data.toString()); if (message.type === 'analysis-update') reads.push(f.result(t, message.requestId).then(response => response.json())); });
+    const reads: Promise<unknown>[] = []; live.socket.on('message', data => { const message = JSON.parse(data.toString()); if (message.type === 'analysis-update') reads.push(f.result(t, message.requestId).then(response => response.json())); });
     f.evaluations[1]!.result.resolve(distribution);
     await expect.poll(() => reads.length).toBe(1);
     expect(await Promise.all(reads)).toEqual([expect.objectContaining({ status: 'complete', requestId: original.requestId, attemptId: retried.attemptId })]);

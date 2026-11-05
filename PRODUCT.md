@@ -60,13 +60,19 @@ claim of poker expertise or Solver quality.
   - Guests enter a display name, join through the table's Join Link, watch
     unseated, and take a Seat when ready.
   - Every Online Table has an Action Time Limit and Automatic Dealing.
-  - Its Table Owner manages table options and Bots, but never another human.
+  - Its Table Owner manages table options and Bots. Removal is the owner's only
+    action on another human; that human's stack and play controls remain their own.
 - M4 adds server-owned Presentation Phases and Action Windows at every table. A
   Practice Table may enable an Action Time Limit. A missed Action Deadline submits
   the Timeout Action.
 - Observe cards, stacks, turn, bets, pots, showdown and payouts. Manage Participants
   and stacks between Hands, including sit out/return, seat changes, top-ups and
   rebuys when permitted by the configuration.
+- Open Seat and Participant actions directly on the table, including watching
+  Participants' names. Choose Seats on the table; forms retain the selected Seat
+  through contention and recovery. Rebuy starts at the default buy-in and Top up
+  at the maximum permitted total. An already-joined Join Link returns to the table
+  automatically.
 - Select a complete Reference Strategy independently of Bot assignments. Optional
   Live Analysis exposes its numerical outputs before the human acts; Live Analysis
   defaults to off. Every accepted human decision triggers nonblocking analysis.

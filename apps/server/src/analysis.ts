@@ -4,7 +4,7 @@ import type { AnalysisUpdate, ConcreteAction, DecisionAnalysis, EvaluationIdenti
 import { createStrategy, immutableData, type Strategy } from '@poker/strategies';
 import { calculateActionProbabilities, calculateDecisionScores, scoringMethodVersion } from '@poker/research';
 import type { ObservableGameView } from '@poker/contracts';
-import { JobRunner, type JobHandle, type JobPurpose } from './job-runner.js';
+import type { JobRunner, JobHandle, JobPurpose } from './job-runner.js';
 import type { openDatabase } from './db/database.js';
 import { analysisEvaluations, analysisScores } from './db/schema.js';
 import { canonical } from './canonical.js';
@@ -216,7 +216,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     },
     async waitForResult(tableSessionId: string, requestId: string, participantId: string): Promise<DecisionAnalysis | undefined> {
       const state = await read(tableSessionId, requestId, participantId);
-      if (!state || state.status !== 'pending') return state;
+      if (state?.status !== 'pending') return state;
       return waitForEvaluation(requestId);
     },
     async retry(tableSessionId: string, requestId: string, participantId: string): Promise<DecisionAnalysis | undefined> {

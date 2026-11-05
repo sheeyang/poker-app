@@ -7,7 +7,7 @@ import { JobFailure } from './job-runner.js';
 export async function executeStrategy(strategy: Strategy, view: ObservableGameView, options: EvaluationOptions & SelectionOptions): Promise<{ readonly policyResult: PolicyResult; readonly selectedAction: ConcreteAction }> {
   if (!(await strategy.policy.checkCompatibility(view)).compatible) throw new JobFailure('incompatible');
   const raw = await strategy.policy.evaluate(view, { evaluationSeed: options.evaluationSeed, signal: options.signal });
-  let policyResult;
+  let policyResult: PolicyResult;
   try { policyResult = validatePolicyResult(raw, view); }
   catch (error) { if (error instanceof PolicyValidationError) throw new JobFailure('invalid-policy'); throw error; }
   try {

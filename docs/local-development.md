@@ -11,6 +11,7 @@ The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreS
 | `pnpm dev:trainer` / `pnpm dev` | Start the persistent development database, API and Trainer at `127.0.0.1:5174`; gracefully stop the database when the command ends. |
 | `pnpm db:init` | Start the development database, initialize the schema, then stop while retaining data. |
 | `pnpm test [filters/options]` | Start a fresh test database on a separate port; stop and remove temporary data afterward. |
+| `pnpm lint` | Lint the repository with [Biome](https://biomejs.dev/linter/); configured in `biome.jsonc`. |
 | `pnpm check` | Run the checks; its test step manages a fresh test database. |
 | `pnpm db:with-test -- <command> [arguments]` | Run a browser fixture or other command against its own temporary test database. |
 | `pnpm --filter @poker/server start` | Connect to a configured `DATABASE_URL`; never start a local database. |
@@ -42,7 +43,7 @@ Keep the wrapper running while using the fixture. Use the fixture's documented s
 pnpm check
 ```
 
-This typechecks scripts and packages, runs public engine and real localhost
+This lints the repository, typechecks scripts and packages, runs public engine and real localhost
 HTTP/WebSocket/PostgreSQL tests, builds the server and Trainer, and checks
 workspace dependency directions. To run only the recovery tests:
 

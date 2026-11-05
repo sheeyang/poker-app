@@ -51,7 +51,7 @@ function verifyWebSocket(origin: string, cookie: string): Promise<void> {
 export async function verifyRelease(options: VerificationOptions, dependencies: Dependencies = {}) {
   if (!/^[0-9a-f]{40}$/.test(options.commit)) throw new Error('DEPLOY_COMMIT must be a full tested Git commit SHA.');
   const app = URL.parse(options.appUrl);
-  if (!app || app.protocol !== 'https:' || app.username || app.password || app.pathname !== '/' || app.search || app.hash) throw new Error('APP_URL must be the HTTPS application origin without a path.');
+  if (app?.protocol !== 'https:' || app.username || app.password || app.pathname !== '/' || app.search || app.hash) throw new Error('APP_URL must be the HTTPS application origin without a path.');
   const origin = app.origin;
   const get = dependencies.fetch ?? fetch;
   const wait = dependencies.wait ?? (milliseconds => delay(milliseconds));

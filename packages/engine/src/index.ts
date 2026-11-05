@@ -507,6 +507,7 @@ export class CashGame {
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
     const observes = (handId: string) => this.#state.participants.some(p => p.participantId === participantId && p.joined)
       && !!this.#state.hands.find(hand => hand.handId === handId)?.observerParticipantIds.includes(participantId);
+    // biome-ignore lint/suspicious/useIterableCallbackReturn: exhaustive switch over the event union; the compiler rejects a missing case.
     return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || observes(event.handId)).map(event => {
       switch (event.type) {
         case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };

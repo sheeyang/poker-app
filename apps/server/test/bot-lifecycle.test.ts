@@ -3,7 +3,7 @@ import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type TableLiveMessage } from '@poker/contracts';
+import type { ConcreteAction, ObservableGameView, ObservableTableSession, StrategyDescriptor, TableLiveMessage } from '@poker/contracts';
 import { createStrategy, HighestProbabilitySelector, ProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';

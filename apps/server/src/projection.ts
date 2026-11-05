@@ -86,6 +86,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   };
 }
 export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = true, connected: readonly string[] = []): ObservableTableUpdate {
+  // biome-ignore lint/suspicious/useIterableCallbackReturn: exhaustive switch over the event union; the compiler rejects a missing case.
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
       case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };

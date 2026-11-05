@@ -1,0 +1,56 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  // Respect .gitignore (node_modules, dist, .scratch, .local, ...).
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  // .agents and .claude hold vendored agent skills, not project code.
+  "files": {
+    "includes": ["**", "!.agents", "!.claude"]
+  },
+  // Lint only. Formatting and import sorting are not adopted.
+  "formatter": { "enabled": false },
+  "assist": { "enabled": false },
+  // apps/web/src/styles.css uses Tailwind's @theme and @import "tailwindcss".
+  "css": { "parser": { "tailwindDirectives": true } },
+  "linter": {
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        // Style preferences that conflict with how this codebase is written.
+        // `!` is used pervasively for invariants (map.get(id)!, ranks[0]!) and
+        // `strict` TypeScript already guards the places where it matters.
+        "noNonNullAssertion": "off",
+        "useTemplate": "off",
+        // A source-order heuristic over one large hand-written stylesheet.
+        "noDescendingSpecificity": "off"
+      },
+      "complexity": {
+        // The only uses are the `prefers-reduced-motion` resets, where
+        // `!important` is the standard way to beat component transitions.
+        "noImportantStyles": "off"
+      },
+      // Existing findings that are real but need a judgment call or change UI
+      // behaviour (button types inside forms, hook dependency lists, ARIA
+      // roles). Kept visible as warnings so they are not forgotten; promote
+      // each to an error, or run `biome lint --error-on-warnings`, once fixed.
+      "a11y": {
+        "useButtonType": "warn",
+        "noLabelWithoutControl": "warn",
+        "useAriaPropsSupportedByRole": "warn",
+        "useAriaPropsForRole": "warn",
+        "noNoninteractiveTabindex": "warn",
+        "noStaticElementInteractions": "warn",
+        "useSemanticElements": "warn"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "warn"
+      }
+    }
+  }
+}

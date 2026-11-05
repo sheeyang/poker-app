@@ -4,11 +4,15 @@ name: poker
 
 # Caddy has a fixed address so that the app can believe forwarding headers (the client's real address, which its
 # per-IP rate limits use) from Caddy and from nothing else. Keep TRUSTED_PROXIES equal to Caddy's address.
+# Docker gives every other container an address from ip_range, which excludes Caddy's. Without it, PostgreSQL
+# starts first, takes the subnet's first free address, and Caddy fails to start with "Address already in use".
 networks:
   default:
     ipam:
       config:
         - subnet: 172.29.77.0/24
+          gateway: 172.29.77.1
+          ip_range: 172.29.77.128/25
 
 services:
   postgres:

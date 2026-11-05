@@ -10,7 +10,7 @@ import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
 import { newJoinToken, writeTableSession } from './membership.js';
 import { emptySchedule } from './schedule.js';
-import { AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
+import { type AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
