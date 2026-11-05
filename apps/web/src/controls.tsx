@@ -6,6 +6,7 @@ import { actionLabel, chips, potTotal, presetTotal, type SizedAction } from './t
 import { useSession, type Command } from './session.js';
 import { nextHandLabel, waitingDetail, waitingReason, type NextHandStatus } from './online-status.js';
 import { afterHandRequestOf, afterHandRequestLabel } from './self-service.js';
+import { handResult } from './hand-result.js';
 
 /** How much of an Action Window is left, `seconds` of `length`. Presentation only: the server alone closes the window. */
 export function DeadlineBar({ seconds, length }: { seconds: number; length: number }) {
@@ -85,8 +86,9 @@ function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSetti
   const needsPlayers = reason?.kind === 'players';
   const resume = () => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'set-sitting-out', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, sittingOut: false } });
   const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, !!online?.openJoinLink, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
-  return <div className="action-tray idle-tray next-hand online-next-hand">
-    <div className="next-hand-copy" role="timer"><strong>{nextHandLabel(nextHand) ?? 'Waiting for the next hand'}</strong><p>{detail}</p></div>
+  const result = handResult(table);
+  return <div className="action-tray idle-tray next-hand next-hand-split">
+    <div className="next-hand-copy" role="timer"><strong>{nextHandLabel(nextHand) ?? 'Waiting for the next hand'}</strong><p>{result ? `${result.headline} ` : ''}{detail}</p></div>
     <div className="next-hand-actions">
       {state.status === 'completed-hand' && review && decisions.length > 0 && <button className="quiet-button" onClick={() => review(decisions.at(-1)?.decisionId)}>Review hand <Icon name="chart" size={17} /></button>}
       {needsPlayers && online?.addBot && <button className="quiet-button" disabled={busy} onClick={online.addBot}>Add a Bot</button>}
@@ -107,8 +109,10 @@ function NextHand({ table, busy, openSettings, review }: { table: ObservableTabl
   const available = state.participants.filter(p => p.seat !== null && (!p.sittingOut || p === human)).length + (needsSeat ? 1 : 0);
   const preparing = setup?.tableId === table.tableSessionId;
   const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === table.viewerParticipantId) ?? [];
-  return <div className="action-tray idle-tray next-hand">
-    {(preparing || refills.length > 0 || needsSeat || human?.sittingOut) && <p>{preparing ? 'Preparing your next hand…' : refills.length ? `${refills.map(p => p === human ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name).join(', ')}: rebuy to ${chips(table.view.configuration.defaultBuyIn)} chips each.` : needsSeat ? 'We’ll return you to an open seat.' : 'You’ll return from sitting out.'}</p>}
+  const result = handResult(table);
+  const notice = preparing ? 'Preparing your next hand…' : refills.length ? `${refills.map(p => p === human ? 'You' : table.bindings.find(b => b.participantId === p.participantId)?.name).join(', ')}: rebuy to ${chips(table.view.configuration.defaultBuyIn)} chips each.` : needsSeat ? 'We’ll return you to an open seat.' : human?.sittingOut ? 'You’ll return from sitting out.' : undefined;
+  return <div className="action-tray idle-tray next-hand next-hand-split">
+    {(result || notice) && <div className="next-hand-copy">{result && <strong>{result.headline}</strong>}<p>{result?.detail}{result && notice ? ' ' : ''}{notice}</p></div>}
     <div className="next-hand-actions">
     {state.status === 'completed-hand' && review && <button className="quiet-button" disabled={!decisions.length} onClick={() => review(decisions.at(-1)?.decisionId)}>Review hand <Icon name="chart" size={17} /></button>}
     {available < 2 ? state.participants.filter(p => p.seat !== null).length < table.view.configuration.seatCount && <button className="primary" onClick={openSettings}>Add an opponent <Icon name="arrow" /></button> : <button className="primary deal-button" disabled={busy || preparing} onClick={() => setSetup({ requestId: crypto.randomUUID(), tableId: table.tableSessionId, afterHandId: state.handId ?? null })}><Icon name="cards" />{refills.length ? 'Rebuy & deal' : human?.sittingOut || needsSeat ? 'Return & deal' : state.handId ? 'Deal next hand' : 'Deal first hand'}</button>}
