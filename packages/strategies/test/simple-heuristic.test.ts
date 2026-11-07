@@ -74,7 +74,7 @@ test.each([
 
 test('new defaults select Simple Heuristic for play and reference without changing Uniform Choice', async () => {
   expect(defaultPlayingStrategy.policy).toEqual({ id: 'simple-heuristic', version: 'v1', configuration: {} });
-  expect(defaultTrainerConfiguration).toEqual({ referenceStrategy: defaultPlayingStrategy, liveAnalysis: false });
+  expect(defaultTrainerConfiguration).toEqual({ referenceStrategy: defaultPlayingStrategy, liveAnalysis: true });
   expect(isSupportedStrategy(defaultPlayingStrategy)).toBe(true);
   expect(createStrategy(defaultPlayingStrategy).policy).toBeInstanceOf(SimpleHeuristicPolicy);
   const view = preflop(['As', 'Ah']);

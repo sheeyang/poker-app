@@ -1,0 +1,338 @@
+{
+ "id": "home-saved-tables",
+ "group": "Home",
+ "label": "Tables home, saved tables",
+ "description": "The Tables screen with several saved tables to pick up.",
+ "home": true,
+ "capturedAt": "2026-11-07T16:38:40.613Z",
+ "session": {
+  "tableSessionId": "ee204d1f-888c-4ed6-a780-8d34b415d820",
+  "mode": "practice",
+  "options": {
+   "actionTimeLimitSeconds": null,
+   "allowLiveAnalysis": true
+  },
+  "viewerParticipantId": "06c25970-800f-4d3b-a33b-70a85a772a79",
+  "ownerParticipantId": "06c25970-800f-4d3b-a33b-70a85a772a79",
+  "pokerRevision": 9,
+  "sessionRevision": 9,
+  "bindings": [
+   {
+    "participantId": "06c25970-800f-4d3b-a33b-70a85a772a79",
+    "name": "You",
+    "controller": {
+     "kind": "human"
+    }
+   },
+   {
+    "participantId": "d2db89d4-f472-4701-97b2-6815c2e82cc2",
+    "name": "Bot 1",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "6f94b963-d1f3-45f7-a10b-8405b193f78d",
+    "name": "Bot 2",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "8fb85b22-f284-43af-93cc-9c1e22a4b0fd",
+    "name": "Bot 3",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "e3725b05-0110-452a-9727-3837e49e0e34",
+    "name": "Bot 4",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "027d2b23-5b58-4151-8413-9d5d04a38b23",
+    "name": "Bot 5",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "db02d30b-ef19-4286-9942-844f64a58cdd",
+    "name": "Bot 6",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "fef95381-4060-47ba-ba9d-97a83a3ea3e9",
+    "name": "Bot 7",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "76f69b76-7a88-4be5-9249-98407876df9d",
+    "name": "Bot 8",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   }
+  ],
+  "trainerConfiguration": {
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "liveAnalysis": true
+  },
+  "schedule": {
+   "phases": [],
+   "actionWindow": null
+  },
+  "serverTime": 1794069520594,
+  "pendingChanges": [],
+  "inspection": {
+   "adminMode": true,
+   "completedHands": []
+  },
+  "view": {
+   "configuration": {
+    "seatCount": 9,
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0,
+    "minimumBuyIn": 1000,
+    "defaultBuyIn": 1000,
+    "maximumBuyIn": 1000,
+    "allowSeatChanges": true
+   },
+   "state": {
+    "status": "between-hands",
+    "buttonSeat": 1,
+    "participants": [
+     {
+      "participantId": "06c25970-800f-4d3b-a33b-70a85a772a79",
+      "seat": 1,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "d2db89d4-f472-4701-97b2-6815c2e82cc2",
+      "seat": 2,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "6f94b963-d1f3-45f7-a10b-8405b193f78d",
+      "seat": 3,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "8fb85b22-f284-43af-93cc-9c1e22a4b0fd",
+      "seat": 4,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "e3725b05-0110-452a-9727-3837e49e0e34",
+      "seat": 5,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "027d2b23-5b58-4151-8413-9d5d04a38b23",
+      "seat": 6,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "db02d30b-ef19-4286-9942-844f64a58cdd",
+      "seat": 7,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "fef95381-4060-47ba-ba9d-97a83a3ea3e9",
+      "seat": 8,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "76f69b76-7a88-4be5-9249-98407876df9d",
+      "seat": 9,
+      "stack": 1000,
+      "sittingOut": false
+     }
+    ],
+    "board": [],
+    "pots": [],
+    "actorId": null,
+    "legalActions": []
+   },
+   "history": []
+  },
+  "runtimeStatus": {
+   "phase": "idle"
+  }
+ },
+ "analyses": {},
+ "handSummaries": {},
+ "savedTables": [
+  {
+   "tableSessionId": "eaf0dfed-7a8d-42dd-b5fc-45532d1f0016",
+   "mode": "practice",
+   "seatCount": 6,
+   "stakes": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0
+   },
+   "playState": {
+    "status": "between-hands",
+    "completedHands": 0,
+    "seatedParticipants": 6,
+    "viewerStack": 1000
+   }
+  },
+  {
+   "tableSessionId": "1935c06f-2a0a-4dd7-8455-dffc851d18cb",
+   "mode": "practice",
+   "seatCount": 2,
+   "stakes": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0
+   },
+   "playState": {
+    "status": "between-hands",
+    "completedHands": 0,
+    "seatedParticipants": 2,
+    "viewerStack": 1000
+   }
+  },
+  {
+   "tableSessionId": "ee204d1f-888c-4ed6-a780-8d34b415d820",
+   "mode": "practice",
+   "seatCount": 9,
+   "stakes": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0
+   },
+   "playState": {
+    "status": "between-hands",
+    "completedHands": 0,
+    "seatedParticipants": 9,
+    "viewerStack": 1000
+   }
+  }
+ ]
+}

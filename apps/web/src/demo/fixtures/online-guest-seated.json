@@ -1,0 +1,169 @@
+{
+ "id": "online-guest-seated",
+ "group": "Online",
+ "label": "Guest, seated",
+ "description": "A Guest who took a seat, waiting for the next Hand.",
+ "capturedAt": "2026-11-07T16:38:40.027Z",
+ "session": {
+  "tableSessionId": "cdd44a69-6d63-4a3f-90eb-84e90c1439c5",
+  "mode": "online",
+  "options": {
+   "actionTimeLimitSeconds": 30,
+   "allowLiveAnalysis": true
+  },
+  "viewerParticipantId": "85547d0f-9c06-4dfd-b35e-824ba96eda53",
+  "ownerParticipantId": "344c4f5e-3306-4892-9461-4336b444ccf3",
+  "pokerRevision": 6,
+  "sessionRevision": 5,
+  "bindings": [
+   {
+    "participantId": "344c4f5e-3306-4892-9461-4336b444ccf3",
+    "name": "Owner",
+    "controller": {
+     "kind": "human"
+    }
+   },
+   {
+    "participantId": "cd7aef85-e30e-40fd-a48c-6416440ae1fe",
+    "name": "Ada",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "5a918d40-5c74-465b-9963-b9ed24b38262",
+    "name": "Grace",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "85547d0f-9c06-4dfd-b35e-824ba96eda53",
+    "name": "Guest",
+    "controller": {
+     "kind": "human"
+    }
+   }
+  ],
+  "trainerConfiguration": {
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "liveAnalysis": true
+  },
+  "schedule": {
+   "phases": [],
+   "actionWindow": null
+  },
+  "serverTime": 1794069520008,
+  "pendingChanges": [],
+  "connectedParticipantIds": [],
+  "inspection": {
+   "adminMode": false,
+   "completedHands": []
+  },
+  "view": {
+   "configuration": {
+    "seatCount": 6,
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0,
+    "minimumBuyIn": 1000,
+    "defaultBuyIn": 1000,
+    "maximumBuyIn": 1000,
+    "allowSeatChanges": true
+   },
+   "state": {
+    "status": "between-hands",
+    "buttonSeat": 1,
+    "participants": [
+     {
+      "participantId": "344c4f5e-3306-4892-9461-4336b444ccf3",
+      "seat": 1,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "cd7aef85-e30e-40fd-a48c-6416440ae1fe",
+      "seat": 2,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "5a918d40-5c74-465b-9963-b9ed24b38262",
+      "seat": 3,
+      "stack": 1000,
+      "sittingOut": false
+     },
+     {
+      "participantId": "85547d0f-9c06-4dfd-b35e-824ba96eda53",
+      "seat": 4,
+      "stack": 1000,
+      "sittingOut": false
+     }
+    ],
+    "board": [],
+    "pots": [],
+    "actorId": null,
+    "legalActions": []
+   },
+   "history": []
+  },
+  "runtimeStatus": {
+   "phase": "idle"
+  }
+ },
+ "analyses": {},
+ "handSummaries": {},
+ "savedTables": [
+  {
+   "tableSessionId": "cdd44a69-6d63-4a3f-90eb-84e90c1439c5",
+   "mode": "online",
+   "seatCount": 6,
+   "stakes": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0
+   },
+   "playState": {
+    "status": "between-hands",
+    "completedHands": 0,
+    "seatedParticipants": 4,
+    "viewerStack": 1000
+   }
+  }
+ ]
+}

@@ -458,7 +458,7 @@ export const simpleHeuristicPlayingStrategy: StrategyDescriptor = Object.freeze(
   selector: baselinePlayingStrategy.selector,
 });
 export const defaultPlayingStrategy = simpleHeuristicPlayingStrategy;
-export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({ referenceStrategy: defaultPlayingStrategy, liveAnalysis: false });
+export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({ referenceStrategy: defaultPlayingStrategy, liveAnalysis: true });
 
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
