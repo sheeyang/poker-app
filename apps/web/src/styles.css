@@ -896,3 +896,89 @@ button.seat-target:hover { background: #304238; }
   .seat-body > .deadline-bar { left: 8px; right: 14px; bottom: 3px; height: 2px; }
   .table-title .mode-badge { align-self: flex-start; }
 }
+
+/* ==========================================================================
+   App shell layout: one slim bar, one stage, one dock.
+   Reading order on a table: where (bar) -> what is happening (hand status)
+   -> the table -> what I can do (dock) -> analysis rail beside it.
+   The stage takes whatever height the bar and dock leave; the dock is a
+   fixed-height band so nothing above it moves when the tray changes.
+   ========================================================================== */
+:root { --gutter: 32px; --bar-h: 52px; --rail-w: clamp(400px, 36vw, 540px); }
+.app-header { height: var(--bar-h); gap: 32px; padding: 0 var(--gutter); }
+.brand-mark { width: 30px; height: 34px; }
+.brand strong { font-size: 1.2rem; }
+.app-header nav { gap: 4px; }
+.app-header nav button { padding: 0 14px; font-size: .88rem; min-height: 0; }
+.play-area { padding: 0 var(--gutter); }
+.play-workspace { max-width: none; }
+.play-workspace.with-analysis { grid-template-columns: minmax(0, 1fr) var(--rail-w); }
+.table-toolbar { min-height: 0; margin: 0; padding: 14px 0 2px; }
+.table-title { gap: 14px; }
+.table-title h1 { font-size: 1.3rem; }
+.hand-status { padding: 4px 0 0; min-height: 22px; }
+.table-active .play-area > .table-stage { flex: 1 1 0; height: auto; min-height: 340px; max-height: 660px; margin: 6px auto; max-width: min(1160px, 100%); }
+.table-dock { flex-shrink: 0; container-type: inline-size; margin-inline: calc(-1 * var(--gutter)); padding: 14px var(--gutter) 10px; background: #17221d; border-top: 1px solid var(--line); }
+.table-active .play-area > .table-dock { width: auto; }
+.table-dock .action-tray { margin: 0 auto; }
+.table-dock .below-table { margin: 8px auto 0; max-width: 980px; }
+.table-dock .table-footer { margin: 2px auto 0; max-width: 980px; }
+.table-dock .hand-activity summary { min-height: 30px; }
+/* Wide dock: the tray and the hand's activity sit side by side instead of stacking. */
+@container (min-width: 1040px) {
+  .table-dock-inner { display: grid; grid-template-columns: minmax(0, 1fr) 260px; column-gap: 28px; align-items: start; }
+  .table-dock-inner .play-controls { grid-column: 1; grid-row: 1 / span 2; }
+  .table-dock-inner .below-table { grid-column: 2; grid-row: 1; margin: 0; max-width: none; height: var(--tray-slot, 138px); overflow-y: auto; align-content: start; padding-left: 24px; border-left: 1px solid var(--line); }
+  .table-dock-inner .table-footer { grid-column: 2; grid-row: 2; margin: 0; max-width: none; padding-left: 24px; }
+  .table-dock-inner .hand-activity[open], .table-active .table-dock-inner .hand-activity[open] { max-height: none; overflow: visible; }
+  .table-dock-inner .action-tray { max-width: none; }
+}
+.analysis-panel > .panel-heading { padding-top: 16px; margin-bottom: 8px; }
+.table-active .analysis-panel { box-shadow: -14px 0 24px -18px #05100b; }
+.practice-home { padding: 40px var(--gutter) 64px; max-width: 1180px; }
+.practice-heading { margin-bottom: 36px; }
+.practice-layout { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0; }
+.practice-config { padding-right: 56px; }
+.practice-return { padding-left: 56px; border-left: 1px solid var(--line); }
+.command-feedback, .global-notice { margin: 12px var(--gutter); }
+@media (min-width: 1500px) { :root { --gutter: 48px; } }
+@media (max-width: 1200px) { :root { --gutter: 24px; } }
+@media (max-width: 1000px) {
+  .practice-config { padding-right: 32px; } .practice-return { padding-left: 32px; }
+}
+@media (max-width: 650px) {
+  :root { --gutter: 14px; --bar-h: 46px; }
+  .app-header { display: flex; height: auto; min-height: var(--bar-h); gap: 14px; flex-wrap: wrap; }
+  .brand strong { font-size: 1.1rem; }
+  .app-header nav { margin-left: auto; height: var(--bar-h); gap: 0; }
+  .app-header nav button { padding: 0 10px; font-size: .8rem; }
+  .identity-status { order: 3; flex-basis: 100%; margin: 0 0 6px; justify-content: flex-end; font-size: .68rem; }
+  .table-active .identity-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); margin: 0; flex-basis: auto; }
+  .table-toolbar { padding-top: 8px; gap: 8px; }
+  .table-title { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+  .table-title h1 { font-size: 1.1rem; }
+  .table-active .play-area > .table-stage { flex: 0 0 auto; height: 380px; min-height: 380px; max-height: none; }
+  .table-dock { padding: 8px var(--gutter) 6px; }
+  .table-dock .play-controls { position: static; padding: 0; background: none; min-height: var(--tray-slot); }
+  .table-dock .below-table { margin-top: 4px; }
+  .table-dock .table-footer { display: none; }
+  .practice-layout { grid-template-columns: 1fr; }
+  .practice-config { padding-right: 0; }
+  .practice-return { padding: 40px 0 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 40px; }
+  .practice-home { padding: 24px var(--gutter) 48px; }
+  .table-active .play-workspace { overflow-y: auto; }
+  .table-active .play-area { overflow: visible; min-height: min-content; }
+  .table-dock { position: sticky; bottom: 0; z-index: 8; padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+  .with-analysis .table-dock { position: static; }
+}
+@media (max-width: 650px) and (max-height: 740px) {
+  .table-active .play-area > .table-stage { height: 330px; min-height: 330px; }
+}
+@media (max-width: 650px) {
+  .table-active .play-area > .table-stage { flex: 1 0 380px; max-height: 480px; }
+  .table-active .play-area > .table-dock { margin-top: auto; }
+}
+@media (max-width: 650px) and (max-height: 740px) {
+  .table-active .play-area > .table-stage { flex-basis: 330px; }
+}
+@container (min-width: 1040px) { .table-dock-inner .table-footer { padding-left: 25px; } }
