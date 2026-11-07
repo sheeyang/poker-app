@@ -64,13 +64,13 @@ _Avoid_: Trainer table, solo table
 A Table Session that Guests join through its Join Link to play against each other, with or without Bots. It always has an Action Time Limit and Automatic Dealing, and its mode is fixed when it is created.
 _Avoid_: Multiplayer table, shared table
 
-**Demo Table**:
-A recorded view of a Table Session, replayed in the Trainer for reviewing the interface in one game state. It is never persisted, has no server behind it, and cannot be acted on; it exists only in development.
-_Avoid_: Mock table, sample table, Playground
-
 **Join Link**:
-The shareable secret link through which Guests join one Online Table. Replacing it invalidates the previous link without removing Participants who have already joined.
-_Avoid_: Invite, participant link, table URL
+The address of an Online Table, through which Guests join it and Participants return to it. It never changes, and anyone at the table can pass it on.
+_Avoid_: Invite, participant link
+
+**Table Password**:
+An optional secret, set by the Table Owner, that a Guest must give to join an Online Table through its Join Link. Setting, changing, or removing it does not affect Participants already at the table.
+_Avoid_: Passcode, PIN
 
 **Table Session Record**:
 The private durable representation from which an authoritative Table Session can be reconstructed and researched. It retains versioned deterministic inputs and accepted game commands, while participant-facing consumers receive only explicit observable projections.
@@ -113,7 +113,7 @@ Ceasing to be at a table, after standing up if seated. A Guest who returns keeps
 _Avoid_: Stand Up, quit, disconnect
 
 **Removal**:
-A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again, through any Join Link. During a Hand it is an After-Hand Request, the strongest one: nothing the Guest asks for undoes it.
+A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again. During a Hand it is an After-Hand Request, the strongest one: nothing the Guest asks for undoes it.
 _Avoid_: Ban, kick
 
 **After-Hand Request**:
