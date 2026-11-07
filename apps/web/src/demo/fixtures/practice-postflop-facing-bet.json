@@ -1,0 +1,1881 @@
+{
+ "id": "practice-postflop-facing-bet",
+ "group": "Practice",
+ "label": "Postflop, facing a bet",
+ "description": "Board on the table and a bet to call, with the action on you.",
+ "capturedAt": "2026-11-07T16:38:25.789Z",
+ "session": {
+  "tableSessionId": "417a35e0-72d9-4e95-8059-4ee7f75d118e",
+  "mode": "practice",
+  "options": {
+   "actionTimeLimitSeconds": null,
+   "allowLiveAnalysis": true
+  },
+  "viewerParticipantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+  "ownerParticipantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+  "pokerRevision": 17,
+  "sessionRevision": 17,
+  "bindings": [
+   {
+    "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+    "name": "You",
+    "controller": {
+     "kind": "human"
+    }
+   },
+   {
+    "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+    "name": "Bot 1",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+    "name": "Bot 2",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+    "name": "Bot 3",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+    "name": "Bot 4",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   },
+   {
+    "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+    "name": "Bot 5",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   }
+  ],
+  "trainerConfiguration": {
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "liveAnalysis": true
+  },
+  "schedule": {
+   "phases": [
+    {
+     "kind": "deal",
+     "handId": "hand-1",
+     "street": "preflop",
+     "startsAt": 1794069501315,
+     "endsAt": 1794069502815,
+     "durationMs": 1500
+    },
+    {
+     "kind": "street",
+     "handId": "hand-1",
+     "street": "flop",
+     "startsAt": 1794069503200,
+     "endsAt": 1794069504200,
+     "durationMs": 1000
+    }
+   ],
+   "actionWindow": {
+    "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+    "decisionId": "hand-1/decision-11",
+    "opensAt": 1794069504414
+   }
+  },
+  "serverTime": 1794069505148,
+  "pendingChanges": [],
+  "inspection": {
+   "adminMode": true,
+   "completedHands": []
+  },
+  "view": {
+   "configuration": {
+    "seatCount": 6,
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0,
+    "minimumBuyIn": 1000,
+    "defaultBuyIn": 1000,
+    "maximumBuyIn": 1000,
+    "allowSeatChanges": true
+   },
+   "state": {
+    "status": "active-hand",
+    "buttonSeat": 1,
+    "participants": [
+     {
+      "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+      "seat": 1,
+      "stack": 980,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 1,
+      "folded": false,
+      "allIn": false,
+      "contribution": 20,
+      "anteContribution": 0,
+      "wager": 0,
+      "cardCount": 2,
+      "holeCards": [
+       "5c",
+       "Kh"
+      ]
+     },
+     {
+      "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+      "seat": 2,
+      "stack": 990,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 2,
+      "folded": true,
+      "allIn": false,
+      "contribution": 10,
+      "anteContribution": 0,
+      "wager": 0,
+      "cardCount": 2
+     },
+     {
+      "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+      "seat": 3,
+      "stack": 980,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 3,
+      "folded": false,
+      "allIn": false,
+      "contribution": 20,
+      "anteContribution": 0,
+      "wager": 0,
+      "cardCount": 2
+     },
+     {
+      "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+      "seat": 4,
+      "stack": 980,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 4,
+      "folded": false,
+      "allIn": false,
+      "contribution": 20,
+      "anteContribution": 0,
+      "wager": 0,
+      "cardCount": 2
+     },
+     {
+      "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+      "seat": 5,
+      "stack": 980,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 5,
+      "folded": false,
+      "allIn": false,
+      "contribution": 20,
+      "anteContribution": 0,
+      "wager": 0,
+      "cardCount": 2
+     },
+     {
+      "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+      "seat": 6,
+      "stack": 925,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 6,
+      "folded": false,
+      "allIn": false,
+      "contribution": 75,
+      "anteContribution": 0,
+      "wager": 55,
+      "cardCount": 2
+     }
+    ],
+    "board": [
+     "2h",
+     "Ks",
+     "9s"
+    ],
+    "pots": [
+     {
+      "amount": 110,
+      "eligibleParticipantIds": [
+       "13fbccc4-956a-4993-b0c4-7733a95adabc",
+       "52611453-eefd-45f5-b2b7-da63c7d1a613",
+       "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+       "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+       "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+      ]
+     }
+    ],
+    "actorId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+    "legalActions": [
+     {
+      "type": "fold"
+     },
+     {
+      "type": "call"
+     },
+     {
+      "type": "raise",
+      "minimum": 110,
+      "maximum": 980
+     }
+    ],
+    "amountToCall": 55,
+    "handId": "hand-1",
+    "decisionId": "hand-1/decision-11",
+    "street": "flop",
+    "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+    "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+    "returns": [],
+    "payouts": []
+   },
+   "history": [
+    {
+     "handId": "hand-1",
+     "description": "Hand 1",
+     "decisions": [
+      {
+       "decisionId": "hand-1/decision-1",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": false,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 10,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [],
+        "pots": [
+         {
+          "amount": 20,
+          "eligibleParticipantIds": [
+           "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613"
+          ]
+         }
+        ],
+        "actorId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-1",
+        "street": "preflop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+        "action": {
+         "type": "call"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-2",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": false,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 10,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [],
+        "pots": [
+         {
+          "amount": 30,
+          "eligibleParticipantIds": [
+           "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4"
+          ]
+         },
+         {
+          "amount": 20,
+          "eligibleParticipantIds": [
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4"
+          ]
+         }
+        ],
+        "actorId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-2",
+        "street": "preflop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+        "action": {
+         "type": "call"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-3",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": false,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 10,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [],
+        "pots": [
+         {
+          "amount": 40,
+          "eligibleParticipantIds": [
+           "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed"
+          ]
+         },
+         {
+          "amount": 30,
+          "eligibleParticipantIds": [
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed"
+          ]
+         }
+        ],
+        "actorId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-3",
+        "street": "preflop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+        "action": {
+         "type": "call"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-4",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 1000,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 0,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": false,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 10,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         }
+        ],
+        "board": [],
+        "pots": [
+         {
+          "amount": 50,
+          "eligibleParticipantIds": [
+           "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         },
+         {
+          "amount": 40,
+          "eligibleParticipantIds": [
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+        "legalActions": [
+         {
+          "type": "fold"
+         },
+         {
+          "type": "call"
+         },
+         {
+          "type": "raise",
+          "minimum": 40,
+          "maximum": 1000
+         }
+        ],
+        "amountToCall": 20,
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-4",
+        "street": "preflop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+        "action": {
+         "type": "call"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-5",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": false,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 10,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         }
+        ],
+        "board": [],
+        "pots": [
+         {
+          "amount": 60,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         },
+         {
+          "amount": 50,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-5",
+        "street": "preflop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "action": {
+         "type": "fold"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-6",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": true,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 10,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 20,
+          "cardCount": 2
+         }
+        ],
+        "board": [],
+        "pots": [
+         {
+          "amount": 110,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-6",
+        "street": "preflop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "action": {
+         "type": "check"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-7",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": true,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [
+         "2h",
+         "Ks",
+         "9s"
+        ],
+        "pots": [
+         {
+          "amount": 110,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-7",
+        "street": "flop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "action": {
+         "type": "check"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-8",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": true,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [
+         "2h",
+         "Ks",
+         "9s"
+        ],
+        "pots": [
+         {
+          "amount": 110,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-8",
+        "street": "flop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+        "action": {
+         "type": "check"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-9",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": true,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [
+         "2h",
+         "Ks",
+         "9s"
+        ],
+        "pots": [
+         {
+          "amount": 110,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-9",
+        "street": "flop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+        "action": {
+         "type": "check"
+        }
+       }
+      },
+      {
+       "decisionId": "hand-1/decision-10",
+       "state": {
+        "status": "active-hand",
+        "buttonSeat": 1,
+        "participants": [
+         {
+          "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+          "seat": 1,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 1,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2,
+          "holeCards": [
+           "5c",
+           "Kh"
+          ]
+         },
+         {
+          "participantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+          "seat": 2,
+          "stack": 990,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 2,
+          "folded": true,
+          "allIn": false,
+          "contribution": 10,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+          "seat": 3,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 3,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+          "seat": 4,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 4,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+          "seat": 5,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 5,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         },
+         {
+          "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+          "seat": 6,
+          "stack": 980,
+          "sittingOut": false,
+          "inHand": true,
+          "handSeat": 6,
+          "folded": false,
+          "allIn": false,
+          "contribution": 20,
+          "anteContribution": 0,
+          "wager": 0,
+          "cardCount": 2
+         }
+        ],
+        "board": [
+         "2h",
+         "Ks",
+         "9s"
+        ],
+        "pots": [
+         {
+          "amount": 110,
+          "eligibleParticipantIds": [
+           "13fbccc4-956a-4993-b0c4-7733a95adabc",
+           "52611453-eefd-45f5-b2b7-da63c7d1a613",
+           "8eabc1cf-b4d7-469a-95d0-5a3bdd6632c4",
+           "bc60c196-0fb9-4abe-bfed-2524985cdbed",
+           "ea11a18a-eb99-47c4-ba2c-631dc608d4c2"
+          ]
+         }
+        ],
+        "actorId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+        "legalActions": [],
+        "handId": "hand-1",
+        "decisionId": "hand-1/decision-10",
+        "street": "flop",
+        "smallBlindParticipantId": "ad1e4f59-fd7a-4f4a-8069-5391dee5b3d5",
+        "bigBlindParticipantId": "52611453-eefd-45f5-b2b7-da63c7d1a613",
+        "returns": [],
+        "payouts": []
+       },
+       "action": {
+        "participantId": "ea11a18a-eb99-47c4-ba2c-631dc608d4c2",
+        "action": {
+         "type": "bet",
+         "betTo": 55
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "runtimeStatus": {
+   "phase": "idle"
+  }
+ },
+ "analyses": {
+  "hand-1/decision-4": {
+   "ok": true,
+   "tableSessionId": "417a35e0-72d9-4e95-8059-4ee7f75d118e",
+   "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+   "handId": "hand-1",
+   "decisionId": "hand-1/decision-4",
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "inputFingerprint": "3095a675503a38a613cff3d7459a48e52b612159bd4336c0cda0a5b7413b9d18",
+   "evaluationSeed": "75c3754b891c51ecbb0a8225b7d1d14ab77f441d7ced257b60400ef49acc60af",
+   "selectionSeed": "3a3b784863d31be84c58ff31e540a9856709aca2a3594aa392f0fd5ad61f9d4f",
+   "engineVersion": "v1",
+   "randomVersion": "v1",
+   "evaluationVersion": "v1",
+   "scoredDecision": {
+    "acceptedAction": {
+     "type": "call"
+    },
+    "scoringMethodVersion": "v1"
+   },
+   "requestId": "38306ce1-ff2b-4f8f-acd8-262e94d6facc",
+   "attemptId": "cd2533f5-bcbb-4158-ac10-0d42fb5c9503",
+   "status": "complete",
+   "evaluationRequestId": "d5c0e37d-f6c5-4d51-934e-7676f19dc5b2",
+   "evaluation": {
+    "policyResult": {
+     "choices": [
+      {
+       "probability": 0.85,
+       "action": {
+        "type": "fold"
+       }
+      },
+      {
+       "probability": 0.12,
+       "action": {
+        "type": "call"
+       }
+      },
+      {
+       "probability": 0.03,
+       "action": {
+        "type": "raise",
+        "raiseTo": 60
+       }
+      }
+     ]
+    },
+    "selectedAction": {
+     "type": "fold"
+    },
+    "actionProbabilities": [
+     {
+      "type": "fold",
+      "probability": 0.85
+     },
+     {
+      "type": "call",
+      "probability": 0.12
+     },
+     {
+      "type": "raise",
+      "probability": 0.03
+     }
+    ]
+   },
+   "scores": {
+    "decisionScore": 0.12,
+    "actionRankScore": 0.5,
+    "actionProbabilities": [
+     {
+      "type": "fold",
+      "probability": 0.85
+     },
+     {
+      "type": "call",
+      "probability": 0.12
+     },
+     {
+      "type": "raise",
+      "probability": 0.03
+     }
+    ]
+   }
+  },
+  "hand-1/decision-11": {
+   "ok": true,
+   "tableSessionId": "417a35e0-72d9-4e95-8059-4ee7f75d118e",
+   "participantId": "13fbccc4-956a-4993-b0c4-7733a95adabc",
+   "handId": "hand-1",
+   "decisionId": "hand-1/decision-11",
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "inputFingerprint": "aa9e18125ea0195058c8b2b5b5a02034b857e3b99f2a3576e89da57c1883cfff",
+   "evaluationSeed": "06c71e5d57d88fd9f3a88bdb91df6fa0ee9f7109366ed071c475738d8765f087",
+   "selectionSeed": "cef62bdc320866cde92a825b6be945b575b4bb7aa73c36a0b48bee59e218b15d",
+   "engineVersion": "v1",
+   "randomVersion": "v1",
+   "evaluationVersion": "v1",
+   "requestId": "fb000d2e-8aad-4fbc-8fd4-d58302f556e8",
+   "attemptId": "12e15eb7-8601-440e-888d-a412876abf49",
+   "status": "complete",
+   "evaluation": {
+    "policyResult": {
+     "choices": [
+      {
+       "probability": 0.09999999999999998,
+       "action": {
+        "type": "fold"
+       }
+      },
+      {
+       "probability": 0.5,
+       "action": {
+        "type": "call"
+       }
+      },
+      {
+       "probability": 0.2,
+       "action": {
+        "type": "raise",
+        "raiseTo": 165
+       }
+      },
+      {
+       "probability": 0.2,
+       "action": {
+        "type": "raise",
+        "raiseTo": 202
+       }
+      }
+     ]
+    },
+    "selectedAction": {
+     "type": "call"
+    },
+    "actionProbabilities": [
+     {
+      "type": "fold",
+      "probability": 0.09999999999999998
+     },
+     {
+      "type": "call",
+      "probability": 0.5
+     },
+     {
+      "type": "raise",
+      "probability": 0.4
+     }
+    ]
+   }
+  }
+ },
+ "handSummaries": {
+  "hand-1": {
+   "ok": true,
+   "tableSessionId": "417a35e0-72d9-4e95-8059-4ee7f75d118e",
+   "scope": "hand",
+   "handId": "hand-1",
+   "capturedPokerRevision": 17,
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "decisionIds": [
+    "hand-1/decision-4"
+   ],
+   "requestId": "e1d37124-c35e-4e24-a03d-e922927f9f05",
+   "attemptId": "9f12edc7-b2af-40cc-a11c-ad82859d6858",
+   "decisionCount": 1,
+   "status": "complete",
+   "averages": {
+    "decisionScore": 0.12,
+    "actionRankScore": 0.5
+   }
+  }
+ },
+ "sessionSummary": {
+  "ok": true,
+  "tableSessionId": "417a35e0-72d9-4e95-8059-4ee7f75d118e",
+  "scope": "table-session",
+  "capturedPokerRevision": 17,
+  "referenceStrategy": {
+   "policy": {
+    "id": "simple-heuristic",
+    "version": "v1",
+    "configuration": {}
+   },
+   "selector": {
+    "id": "seeded-sampling",
+    "version": "v1",
+    "configuration": {}
+   }
+  },
+  "decisionIds": [],
+  "requestId": "ecdd603a-12a6-4634-b034-59e462bc946b",
+  "attemptId": "fb6118eb-bcd4-48f5-bbf7-f50ded0591d7",
+  "decisionCount": 0,
+  "status": "empty"
+ },
+ "savedTables": [
+  {
+   "tableSessionId": "417a35e0-72d9-4e95-8059-4ee7f75d118e",
+   "mode": "practice",
+   "seatCount": 6,
+   "stakes": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0
+   },
+   "playState": {
+    "status": "active-hand",
+    "completedHands": 0,
+    "seatedParticipants": 6,
+    "viewerStack": 980
+   }
+  }
+ ]
+}

@@ -1,0 +1,288 @@
+{
+ "id": "practice-heads-up",
+ "group": "Practice",
+ "label": "Heads-up",
+ "description": "Two seats: the sparsest table layout.",
+ "capturedAt": "2026-11-07T16:38:36.337Z",
+ "session": {
+  "tableSessionId": "0ed4ba75-1672-480e-8a60-333198bed761",
+  "mode": "practice",
+  "options": {
+   "actionTimeLimitSeconds": null,
+   "allowLiveAnalysis": true
+  },
+  "viewerParticipantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+  "ownerParticipantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+  "pokerRevision": 3,
+  "sessionRevision": 3,
+  "bindings": [
+   {
+    "participantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+    "name": "You",
+    "controller": {
+     "kind": "human"
+    }
+   },
+   {
+    "participantId": "b3920b9e-40e4-4a23-8057-e79adabdfd3c",
+    "name": "Bot 1",
+    "controller": {
+     "kind": "bot",
+     "playingStrategy": {
+      "policy": {
+       "id": "simple-heuristic",
+       "version": "v1",
+       "configuration": {}
+      },
+      "selector": {
+       "id": "seeded-sampling",
+       "version": "v1",
+       "configuration": {}
+      }
+     }
+    }
+   }
+  ],
+  "trainerConfiguration": {
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "liveAnalysis": true
+  },
+  "schedule": {
+   "phases": [
+    {
+     "kind": "deal",
+     "handId": "hand-1",
+     "street": "preflop",
+     "startsAt": 1794069515430,
+     "endsAt": 1794069516930,
+     "durationMs": 1500
+    }
+   ],
+   "actionWindow": {
+    "participantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+    "decisionId": "hand-1/decision-1",
+    "opensAt": 1794069516930
+   }
+  },
+  "serverTime": 1794069515771,
+  "pendingChanges": [],
+  "inspection": {
+   "adminMode": true,
+   "completedHands": []
+  },
+  "view": {
+   "configuration": {
+    "seatCount": 2,
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0,
+    "minimumBuyIn": 1000,
+    "defaultBuyIn": 1000,
+    "maximumBuyIn": 1000,
+    "allowSeatChanges": true
+   },
+   "state": {
+    "status": "active-hand",
+    "buttonSeat": 1,
+    "participants": [
+     {
+      "participantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+      "seat": 1,
+      "stack": 990,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 1,
+      "folded": false,
+      "allIn": false,
+      "contribution": 10,
+      "anteContribution": 0,
+      "wager": 10,
+      "cardCount": 2,
+      "holeCards": [
+       "Td",
+       "8d"
+      ]
+     },
+     {
+      "participantId": "b3920b9e-40e4-4a23-8057-e79adabdfd3c",
+      "seat": 2,
+      "stack": 980,
+      "sittingOut": false,
+      "inHand": true,
+      "handSeat": 2,
+      "folded": false,
+      "allIn": false,
+      "contribution": 20,
+      "anteContribution": 0,
+      "wager": 20,
+      "cardCount": 2
+     }
+    ],
+    "board": [],
+    "pots": [
+     {
+      "amount": 20,
+      "eligibleParticipantIds": [
+       "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+       "b3920b9e-40e4-4a23-8057-e79adabdfd3c"
+      ]
+     }
+    ],
+    "actorId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+    "legalActions": [
+     {
+      "type": "fold"
+     },
+     {
+      "type": "call"
+     },
+     {
+      "type": "raise",
+      "minimum": 40,
+      "maximum": 1000
+     }
+    ],
+    "amountToCall": 10,
+    "handId": "hand-1",
+    "decisionId": "hand-1/decision-1",
+    "street": "preflop",
+    "smallBlindParticipantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+    "bigBlindParticipantId": "b3920b9e-40e4-4a23-8057-e79adabdfd3c",
+    "returns": [],
+    "payouts": []
+   },
+   "history": []
+  },
+  "runtimeStatus": {
+   "phase": "idle"
+  }
+ },
+ "analyses": {
+  "hand-1/decision-1": {
+   "ok": true,
+   "tableSessionId": "0ed4ba75-1672-480e-8a60-333198bed761",
+   "participantId": "75ce02e2-97c4-48ee-bb76-7a55f87bcf02",
+   "handId": "hand-1",
+   "decisionId": "hand-1/decision-1",
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "inputFingerprint": "f92f817b1fc9705733781192f1bf61766b75a9a3e0057cfa6a12ce3eb81bf1f9",
+   "evaluationSeed": "54b21d491ae27acd1b62b902e27cb4e08c1f512cf47ddd661b140bb0e4631cdb",
+   "selectionSeed": "05712b9b0ad430cff563828189c5f3971ed26a0dc286be092078a3e2273f2924",
+   "engineVersion": "v1",
+   "randomVersion": "v1",
+   "evaluationVersion": "v1",
+   "requestId": "ddd37535-a49b-4667-ac2b-1f6a8a4269b5",
+   "attemptId": "3a0656dc-ace0-4233-ab55-60d580dff851",
+   "status": "complete",
+   "evaluation": {
+    "policyResult": {
+     "choices": [
+      {
+       "probability": 0.18000000000000005,
+       "action": {
+        "type": "fold"
+       }
+      },
+      {
+       "probability": 0.7,
+       "action": {
+        "type": "call"
+       }
+      },
+      {
+       "probability": 0.12,
+       "action": {
+        "type": "raise",
+        "raiseTo": 60
+       }
+      }
+     ]
+    },
+    "selectedAction": {
+     "type": "raise",
+     "raiseTo": 60
+    },
+    "actionProbabilities": [
+     {
+      "type": "fold",
+      "probability": 0.18000000000000005
+     },
+     {
+      "type": "call",
+      "probability": 0.7
+     },
+     {
+      "type": "raise",
+      "probability": 0.12
+     }
+    ]
+   }
+  }
+ },
+ "handSummaries": {
+  "hand-1": {
+   "ok": true,
+   "tableSessionId": "0ed4ba75-1672-480e-8a60-333198bed761",
+   "scope": "hand",
+   "handId": "hand-1",
+   "capturedPokerRevision": 3,
+   "referenceStrategy": {
+    "policy": {
+     "id": "simple-heuristic",
+     "version": "v1",
+     "configuration": {}
+    },
+    "selector": {
+     "id": "seeded-sampling",
+     "version": "v1",
+     "configuration": {}
+    }
+   },
+   "decisionIds": [],
+   "requestId": "734dd21c-7f4f-4594-a4c0-fefd6fe2de3d",
+   "attemptId": "4fda617a-b38b-4958-9ae4-42452a8d4126",
+   "decisionCount": 0,
+   "status": "empty"
+  }
+ },
+ "savedTables": [
+  {
+   "tableSessionId": "0ed4ba75-1672-480e-8a60-333198bed761",
+   "mode": "practice",
+   "seatCount": 2,
+   "stakes": {
+    "smallBlind": 10,
+    "bigBlind": 20,
+    "ante": 0
+   },
+   "playState": {
+    "status": "active-hand",
+    "completedHands": 0,
+    "seatedParticipants": 2,
+    "viewerStack": 990
+   }
+  }
+ ]
+}

@@ -64,6 +64,10 @@ _Avoid_: Trainer table, solo table
 A Table Session that Guests join through its Join Link to play against each other, with or without Bots. It always has an Action Time Limit and Automatic Dealing, and its mode is fixed when it is created.
 _Avoid_: Multiplayer table, shared table
 
+**Demo Table**:
+A recorded view of a Table Session, replayed in the Trainer for reviewing the interface in one game state. It is never persisted, has no server behind it, and cannot be acted on; it exists only in development.
+_Avoid_: Mock table, sample table, Playground
+
 **Join Link**:
 The shareable secret link through which Guests join one Online Table. Replacing it invalidates the previous link without removing Participants who have already joined.
 _Avoid_: Invite, participant link, table URL
