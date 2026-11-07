@@ -55,7 +55,7 @@ test('new Table Sessions expose a complete default Reference Strategy and Live A
   const t = await table();
   expect(await read(t)).toMatchObject({
     pokerRevision: 0, sessionRevision: 0,
-    trainerConfiguration: { referenceStrategy: defaultPlayingStrategy, liveAnalysis: false },
+    trainerConfiguration: { referenceStrategy: defaultPlayingStrategy, liveAnalysis: true },
     bindings: [expect.objectContaining({ controller: { kind: 'human' } }), expect.objectContaining({ controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } })],
   });
 });
@@ -86,7 +86,7 @@ test('two owner connections receive the complete configuration only after commit
     beforeCommit = async context => { if (context.tableSessionId === t.id) { entered.resolve(); await release.promise; } };
     held = configure(t, change(0, 'held'));
     await entered.promise;
-    expect(await read(t)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, trainerConfiguration: { referenceStrategy: defaultPlayingStrategy, liveAnalysis: false } });
+    expect(await read(t)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, trainerConfiguration: { referenceStrategy: defaultPlayingStrategy, liveAnalysis: true } });
     expect(first.messages).toHaveLength(1);
     expect(second.messages).toHaveLength(1);
     release.resolve();

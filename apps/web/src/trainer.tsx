@@ -46,7 +46,7 @@ export function Trainer() {
   const setup = usePracticeSetup(table.data, command);
   const preparing = setup?.tableId === selected && !!setup;
   const lastSelected = useRef(selected);
-  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setJoinLinkOpen(false); useSession.setState({ analysisOpen: false }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
+  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setJoinLinkOpen(false); useSession.setState({ analysisOpen: true }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
   useEffect(() => { if (browse) window.scrollTo({ top: 0 }); }, [browse]);
   const runtime = live.runtimeStatus ?? table.data?.runtimeStatus;
   // Runtime status and who is connected are transient: the live connection's latest word wins over the cached view.

@@ -37,7 +37,7 @@ interface SessionState {
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  selectedId: null, pending: null, analysisOpen: false, animations: true, setup: null,
+  selectedId: null, pending: null, analysisOpen: true, animations: true, setup: null,
   setSetup: setup => set({ setup }),
   select: selectedId => set({ selectedId }),
   setPending: pending => set({ pending }),

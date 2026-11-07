@@ -76,10 +76,12 @@ test('accepted human play starts analysis with Live Analysis off and no browser 
   const f = await fixture();
   try {
     const t = await f.decision();
-    expect((await f.read(t)).trainerConfiguration.liveAnalysis).toBe(false);
+    const before = await f.read(t);
+    expect(before.trainerConfiguration.liveAnalysis).toBe(true);
+    expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { ...before.trainerConfiguration, liveAnalysis: false } })).status).toBe(200);
     expect(f.evaluations).toHaveLength(0);
     await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
-    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, view: { state: { status: 'completed-hand' } } });
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 5, view: { state: { status: 'completed-hand' } } });
     await expect.poll(() => f.evaluations.length).toBe(1);
     const pending = await f.request(t);
     expect(pending).toMatchObject({ status: 'pending', scoredDecision: { acceptedAction: { type: 'fold' }, scoringMethodVersion: 'v1' } });
