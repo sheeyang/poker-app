@@ -57,12 +57,20 @@ A continuing cash game whose seats, participant stacks, button position, and com
 _Avoid_: Match, tournament
 
 **Practice Table**:
-A Table Session in which one human Participant plays only against Bots. Each Hand starts only by explicit deal, it has no Join Link, and its mode is fixed when it is created.
+A Table Session in which one human Participant plays only against Bots. Each Hand starts only by explicit deal, it has no Join Link, and its mode is fixed when it is created. Its human never leaves it, so it stays in their practice history to return to at any time.
 _Avoid_: Trainer table, solo table
 
 **Online Table**:
 A Table Session that Guests join through its Join Link to play against each other, with or without Bots. It always has an Action Time Limit and Automatic Dealing, and its mode is fixed when it is created.
 _Avoid_: Multiplayer table, shared table
+
+**Current Table**:
+The one Online Table a Guest is at, from creating, joining or returning to it until their Leave Table or Removal takes effect. A Guest has at most one, while they may be at any number of Practice Tables.
+_Avoid_: Current game, active table
+
+**Closed Table**:
+An Online Table that has ended, after 24 hours without activity or when its Table Owner left with no other human at it. No one can open, join, or act at it, and its completed Hands remain recorded. Practice Tables never close.
+_Avoid_: Archived table, ended session
 
 **Join Link**:
 The address of an Online Table, through which Guests join it and Participants return to it. It never changes, and anyone at the table can pass it on.
@@ -81,7 +89,7 @@ The complete application-owned durable representation of a Table Session, contai
 _Avoid_: Table Session Record, Cash Game state
 
 **Table Owner**:
-The application user who created a Table Session and may manage its options and Bots. Ownership is independent of the Participant through whom that user plays and grants no control over, or private information of, another human Participant.
+The human Participant who may manage a Table Session's options and Bots: its creator, or at an Online Table the human to whom ownership passed when the previous owner left. Ownership grants no control over, or private information of, another human Participant.
 _Avoid_: Participant, host, button, dealer
 
 **Participant**:
@@ -109,11 +117,11 @@ Leaving a Seat and cashing out its stack while remaining a Participant at the ta
 _Avoid_: Leave, cash out, leave table
 
 **Leave Table**:
-Ceasing to be at a table, after standing up if seated. A Guest who returns keeps the same Participant.
+Ceasing to be at an Online Table, after standing up if seated. A Guest who returns keeps the same Participant. There is no Leave Table at a Practice Table.
 _Avoid_: Stand Up, quit, disconnect
 
 **Removal**:
-A Leave Table imposed by the Table Owner that also prevents that Guest from joining the table again. During a Hand it is an After-Hand Request, the strongest one: nothing the Guest asks for undoes it.
+A Leave Table imposed by the Table Owner. The Guest may join again like any other Guest, through the Join Link and any Table Password. During a Hand it is an After-Hand Request, the strongest one: nothing the Guest asks for undoes it.
 _Avoid_: Ban, kick
 
 **After-Hand Request**:
