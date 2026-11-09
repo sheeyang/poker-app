@@ -17,14 +17,6 @@ export function AnalysisSkeleton({ actions, scores, sampled }: { actions: readon
   </div></div>;
 }
 
-export function SavedTableSkeleton() {
-  return <li className="saved-table saved-table-skeleton" role="status" aria-label="Loading saved table"><div aria-hidden="true"><span className="saved-table-copy"><Skeleton className="skeleton-table-title" /><Skeleton className="skeleton-table-detail" /><Skeleton className="skeleton-table-state" /></span><Skeleton className="skeleton-resume" /></div></li>;
-}
-
-export function SavedTablesSkeleton() {
-  return <ul className="return-list" aria-label="Loading saved tables">{[0, 1, 2].map(row => <SavedTableSkeleton key={row} />)}</ul>;
-}
-
 export function TableSkeleton() {
   return <div className="table-loading table-skeleton" role="status" aria-label="Opening your table"><div className="table-skeleton-content" aria-hidden="true"><Skeleton className="skeleton-hand-status" /><div className="loading-oval"><div className="skeleton-board">{[0, 1, 2, 3, 4].map(card => <Skeleton className="skeleton-card" key={card} />)}</div>{[0, 1, 2, 3].map(seat => <Skeleton className={`skeleton-seat skeleton-seat-${seat}`} key={seat} />)}</div><div className="skeleton-controls">{[0, 1, 2].map(control => <Skeleton key={control} />)}</div></div></div>;
 }

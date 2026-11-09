@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import { listPath, tablePath } from './table-address.js';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -24,22 +26,19 @@ type TableAttempt = { readonly tableId: string } & (
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
 interface SessionState {
-  selectedId: string | null;
   pending: Attempt | null;
   analysisOpen: boolean;
   animations: boolean;
   setup: { requestId: string; tableId?: string; paused?: string; afterHandId?: string | null } | null;
   setSetup: (setup: SessionState['setup']) => void;
-  select: (id: string | null) => void;
   setPending: (pending: Attempt | null) => void;
   toggleAnalysis: () => void;
   setAnimations: (enabled: boolean) => void;
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  selectedId: null, pending: null, analysisOpen: true, animations: true, setup: null,
+  pending: null, analysisOpen: true, animations: true, setup: null,
   setSetup: setup => set({ setup }),
-  select: selectedId => set({ selectedId }),
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
   setAnimations: animations => set({ animations }),
@@ -77,7 +76,10 @@ export function useCommand() {
   const queryClient = useQueryClient();
   const pending = useSession(state => state.pending);
   const setPending = useSession(state => state.setPending);
-  const select = useSession(state => state.select);
+  const router = useRouter();
+  // The table's own mode, for its address; a table not in the cache is an Online one, the only kind a Guest can leave or return to.
+  const modeOf = (id: string): TableMode => queryClient.getQueryData<ObservableTableSession>(['table-session', id])?.mode ?? 'online';
+  const showing = (id: string) => router.state.location.pathname === tablePath(modeOf(id), id);
   const mutation = useMutation({
     mutationFn: execute,
     retry: false,
@@ -86,17 +88,19 @@ export function useCommand() {
       if (attempt.kind === 'create') {
         const setup = useSession.getState().setup;
         if (setup?.requestId === attempt.body.requestId) useSession.getState().setSetup({ ...setup, tableId: result.tableSessionId });
-        select(result.tableSessionId);
+        // Creating a table opens it: one Back step returns to the list it was created from.
+        void router.navigate({ to: tablePath(attempt.body.mode ?? 'practice', result.tableSessionId) });
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       }
       // Leaving at once ends this Guest's place at the table; leaving after the Hand is announced when it happens.
       if (attempt.kind === 'manage' && attempt.operation === 'leave-table' && !('afterHand' in result)) {
-        select(null);
+        // Back never returns to a table this Guest is no longer at.
+        if (showing(result.tableSessionId)) void router.navigate({ to: listPath(modeOf(result.tableSessionId)), replace: true });
         queryClient.removeQueries({ queryKey: ['table-session', result.tableSessionId] });
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
         return;
       }
-      if (attempt.kind === 'rejoin') { select(result.tableSessionId); await queryClient.invalidateQueries({ queryKey: ['table-sessions'] }); }
+      if (attempt.kind === 'rejoin') { void router.navigate({ to: tablePath('online', result.tableSessionId) }); await queryClient.invalidateQueries({ queryKey: ['table-sessions'] }); }
       await queryClient.invalidateQueries({ queryKey: ['table-session', result.tableSessionId] });
     },
     onError: async (error, attempt) => {

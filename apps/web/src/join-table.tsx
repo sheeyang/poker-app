@@ -7,14 +7,16 @@ import { CommandFeedback } from './controls.js';
 import { Dialog } from './dialog.js';
 import { Icon } from './icons.js';
 import { joinLink } from './join-link.js';
-import { useSession, type Command } from './session.js';
+import type { Command } from './session.js';
+import { usePageTitle } from './app-shell.js';
 import { chips } from './table-model.js';
 
 const hint = 'Up to 20 letters, digits, spaces or basic punctuation. It is fixed for this table once you join.';
 
 /** The page a Join Link opens: confirm a display name, join unseated, then land at the table. */
 export function JoinTable({ token }: { token: string }) {
-  const queryClient = useQueryClient(), navigate = useNavigate(), select = useSession(s => s.select);
+  const queryClient = useQueryClient(), navigate = useNavigate();
+  usePageTitle({ page: 'list', mode: 'online' });
   const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity });
   const preview = useQuery({ queryKey: ['join-link', token], queryFn: ({ signal }) => api.previewJoinLink(token, signal), enabled: identity.isSuccess });
   const [typed, setTyped] = useState<string>();
@@ -31,9 +33,8 @@ export function JoinTable({ token }: { token: string }) {
       return api.joinTable(token, { requestId: crypto.randomUUID() });
     },
     onSuccess: async result => {
-      select(result.tableSessionId);
       await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      await navigate({ to: '/', replace: true });
+      await navigate({ to: '/online/$tableSessionId', params: { tableSessionId: result.tableSessionId }, replace: true });
     },
   });
   const returning = !!preview.data?.returningAs;
@@ -51,7 +52,7 @@ export function JoinTable({ token }: { token: string }) {
       {(identity.isPending || preview.isPending && identity.isSuccess) && <p className="muted" role="status">Opening your invitation…</p>}
       {identity.isError && <div className="notice-error" role="alert"><p>Couldn’t connect to the poker server.</p><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
       {preview.isError && (dead
-        ? <><h1>{removed ? 'You can’t join this table.' : 'This link doesn’t work.'}</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/' })}>Go to my tables</button></>
+        ? <><h1>{removed ? 'You can’t join this table.' : 'This link doesn’t work.'}</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/online' })}>Go to Online tables</button></>
         : <div className="notice-error" role="alert"><p>{preview.error instanceof RequestFailure ? preview.error.message : 'Couldn’t open this table.'}</p><button onClick={() => void preview.refetch()}>Try again</button></div>)}
       {data?.alreadyJoined ? <div className="dialog-stack"><p role="status" className="muted">Opening your table…</p>{failure && <div className="notice-error" role="alert"><p>{failure}</p><button className="primary" disabled={join.isPending} onClick={() => join.mutate()}>Try opening again</button></div>}</div> : data && <>
         <h1>{data.alreadyJoined ? 'You’re already at this table.' : returning ? `Return to ${data.ownerName}’s table` : `Join ${data.ownerName}’s table`}</h1>
