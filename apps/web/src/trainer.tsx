@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api, RequestFailure, retainNewestTable } from '@poker/client';
 import type { TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { useSession } from './session.js';
-import { listPath, tableAddress } from './table-address.js';
+import { analysisTabParam, listPath, tableAddress, type AnalysisTab } from './table-address.js';
 import { usePracticeSetup } from './practice-setup.js';
 import { PokerTable } from './poker-table.js';
 import { ActionTray, CommandFeedback } from './controls.js';
@@ -38,10 +38,13 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const missing = read.error instanceof RequestFailure && read.error.code === 'not-found';
   const outcome = missing ? tableAddress(mode, selected, 'not-found') : read.data ? tableAddress(mode, selected, read.data) : undefined;
   const correctedTo = outcome?.show === 'corrected' ? outcome.to : undefined;
-  useEffect(() => { if (correctedTo) void navigate({ href: correctedTo, replace: true }); }, [correctedTo, navigate]);
+  // The analysis tab lives in the address; choosing one replaces the history entry so Back still leaves the table.
+  const addressTab = analysisTabParam(useSearch({ strict: false }).analysis);
+  useEffect(() => { if (correctedTo) void navigate({ href: addressTab ? `${correctedTo}?analysis=${addressTab}` : correctedTo, replace: true }); }, [correctedTo, addressTab, navigate]);
+  const chooseTab = useCallback((tab: AnalysisTab) => { void navigate({ to: '.', search: { analysis: tab }, replace: true }); }, [navigate]);
   // Only a table shown at its own address is on screen.
   const table = { ...read, data: outcome?.show === 'table' ? read.data : undefined, error: missing ? null : read.error };
-  const analysis = useDecisionAnalysis(table.data), summary = useHandSummary(table.data), sessionSummary = useTableSessionSummary(table.data);
+  const analysis = useDecisionAnalysis(table.data, { tab: addressTab, choose: chooseTab }), summary = useHandSummary(table.data), sessionSummary = useTableSessionSummary(table.data);
   useEffect(() => consumeLive({
     onReady: lifecycle => { analysis.consumers.onReady?.(lifecycle); summary.consumers.onReady?.(lifecycle); sessionSummary.consumers.onReady?.(lifecycle); },
     onAnalysisUpdate: (update, lifecycle) => { analysis.consumers.onAnalysisUpdate?.(update, lifecycle); summary.consumers.onAnalysisUpdate?.(update, lifecycle); sessionSummary.consumers.onAnalysisUpdate?.(update, lifecycle); },

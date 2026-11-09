@@ -18,7 +18,8 @@ type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
 export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void }) {
   const panel = useRef<HTMLElement>(null), viewTabs = useRef<HTMLDivElement>(null);
-  const [sessionTab, setSessionTab] = useState(false);
+  // The Session summary tab is part of the address, so a refresh keeps it.
+  const sessionTab = analysis.addressTab === 'session';
   // Opening the tab requests a fresh summary, and so does each Hand that completes while it stays open.
   const refreshKey = sessionSummaryRefreshKey(table, sessionTab), requestSession = useRef(sessionSummary.request);
   requestSession.current = sessionSummary.request;
@@ -42,7 +43,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
   const accepted = analysis.acceptedDecisions.filter(d => d.handId === table.view.state.handId);
   const liveView = analysis.view === 'live';
   const tab = sessionTab ? 'session' : liveView ? 'live' : 'hand';
-  function selectTab(next: 'live' | 'hand' | 'session') { setSessionTab(next === 'session'); if (next !== 'session') analysis.selectView(next); }
+  function selectTab(next: 'live' | 'hand' | 'session') { if (next === 'session') analysis.chooseTab?.(next); else analysis.selectView(next); }
   const selected = liveView ? undefined : accepted.find(d => d.decisionId === analysis.selectedDecisionId);
   const handDecisions = accepted;
   const liveDecision = liveOn && !!table.view.state.decisionId && table.view.state.legalActions.length > 0;

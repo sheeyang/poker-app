@@ -22,6 +22,17 @@ export function tableAddress(routeMode: TableMode, tableSessionId: string, read:
   return read.mode === routeMode ? { show: 'table' } : { show: 'corrected', to: tablePath(read.mode, tableSessionId) };
 }
 
+export type AnalysisTab = 'live' | 'hand' | 'session';
+/** The analysis tab an address names; anything absent or invalid names none, and the current default applies. */
+export function analysisTabParam(value: unknown): AnalysisTab | undefined {
+  return value === 'live' || value === 'hand' || value === 'session' ? value : undefined;
+}
+/** The search a table route accepts: `analysis=live|hand|session`. */
+export function tableSearch(search: Record<string, unknown>): { analysis?: AnalysisTab } {
+  const analysis = analysisTabParam(search.analysis);
+  return analysis ? { analysis } : {};
+}
+
 const app = 'Poker Trainer';
 export type Page =
   | { readonly page: 'list'; readonly mode: TableMode }

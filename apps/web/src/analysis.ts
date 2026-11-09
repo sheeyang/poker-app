@@ -9,7 +9,9 @@ function identity(value: unknown): string {
   if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + identity((value as Record<string, unknown>)[key])).join(',') + '}';
   return JSON.stringify(value);
 }
-export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
+/** The analysis tab kept in the table's address: `tab` is what the address names, `choose` replaces it. */
+export type AnalysisAddress = { tab: 'live' | 'hand' | 'session' | undefined; choose: (tab: 'live' | 'hand' | 'session') => void };
+export function useDecisionAnalysis(table: ObservableTableSession | undefined, address?: AnalysisAddress) {
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string; handId?: string; newestAccepted?: string; collapsed?: boolean }>();
   const [viewSelection, setViewSelection] = useState<{ tableId: string; view: 'live' | 'hand' }>();
   const human = table?.viewerParticipantId;
@@ -18,7 +20,8 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   const currentDecisionId = table?.view.state.legalActions.length ? table.view.state.decisionId : undefined;
   // Live Analysis runs only while the viewer has it on and the table allows it for their decision.
   const liveEnabled = table ? liveAnalysisOn(table) : false;
-  const view = table && viewSelection?.tableId === table.tableSessionId ? viewSelection!.view : liveEnabled ? 'live' : 'hand';
+  const chosenView = table && viewSelection?.tableId === table.tableSessionId ? viewSelection!.view : liveEnabled ? 'live' : 'hand';
+  const view = address?.tab === 'live' || address?.tab === 'hand' ? address.tab : chosenView;
   useEffect(() => {
     if (table && viewSelection?.tableId !== table.tableSessionId) setViewSelection({ tableId: table.tableSessionId, view: liveEnabled ? 'live' : 'hand' });
   }, [table?.tableSessionId, viewSelection?.tableId, liveEnabled]);
@@ -74,8 +77,8 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined) {
   };
   const connectionChanged = useCallback((generation: number | null) => { resource.connectionChanged(generation); background.connectionChanged(generation); }, [resource.connectionChanged, background.connectionChanged]);
   return { ...resource, consumers, connectionChanged, acceptedDecisions, rowAnalyses, rowErrors, selectedDecisionId, expandedDecisionId, pinned, view,
-    selectView: (view: 'live' | 'hand') => { if (table) setViewSelection({ tableId: table.tableSessionId, view }); },
-    selectDecision: (id: string) => { if (table) { setViewSelection({ tableId: table.tableSessionId, view: 'hand' }); setSelection(id ? { tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: id } : undefined); } },
+    selectView: (view: 'live' | 'hand') => { if (table) setViewSelection({ tableId: table.tableSessionId, view }); address?.choose(view); }, addressTab: address?.tab, chooseTab: address?.choose,
+    selectDecision: (id: string) => { if (table) { setViewSelection({ tableId: table.tableSessionId, view: 'hand' }); address?.choose('hand'); setSelection(id ? { tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: id } : undefined); } },
     collapseDecision: () => { if (table && selectedDecisionId) setSelection({ tableId: table.tableSessionId, handId: table.view.state.handId, newestAccepted, decisionId: selectedDecisionId, collapsed: true }); },
     canEvaluate: !!target, evaluate: () => resource.request() };
 }
