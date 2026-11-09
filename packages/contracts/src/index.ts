@@ -130,14 +130,6 @@ export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
  * Table Owner's own place, which is held after they leave so that they can always return.
  */
 export const onlineTableCapacity = 20;
-/** A Guest cannot create a table while they own this many tables that each have a seated human. */
-export const seatedTableLimit = 10;
-/** What this server offers, read by clients before showing optional capabilities. */
-export interface ServerFeatures {
-  readonly ok: true;
-  /** Whether Online Tables can be created and joined. When off, creating or joining one is refused with `online-play-disabled`. */
-  readonly onlinePlay: boolean;
-}
 export interface CreateTableSessionRequest {
   readonly requestId: string;
   /** Fixed for the table's life. Defaults to a Practice Table. */

@@ -20,6 +20,12 @@ describe('the viewer’s own controls', () => {
   it('wait for the Hand to end during one, except top-ups and seat changes, which wait without being asked for', () => {
     expect(selfService(table({ seat: 2 }), true)).toEqual({ pending: undefined, sitOut: 'after-hand', resume: 'unavailable', standUp: 'after-hand', leaveTable: 'after-hand', topUp: 'unavailable', moveSeat: 'unavailable' });
   });
+  it('never offer Leave Table at a Practice Table, while Stand Up and Sitting Out still work', () => {
+    const practice = (handOpen: boolean) => selfService({ ...table({ seat: 2 }), mode: 'practice' }, handOpen);
+    expect(practice(false)).toMatchObject({ leaveTable: 'unavailable', sitOut: 'now', standUp: 'now' });
+    expect(practice(true)).toMatchObject({ leaveTable: 'unavailable', sitOut: 'after-hand', standUp: 'after-hand' });
+    expect(selfService({ ...table({ seat: null }), mode: 'practice' }, false).leaveTable).toBe('unavailable');
+  });
   it('offer resuming only between Hands, to someone who is sitting out', () => {
     expect(selfService(table({ seat: 2, sittingOut: true }), false)).toMatchObject({ sitOut: 'unavailable', resume: 'now' });
     expect(selfService(table({ seat: 2, sittingOut: true }), true)).toMatchObject({ sitOut: 'unavailable', resume: 'unavailable', standUp: 'after-hand' });

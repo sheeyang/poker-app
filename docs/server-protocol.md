@@ -54,12 +54,12 @@ All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
 | --- | --- |
-| `POST` to the base path | Refused with 409 `table-limit-reached` while the Guest owns 10 tables that each have a seated human (not remembered, see [Public hosting safeguards](#public-hosting-safeguards)); 429 `rate-limited` when the address is over its limit. Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
+| `POST` to the base path | There is no per-Guest table cap, so a Guest may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
 | `POST /:id/rejoin-table` | Table Owner only: returns the owner to a table they left, without the Join Link, as the same Participant. Requires only `requestId`. Anyone else, left or not, receives 404 `not-found`; a Guest who left a table they do not own rejoins through its Join Link. Same outcome and rejections as a join, except that the owner's held place means the table is never full for them. |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. Only the Table Owner of an Online Table also receives its `joinToken`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
-| `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: the table leaves their saved list (unless they own it) and a place is freed. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
+| `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: the table leaves their saved list (unless they own it) and a place is freed. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until its payout phase ends. They are never deferred. |
 | `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left or been removed. Between Hands it applies at once: the Guest stands up (cashing out), leaves the table, and their membership becomes `removed`. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table or join it again, through any Join Link; it leaves their saved list. |
 | `POST /:id/replace-join-link` | Table Owner only, Online Tables only (400 `join-link-unavailable` at a Practice Table). Requires `requestId` and `expectedSessionRevision`. Stores a new token in the aggregate's `joinToken` in the same transaction, so the previous link stops resolving at once (404 `invalid-join-link`); the acknowledgement carries no link, the owner reads the new `joinToken` from the view (and the live update). Joined Participants are untouched. Rate limited, see [Public hosting safeguards](#public-hosting-safeguards). |
@@ -119,6 +119,18 @@ same transaction as every aggregate write that changes a membership (see
 [`membership.ts`](../apps/server/src/membership.ts)). Startup backfills it for
 version-1 records. It serves the saved-tables list and the authorization of
 tables that are not yet loaded.
+
+A table is in memory only while something needs it
+([ADR-0035](adr/0035-close-idle-online-tables-and-load-tables-only-while-needed.md)):
+a live subscription to it, a request being handled at it, or its scheduled work (an
+Action Deadline, a Presentation Phase, a Next-Hand Countdown, a Bot decision, or
+After-Hand Requests to apply). One minute after the last of these ends, it unloads;
+anything that needs it within that minute keeps it. When next needed, it loads again
+from its record ([`table-registry.ts`](../apps/server/src/table-registry.ts)). A
+request from a Guest who is not joined at a table is answered from the membership
+index and never loads it; joining an Online Table, and its owner returning, do. A
+Join Link preview reads the stored table without loading it. Startup still loads
+every table and runs its schedule; one without scheduled work unloads a minute later.
 
 Creation rejects hidden or unknown configuration fields and supplied
 ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
@@ -376,14 +388,6 @@ captured analyses retain their original descriptors.
 The hosted product is open to the public, so the server limits what one address and one
 Guest can ask of it.
 
-**Online play switch.** Online Tables are in beta. The `onlinePlay` server option
-(environment `POKER_ONLINE_PLAY`) decides whether they are offered. The environment leaves it off unless set to
-`true`; the option itself defaults on, so tests exercise Online Tables. `GET /api/features`
-returns `{ ok: true, onlinePlay }`, and the web client shows the Online table type only
-when it is `true`. While it is off, creating an Online Table, previewing or using a Join
-Link, and `rejoin-table` answer 403 `online-play-disabled`. Online Tables that already exist
-stay playable for the Participants already at them, so turning the switch off never strands
-chips. Practice Tables are unaffected.
 
 **Client addresses.** The `trustedProxies` server option (environment `TRUSTED_PROXIES`,
 comma-separated addresses or CIDR ranges) names the reverse proxy in front of the server.
@@ -410,14 +414,7 @@ A refusal is HTTP 429 with a `Retry-After` header (seconds) and
 `{ ok: false, rejection: { code: 'rate-limited', message } }`; the message says how long
 to wait. The limit is checked before authentication and is never remembered with a request ID.
 
-**Tables per Guest.** Creation answers 409 `table-limit-reached` while the Guest owns 10
-tables (`seatedTableLimit` in contracts) that each have at least one seated human, the owner
-or another Guest. Tables without a seated human, such as an Online Table where everyone is
-watching, do not count. The count follows the committed state of each loaded table, so
-standing up or leaving frees a place at once and the limit survives a restart. It is judged
-only for a creation that has not happened yet and the refusal is not remembered: retrying
-a creation that succeeded returns its stored outcome, and the same request ID goes through
-once a place is free.
+**Tables per Guest.** There is no cap: a Guest can own any number of tables, and Practice Tables are a permanent practice history.
 
 ## Request fingerprints
 

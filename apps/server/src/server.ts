@@ -8,7 +8,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest, ServerFeatures } from '@poker/contracts';
+import type { AnalysisUpdate, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ReplaceJoinLinkRequest, SetTableOptionsRequest } from '@poker/contracts';
 import { openDatabase, initializeDatabase } from './db/database.js';
 import { localUsers, tableSessions } from './db/schema.js';
 import { upgradeTableSession } from './aggregate.js';
@@ -30,12 +30,7 @@ export interface ServerOptions { readonly databaseUrl: string; readonly schema?:
    */
   readonly trustedProxies?: readonly string[];
   /** Per-client-address limits on creation, joining and Join Link replacement. A kind left out is unlimited. */
-  readonly rateLimits?: Partial<RateLimits>;
-  /**
-   * Whether Guests may create and join Online Tables. Defaults to on here; the hosted environment turns it off
-   * unless `POKER_ONLINE_PLAY=true`. Existing Online Tables stay playable for the Participants already at them.
-   */
-  readonly onlinePlay?: boolean }
+  readonly rateLimits?: Partial<RateLimits> }
 export async function createServer(options: ServerOptions) {
   const app = Fastify({ logger: options.logger ?? false, trustProxy: options.trustedProxies?.length ? [...options.trustedProxies] : false });
   let closing = false;
@@ -71,17 +66,11 @@ export async function createServer(options: ServerOptions) {
     return reply.code(429).header('retry-after', String(decision.retryAfterSeconds))
       .send({ ok: false, rejection: { code: 'rate-limited', message: `${limitMessages[kind]} Try again in ${waitText(decision.retryAfterSeconds)}.` } });
   }
-  const onlinePlay = options.onlinePlay ?? true;
-  /** Answers 403 when Online Tables are turned off on this server. */
-  function refuseIfOnlinePlayDisabled(reply: FastifyReply) {
-    if (onlinePlay) return undefined;
-    return reply.code(403).send({ ok: false, rejection: { code: 'online-play-disabled', message: 'Online tables are in beta and turned off on this server. You can still play at a Practice Table.' } });
-  }
   const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema);
-  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy, userId => mutations.seatedTableCount(userId));
+  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy);
   const jobRunner = new JobRunner(options.jobRunnerOptions);
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis') }, options.clock);
-  options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
+  options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession, loadedTables: mutations.loadedTables });
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult);
   const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult);
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
@@ -175,7 +164,6 @@ export async function createServer(options: ServerOptions) {
       else unsubscribe = subscription;
     }).catch(() => socket.close(1011, 'The committed view could not be loaded.'));
   });
-  app.get('/api/features', async () => ({ ok: true, onlinePlay } satisfies ServerFeatures));
   app.get('/api/identity', async (request, reply) => {
     const userId = await ensureIdentity(request, reply);
     const displayName = (await db.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
@@ -192,14 +180,13 @@ export async function createServer(options: ServerOptions) {
     return { ok: true, displayName: checked.displayName };
   });
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
-    if (request.body?.mode === 'online') { const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled; }
     const limited = refuseIfLimited('creation', request, reply); if (limited) return limited;
     const ownerUserId = await ensureIdentity(request, reply);
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const result = await create(ownerUserId, request.body);
-      return reply.code(result.ok ? 201 : ['request-id-conflict', 'table-limit-reached'].includes(result.rejection.code) ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
+      return reply.code(result.ok ? 201 : result.rejection.code === 'request-id-conflict' ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
     } catch (error) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The creation commit outcome is unknown. Check owned sessions or explicitly retry this requestId to resolve it.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Creation could not be confirmed. No definitive domain rejection has been stored.' } });
@@ -212,7 +199,6 @@ export async function createServer(options: ServerOptions) {
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
   });
   app.get<{ Params: { token: string } }>('/api/join-links/:token', async (request, reply) => {
-    const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled;
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     try {
@@ -225,7 +211,6 @@ export async function createServer(options: ServerOptions) {
     }
   });
   app.post<{ Params: { token: string }; Body: JoinTableRequest }>('/api/join-links/:token/join', async (request, reply) => {
-    const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled;
     const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
@@ -241,7 +226,6 @@ export async function createServer(options: ServerOptions) {
     }
   });
   app.post<{ Params: { id: string }; Body: JoinTableRequest }>('/api/table-sessions/:id/rejoin-table', async (request, reply) => {
-    const disabled = refuseIfOnlinePlayDisabled(reply); if (disabled) return disabled;
     const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });

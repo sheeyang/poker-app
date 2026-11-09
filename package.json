@@ -9,7 +9,6 @@
   "scripts": {
     "dev": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter=./apps/* dev",
     "dev:trainer": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter @poker/server --filter @poker/web dev",
-    "dev:trainer:online": "node scripts/dev-trainer-online.mjs",
     "test": "node --import tsx scripts/with-database.ts test -- node node_modules/vitest/vitest.mjs run",
     "lint": "biome lint .",
     "typecheck": "tsc -p scripts/tsconfig.json && pnpm -r --if-present typecheck",

@@ -224,3 +224,45 @@ test('a Timeout Action is scored as the human’s own decision: automatic analys
     await expect.poll(async () => (await get<ScoreSummary>(t, 'summaries/' + summary.requestId)).status).toBe('complete');
   }
 });
+
+test('Practice Tables are never left: Leave Table is refused to the human, who can still stand up and sit out', async () => {
+  const { t, human } = await headsUp(null);
+  const left = await submit(t, 'leave-table', { participantId: human });
+  expect(left.status).toBe(403);
+  expect(await left.json()).toMatchObject({ ok: false, rejection: { code: 'unavailable-at-practice-tables' } });
+  await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
+  await command(t, 'set-sitting-out', { participantId: human, sittingOut: false });
+  await command(t, 'stand-up-participant', { participantId: human });
+  // Still refused when unseated, and the table remains the human's.
+  expect((await submit(t, 'leave-table', { participantId: human })).status).toBe(403);
+  expect((await read(t)).viewerParticipantId).toBe(human);
+});
+
+test('an untimed Practice Hand left unattended waits for the human, and no later Hand is dealt without Deal', async () => {
+  const { t, human } = await headsUp(null);
+  await command(t, 'start-hand');
+  const waiting = await read(t);
+  clock.advance(24 * 60 * 60_000);
+  expect(await read(t)).toMatchObject({ pokerRevision: waiting.pokerRevision, view: { state: { status: 'active-hand', actorId: human } } });
+  await server.close(); await startServer();
+  clock.advance(60 * 60_000);
+  expect(await read(t)).toMatchObject({ pokerRevision: waiting.pokerRevision, view: { state: { status: 'active-hand', actorId: human } } });
+});
+
+test('a timed Practice Hand with nobody connected finishes by Timeout Actions, and nothing more is dealt', async () => {
+  const { t, human } = await headsUp(15);
+  await command(t, 'start-hand'); clock.advance(1500);
+  const dealt = await read(t);
+  // Nobody is connected: only time passes, and the server plays each missed decision for the human.
+  for (let step = 0; step < 12 && (await read(t)).view.state.status === 'active-hand'; step++) {
+    const current = await read(t);
+    if (current.view.state.actorId === human) clock.advanceTo(current.schedule.actionWindow!.deadlineAt! + 1);
+    else await accepted(t, current.view.state.actorId!, { type: 'check' });
+    await expect.poll(async () => (await read(t)).pokerRevision).toBeGreaterThan(current.pokerRevision);
+  }
+  const done = await read(t);
+  expect(done.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
+  expect(done.view.history.length).toBe(dealt.view.history.length + 1);
+  clock.advance(60 * 60_000);
+  expect(await read(t)).toMatchObject({ pokerRevision: done.pokerRevision, view: { state: { status: 'completed-hand', handId: 'hand-1' } } });
+});

@@ -44,16 +44,15 @@ export function JoinTable({ token }: { token: string }) {
     if (data?.alreadyJoined && autoOpened.current !== token) { autoOpened.current = token; join.mutate(); }
   }, [data?.alreadyJoined, token, join.mutate]);
   // A replaced link and a removal are final: trying again changes nothing.
-  const dead = preview.error instanceof RequestFailure && ['invalid-join-link', 'guest-removed', 'online-play-disabled'].includes(preview.error.code);
+  const dead = preview.error instanceof RequestFailure && ['invalid-join-link', 'guest-removed'].includes(preview.error.code);
   const removed = preview.error instanceof RequestFailure && preview.error.code === 'guest-removed';
-  const offline = preview.error instanceof RequestFailure && preview.error.code === 'online-play-disabled';
   return <main id="main-table" className="join-page">
     <div className="join-card">
       <span className="brand-mark"><Icon name="spade" size={23} /></span>
       {(identity.isPending || preview.isPending && identity.isSuccess) && <p className="muted" role="status">Opening your invitation…</p>}
       {identity.isError && <div className="notice-error" role="alert"><p>Couldn’t connect to the poker server.</p><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
       {preview.isError && (dead
-        ? <><h1>{removed ? 'You can’t join this table.' : offline ? 'Online tables are in beta and turned off.' : 'This link doesn’t work.'}</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/online' })}>Go to Online tables</button></>
+        ? <><h1>{removed ? 'You can’t join this table.' : 'This link doesn’t work.'}</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/online' })}>Go to Online tables</button></>
         : <div className="notice-error" role="alert"><p>{preview.error instanceof RequestFailure ? preview.error.message : 'Couldn’t open this table.'}</p><button onClick={() => void preview.refetch()}>Try again</button></div>)}
       {data?.alreadyJoined ? <div className="dialog-stack"><p role="status" className="muted">Opening your table…</p>{failure && <div className="notice-error" role="alert"><p>{failure}</p><button className="primary" disabled={join.isPending} onClick={() => join.mutate()}>Try opening again</button></div>}</div> : data && <>
         <h1>{data.alreadyJoined ? 'You’re already at this table.' : returning ? `Return to ${data.ownerName}’s table` : `Join ${data.ownerName}’s table`}</h1>

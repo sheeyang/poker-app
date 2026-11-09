@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import WebSocket from 'ws';
-import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
@@ -113,7 +112,7 @@ test('a Stand Up asked for during a Hand cashes out after it, keeps every chip, 
 test('a request whose Hand ended while the server was down is applied once when the server starts', async () => {
   const { t, human } = await headsUp();
   await command(t, 'start-hand'); clock.advance(1500);
-  await command(t, 'leave-table', { participantId: human });
+  await command(t, 'stand-up-participant', { participantId: human });
   await accepted(t, human, { type: 'fold' });
   await server.close();
   // The outage outlasts the payout phase; no timer of the closed server fires.
@@ -121,8 +120,8 @@ test('a request whose Hand ended while the server was down is applied once when 
   await startServer();
   await expect.poll(async () => (await controllers.readPersistedSession(t.id))!.pendingChanges).toEqual([]);
   const session = (await controllers.readPersistedSession(t.id))!;
-  expect(session.bindings.find(binding => binding.participantId === human)).toMatchObject({ membership: 'left' });
-  expect(session.pokerRecord.commands.slice(-2).map(command => command.type)).toEqual(['stand-up-participant', 'leave-table']);
+  expect(session.bindings.find(binding => binding.participantId === human)).toMatchObject({ membership: 'joined' });
+  expect(session.pokerRecord.commands.slice(-1).map(command => command.type)).toEqual(['stand-up-participant']);
   await server.close(); await startServer();
   expect((await controllers.readPersistedSession(t.id))!.pokerRecord.commands).toHaveLength(session.pokerRecord.commands.length);
 });
@@ -131,12 +130,12 @@ test('a stronger request replaces a weaker pending one, and a weaker one changes
   const { t, human } = await headsUp();
   await command(t, 'start-hand'); clock.advance(1500);
   const sitOut = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
-  const leave = await command(t, 'leave-table', { participantId: human });
-  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'leave-table' }]);
+  const standUp = await command(t, 'stand-up-participant', { participantId: human });
+  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
   const again = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
-  expect(leave.sessionRevision).toBe(sitOut.sessionRevision + 1);
-  expect(again.sessionRevision).toBe(leave.sessionRevision);
-  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'leave-table' }]);
+  expect(standUp.sessionRevision).toBe(sitOut.sessionRevision + 1);
+  expect(again.sessionRevision).toBe(standUp.sessionRevision);
+  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
 });
 
 test('top-ups and seat moves are not deferred: they wait for the Hand, which lasts until its payout phase ends', async () => {
@@ -154,7 +153,7 @@ test('top-ups and seat moves are not deferred: they wait for the Hand, which las
   expect(participant(await read(t), human)).toMatchObject({ seat: 3 });
 });
 
-test('between Hands the same requests apply at once, and Leave Table stands the Participant up in the same commit', async () => {
+test('between Hands the same requests apply at once, and Stand Up changes the Seat in one revision step', async () => {
   const { t, human } = await headsUp();
   await foldedHand(t, human);
   clock.advance(2000);
@@ -163,60 +162,11 @@ test('between Hands the same requests apply at once, and Leave Table stands the 
   expect(sat).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: revision + 1, sessionRevision: expect.any(Number) });
   expect(participant(await read(t), human).sittingOut).toBe(true);
   expect((await read(t)).pendingChanges).toEqual([]);
-  const left = await command(t, 'leave-table', { participantId: human });
-  // One request, one revision step, two CashGame commands.
-  expect(left).toMatchObject({ ok: true, pokerRevision: revision + 2 });
-  expect(left).not.toHaveProperty('afterHand');
-  expect((await controllers.readPersistedSession(t.id))!.pokerRecord.commands.slice(-2).map(command => command.type)).toEqual(['stand-up-participant', 'leave-table']);
-  expect((await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).status).toBe(404);
-});
-
-test('a Practice owner who leaves during a Hand is stood up after it, keeps the table in their saved list, and returns to the same Participant and history without a link', async () => {
-  const { t, human, bot } = await headsUp();
-  const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: t.cookie } });
-  const messages: ServerLiveMessage[] = [];
-  socket.on('message', data => messages.push(JSON.parse(data.toString())));
-  socket.on('open', () => socket.send(JSON.stringify({ type: 'subscribe-table', requestId: randomUUID(), tableSessionId: t.id })));
-  try {
-    await command(t, 'start-hand'); clock.advance(1500);
-    expect(await command(t, 'leave-table', { participantId: human })).toMatchObject({ ok: true, afterHand: true });
-    await accepted(t, human, { type: 'fold' });
-    const finished = await read(t);
-    expect(finished.pendingChanges).toEqual([{ participantId: human, change: 'leave-table' }]);
-    // Until the payout phase ends they are still at the table.
-    expect((await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).status).toBe(200);
-    clock.advance(2000);
-    await expect.poll(async () => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).status).toBe(404);
-    // Their client is told once, so it leaves the table instead of showing a view it can no longer refresh.
-    await expect.poll(() => messages.filter(message => message.type === 'table-membership-ended')).toEqual([{ type: 'table-membership-ended', tableSessionId: t.id, reason: 'left' }]);
-    // The table stays in the saved list of its owner, marked as left; the Bot's seat and the freed Seat stay at the table.
-    expect(await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice', left: true }] });
-    const strangerCookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, strangerCookie, 'Stranger');
-    const refusedStranger = await fetch(base + '/api/table-sessions/' + t.id + '/rejoin-table', { method: 'POST', headers: { 'content-type': 'application/json', cookie: strangerCookie }, body: JSON.stringify({ requestId: randomUUID() }) });
-    expect(refusedStranger.status).toBe(404);
-    const rejoined = await fetch(base + '/api/table-sessions/' + t.id + '/rejoin-table', { method: 'POST', headers: { 'content-type': 'application/json', cookie: t.cookie }, body: JSON.stringify({ requestId: randomUUID() }) });
-    expect(rejoined.status).toBe(200);
-    expect(await rejoined.json()).toMatchObject({ ok: true, participantId: human });
-    const back = await read(t);
-    expect(back).toMatchObject({ viewerParticipantId: human, pendingChanges: [], bindings: [{ participantId: human, name: 'You' }, { participantId: bot }] });
-    expect(participant(back, human)).toMatchObject({ seat: null, stack: 0 });
-    expect(back.view.history).toEqual(finished.view.history);
-    expect(back.view.history).toHaveLength(1);
-    const saved = await (await fetch(base + '/api/table-sessions', { headers: { cookie: t.cookie } })).json();
-    expect(saved).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
-    expect(saved.tables[0]).not.toHaveProperty('left');
-  } finally { socket.terminate(); }
-});
-
-test('a Practice human who never sat down can leave and return, and naming a Bot to leave is refused', async () => {
-  const t = await table(2); const [human, bot] = t.ids as [string, string];
-  const refused = await submit(t, 'leave-table', { participantId: bot });
-  expect({ status: refused.status, code: (await refused.json()).rejection?.code }).toEqual({ status: 400, code: 'participant-not-human' });
-  const revision = (await read(t)).pokerRevision;
-  expect(await command(t, 'leave-table', { participantId: human })).toMatchObject({ ok: true, pokerRevision: revision });
-  expect((await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).status).toBe(404);
-  const rejoined = await fetch(base + '/api/table-sessions/' + t.id + '/rejoin-table', { method: 'POST', headers: { 'content-type': 'application/json', cookie: t.cookie }, body: JSON.stringify({ requestId: randomUUID() }) });
-  expect(await rejoined.json()).toMatchObject({ ok: true, participantId: human });
+  const stood = await command(t, 'stand-up-participant', { participantId: human });
+  expect(stood).toMatchObject({ ok: true, pokerRevision: revision + 2 });
+  expect(stood).not.toHaveProperty('afterHand');
+  expect(participant(await read(t), human)).toMatchObject({ seat: null });
+  expect((await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).status).toBe(200);
 });
 
 test('Deal received before the table has woken for the end of the payout phase still finds the Hand’s requests applied', async () => {
