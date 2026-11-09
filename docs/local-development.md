@@ -78,9 +78,6 @@ Use Vite's `--port` option for another frontend port. Concurrent checkouts also
 need distinct `POKER_POSTGRES_PORT` values when using managed development
 databases.
 
-Online Tables are in beta and off by default. To enable them, start the server with
-`POKER_ONLINE_PLAY=true`; without it
-the web client offers only Practice Tables and Join Links are refused.
 
 Admin Mode defaults on locally. Set `POKER_ADMIN_MODE=false` before starting the
 server to disable completed-Hand hidden-information reveal.
