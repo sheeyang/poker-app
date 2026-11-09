@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, retainNewestTable, useTableSynchronization } from '@poker/client';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { api, RequestFailure, retainNewestTable } from '@poker/client';
+import type { TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
-import { SessionBrowser } from './session-browser.js';
-import { useCommand, useSession } from './session.js';
+import { usePageTitle, useShell } from './app-shell.js';
+import { useSession } from './session.js';
+import { listPath, tableAddress } from './table-address.js';
 import { usePracticeSetup } from './practice-setup.js';
 import { PokerTable } from './poker-table.js';
 import { ActionTray, CommandFeedback } from './controls.js';
@@ -21,33 +24,34 @@ import { TableSkeleton } from './loading-skeleton.js';
 import { actionLabel, chips, modeLabel, playerName } from './table-model.js';
 import { usePresentation } from './use-presentation.js';
 
-export function Trainer() {
-  const selected = useSession(s => s.selectedId);
+/**
+ * A table's own page, `/practice/<id>` or `/online/<id>`: the table named by the address, shown to its Participants.
+ * Anyone else is told it doesn't exist; a Participant who opened it under the other mode is moved to its one address.
+ */
+export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSessionId: string }) {
+  const selected = tableSessionId;
   const analysisOpen = useSession(s => s.analysisOpen), animations = useSession(s => s.animations);
-  const [browse, setBrowse] = useState(false), [settings, setSettings] = useState<false | 'all'>(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-  const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity });
-  const table = useQuery({ queryKey: ['table-session', selected], queryFn: ({ signal }) => api.readSession(selected!, signal), enabled: identity.isSuccess && !!selected, structuralSharing: retainNewestTable });
+  const [settings, setSettings] = useState<false | 'all'>(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
+  const { identity, command, live, consumeLive } = useShell();
+  const navigate = useNavigate();
+  const read = useQuery({ queryKey: ['table-session', selected], queryFn: ({ signal }) => api.readSession(selected, signal), enabled: identity.isSuccess, structuralSharing: retainNewestTable });
+  const missing = read.error instanceof RequestFailure && read.error.code === 'not-found';
+  const outcome = missing ? tableAddress(mode, selected, 'not-found') : read.data ? tableAddress(mode, selected, read.data) : undefined;
+  const correctedTo = outcome?.show === 'corrected' ? outcome.to : undefined;
+  useEffect(() => { if (correctedTo) void navigate({ href: correctedTo, replace: true }); }, [correctedTo, navigate]);
+  // Only a table shown at its own address is on screen.
+  const table = { ...read, data: outcome?.show === 'table' ? read.data : undefined, error: missing ? null : read.error };
   const analysis = useDecisionAnalysis(table.data), summary = useHandSummary(table.data), sessionSummary = useTableSessionSummary(table.data);
-  const live = useTableSynchronization(selected, identity.isSuccess, {
-    // Left after the Hand: the server says so when it happens, and this client returns to the saved tables.
-    onMembershipEnded: ended => {
-      useSession.getState().select(null);
-      queryClient.removeQueries({ queryKey: ['table-session', ended.tableSessionId] });
-      void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      setNotice(ended.reason === 'left' ? 'You left the table.' : 'The Table Owner removed you from that table.');
-    },
+  useEffect(() => consumeLive({
     onReady: lifecycle => { analysis.consumers.onReady?.(lifecycle); summary.consumers.onReady?.(lifecycle); sessionSummary.consumers.onReady?.(lifecycle); },
     onAnalysisUpdate: (update, lifecycle) => { analysis.consumers.onAnalysisUpdate?.(update, lifecycle); summary.consumers.onAnalysisUpdate?.(update, lifecycle); sessionSummary.consumers.onAnalysisUpdate?.(update, lifecycle); },
-  });
+  }));
+  useEffect(() => () => consumeLive(null), [consumeLive]);
+  useEffect(() => { window.scrollTo({ top: 0 }); }, []);
+  usePageTitle(missing ? { page: 'missing-table' } : table.data ? { page: 'table', ...table.data.view.configuration } : undefined);
   useEffect(() => { const generation = live.userChannel?.generation ?? null; analysis.connectionChanged(generation); summary.connectionChanged(generation); sessionSummary.connectionChanged(generation); }, [live.userChannel?.generation, analysis.connectionChanged, summary.connectionChanged, sessionSummary.connectionChanged]);
-  const command = useCommand();
   const setup = usePracticeSetup(table.data, command);
   const preparing = setup?.tableId === selected && !!setup;
-  const lastSelected = useRef(selected);
-  useEffect(() => { if (lastSelected.current !== selected) { setBrowse(false); setSettings(false); setJoinLinkOpen(false); useSession.setState({ analysisOpen: true }); window.scrollTo({ top: 0 }); lastSelected.current = selected; } }, [selected]);
-  useEffect(() => { if (browse) window.scrollTo({ top: 0 }); }, [browse]);
   const runtime = live.runtimeStatus ?? table.data?.runtimeStatus;
   // Runtime status and who is connected are transient: the live connection's latest word wins over the cached view.
   const connected = live.connectedParticipantIds;
@@ -80,17 +84,18 @@ export function Trainer() {
     useSession.setState({ analysisOpen: false });
     requestAnimationFrame(() => document.getElementById('play-controls')?.focus({ preventScroll: true }));
   }
-  return <div className={`app-shell${selected && !browse ? ' table-active' : ''}`}>
-    <a className="skip-link" href="#main-table">Skip to table</a>
-    <header className="app-header"><button className="brand" onClick={() => setBrowse(true)} aria-label="Poker Trainer · tables"><span className="brand-mark"><Icon name="spade" size={23} /></span><strong>Poker<span className="brand-divider" /> <span>Trainer</span></strong></button><nav aria-label="Table navigation"><button className={browse || !selected ? 'nav-active' : ''} onClick={() => setBrowse(true)}><Icon name="tables" size={18} /><span>Tables</span></button>{selected && <button onClick={() => setBrowse(false)} className={!browse ? 'nav-active' : ''}><Icon name="cards" size={18} /><span>Your table</span></button>}</nav><span className="identity-status">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span></header>
-    {!(selected && !browse) && <CommandFeedback command={command} />}
-    {identity.isError && !(selected && !browse) && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>Your saved table is still selected.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
-    {notice && !selected && <div className="global-notice" role="status"><div><strong>{notice}</strong></div><button onClick={() => setNotice(null)}>Dismiss</button></div>}
-    {!selected || browse ? <SessionBrowser command={command} ready={identity.isSuccess} connecting={identity.isPending} close={selected ? () => setBrowse(false) : undefined} /> : <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
+  if (missing) return <main id="main-table" className="address-missing">
+    <Icon name="cards" size={34} />
+    <h1>This table doesn’t exist.</h1>
+    <p>Check the address you were given. A table opens only for the people at it.</p>
+    <Link className="primary address-missing-link" to={listPath(mode)}>Go to {mode === 'online' ? 'Online' : 'Practice'} tables <Icon name="arrow" size={18} /></Link>
+  </main>;
+  return <>
+    <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
       <div className="play-area">
         <div className="table-notices">
           <CommandFeedback command={command} />
-          {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>Your saved table is still selected.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
+          {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>This table is still saved.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
           {current && <>
             {live.connection !== 'connected' && <div className="connection-notice" role="status"><span>{live.connection === 'reconnecting' ? 'Reconnecting… Your confirmed table is still visible.' : 'Connecting live updates…'}</span><button onClick={() => void table.refetch()}>Refresh table</button></div>}
             {runtime?.phase === 'recovering' && <div className="notice-error" role="status"><strong>Confirming the last request.</strong><p>{runtime.message ?? 'This table is paused until its outcome is known.'}</p><button onClick={() => void table.refetch()}>Check table status</button></div>}
@@ -103,7 +108,7 @@ export function Trainer() {
         </div>
         <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}{online && !owner && ownerName ? ` · ${ownerName}’s table` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{current?.joinToken && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}<button className="quiet-button" aria-expanded={analysisOpen} aria-controls="analysis-panel" onClick={() => analysisOpen ? closeAnalysis() : review()}><Icon name="chart" size={18} /><span>{analysisOpen ? 'Return to play' : handDecisions.length ? 'Review decisions' : 'Analysis'}</span></button><button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings('all')}><Icon name="settings" /></button></div></div>
         {!current && !table.error && !identity.isError && <TableSkeleton />}
-        {table.error && <div className="table-error notice-error" role="alert"><h2>Couldn’t open this table.</h2><p>{table.error.message}</p><div className="button-row"><button onClick={() => void table.refetch()}>Retry</button><button onClick={() => setBrowse(true)}>Choose another table</button></div></div>}
+        {table.error && <div className="table-error notice-error" role="alert"><h2>Couldn’t open this table.</h2><p>{table.error.message}</p><div className="button-row"><button onClick={() => void table.refetch()}>Retry</button><Link className="button-link" to={listPath(mode)}>Choose another table</Link></div></div>}
         {current && shown && presentation && <>
           <div className="hand-status">{!shown.view.state.handId && online
             // A Hand the viewer was not dealt into reaches them without its identity: they only see that one ended.
@@ -124,9 +129,9 @@ export function Trainer() {
       </div>
       {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} />}
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
-    </main>}
+    </main>
     {joinLinkOpen && current?.joinToken && <JoinLinkDialog table={current} command={command} close={() => setJoinLinkOpen(false)} />}
     {settings && current && <TableSettings table={current} command={command} handOpen={handOpen} close={() => setSettings(false)} />}
     {interactions.overlays}
-  </div>;
+  </>;
 }

@@ -23,7 +23,6 @@ describe('browser storage keeps only preferences', () => {
     const session = await loadSession();
     session.getState().setPending({ kind: 'create', body: { requestId: 'r1', mode: 'online' } as never });
     session.getState().setSetup({ requestId: 'r1', tableId: 't' });
-    session.getState().select('t');
     session.getState().setAnimations(false);
     session.getState().toggleAnalysis();
     expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations']);
@@ -44,7 +43,9 @@ describe('browser storage keeps only preferences', () => {
       selectedId: 't', pending: { kind: 'create', body: { requestId: 'r1' } }, setup: { requestId: 'r1', tableId: 't' }, analysisOpen: false, animations: false,
     } }));
     const session = await loadSession();
-    expect(session.getState()).toMatchObject({ pending: null, setup: null, selectedId: null, analysisOpen: false, animations: false });
+    expect(session.getState()).toMatchObject({ pending: null, setup: null, analysisOpen: false, animations: false });
+    // The table on screen comes from the address: nothing is selected in storage or in memory.
+    expect(session.getState()).not.toHaveProperty('selectedId');
     expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations']);
   });
 });
