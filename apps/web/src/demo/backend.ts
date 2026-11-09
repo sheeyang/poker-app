@@ -32,7 +32,6 @@ export function installDemoBackend(scenario: DemoScenario): () => void {
   async function answer(method: string, path: string, body: Record<string, unknown>, signal?: AbortSignal | null): Promise<Response> {
     if (behavior === 'offline') throw new TypeError('Failed to fetch');
     if (method === 'GET' && path === '/identity') return json({ ok: true, displayName: 'You' });
-    if (method === 'GET' && path === '/features') return json({ ok: true, onlinePlay: true });
     if (method === 'GET' && path === '/table-sessions') return json({ ok: true, tables: scenario.savedTables });
     const table = /^\/table-sessions\/([^/]+)(?:\/(.*))?$/.exec(path);
     if (table && table[1] === session.tableSessionId) {

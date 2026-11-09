@@ -13,16 +13,13 @@ type Environment = Readonly<Record<string, string | undefined>>;
  * - `POKER_RATE_LIMITS`: `true` or `false`. Per-address limits on table creation, joining and Join Link
  *   replacement. Unset: on in production and off elsewhere, so that development on one machine is not limited.
  * - `POKER_ADMIN_MODE`: `false` disables completed-Hand inspection.
- * - `POKER_ONLINE_PLAY`: `true` enables Online Tables, which are in beta, letting Guests create and join them. Unset or anything else: off, and only
- *   Practice Tables are offered.
  */
-export function hostingOptionsFromEnvironment(environment: Environment): Pick<HostedServerOptions, 'secureCookies' | 'adminMode' | 'onlinePlay' | 'singleAuthority' | 'trustedProxies' | 'rateLimits'> {
+export function hostingOptionsFromEnvironment(environment: Environment): Pick<HostedServerOptions, 'secureCookies' | 'adminMode' | 'singleAuthority' | 'trustedProxies' | 'rateLimits'> {
   const production = environment.NODE_ENV === 'production';
   const trustedProxies = (environment.TRUSTED_PROXIES ?? '').split(',').map(entry => entry.trim()).filter(Boolean);
   return {
     secureCookies: production,
     adminMode: environment.POKER_ADMIN_MODE !== 'false',
-    onlinePlay: environment.POKER_ONLINE_PLAY === 'true',
     singleAuthority: production || environment.SINGLE_SERVER_GUARD === 'true',
     ...(trustedProxies.length ? { trustedProxies } : {}),
     ...((environment.POKER_RATE_LIMITS ?? String(production)) === 'true' ? { rateLimits: defaultRateLimits } : {}),

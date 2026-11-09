@@ -1,5 +1,5 @@
 // Records Demo Table fixtures from a running server: node scripts/capture-demo-fixtures.mjs [http://127.0.0.1:3190]
-// The server must have online play on (POKER_ONLINE_PLAY=true). Each fixture is the participant-safe view a real
+// Each fixture is the participant-safe view a real
 // Guest received, plus the analysis and summary resources for it, so the Demo Tables never hand-write contract data.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
