@@ -55,13 +55,13 @@ export async function membership(db: Database, tableSessionId: string, userId: s
   return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId, mode: rows[0].mode ?? legacyTableMode };
 }
 /**
- * Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left, with the Guest's
- * Participant at each. An owned table the Guest has left is marked `left`: its Join Link returns them. The index has no
+ * Every table the Guest has joined, with the Guest's Participant at each, however their membership ended (Leave Table
+ * or Removal, which are the same). A table they have left is marked `left`: its Join Link returns them. The index has no
  * seating, so the caller adds each table's public stakes and play state.
  */
 export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left'> & { participantId: string })[]> {
   const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, participantId: tableMemberships.participantId, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
-    .where(and(eq(tableMemberships.userId, userId), or(eq(tableMemberships.status, 'joined'), eq(tableSessions.ownerUserId, userId))));
+    .where(eq(tableMemberships.userId, userId));
   return rows.map(row => ({ tableSessionId: row.tableSessionId, participantId: row.participantId, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
 }

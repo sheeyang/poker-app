@@ -61,7 +61,7 @@ async function listen(cookie: string, tableSessionId: string) {
   return { messages, close: () => socket.close() };
 }
 
-test('between Hands, Removal stands the Guest up at once and ends their membership, and the Join Link does not let them back', async () => {
+test('between Hands, Removal stands the Guest up at once and leaves them as a Guest who has left, and the Join Link lets them back as the same Participant', async () => {
   const { ann, annId, id, view, join, preview, as, guests } = await onlineTable('Ben', 'Cy');
   const { cookie: ben, participantId: benId } = guests.Ben!, cy = guests.Cy!;
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 1 })).status).toBe(200);
@@ -78,19 +78,18 @@ test('between Hands, Removal stands the Guest up at once and ends their membersh
   expect(participant(table, benId)).toMatchObject({ seat: null, stack: 0 });
   expect(table.bindings.find(binding => binding.participantId === benId)).toMatchObject({ name: 'Ben' });
 
-  // Ben is told once, then has no table: it leaves his saved list and every route refuses him as for a missing table.
-  await expect.poll(() => bensConnection.messages.filter(message => message.type === 'table-membership-ended')).toEqual([{ type: 'table-membership-ended', tableSessionId: id, reason: 'removed' }]);
+  // Ben is told once, then has no table: his saved list keeps it as one he left, and every route refuses him as for a missing table.
+  await expect.poll(() => bensConnection.messages.filter(message => message.type === 'table-membership-ended')).toEqual([{ type: 'table-membership-ended', tableSessionId: id }]);
   bensConnection.close();
   expect((await get('/api/table-sessions/' + id, ben)).status).toBe(404);
-  expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [] });
+  expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ tableSessionId: id, left: true }]);
   expect(await rejection(await as(ben, 'seat-participant', { participantId: benId, seat: 3, expectedPokerRevision: 0 }))).toEqual({ status: 404, code: 'not-found' });
 
-  // The table's Join Link does not admit him again.
-  expect(await rejection(await join(ben))).toEqual({ status: 403, code: 'guest-removed' });
-  expect(await rejection(await preview(ben))).toEqual({ status: 403, code: 'guest-removed' });
-  // Still not joined after that, and the place he held is free for someone else.
-  expect((await get('/api/table-sessions/' + id, ben)).status).toBe(404);
-  expect(await (await preview(await guest('Dee'))).json()).toMatchObject({ ok: true, placesTaken: 2 });
+  // Removal did not bar him: the Join Link shows him as returning, and joining again gives him his own Participant back.
+  expect(await (await preview(ben)).json()).toMatchObject({ ok: true, returningAs: 'Ben', alreadyJoined: false, placesTaken: 2 });
+  expect(await (await join(ben)).json()).toMatchObject({ ok: true, participantId: benId });
+  expect((await get('/api/table-sessions/' + id, ben)).status).toBe(200);
+  expect(participant(await view(ann), benId)).toMatchObject({ seat: null, stack: 0 });
   expect(annId).toBe(table.ownerParticipantId);
 });
 
@@ -153,12 +152,12 @@ test('during a Hand, Removal is an After-Hand Request that outranks the Guest’
   // He cashed out the stack he finished with, so no chip is lost.
   expect(participant(after, annId).stack + participant(decided, benId).stack).toBe(stacks.reduce((sum, stack) => sum + stack, 0));
   expect(after.pokerRevision).toBe(decided.pokerRevision + 1);
-  await expect.poll(() => bensConnection.messages.filter(message => message.type === 'table-membership-ended')).toEqual([{ type: 'table-membership-ended', tableSessionId: id, reason: 'removed' }]);
+  await expect.poll(() => bensConnection.messages.filter(message => message.type === 'table-membership-ended')).toEqual([{ type: 'table-membership-ended', tableSessionId: id }]);
   bensConnection.close();
-  expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [] });
-  // He is removed, not merely gone: his earlier request to leave did not become a way back.
-  expect(await rejection(await join(ben))).toEqual({ status: 403, code: 'guest-removed' });
-  expect(await rejection(await preview(ben))).toEqual({ status: 403, code: 'guest-removed' });
+  // His table stays in his saved list, as one he has left, and the Join Link takes him back as the same Participant.
+  expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ tableSessionId: id, left: true }]);
+  expect(await (await join(ben)).json()).toMatchObject({ ok: true, participantId: benId });
+  expect((await get('/api/table-sessions/' + id, ben)).status).toBe(200);
 });
 
 test('during a Hand, Removal of a Guest without a Seat also waits for the Hand', async () => {
@@ -173,7 +172,7 @@ test('during a Hand, Removal of a Guest without a Seat also waits for the Hand',
   expect(await (await as(actor === annId ? ann : ben, 'act', { participantId: actor, action: { type: 'fold' } })).json()).toMatchObject({ ok: true });
   clock.advance(2000);
   await expect.poll(async () => (await get('/api/table-sessions/' + id, cy)).status).toBe(404);
-  expect(await rejection(await join(cy))).toEqual({ status: 403, code: 'guest-removed' });
+  expect(await (await join(cy)).json()).toMatchObject({ ok: true, participantId: cyId });
 });
 
 test('only the owner can remove a human, the owner cannot be removed, and only a joined human can be', async () => {

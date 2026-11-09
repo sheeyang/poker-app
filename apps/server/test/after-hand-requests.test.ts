@@ -249,7 +249,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   const stacks = decided.view.state.participants.map(p => p.stack);
   clock.advance(2000);
   await expect.poll(async () => (await get('/api/table-sessions/' + id, ben)).status).toBe(404);
-  expect(await (await get('/api/table-sessions', ben)).json()).toEqual({ tables: [] });
+  expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ left: true }]);
   expect(await placesTaken()).toBe(1);
   const after = await view(ann);
   expect(after.pendingChanges).toEqual([]);
