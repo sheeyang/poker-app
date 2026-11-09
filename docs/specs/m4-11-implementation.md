@@ -8,7 +8,7 @@ The Table Owner of an Online Table can replace its Join Link and remove a disrup
 
 **Rate limits and client addresses.** Table creation, joining (including the owner returning to a table they left) and Join Link replacement are limited per client address by a sliding window on the server clock: 10, 30 and 10 requests per 10 minutes. A refusal is HTTP 429 `rate-limited` with `Retry-After` and a message saying how long to wait. Client addresses come from `X-Forwarded-For` only on a connection from the proxies named in `TRUSTED_PROXIES`. The production stack gives Caddy a fixed address on a pinned Compose network and trusts that address alone.
 
-**Tables per Guest.** Creation answers 409 `table-limit-reached` while the Guest owns 10 tables that each have a seated human.
+**Tables per Guest.** Superseded by spec #49: there is no per-Guest table cap.
 
 Server tests are in `apps/server/test/join-link-removal.test.ts` (link replacement; Removal between Hands, during a Hand across a server restart in the payout phase, of an unseated Guest, the rules about who can be removed, and every way of trying to rejoin) and `apps/server/test/public-safeguards.test.ts` (each rate limit with a manual clock, the refusal text and `Retry-After`, forged and trusted forwarding headers, and the table limit including restart, a Guest's own counting and an idempotent retry). `apps/server/test/environment.test.ts` covers the environment configuration and `scripts/test/compose.test.ts` checks that the Compose file trusts Caddy's address and publishes nothing else. Online Tables cannot deal until Automatic Dealing exists, so the Hand-time tests use a stored Hand (`fixtures/online.ts`) as the earlier Online tests do. Web logic is in `apps/web/test/removal.test.ts`.
 

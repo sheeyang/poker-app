@@ -133,42 +133,15 @@ async function seatedPracticeTable(base: string, cookie: string, requestId = ran
   return { id, human, requestId };
 }
 
-test('a Guest cannot create a table while they own 10 tables that each have a seated human, and nothing else counts', async () => {
-  await withServer({}, async harness => {
+test('there is no per-Guest table cap: a Guest with a seated human at every table creates more than 10', async () => {
+  await withServer({ rateLimits: { creation: { limit: 100, windowMs: minute } } }, async harness => {
     const ann = await guest(harness.base, 'Ann');
-    const tables = [];
-    for (let count = 0; count < 9; count++) tables.push(await seatedPracticeTable(harness.base, ann));
-    // An Online Table counts once any human is seated at it, the owner or not; before that it does not.
-    const online = await (await create(harness.base, ann, { mode: 'online' })).json();
-    const onlineId = online.tableSessionId as string;
-    const view = async (cookie: string): Promise<ObservableTableSession> => (await call(harness.base, 'GET', '/api/table-sessions/' + onlineId, cookie)).json();
-    const ben = await guest(harness.base, 'Ben');
-    const benId = (await (await call(harness.base, 'POST', '/api/join-links/' + (await view(ann)).joinToken + '/join', ben, { requestId: randomUUID() })).json()).participantId as string;
-    // Nine tables with a seated human, a tenth with only a watcher, and an eleventh is allowed.
-    expect((await create(harness.base, ann)).status).toBe(201);
-    const seatBen = await call(harness.base, 'POST', '/api/table-sessions/' + onlineId + '/seat-participant', ben, { requestId: randomUUID(), expectedPokerRevision: (await view(ben)).pokerRevision, participantId: benId, seat: 2 });
-    expect(seatBen.status).toBe(200);
-
-    expect(await rejection(await create(harness.base, ann))).toEqual({ status: 409, code: 'table-limit-reached', message: expect.stringContaining('10 tables') });
-    // The limit is the Guest's own: Ben owns nothing and can still create. The limit survives a restart.
-    expect((await create(harness.base, ben)).status).toBe(201);
-    await harness.restart();
-    expect((await rejection(await create(harness.base, ann))).code).toBe('table-limit-reached');
-
-    // A refusal is not remembered: the same request goes through once a place is free.
-    const requestId = randomUUID();
-    expect((await rejection(await create(harness.base, ann, { requestId }))).code).toBe('table-limit-reached');
-    const stand = await call(harness.base, 'POST', '/api/table-sessions/' + tables[0]!.id + '/stand-up-participant', ann, { requestId: randomUUID(), expectedPokerRevision: 1, participantId: tables[0]!.human });
-    expect(stand.status).toBe(200);
-    const created = await create(harness.base, ann, { requestId });
+    for (let count = 0; count < 12; count++) await seatedPracticeTable(harness.base, ann);
+    const created = await create(harness.base, ann);
     expect(created.status).toBe(201);
-    const fresh = await created.json();
-    // Seating at the new table puts the Guest at the limit again, and the same request still answers with that table.
-    const seat = await call(harness.base, 'POST', '/api/table-sessions/' + fresh.tableSessionId + '/seat-participant', ann, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: fresh.bindings[0].participantId, seat: 1 });
-    expect(seat.status).toBe(200);
-    expect((await rejection(await create(harness.base, ann))).code).toBe('table-limit-reached');
-    const retried = await create(harness.base, ann, { requestId });
-    expect(retried.status).toBe(201);
-    expect(await retried.json()).toEqual(fresh);
+    // Nothing is remembered about a limit across a restart either.
+    await harness.restart();
+    expect((await create(harness.base, ann)).status).toBe(201);
+    expect(((await (await call(harness.base, 'GET', '/api/table-sessions', ann)).json()).tables as unknown[]).length).toBe(14);
   });
 });

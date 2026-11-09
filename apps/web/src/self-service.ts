@@ -52,7 +52,8 @@ export function selfService(table: ObservableTableSession, handOpen: boolean): S
     resume: betweenHands(seated && me.sittingOut),
     standUp: waits(seated && asks('stand-up')),
     // Someone without a Seat has nothing at stake, so they leave at once even mid-Hand.
-    leaveTable: !asks('leave-table') ? 'unavailable' : seated && handOpen ? 'after-hand' : 'now',
+    // A Practice Table is never left.
+    leaveTable: table.mode === 'practice' || !asks('leave-table') ? 'unavailable' : seated && handOpen ? 'after-hand' : 'now',
     topUp: betweenHands(seated),
     moveSeat: betweenHands(seated && table.view.configuration.allowSeatChanges),
   };
