@@ -120,6 +120,18 @@ same transaction as every aggregate write that changes a membership (see
 version-1 records. It serves the saved-tables list and the authorization of
 tables that are not yet loaded.
 
+A table is in memory only while something needs it
+([ADR-0035](adr/0035-close-idle-online-tables-and-load-tables-only-while-needed.md)):
+a live subscription to it, a request being handled at it, or its scheduled work (an
+Action Deadline, a Presentation Phase, a Next-Hand Countdown, a Bot decision, or
+After-Hand Requests to apply). One minute after the last of these ends, it unloads;
+anything that needs it within that minute keeps it. When next needed, it loads again
+from its record ([`table-registry.ts`](../apps/server/src/table-registry.ts)). A
+request from a Guest who is not joined at a table is answered from the membership
+index and never loads it; joining an Online Table, and its owner returning, do. A
+Join Link preview reads the stored table without loading it. Startup still loads
+every table and runs its schedule; one without scheduled work unloads a minute later.
+
 Creation rejects hidden or unknown configuration fields and supplied
 ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
 Participants, occupied/invalid seats, duplicate seating, and invalid buy-ins.
