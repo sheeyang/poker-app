@@ -9,12 +9,11 @@ export const requestIdConflict = () => reject('request-id-conflict', 'This reque
 export const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
 export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options.');
 export const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
-export const removedGuest = () => reject('guest-removed', 'The Table Owner removed you from this table, so you cannot join it again.');
 export const tableFull = (advice: string) => reject('table-full', `This table already has ${onlineTableCapacity} Participants, Bots included. ${advice}`);
 export const liveAnalysisDisallowed = () => reject('live-analysis-disallowed', 'This table did not allow Live Analysis when this decision began. Your decision is analyzed and scored after you act.');
 
 /** Rejections that refuse who is asking: 403. */
-const forbidden: ReadonlySet<string> = new Set(['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'guest-removed', 'live-analysis-disallowed']);
+const forbidden: ReadonlySet<string> = new Set(['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'live-analysis-disallowed']);
 /** Rejections that a fresh view or a new request resolves, because the table or the request ID moved on: 409. */
 const conflicts: ReadonlySet<string> = new Set(['request-id-conflict', 'stale-poker-revision', 'stale-session-revision', 'action-window-not-open', 'action-deadline-passed', 'payout-phase-not-ended', 'name-taken', 'table-full']);
 /** Rejections that say the table is unavailable for now, not that the request is wrong: 503. */

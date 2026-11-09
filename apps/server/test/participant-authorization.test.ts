@@ -173,7 +173,8 @@ test('each human acts, manages and studies only through their own Participant, a
   expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
   for (const cookie of [leftCookie, removedCookie]) {
     expect((await get('/api/table-sessions/' + owner.id, cookie)).status).toBe(404);
-    expect(await (await get('/api/table-sessions', cookie)).json()).toEqual({ tables: [] });
+    // The table stays in their saved list, as one they have left, whether they left or were removed.
+    expect((await (await get('/api/table-sessions', cookie)).json()).tables).toMatchObject([{ tableSessionId: owner.id, left: true }]);
   }
   expect(await (await get('/api/table-sessions', otherCookie)).json()).toMatchObject({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
   expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: owner.id, mode: 'online' }));

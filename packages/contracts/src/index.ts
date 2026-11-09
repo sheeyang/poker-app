@@ -426,7 +426,7 @@ export type TableSubscriptionResult = {
  * The last message a Guest's subscription receives after their Participant leaves the table or is removed.
  * Their client returns to its saved tables.
  */
-export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId; readonly reason: 'left' | 'removed' }
+export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId }
 /**
  * A change of who is connected at an Online Table, sent to everyone subscribed to it. Transient like
  * `table-status`: it advances no revision, and every complete view carries the same list.
