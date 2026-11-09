@@ -11,8 +11,16 @@ END $$;
 CREATE TABLE IF NOT EXISTS table_sessions (
   id uuid PRIMARY KEY,
   owner_user_id uuid NOT NULL REFERENCES local_users(id),
-  aggregate jsonb NOT NULL
+  aggregate jsonb NOT NULL,
+  -- True exactly while the table has scheduled work, written in the same commit that creates or ends it.
+  load_at_startup boolean NOT NULL DEFAULT false
 );
+-- Startup loads only the tables with scheduled work. Guarded: even a no-op CREATE INDEX IF NOT EXISTS takes a SHARE lock.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'table_sessions' AND indexname = 'table_sessions_load_at_startup') THEN
+    CREATE INDEX table_sessions_load_at_startup ON table_sessions (id) WHERE load_at_startup;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS creation_requests (
   user_id uuid NOT NULL REFERENCES local_users(id),

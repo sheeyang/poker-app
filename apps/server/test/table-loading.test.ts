@@ -206,12 +206,11 @@ test('After-Hand Requests hold their table until the Hand ends and they are appl
   await expect.poll(() => loaded(t.id)).toBe(false);
 });
 
-test('after a restart, an idle table is out of memory a minute later at the latest, and loads when its owner opens it', async () => {
+test('after a restart, an idle table is not loaded, and loads when its owner opens it', async () => {
   const t = await practiceTable();
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
   await server.close(); await startServer();
-  clock.advance(minute);
-  await expect.poll(() => loaded(t.id)).toBe(false);
+  expect(loaded(t.id)).toBe(false);
   expect((await read(t)).view.state.participants.find(p => p.participantId === t.human)).toMatchObject({ seat: 1 });
   expect(loaded(t.id)).toBe(true);
 });

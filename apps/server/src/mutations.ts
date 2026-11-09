@@ -293,7 +293,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * a human's late act is rejected with `action-deadline-passed` whichever runs first.
    *
    * The end of a Hand's payout phase (`payoutEndsAt`) is one of those wake-ups: it fires here, in the FIFO,
-   * and `resumeBots` reaches it after a restart. Deal itself is gated by the clock alone (`beforePayoutEnd`
+   * and `loadScheduledTables` reaches it after a restart. Deal itself is gated by the clock alone (`beforePayoutEnd`
    * in `accept`). The work that must happen when the Hand ends runs from here once
    * `payoutEndsAt(schedule) <= clock.now()`: applying the after-Hand requests (`settleAfterHand`), queued as
    * its own FIFO task. `accept` runs the same step first, so a request that arrives ahead of this wake-up
@@ -1098,9 +1098,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const stored = rows[0]?.aggregate;
       return stored && immutableData(restorable(stored).aggregate);
     }
-    /** Loads every table at startup and runs its schedule; a table left with no scheduled work unloads a minute later. */
-    async function resumeBots() {
-      const rows = await db.select({ id: tableSessions.id }).from(tableSessions);
+    /**
+     * Loads at startup only the tables with scheduled work (`loadAtStartup`, ADR-0035) and runs each one's schedule, so
+     * that its deadlines keep running without anyone at it. An Action Deadline that expired during the outage resolves
+     * there, once. Every other table loads the first time a request needs it.
+     */
+    async function loadScheduledTables() {
+      const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(eq(tableSessions.loadAtStartup, true));
       // A corrupt session remains unavailable at its routes without preventing other sessions from starting.
       // Loading a table queues its schedule run; startup waits for it.
       await Promise.allSettled(rows.map(row => holding(row.id, () => drained(row.id))));
@@ -1173,7 +1177,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     rejoin,
     previewJoin,
     savedTables,
-    resumeBots,
+    loadScheduledTables,
     startRecovery,
     stop,
     close,

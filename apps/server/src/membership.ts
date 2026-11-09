@@ -1,19 +1,32 @@
 import { randomBytes } from 'node:crypto';
 import { and, eq, or, sql } from 'drizzle-orm';
 import type { SavedTable, TableMode } from '@poker/contracts';
-import { humanBindings, legacyTableMode, type PersistedTableSession } from './aggregate.js';
+import { findBinding, humanBindings, isBot, legacyTableMode, type PersistedTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { tableMemberships, tableSessions } from './db/schema.js';
 type Database = Omit<ReturnType<typeof openDatabase>['db'], '$client'>;
 
 /**
+ * Whether the committed table has scheduled work that runs with nobody at it (ADR-0035): an Action Deadline, a Bot
+ * decision, a Next-Hand Countdown, or After-Hand Requests to apply. In practice that is an Online Table in play, or a
+ * timed Practice Table with a Hand in progress. Presentation Phases alone are not: after a restart nobody is
+ * connected, so the end of one starts nothing until someone opens the table.
+ */
+export function hasScheduledWork(aggregate: PersistedTableSession): boolean {
+  const { actionWindow, nextHandCountdown } = aggregate.schedule;
+  return !!nextHandCountdown || aggregate.pendingChanges.length > 0
+    || !!actionWindow && (actionWindow.deadlineAt !== undefined || isBot(findBinding(aggregate, actionWindow.participantId)));
+}
+/**
  * The only way to write a Persisted Table Session. In the caller's transaction it inserts (no `previous`)
- * or updates the aggregate, and writes the membership index rows of every human binding whose
- * membership differs from `previous`. Joining, leaving and Removal therefore only change bindings.
+ * or updates the aggregate, with its `loadAtStartup` (`hasScheduledWork`), and writes the membership index rows
+ * of every human binding whose membership differs from `previous`. Joining, leaving and Removal therefore only
+ * change bindings.
  */
 export async function writeTableSession(tx: Database, previous: PersistedTableSession | undefined, next: PersistedTableSession) {
-  if (previous) await tx.update(tableSessions).set({ aggregate: next }).where(eq(tableSessions.id, next.tableSessionId));
-  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ownerUserId: next.ownerUserId, aggregate: next });
+  const loadAtStartup = hasScheduledWork(next);
+  if (previous) await tx.update(tableSessions).set({ aggregate: next, loadAtStartup }).where(eq(tableSessions.id, next.tableSessionId));
+  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ownerUserId: next.ownerUserId, aggregate: next, loadAtStartup });
   const known = new Map(previous ? humanBindings(previous).map(binding => [binding.participantId, binding.membership]) : []);
   const changed = humanBindings(next).filter(binding => known.get(binding.participantId) !== binding.membership);
   if (changed.length) await tx.insert(tableMemberships)

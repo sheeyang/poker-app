@@ -129,8 +129,16 @@ anything that needs it within that minute keeps it. When next needed, it loads a
 from its record ([`table-registry.ts`](../apps/server/src/table-registry.ts)). A
 request from a Guest who is not joined at a table is answered from the membership
 index and never loads it; joining an Online Table, and its owner returning, do. A
-Join Link preview reads the stored table without loading it. Startup still loads
-every table and runs its schedule; one without scheduled work unloads a minute later.
+Join Link preview reads the stored table without loading it.
+
+Each `table_sessions` row stores `load_at_startup`, true exactly while the table has
+scheduled work that runs with nobody at it: an Action Deadline, a Bot decision, a
+Next-Hand Countdown, or After-Hand Requests to apply. It is written in the same
+commit that creates or ends that work (`hasScheduledWork` in
+[`membership.ts`](../apps/server/src/membership.ts)). Startup loads only those
+tables and runs their schedules; in practice they are Online Tables in play and
+timed Practice Tables with a Hand in progress. Every other table loads the first
+time a request needs it.
 
 Creation rejects hidden or unknown configuration fields and supplied
 ownership/Participant identifiers. Seating rejects unexpected fields, unassigned
@@ -209,7 +217,8 @@ Table the commit of each server-played Timeout Action also records a `sit-out`
 after-Hand request for its Participant (see below), so they are sat out once
 the Hand's payout phase ends, connected or not; resuming is their own
 `set-sitting-out` to `false`. A deadline that expired while the server was down
-plays its Timeout Action at startup, before any request is served.
+plays its Timeout Action at startup, before any request is served: a table with an
+Action Deadline is always loaded at startup, and resolves it exactly once.
 
 ### Allow Live Analysis
 
