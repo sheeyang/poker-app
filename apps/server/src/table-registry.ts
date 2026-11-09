@@ -108,8 +108,6 @@ export function createTableRegistry<T>(options: TableRegistryOptions<T>) {
     set(id: string, table: T) { const entry = entries.get(id); if (entry?.table !== undefined) entry.table = table; },
     /** The IDs of the tables in memory now. */
     loadedIds(): string[] { return [...entries].filter(([, entry]) => entry.table !== undefined).map(([id]) => id); },
-    /** Every table in memory, by ID. */
-    loadedTables(): [string, T][] { return [...entries].flatMap(([id, entry]) => entry.table === undefined ? [] : [[id, entry.table] as [string, T]]); },
     /** Stops unloading: the server is closing, and its memory goes with it. */
     close() {
       closed = true;

@@ -187,23 +187,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     tables.set(id, session);
     holdWhile(id, 'after-hand', session.aggregate.pendingChanges.length > 0);
   }
-  /** Whether a human has a Seat at this committed table. Remembered per committed state, which every commit replaces. */
-  const seatedHuman = new WeakMap<CommittedSession, boolean>();
-  function hasSeatedHuman(session: CommittedSession): boolean {
-    let seated = seatedHuman.get(session);
-    if (seated === undefined) {
-      const humans = new Set(humanBindings(session.aggregate).map(binding => binding.participantId));
-      seated = tableState(session).participants.some(participant => participant.seat !== null && humans.has(participant.participantId));
-      seatedHuman.set(session, seated);
-    }
-    return seated;
-  }
-  /** The loaded tables this Guest owns that have a seated human: what the cap on tables per Guest counts. */
-  function seatedTableCount(userId: string): number {
-    let count = 0;
-    for (const [, session] of tables.loadedTables()) if (session.aggregate.ownerUserId === userId && hasSeatedHuman(session)) count++;
-    return count;
-  }
   function capture(session: CommittedSession, evaluationRequestId: string) {
     for (const binding of session.aggregate.bindings) {
       if (!isBot(binding) || binding.removed) continue;
@@ -1191,7 +1174,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     previewJoin,
     savedTables,
     resumeBots,
-    seatedTableCount,
     startRecovery,
     stop,
     close,
