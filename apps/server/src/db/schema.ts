@@ -1,5 +1,5 @@
 import type { CreationOutcome, MutationOutcome } from '@poker/contracts';
-import { jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
 import type { MembershipStatus, StoredTableSession } from '../aggregate.js';
 export const localUsers = pgTable('local_users', {
   id: uuid('id').primaryKey(),
@@ -11,6 +11,8 @@ export const tableSessions = pgTable('table_sessions', {
   ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),
   /** Any stored version; read it through `upgradeTableSession`. */
   aggregate: jsonb('aggregate').$type<StoredTableSession>().notNull(),
+  /** True exactly while the table has scheduled work (`hasScheduledWork`), written with each commit; startup loads only these. */
+  loadAtStartup: boolean('load_at_startup').notNull().default(false),
 });
 /** The membership index: one row per human Participant, mirroring its aggregate binding. */
 export const tableMemberships = pgTable('table_memberships', {

@@ -401,7 +401,7 @@ export async function createServer(options: ServerOptions) {
     await options.beforeInitialize?.(app);
     await initializeDatabase(pool);
     await mutations.startRecovery();
-    await mutations.resumeBots();
+    await mutations.loadScheduledTables();
     return app;
   } catch (error) {
     await app.close().catch(() => {});
