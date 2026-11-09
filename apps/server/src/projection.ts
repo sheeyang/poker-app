@@ -1,5 +1,5 @@
 import type { ConcreteAction, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
-import { CashGame, type CashGameEvent } from '@poker/engine';
+import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
   return action.type === 'bet' ? { type: 'bet', betTo: action.betTo } : action.type === 'raise' ? { type: 'raise', raiseTo: action.raiseTo } : { type: action.type };
@@ -32,6 +32,15 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
 /** The Observable Game Configuration, field by field (ADR-0017). */
 export function projectConfiguration(c: ObservableGameConfiguration): ObservableGameConfiguration {
   return { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges };
+}
+/**
+ * The Observable Game Configuration as it stands now, read from the record without replaying it: of its fields, only
+ * the seat-change permission changes after creation, and only by its own command.
+ */
+export function recordedConfiguration(record: TableSessionRecord): ObservableGameConfiguration {
+  const { seed: _seed, ...configuration } = record.configuration;
+  const seatChanges = record.commands.findLast(command => command.type === 'set-seat-changes');
+  return { ...configuration, ...(seatChanges?.type === 'set-seat-changes' ? { allowSeatChanges: seatChanges.allowSeatChanges } : {}) };
 }
 /** The table options, field by field (ADR-0017): a field added to the stored options is never projected by accident. */
 export function projectOptions(options: TableOptions): TableOptions {
