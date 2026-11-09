@@ -67,7 +67,7 @@ export async function createServer(options: ServerOptions) {
       .send({ ok: false, rejection: { code: 'rate-limited', message: `${limitMessages[kind]} Try again in ${waitText(decision.retryAfterSeconds)}.` } });
   }
   const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema);
-  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy, userId => mutations.seatedTableCount(userId));
+  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy);
   const jobRunner = new JobRunner(options.jobRunnerOptions);
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis') }, options.clock);
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession });
@@ -186,7 +186,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const result = await create(ownerUserId, request.body);
-      return reply.code(result.ok ? 201 : ['request-id-conflict', 'table-limit-reached'].includes(result.rejection.code) ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
+      return reply.code(result.ok ? 201 : result.rejection.code === 'request-id-conflict' ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
     } catch (error) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The creation commit outcome is unknown. Check owned sessions or explicitly retry this requestId to resolve it.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Creation could not be confirmed. No definitive domain rejection has been stored.' } });
