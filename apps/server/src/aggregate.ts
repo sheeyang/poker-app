@@ -46,8 +46,6 @@ export interface PersistedTableSession {
   readonly ownerUserId: string;
   readonly mode: TableMode;
   readonly options: TableOptions;
-  /** The Online Table's current Join Link token. A unique index in schema.sql reads this exact key. */
-  readonly joinToken?: string;
   readonly pokerRecord: TableSessionRecord;
   readonly bindings: readonly PersistedBinding[];
   readonly pokerRevision: number;

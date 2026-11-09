@@ -75,7 +75,6 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   const departed = aggregate.bindings.filter(binding => isHuman(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
   return {
     tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectOptions(aggregate.options), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
-    ...(aggregate.joinToken && viewer.userId === aggregate.ownerUserId ? { joinToken: aggregate.joinToken } : {}),
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: { referenceStrategy: projectStrategy(viewer.trainerConfiguration.referenceStrategy), liveAnalysis: viewer.trainerConfiguration.liveAnalysis },

@@ -67,7 +67,7 @@ async function table(mode: 'practice' | 'online' = 'online') {
     id, ann, annId, view,
     async join(name: string) {
       const cookie = await guest(name);
-      const joined = await (await post('/api/join-links/' + (await view()).joinToken! + '/join', cookie, { requestId: randomUUID() })).json();
+      const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
     /** A poker mutation from a Guest, at the poker revision that Guest last saw. */

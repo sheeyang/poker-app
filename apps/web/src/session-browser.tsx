@@ -15,7 +15,7 @@ import { usePageTitle, useShell } from './app-shell.js';
 
 const copy = {
   practice: { title: 'Practice tables', lead: 'Your practice history. Every table waits exactly where you left it.', create: 'New practice table', empty: 'No practice tables yet.', emptyHint: 'Start practice to play your first hand against Bots.' },
-  online: { title: 'Online tables', lead: 'Tables you created or joined to play with friends.', create: 'New online table', empty: 'No online tables yet.', emptyHint: 'Create one for your friends, or open a Join Link a friend sent you.' },
+  online: { title: 'Online tables', lead: 'Tables you created or joined to play with friends.', create: 'New online table', empty: 'No online tables yet.', emptyHint: 'Create one for your friends, or open the Join Link a friend sent you.' },
 } as const;
 
 /** The Practice screen or the Online screen: that mode's creation form, opened inline, above that mode's saved tables. */
@@ -46,7 +46,7 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
       {tables?.length === 0 && <div className="ledger-empty"><SeatGlyph seats={mode === 'practice' ? 6 : 9} /><div><h3>{text.empty}</h3><p>{text.emptyHint}</p></div></div>}
       {!!tables?.length && <table className="ledger">
         <thead><tr><th scope="col">Table</th><th scope="col">Blinds</th><th scope="col">Status</th><th scope="col"><span className="visually-hidden">Action</span></th></tr></thead>
-        <tbody>{tables.map(saved => <LedgerRow key={saved.tableSessionId} saved={saved} command={command} retry={() => void sessions.refetch()} />)}</tbody>
+        <tbody>{tables.map(saved => <LedgerRow key={saved.tableSessionId} saved={saved} retry={() => void sessions.refetch()} />)}</tbody>
       </table>}
     </section>
     <details className="tables-name"><summary><span>Your name</span><strong>{displayName ?? 'Not set yet'}</strong><Icon name="chevron" size={15} /></summary><div className="tables-name-form"><p className="muted">Used at tables you create or join from now on. Existing tables keep the name you had there.</p><DisplayNameForm key={displayName} current={displayName} /></div></details>
@@ -60,9 +60,9 @@ const readable = (saved: SavedTable): saved is ReadableSavedTable => saved.seatC
 
 /**
  * One saved table. The whole row opens it: a real link to its address, so it can open in a new browser tab. An
- * Online Table the Guest left is returned to by request, since its address doesn't let them back in yet.
+ * Online Table the Guest left opens at its address too, which is its Join Link: its join form returns them.
  */
-function LedgerRow({ saved, command, retry }: { saved: SavedTable; command: Command; retry: () => void }) {
+function LedgerRow({ saved, retry }: { saved: SavedTable; retry: () => void }) {
   if (!readable(saved)) return <tr className="ledger-row is-unreadable"><th scope="row" colSpan={3}><span className="muted">This saved table couldn’t be read.</span></th><td className="ledger-action"><button className="text-button" onClick={retry}>Retry</button></td></tr>;
   const { seatCount, stakes, playState } = saved;
   const name = `${tableFormat(seatCount)} Hold’em`, blinds = `${chips(stakes.smallBlind)} / ${chips(stakes.bigBlind)}`;
@@ -72,9 +72,7 @@ function LedgerRow({ saved, command, retry }: { saved: SavedTable; command: Comm
   const status = kind === 'practice' ? <span className="muted">Practice</span>
     : kind === 'away' ? <span className="muted">Not at this table</span>
     : <span className="ledger-live"><b>At this table</b> · {playState.status === 'active-hand' ? 'Hand in progress' : 'Between hands'} · {playState.viewerStack !== undefined ? <span className="numeric">{chips(playState.viewerStack)} chips</span> : 'Watching'}</span>;
-  const opener = kind === 'away'
-    ? <button className="ledger-open" aria-label={label} disabled={command.busy} onClick={() => command.submit({ kind: 'rejoin', tableId: saved.tableSessionId, body: { requestId: crypto.randomUUID() } })}>{name}</button>
-    : saved.mode === 'online'
+  const opener = saved.mode === 'online'
       ? <Link className="ledger-open" aria-label={label} to="/online/$tableSessionId" params={{ tableSessionId: saved.tableSessionId }}>{name}</Link>
       : <Link className="ledger-open" aria-label={label} to="/practice/$tableSessionId" params={{ tableSessionId: saved.tableSessionId }}>{name}</Link>;
   return <tr className={`ledger-row is-${kind}`}>

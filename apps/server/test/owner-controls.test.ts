@@ -42,12 +42,11 @@ async function newTable(mode: 'practice' | 'online', bots: string[] = ['Rex'], c
   const id = created.tableSessionId as string;
   const [annId, ...botIds] = created.bindings.map((binding: { participantId: string }) => binding.participantId) as string[];
   const view = async (cookie = ann): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + id, cookie)).json();
-  const token = (await view()).joinToken;
   const t = {
-    id, ann, annId: annId!, botIds, token, view,
+    id, ann, annId: annId!, botIds, view,
     async join(name: string) {
       const cookie = await guest(name);
-      const joined = await (await post('/api/join-links/' + token + '/join', cookie, { requestId: randomUUID() })).json();
+      const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
     /** A poker request from a Guest, at the poker revision that Guest last saw. */
@@ -443,7 +442,7 @@ test('the table view says who has left or been removed, humans and Bots alike', 
   expect(JSON.stringify(seen)).not.toMatch(/"(?:membership|removed)"\s*:/);
   expect(seen.bindings.map(binding => binding.name)).toEqual(['Ann', 'Rex', 'Ben', 'Cy']);
   // Ben rejoins as the same Participant: he is no longer listed.
-  expect((await post('/api/join-links/' + t.token + '/join', ben.cookie, { requestId: randomUUID() })).status).toBe(200);
+  expect((await post('/api/table-sessions/' + t.id + '/join-table', ben.cookie, { requestId: randomUUID() })).status).toBe(200);
   expect((await t.view()).departedParticipantIds).toEqual([t.botIds[0], cy.participantId]);
 });
 

@@ -3,11 +3,11 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type ReplaceJoinLinkRequest, type SetTableOptionsRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { membership, newJoinToken, ownsTable, savedTableEntries, tableOfJoinLink, writeTableSession } from './membership.js';
+import { membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
 import { CommitOutcomeUnknown } from './creation.js';
@@ -22,7 +22,7 @@ import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, n
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
-import { invalidJoinLink, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, removedGuest, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
+import { liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, removedGuest, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -912,10 +912,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return enqueue(id, () => accept(id, authority, kind, request));
     }
     /**
-     * Bot controller changes, replacing the Join Link and table options require Table Ownership; a Trainer
+     * Bot controller changes and table options require Table Ownership; a Trainer
      * configuration change is the requester's own. Table options change only at an Online Table, between Hands.
      */
-    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration' | 'replace-join-link' | 'set-table-options', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | ReplaceJoinLinkRequest | SetTableOptionsRequest): Promise<MutationOutcome> {
+    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration' | 'set-table-options', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | SetTableOptionsRequest): Promise<MutationOutcome> {
       return await asMember(id, userId, () => enqueue(id, async (): Promise<MutationOutcome> => {
         let session = tables.get(id);
         const requester = session && memberBinding(session.aggregate, userId);
@@ -937,7 +937,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : tableOptions ? 'invalid-table-options' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
             if (!result && tableOptions) result = validateTableOptionChanges((request as SetTableOptionsRequest).options);
             if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
-            if (!result && kind === 'replace-join-link' && session.aggregate.mode !== 'online') result = reject('join-link-unavailable', 'Only an Online Table has a Join Link.');
             if (!result && tableOptions) {
               // A Practice Table keeps the options it was created with. At an Online Table they change between Hands only: a Hand lasts until its payout phase ends.
               if (session.aggregate.mode !== 'online') result = reject('unavailable-at-practice-tables', 'A Practice Table keeps the options it was created with.');
@@ -971,11 +970,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 proposed = { aggregate, game: session.game };
               }
             }
-            if (!result && kind === 'replace-join-link') {
-              // The old token stops resolving in the same transaction that stores the new one.
-              const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1, joinToken: newJoinToken() };
-              proposed = { aggregate, game: session.game };
-            }
             if (!result && kind === 'set-playing-strategy') {
               const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
                 bindings: session.aggregate.bindings.map(item => isBot(item) && item.participantId === (request as SetPlayingStrategyRequest).participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
@@ -990,35 +984,21 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       })) ?? notFound();
     }
     /**
-     * Joins the Online Table that this Join Link opens, as the Guest's one Participant there. The link is the
-     * authorization, so there is no expected revision. A Guest who already joined gets their Participant back,
-     * and one who left rejoins as the same Participant under their original name.
+     * Joins the Online Table that this Join Link, its own address, names, as the Guest's one Participant there
+     * (ADR-0033). The link is the authorization, so there is no expected revision. A Guest who already joined gets
+     * their Participant back, and one who left, the Table Owner included, returns as the same Participant under
+     * their original name. An ID that names no Online Table is not found, and never loads anything: only a join to an
+     * Online Table that exists does.
      */
-    async function join(userId: string, token: string, request: JoinTableRequest): Promise<JoinOutcome> {
-      const id = await tableOfJoinLink(db, token);
-      if (!id) return invalidJoinLink();
-      return enterTable(id, userId, request, { token });
-    }
-    /**
-     * Returns the Table Owner to a table they left, without the Join Link: ownership is the authorization, and it
-     * outlives leaving. Anyone else gets the not-found a missing table gives. The owner's Participant is the same
-     * one, and the same place-in-the-table rules as for any Guest apply.
-     */
-    async function rejoin(id: string, userId: string, request: JoinTableRequest): Promise<JoinOutcome> {
-      if (!await ownsTable(db, id, userId)) return notFound();
-      return enterTable(id, userId, request, {});
-    }
-    /** Joining holds the table, loading it if needed: a join is the one request from someone not at a table that does. */
-    async function enterTable(id: string, userId: string, request: JoinTableRequest, via: { token?: string }): Promise<JoinOutcome> {
+    async function join(id: string, userId: string, request: JoinTableRequest): Promise<JoinOutcome> {
+      if (!await storedOnlineTable(db, id)) return notFound();
       return await holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
         let session = tables.get(id);
-        // The link may have been replaced while this request waited for its turn.
-        if (!session) return via.token !== undefined ? invalidJoinLink() : notFound();
-        if (via.token !== undefined && session.aggregate.joinToken !== via.token) return invalidJoinLink();
+        if (!session) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
         const { requestId, ...contents } = request;
         if (Object.keys(contents).length) return reject('invalid-mutation-request', 'Joining carries only a requestId.');
-        const fingerprint = createHash('sha256').update((via.token !== undefined ? 'join-table-v1:' : 'rejoin-table-v1:') + canonical({ userId })).digest('hex');
+        const fingerprint = createHash('sha256').update('join-table-v1:' + canonical({ userId })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
         session = tables.get(id)!;
         let proposed: CommittedSession | undefined;
@@ -1055,20 +1035,18 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         });
         if (next) publishCommitted(id, events);
         return outcome;
-      })) ?? (via.token !== undefined ? invalidJoinLink() : notFound());
+      })) ?? notFound();
     }
     /**
-     * What a Join Link shows before joining, for the Guest holding it. A removed Guest is told so instead. It is read
-     * from the stored table, never loading it: the Guest holding the link is not at the table yet.
+     * What an Online Table's Join Link shows before joining, for the Guest opening it: undefined, answered as not
+     * found, for an ID that names no Online Table. A removed Guest is told so instead. It is read from the stored
+     * table, never loading it: the Guest opening the link is not at the table yet.
      */
-    async function previewJoin(userId: string, token: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
-      const id = await tableOfJoinLink(db, token);
-      if (!id) return undefined;
-      const stored = (await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(eq(tableSessions.id, id)))[0]?.aggregate;
+    async function previewJoin(userId: string, id: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
+      const stored = await storedOnlineTable(db, id);
       if (!stored) return undefined;
       const aggregate = upgradeTableSession(stored);
       if (!aggregate) throw new TableSessionRestorationError();
-      if (aggregate.joinToken !== token) return undefined;
       const humans = humanBindings(aggregate);
       if (humans.some(binding => binding.userId === userId && binding.membership === 'removed')) return removedGuest();
       const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
@@ -1174,7 +1152,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     subscribe,
     configure,
     join,
-    rejoin,
     previewJoin,
     savedTables,
     loadScheduledTables,

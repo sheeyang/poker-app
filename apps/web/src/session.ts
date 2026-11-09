@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ObservableTableSession, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
 
 type TableAttempt = { readonly tableId: string } & (
@@ -18,10 +18,6 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'add-bot'; readonly body: AddBotRequest }
   /** The Table Owner changes an Online Table's options between Hands. */
   | { readonly kind: 'options'; readonly body: SetTableOptionsRequest }
-  /** The Table Owner replaces the Online Table's Join Link. */
-  | { readonly kind: 'replace-link'; readonly body: ReplaceJoinLinkRequest }
-  /** The Table Owner returns to a table they left, without the Join Link. */
-  | { readonly kind: 'rejoin'; readonly body: JoinTableRequest }
 );
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
@@ -64,8 +60,6 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'trainer': return api.setTrainerConfiguration(tableId, attempt.body);
     case 'strategy': return api.setPlayingStrategy(tableId, attempt.body);
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
-    case 'rejoin': return api.rejoinTable(tableId, attempt.body);
-    case 'replace-link': return api.replaceJoinLink(tableId, attempt.body);
     case 'add-bot': return api.addBot(tableId, attempt.body);
     case 'options': return api.setTableOptions(tableId, attempt.body);
   }
@@ -77,7 +71,7 @@ export function useCommand() {
   const pending = useSession(state => state.pending);
   const setPending = useSession(state => state.setPending);
   const router = useRouter();
-  // The table's own mode, for its address; a table not in the cache is an Online one, the only kind a Guest can leave or return to.
+  // The table's own mode, for its address; a table not in the cache is an Online one, the only kind a Guest can leave.
   const modeOf = (id: string): TableMode => queryClient.getQueryData<ObservableTableSession>(['table-session', id])?.mode ?? 'online';
   const showing = (id: string) => router.state.location.pathname === tablePath(modeOf(id), id);
   const mutation = useMutation({
@@ -100,7 +94,6 @@ export function useCommand() {
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
         return;
       }
-      if (attempt.kind === 'rejoin') { void router.navigate({ to: tablePath('online', result.tableSessionId) }); await queryClient.invalidateQueries({ queryKey: ['table-sessions'] }); }
       await queryClient.invalidateQueries({ queryKey: ['table-session', result.tableSessionId] });
     },
     onError: async (error, attempt) => {

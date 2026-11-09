@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, simpleHeuristicPlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem } from '../src/online-setup.js';
-import { joinLink } from '../src/join-link.js';
 import { canManage, modeLabel, playerName } from '../src/table-model.js';
 
 function table(overrides: Partial<ObservableTableSession> = {}): ObservableTableSession {
@@ -40,9 +39,6 @@ describe('creating an Online Table', () => {
     const setup = { ...defaultOnlineSetup, ...override };
     expect(onlineSetupProblem(setup)).toEqual(expect.any(String));
     expect(onlineCreationRequest(setup, 'r')).toBeUndefined();
-  });
-  it('builds a Join Link from the page origin and the secret token', () => {
-    expect(joinLink('https://poker.example', 'abc_DEF-123')).toBe('https://poker.example/join/abc_DEF-123');
   });
 });
 

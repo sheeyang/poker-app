@@ -7,10 +7,9 @@ import { onlineTableCapacity, type ApplicationRejection } from '@poker/contracts
 export const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 export const requestIdConflict = () => reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
 export const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
-export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options and the Join Link.');
+export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options.');
 export const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
 export const removedGuest = () => reject('guest-removed', 'The Table Owner removed you from this table, so you cannot join it again.');
-export const invalidJoinLink = () => reject('invalid-join-link', 'This Join Link does not work. Ask the Table Owner for a new one.');
 export const tableFull = (advice: string) => reject('table-full', `This table already has ${onlineTableCapacity} Participants, Bots included. ${advice}`);
 export const liveAnalysisDisallowed = () => reject('live-analysis-disallowed', 'This table did not allow Live Analysis when this decision began. Your decision is analyzed and scored after you act.');
 
@@ -25,5 +24,5 @@ const unavailable: ReadonlySet<string> = new Set(['session-recovering', 'commit-
 export function outcomeStatus(outcome: { readonly ok: true } | ApplicationRejection): number {
   if (outcome.ok) return 200;
   const { code } = outcome.rejection;
-  return code === 'not-found' || code === 'invalid-join-link' ? 404 : forbidden.has(code) ? 403 : unavailable.has(code) ? 503 : conflicts.has(code) ? 409 : 400;
+  return code === 'not-found' ? 404 : forbidden.has(code) ? 403 : unavailable.has(code) ? 503 : conflicts.has(code) ? 409 : 400;
 }

@@ -209,7 +209,7 @@ export interface JoinTableRequest { readonly requestId: string }
 /** The Guest's Participant at the table: the same one every time they join. */
 export interface JoinAcknowledgement extends MutationAcknowledgement { readonly participantId: ParticipantId }
 export type JoinOutcome = JoinAcknowledgement | ApplicationRejection;
-/** What a Join Link shows before joining. Only a holder of the link can read it. */
+/** What an Online Table's Join Link, its own address, shows a Guest before they join. */
 export interface JoinLinkPreview {
   readonly ok: true;
   readonly ownerName: string;
@@ -249,7 +249,7 @@ export interface InspectionCapabilities {
 export type TableMode = 'practice' | 'online';
 /**
  * One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left.
- * `left` marks an owned table the Guest has left; opening it rejoins them without the Join Link.
+ * `left` marks an owned table the Guest has left; its Join Link returns them as the same Participant.
  * The table's size, stakes and play state are public facts, so even a Guest who left sees them. They are absent
  * only while the table cannot be restored.
  */
@@ -365,8 +365,6 @@ export interface ObservableTableSession {
   readonly viewerParticipantId: ParticipantId;
   /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another human. */
   readonly ownerParticipantId: ParticipantId;
-  /** The secret Join Link token of an Online Table, read by its Table Owner only. */
-  readonly joinToken?: string;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
@@ -480,11 +478,6 @@ export interface SetTableOptionsRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;
   readonly options: TableOptionChanges;
-}
-/** The Table Owner replaces an Online Table's Join Link: the old link stops working at once, and joined Participants stay. */
-export interface ReplaceJoinLinkRequest {
-  readonly requestId: string;
-  readonly expectedSessionRevision: Revision;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
 

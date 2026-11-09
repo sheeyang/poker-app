@@ -76,7 +76,7 @@ async function botToAct() {
   const view = async (cookie = ann): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + id, { headers: { cookie } })).json();
   const as = async (cookie: string, kind: string, fields: object) => post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
   const ben = await guest('Ben');
-  await post('/api/join-links/' + (await view()).joinToken + '/join', ben, { requestId: randomUUID() });
+  await post('/api/table-sessions/' + id + '/join-table', ben, { requestId: randomUUID() });
   const annLive = await connectLive(base, ann, id), benLive = await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: rex, seat: 1 })).status).toBe(200);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 2 })).status).toBe(200);

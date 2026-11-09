@@ -57,45 +57,30 @@ test('table creation is limited per IP, a refusal says when to try again, and re
   });
 });
 
-test('joining, returning to a table and replacing a Join Link each have their own per-IP limit', async () => {
-  await withServer({ rateLimits: { joining: { limit: 2, windowMs: minute }, 'join-link-replacement': { limit: 1, windowMs: minute } } }, async ({ base, clock }) => {
+test('joining, and returning to a table, share a per-IP limit', async () => {
+  await withServer({ rateLimits: { joining: { limit: 2, windowMs: minute } } }, async ({ base, clock }) => {
     const ann = await guest(base, 'Ann');
     const created = await (await create(base, ann, { mode: 'online' })).json();
     const id = created.tableSessionId as string, annId = created.bindings[0].participantId as string;
     const view = async (cookie: string): Promise<ObservableTableSession> => (await call(base, 'GET', '/api/table-sessions/' + id, cookie)).json();
-    const link = async () => (await view(ann)).joinToken!;
-    const join = async (cookie: string, token?: string) => call(base, 'POST', '/api/join-links/' + (token ?? await link()) + '/join', cookie, { requestId: randomUUID() });
+    const join = async (cookie: string, table = id) => call(base, 'POST', '/api/table-sessions/' + table + '/join-table', cookie, { requestId: randomUUID() });
 
     const [ben, cy, dee] = [await guest(base, 'Ben'), await guest(base, 'Cy'), await guest(base, 'Dee')] as [string, string, string];
     expect((await join(ben)).status).toBe(200);
-    // A refused attempt counts too: a flood of bad links is a flood.
-    expect((await join(cy, 'x'.repeat(43))).status).toBe(404);
+    // A refused attempt counts too: a flood of guessed addresses is a flood.
+    expect((await join(cy, randomUUID())).status).toBe(404);
     const refused = await join(cy);
     expect(await rejection(refused)).toEqual({ status: 429, code: 'rate-limited', message: expect.stringContaining('60 seconds') });
     expect(refused.headers.get('retry-after')).toBe('60');
     expect((await view(ben)).bindings.map(binding => binding.name)).toEqual(['Ann', 'Ben']);
-    // The owner's way back without the link is joining as well, so it draws on the same allowance.
+    // The owner returns through the Join Link too, so it draws on the same allowance.
     const left = await call(base, 'POST', '/api/table-sessions/' + id + '/leave-table', ann, { requestId: randomUUID(), expectedPokerRevision: (await view(ben)).pokerRevision, participantId: annId });
     expect(left.status).toBe(200);
-    expect((await call(base, 'POST', '/api/table-sessions/' + id + '/rejoin-table', ann, { requestId: randomUUID() })).status).toBe(429);
+    expect((await join(ann)).status).toBe(429);
     clock.advance(minute);
-    expect((await call(base, 'POST', '/api/table-sessions/' + id + '/rejoin-table', ann, { requestId: randomUUID() })).status).toBe(200);
+    expect((await join(ann)).status).toBe(200);
     expect((await join(cy)).status).toBe(200);
     expect((await join(dee)).status).toBe(429);
-
-    // Replacing the link has its own, separate allowance.
-    const replace = () => call(base, 'POST', '/api/table-sessions/' + id + '/replace-join-link', ann, { requestId: randomUUID(), expectedSessionRevision: 0 });
-    clock.advance(minute);
-    const first = await link();
-    const current = (await view(ann)).sessionRevision;
-    const replaced = await call(base, 'POST', '/api/table-sessions/' + id + '/replace-join-link', ann, { requestId: randomUUID(), expectedSessionRevision: current });
-    expect(replaced.status).toBe(200);
-    expect(await link()).not.toBe(first);
-    const again = await replace();
-    expect(await rejection(again)).toEqual({ status: 429, code: 'rate-limited', message: expect.stringContaining('60 seconds') });
-    expect(await link()).not.toBe(first);
-    clock.advance(minute);
-    expect((await replace()).status).toBe(409); // allowed through, then judged on its stale revision
   });
 });
 

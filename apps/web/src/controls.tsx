@@ -84,7 +84,7 @@ function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSetti
   const reason = nextHand?.kind === 'waiting' ? waitingReason(table) : undefined;
   const needsPlayers = reason?.kind === 'players';
   const resume = () => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'set-sitting-out', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, sittingOut: false } });
-  const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, !!online?.openJoinLink, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
+  const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, table.viewerParticipantId === table.ownerParticipantId, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
   return <div className="action-tray idle-tray next-hand online-next-hand">
     <div className="next-hand-copy" role="timer"><strong>{nextHandLabel(nextHand) ?? 'Waiting for the next hand'}</strong><p>{detail}</p></div>
     <div className="next-hand-actions">
