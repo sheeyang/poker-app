@@ -82,10 +82,10 @@ databases.
 Admin Mode defaults on locally. Set `POKER_ADMIN_MODE=false` before starting the
 server to disable completed-Hand hidden-information reveal.
 
-Per-IP rate limits on table creation, joining and Join Link replacement are on in
+Per-IP rate limits on table creation and joining are on in
 production and off locally, so repeated manual checks from one machine are not
-limited. Set `POKER_RATE_LIMITS=true` to try them (10 creations, 30 joins and 10
-replacements per address per 10 minutes) or `false` to turn them off. By default no
+limited. Set `POKER_RATE_LIMITS=true` to try them (10 creations and 30 joins per
+address per 10 minutes) or `false` to turn them off. By default no
 reverse proxy is trusted and every client's address is the connection's own; behind
 one, set `TRUSTED_PROXIES` to its address (comma-separated addresses or CIDR ranges)
 and only a connection from it may supply `X-Forwarded-For`. The production stack

@@ -739,17 +739,41 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .rules-form { display: grid; gap: 14px; justify-items: start; }
 .rules-form label:not(.check-label) { display: grid; gap: 6px; }
 .settings-section > form.inline-form { flex-wrap: wrap; }
-.join-page { min-height: calc(100dvh - var(--bar-h)); display: grid; place-items: center; padding: 32px 20px; }
-.join-card { width: min(100%, 460px); display: grid; gap: 20px; padding: 36px 32px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
-.join-card h1 { font-size: 1.7rem; font-weight: 600; }
-.join-card form { display: grid; gap: 16px; }
-.join-card label { display: grid; gap: 8px; }
-.join-card .brand-mark { justify-self: start; }
-.join-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin: 0; padding: 16px 0; border-block: 1px solid var(--line); }
-.join-facts > div { min-width: 0; }
-.join-facts dt { color: var(--muted); font-size: .76rem; margin-bottom: 4px; }
-.join-facts dd { margin: 0; font-size: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.join-card label small { font-weight: 400; line-height: 1.5; }
+/* The join form at an Online Table's address: the table its Join Link opens, felt first, beside one column to join it. */
+.join-page { max-width: 960px; margin: 0 auto; padding: 48px var(--gutter) 72px; }
+.join-card { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.join-table { display: grid; gap: 20px; align-content: start; min-width: 0; padding: 32px; background: #18241f; border-right: 1px solid var(--line); }
+.join-address { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: .78rem; }
+.join-address svg { flex-shrink: 0; }
+.join-address span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.join-table h1 { font-size: 2rem; font-weight: 600; letter-spacing: -.025em; line-height: 1.15; text-wrap: balance; }
+.join-table .felt-preview { width: min(100%, 380px); margin-block: 6px 2px; }
+.join-facts { margin: 0; }
+.join-facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.join-facts dt { color: var(--muted); font-size: .84rem; }
+.join-facts dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.join-form { display: grid; gap: 18px; align-content: start; min-width: 0; padding: 36px; }
+.join-form h2 { font-size: 1.1rem; font-weight: 600; letter-spacing: -.01em; }
+.join-form label { display: grid; gap: 8px; }
+.join-form label small { font-weight: 400; line-height: 1.5; }
+.join-form > p { margin: 0; }
+.join-room { color: #e6cca0; font-size: .86rem; }
+.join-note { font-size: .86rem; line-height: 1.5; }
+.skeleton-join-address { width: 14rem; max-width: 100%; height: .9rem; }
+.skeleton-join-title { width: 11rem; height: 2rem; }
+.skeleton-join-heading { width: 9rem; height: 1.2rem; }
+.skeleton-join-field { height: 64px; }
+.skeleton-join-button { height: 48px; border-radius: 8px; }
+.join-table > .ui-skeleton, .join-form > .ui-skeleton { display: block; }
+@media (max-width: 760px) {
+  .join-card { grid-template-columns: 1fr; }
+  .join-table { border-right: 0; border-bottom: 1px solid var(--line); padding: 24px; }
+  .join-form { padding: 24px; }
+}
+@media (max-width: 650px) {
+  .join-page { padding: 20px var(--gutter) 48px; }
+  .join-table h1 { font-size: 1.7rem; }
+}
 
 /* Simple dialogs stack their content on one rhythm. */
 .dialog-stack { display: grid; gap: 18px; }
@@ -965,8 +989,6 @@ fieldset.composer-field { display: block; }
 .ledger-row > * { padding: 11px 12px; text-align: left; vertical-align: middle; font-size: .9rem; font-weight: 400; }
 .ledger-name { display: flex; align-items: center; gap: 14px; }
 .ledger-open { color: var(--text); font: inherit; font-weight: 600; text-decoration: none; }
-button.ledger-open { min-height: 0; padding: 0; border: 0; background: none; }
-button.ledger-open:hover { background: none; }
 .ledger-open::after { content: ""; position: absolute; inset: 0; }
 .ledger-open:focus-visible { outline: none; }
 .ledger-row:has(.ledger-open:focus-visible) { outline: 2px solid var(--gold); outline-offset: -2px; }

@@ -168,6 +168,11 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
     runtimeStatus: runtime?.id === id ? runtime.status : undefined,
     /** At an Online Table, the Participants connected now, from this connection's latest message. */
     connectedParticipantIds: presence?.id === id ? presence.connected : undefined,
+    /**
+     * Asks again for the open table, whose subscription the server refused while this Guest was not at it: after
+     * joining through its Join Link, the same address becomes their table.
+     */
+    resubscribe: () => { if (enabled && selected.current) control('subscribe-table', selected.current); },
     disconnect: () => setPaused(true),
     reconnect: () => setPaused(false),
   };

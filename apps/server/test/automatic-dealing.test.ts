@@ -43,12 +43,11 @@ async function onlineTable(bots: string[] = ['Rex']) {
   const id = created.tableSessionId as string;
   const [annId, ...botIds] = created.bindings.map((binding: { participantId: string }) => binding.participantId) as string[];
   const view = async (cookie = ann): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + id, cookie)).json();
-  const token = (await view()).joinToken!;
   const t = {
-    id, ann, annId: annId!, botIds, token, view,
+    id, ann, annId: annId!, botIds, view,
     async join(name: string) {
       const cookie = await guest(name);
-      const joined = await (await post('/api/join-links/' + token + '/join', cookie, { requestId: randomUUID() })).json();
+      const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
     /** A request from a Guest, at the poker revision that Guest last saw. */

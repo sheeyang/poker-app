@@ -2,8 +2,8 @@ import type { ServerClock } from './clock.js';
 
 /** At most `limit` requests from one address in any window of `windowMs`. */
 export interface RateLimit { readonly limit: number; readonly windowMs: number }
-/** What the public server protects itself from: floods of creation, joining and Join Link replacement. */
-export type RateLimitKind = 'creation' | 'joining' | 'join-link-replacement';
+/** What the public server protects itself from: floods of creation and joining. */
+export type RateLimitKind = 'creation' | 'joining';
 export type RateLimits = Readonly<Record<RateLimitKind, RateLimit>>;
 
 const tenMinutes = 10 * 60_000;
@@ -15,7 +15,6 @@ const tenMinutes = 10 * 60_000;
 export const defaultRateLimits: RateLimits = Object.freeze({
   creation: { limit: 10, windowMs: tenMinutes },
   joining: { limit: 30, windowMs: tenMinutes },
-  'join-link-replacement': { limit: 10, windowMs: tenMinutes },
 });
 
 export type RateLimitDecision = { readonly allowed: true } | { readonly allowed: false; readonly retryAfterSeconds: number };

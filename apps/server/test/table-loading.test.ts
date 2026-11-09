@@ -148,19 +148,23 @@ test('a request from anyone not at a table never loads it; a join to an Online T
   expect(await subscription(stranger, t.id)).toMatchObject({ status: 'rejected', code: 'not-found' });
   expect(loaded(t.id)).toBe(false);
 
+  // The Join Link at a Practice Table's ID is not found, and loads nothing, for a stranger as for anyone.
+  expect((await get(at('/join-preview'), stranger)).status).toBe(404);
+  expect((await post(at('/join-table'), stranger, { requestId: randomUUID() })).status).toBe(404);
+  expect(loaded(t.id)).toBe(false);
+
   // A Join Link's preview is read without loading the table; joining loads it.
   const ann = await guest('Ann');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json();
   const online = created.tableSessionId as string;
-  const token = (await (await get('/api/table-sessions/' + online, ann)).json()).joinToken as string;
   clock.advance(minute);
   await expect.poll(() => loaded(online)).toBe(false);
   const ben = await guest('Ben');
-  const preview = await get('/api/join-links/' + token, ben);
+  const preview = await get('/api/table-sessions/' + online + '/join-preview', ben);
   expect(await preview.json()).toMatchObject({ ok: true, ownerName: 'Ann', configuration: { seatCount: 6 }, placesTaken: 1, alreadyJoined: false });
   expect((await get('/api/table-sessions/' + online, ben)).status).toBe(404);
   expect(loaded(online)).toBe(false);
-  expect((await post('/api/join-links/' + token + '/join', ben, { requestId: randomUUID() })).status).toBe(200);
+  expect((await post('/api/table-sessions/' + online + '/join-table', ben, { requestId: randomUUID() })).status).toBe(200);
   expect(loaded(online)).toBe(true);
 });
 

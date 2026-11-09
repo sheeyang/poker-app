@@ -56,9 +56,9 @@ describe('the next Hand at an Online Table, between Hands', () => {
     // A table that can deal waits for nothing.
     expect(waitingReason(table([seated('you', 1), seated('rex', 2)], ['you']))).toBeUndefined();
   });
-  it('explains the wait in plain words, offering the owner the Join Link and Bots', () => {
+  it('explains the wait in plain words, offering everyone the Join Link and the owner Bots too', () => {
     expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] }, true)).toBe('Hands start once one more player is seated. Share the join link, or add a Bot.');
-    expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] }, false)).toBe('Hands start once one more player takes a seat.');
+    expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: [], sittingOut: [] }, false)).toBe('Hands start once one more player takes a seat. Share the join link to invite someone.');
     expect(waitingDetail({ kind: 'players', needed: 1, reconnecting: ['Ann'], sittingOut: ['Rex'] }, false)).toBe('Ann is disconnected. Rex is sitting out. Hands start once one more player is ready.');
   });
     it('does not suggest adding a Bot when no Seat is open', () => {

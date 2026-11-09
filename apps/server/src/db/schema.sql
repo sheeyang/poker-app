@@ -47,13 +47,6 @@ CREATE TABLE IF NOT EXISTS acceptance_attempts (
   table_session_id uuid,
   PRIMARY KEY(scope_kind, scope_id, request_id)
 );
--- An Online Table's Join Link token lives in its aggregate. This unique index finds the table from the token.
--- Guarded: even a no-op CREATE INDEX IF NOT EXISTS takes a SHARE lock that waits for in-flight writers.
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'table_sessions' AND indexname = 'table_sessions_join_token') THEN
-    CREATE UNIQUE INDEX table_sessions_join_token ON table_sessions ((aggregate->>'joinToken'));
-  END IF;
-END $$;
 -- Mirrors each human binding of a table's aggregate, written in the same transaction as every commit.
 -- The primary key serves a Guest's lookups; the unique key serves a Participant's.
 CREATE TABLE IF NOT EXISTS table_memberships (

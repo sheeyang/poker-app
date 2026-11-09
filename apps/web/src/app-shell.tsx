@@ -23,10 +23,10 @@ export function useShell(): Shell {
   return shell;
 }
 
-/** The section an address belongs to: each mode's list and tables, and the Join Link page, which is Online. */
+/** The section an address belongs to: each mode's list and tables, an Online Table's Join Link included. */
 function sectionOf(pathname: string): TableMode | undefined {
   const first = pathname.split('/')[1];
-  return first === 'practice' ? 'practice' : first === 'online' || first === 'join' ? 'online' : undefined;
+  return first === 'practice' ? 'practice' : first === 'online' ? 'online' : undefined;
 }
 
 /** Sets the browser-tab title while a page is shown. */

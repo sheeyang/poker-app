@@ -12,9 +12,9 @@ async function request<T>(path: string, init?: RequestInit, acceptAnalysisError 
   return data as T;
 }
 export const api = {
-  previewJoinLink: (token: string, signal?: AbortSignal) => request<import('@poker/contracts').JoinLinkPreview>('/join-links/' + encodeURIComponent(token), { signal }),
-  rejoinTable: (id: string, body: import('@poker/contracts').JoinTableRequest) => request<import('@poker/contracts').JoinAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/rejoin-table', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-  joinTable: (token: string, body: import('@poker/contracts').JoinTableRequest) => request<import('@poker/contracts').JoinAcknowledgement>('/join-links/' + encodeURIComponent(token) + '/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  /** What an Online Table's Join Link, its own address, shows a Guest who is not at it. */
+  previewJoin: (id: string, signal?: AbortSignal) => request<import('@poker/contracts').JoinLinkPreview>('/table-sessions/' + encodeURIComponent(id) + '/join-preview', { signal }),
+  joinTable: (id: string, body: import('@poker/contracts').JoinTableRequest) => request<import('@poker/contracts').JoinAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/join-table', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   createSessionSummary: (id: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/session-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }, true),
   createHandSummary: (id: string, handId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/hand-summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }, true),
   readSummary: (id: string, requestId: string) => request<import('@poker/contracts').ScoreSummary>('/table-sessions/' + encodeURIComponent(id) + '/summaries/' + encodeURIComponent(requestId)),
@@ -24,7 +24,6 @@ export const api = {
   readAnalysis: (id: string, requestId: string) => request<import('@poker/contracts').DecisionAnalysis>('/table-sessions/' + encodeURIComponent(id) + '/analysis/' + encodeURIComponent(requestId)),
   addBot: (id: string, body: import('@poker/contracts').AddBotRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/add-bot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   setTableOptions: (id: string, body: import('@poker/contracts').SetTableOptionsRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-table-options', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-  replaceJoinLink: (id: string, body: import('@poker/contracts').ReplaceJoinLinkRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/replace-join-link', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   setTrainerConfiguration: (id: string, body: SetTrainerConfigurationRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-trainer-configuration', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   inspectHand: (id: string, handId: string) => request<Extract<import('@poker/contracts').CompletedHandInspectionOutcome, { ok: true }>>('/table-sessions/' + encodeURIComponent(id) + '/inspect-hand', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }),
   setPlayingStrategy: (id: string, body: SetPlayingStrategyRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-playing-strategy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),

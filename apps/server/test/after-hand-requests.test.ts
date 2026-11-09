@@ -210,7 +210,7 @@ async function guest(name: string) {
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 /**
- * An Online Table of Ann (the owner) and Ben, both joined through the link, connected and seated heads-up. Automatic
+ * An Online Table of Ann (the owner) and Ben, who joined through its Join Link, connected and seated heads-up. Automatic
  * Dealing has dealt Hand 1, and the first Action Window is open.
  */
 async function onlineHand() {
@@ -218,8 +218,8 @@ async function onlineHand() {
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json();
   const id = created.tableSessionId as string, annId = created.bindings[0].participantId as string;
   const view = async (cookie: string): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + id, cookie)).json();
-  const token = (await view(ann)).joinToken!;
-  const join = async (cookie: string) => post('/api/join-links/' + token + '/join', cookie, { requestId: randomUUID() });
+  const join = async (cookie: string) => post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() });
+  const preview = async (cookie: string) => (await get('/api/table-sessions/' + id + '/join-preview', cookie)).json();
   const benId = (await (await join(ben)).json()).participantId as string;
   const as = async (cookie: string, kind: string, fields: object) => post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
   await connectLive(base, ann, id); await connectLive(base, ben, id);
@@ -229,13 +229,13 @@ async function onlineHand() {
   await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
   clock.advance(1500);
   const cookieOf = (participantId: string) => participantId === annId ? ann : ben;
-  return { ann, ben, id, annId, benId, token, view, join, as, cookieOf };
+  return { ann, ben, id, annId, benId, view, join, preview, as, cookieOf };
 }
 
 test('at an Online Table a seated Guest who leaves during a Hand is stood up after it, frees a place, and rejoins through the Join Link as the same Participant with their history', async () => {
-  const { ann, ben, id, annId, benId, token, view, join, as, cookieOf } = await onlineHand();
+  const { ann, ben, id, annId, benId, view, join, preview, as, cookieOf } = await onlineHand();
   const watcher = await guest('Cy');
-  const placesTaken = async () => (await (await get('/api/join-links/' + token, watcher)).json()).placesTaken as number;
+  const placesTaken = async () => (await preview(watcher)).placesTaken as number;
   expect(await placesTaken()).toBe(2);
   const asked = await as(ben, 'leave-table', { participantId: benId });
   expect(await asked.json()).toMatchObject({ ok: true, afterHand: true });
@@ -256,7 +256,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   expect(participant(after, benId)).toMatchObject({ seat: null, stack: 0 });
   expect(participant(after, annId).stack + participant(decided, benId).stack).toBe(stacks.reduce((sum, stack) => sum + stack, 0));
   // The link tells the returning Guest who they will be, then gives them back the same Participant.
-  expect(await (await get('/api/join-links/' + token, ben)).json()).toMatchObject({ alreadyJoined: false, returningAs: 'Ben' });
+  expect(await preview(ben)).toMatchObject({ alreadyJoined: false, returningAs: 'Ben' });
   const rejoined = await join(ben);
   expect(await rejoined.json()).toMatchObject({ ok: true, participantId: benId });
   const back = await view(ben);
@@ -268,7 +268,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
 });
 
 test('nobody manages another human, and an owner who leaves keeps their table, which keeps running without them', async () => {
-  const { ann, ben, id, annId, benId, token, view, as } = await onlineHand();
+  const { ann, ben, id, annId, benId, view, join, preview, as } = await onlineHand();
   // Both are seated in a Hand. Requests naming the other human are refused for the owner and everyone else.
   for (const [cookie, target] of [[ben, annId], [ann, benId]] as const) {
     for (const [kind, fields] of [['leave-table', {}], ['stand-up-participant', {}], ['set-sitting-out', { sittingOut: true }]] as const) {
@@ -288,16 +288,15 @@ test('nobody manages another human, and an owner who leaves keeps their table, w
   // The table keeps running, and ownership stays with her.
   const running = await view(ben);
   expect(running.ownerParticipantId).toBe(annId);
-  expect(running).not.toHaveProperty('joinToken');
   const ownerOnly = await as(ben, 'set-button', { seat: 2 });
   expect({ status: ownerOnly.status, code: (await ownerOnly.json()).rejection?.code }).toEqual({ status: 403, code: 'table-owner-required' });
   expect((await as(ben, 'move-participant', { participantId: benId, seat: 3 })).status).toBe(200);
-  // Only the owner returns without the link; nobody else can use that route.
-  expect((await post('/api/table-sessions/' + id + '/rejoin-table', ben, { requestId: randomUUID() })).status).toBe(404);
-  const returned = await post('/api/table-sessions/' + id + '/rejoin-table', ann, { requestId: randomUUID() });
+  // She returns through the Join Link like anyone who left, as the same Participant.
+  expect(await preview(ann)).toMatchObject({ alreadyJoined: false, returningAs: 'Ann' });
+  const returned = await join(ann);
   expect(await returned.json()).toMatchObject({ ok: true, participantId: annId });
   const owner = await view(ann);
-  expect(owner).toMatchObject({ viewerParticipantId: annId, ownerParticipantId: annId, joinToken: token });
+  expect(owner).toMatchObject({ viewerParticipantId: annId, ownerParticipantId: annId });
   expect(participant(owner, annId)).toMatchObject({ seat: null, stack: 0 });
 });
 
