@@ -41,6 +41,17 @@ export function tableAddress(routeMode: TableMode, tableSessionId: string, read:
 /** Whether the address is an Online Table's Join Link to a visitor who is not at it: only then is its preview asked for. */
 export const joinPreviewWanted = (routeMode: TableMode, read: TableRead) => routeMode === 'online' && read === 'not-found';
 
+export type AnalysisTab = 'live' | 'hand' | 'session';
+/** The analysis tab an address names; anything absent or invalid names none, and the current default applies. */
+export function analysisTabParam(value: unknown): AnalysisTab | undefined {
+  return value === 'live' || value === 'hand' || value === 'session' ? value : undefined;
+}
+/** The search a table route accepts: `analysis=live|hand|session`. */
+export function tableSearch(search: Record<string, unknown>): { analysis?: AnalysisTab } {
+  const analysis = analysisTabParam(search.analysis);
+  return analysis ? { analysis } : {};
+}
+
 const app = 'Poker Trainer';
 export type Page =
   | { readonly page: 'list'; readonly mode: TableMode }

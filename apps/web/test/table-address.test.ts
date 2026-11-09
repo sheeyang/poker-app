@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, type JoinLinkPreview } from '@poker/contracts';
-import { joinLink, joinPreviewWanted, pageTitle, tableAddress } from '../src/table-address.js';
+import { analysisTabParam, joinLink, joinPreviewWanted, pageTitle, tableAddress, tableSearch } from '../src/table-address.js';
+
+describe('the analysis tab kept in a table address', () => {
+  it('accepts live, hand and session, and ignores anything else', () => {
+    expect(analysisTabParam('live')).toBe('live');
+    expect(analysisTabParam('hand')).toBe('hand');
+    expect(analysisTabParam('session')).toBe('session');
+    for (const bad of ['', 'Live', 'summary', 1, undefined, null, ['live']]) expect(analysisTabParam(bad)).toBeUndefined();
+  });
+  it('drops an invalid parameter from the route search', () => {
+    expect(tableSearch({ analysis: 'session', other: 1 })).toEqual({ analysis: 'session' });
+    expect(tableSearch({ analysis: 'nonsense' })).toEqual({});
+    expect(tableSearch({})).toEqual({});
+  });
+});
 
 const id = '7f3a2c1e-0000-4000-8000-000000000001';
 const preview: JoinLinkPreview = { ok: true, ownerName: 'Sam', configuration: defaultConfiguration, options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true }, placesTaken: 3, alreadyJoined: false };
