@@ -43,7 +43,16 @@ export const useSession = create<SessionState>()(persist(set => ({
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
   setAnimations: animations => set({ animations }),
-}), { name: 'poker-trainer-v1' }));
+}), {
+  name: 'poker-trainer-v1',
+  // Browser storage keeps only preferences. A request, and anything a Guest typed into one, lives in memory for the life of the page.
+  version: 1,
+  partialize: ({ analysisOpen, animations }) => ({ analysisOpen, animations }),
+  migrate: stored => {
+    const { analysisOpen, animations } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations'>>;
+    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true } as SessionState;
+  },
+}));
 
 function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAcknowledgement> {
   if (attempt.kind === 'create') return api.createSession(attempt.body);
@@ -63,7 +72,7 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
   }
 }
 
-/** Persist the exact attempt before transmission; an ambiguous response never creates a second action. */
+/** Hold the exact attempt in memory before transmission; an ambiguous response never creates a second action within a page's life. */
 export function useCommand() {
   const queryClient = useQueryClient();
   const pending = useSession(state => state.pending);
