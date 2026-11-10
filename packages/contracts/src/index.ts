@@ -145,7 +145,11 @@ export interface CreationAcknowledgement {
 }
 export interface ApplicationRejection {
   readonly ok: false;
-  readonly rejection: { readonly code: string; readonly message: string; readonly field?: string };
+  readonly rejection: {
+    readonly code: string; readonly message: string; readonly field?: string;
+    /** With `current-table-elsewhere`: the Guest's Current Table, which they must leave first. */
+    readonly currentTableId?: TableSessionId;
+  };
 }
 export type CreationOutcome = CreationAcknowledgement | ApplicationRejection;
 export interface PokerMutationMetadata {

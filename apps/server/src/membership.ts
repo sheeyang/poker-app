@@ -47,6 +47,16 @@ export async function storedOnlineTable(db: Database, tableSessionId: string): P
     .where(and(eq(tableSessions.id, tableSessionId), sql`${tableSessions.aggregate}->>'mode' = 'online'`));
   return rows[0]?.aggregate;
 }
+/**
+ * The Guest's Current Table: the one Online Table they are joined at, watching counts, or undefined. Practice Tables
+ * never count. Read from the membership index, so it loads nothing.
+ */
+export async function currentTable(db: Database, userId: string): Promise<string | undefined> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId })
+    .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
+    .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.status, 'joined'), sql`${tableSessions.aggregate}->>'mode' = 'online'`));
+  return rows[0]?.tableSessionId;
+}
 /** The Guest's joined, unremoved Participant at a table, whether the Guest owns it and its mode, without restoring the table. */
 export async function membership(db: Database, tableSessionId: string, userId: string): Promise<{ participantId: string; owner: boolean; mode: TableMode } | undefined> {
   const rows = await db.select({ participantId: tableMemberships.participantId, ownerUserId: tableSessions.ownerUserId, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })

@@ -1,13 +1,18 @@
 import type { SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest } from '@poker/contracts';
 export class RequestFailure extends Error {
-  constructor(readonly code: string, message: string, readonly definitive: boolean) { super(message); }
+  /** With `current-table-elsewhere`: the Guest's Current Table, which they must leave first. */
+  readonly currentTableId?: string;
+  constructor(readonly code: string, message: string, readonly definitive: boolean, details: { readonly currentTableId?: string } = {}) {
+    super(message);
+    if (details.currentTableId !== undefined) this.currentTableId = details.currentTableId;
+  }
 }
 async function request<T>(path: string, init?: RequestInit, acceptAnalysisError = false): Promise<T> {
   const response = await fetch('/api' + path, { ...init, credentials: 'same-origin' });
   const data = await response.json();
   if ((!response.ok && !(acceptAnalysisError && data.ok === true)) || data.ok === false) {
     const rejection = (data as ApplicationRejection).rejection;
-    throw new RequestFailure(rejection?.code ?? 'request-failed', rejection?.message ?? 'The server could not complete this request.', response.status < 500);
+    throw new RequestFailure(rejection?.code ?? 'request-failed', rejection?.message ?? 'The server could not complete this request.', response.status < 500, typeof rejection?.currentTableId === 'string' ? { currentTableId: rejection.currentTableId } : {});
   }
   return data as T;
 }
