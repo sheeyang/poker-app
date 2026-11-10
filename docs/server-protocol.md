@@ -171,6 +171,10 @@ The Trainer uses the authenticated `GET /api/live` WebSocket with typed
 `subscribe-table` and `unsubscribe-table` messages. Its full-view envelopes,
 subscription authorization, revision ordering, status messages, and reconnect
 rules are defined in [ADR-0017](adr/0017-bind-observability-with-participant-cash-game.md).
+One connection may be subscribed to several tables at once. The Trainer follows
+the Guest's Current Table from every page, and also the table being viewed when
+that is a different one, so a Guest stays connected to their Current Table, and
+dealt in, while any tab of the app is open.
 
 ## Play timing
 
