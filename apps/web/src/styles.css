@@ -1153,3 +1153,18 @@ fieldset.composer-field { display: block; }
 /* Ownership passed: who manages the table now, until dismissed. */
 .table-notices > .ownership-notice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #6e7a54; border-radius: 8px; background: #2f3c2b; color: #dfe6cf; font-size: .84rem; line-height: 1.45; }
 .ownership-notice > svg { color: var(--gold); }
+
+.analysis-rail { position: absolute; top: 96px; right: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px 9px; min-height: 0; border-radius: 10px 0 0 10px; border-right: 0; background: #1a2721; border-color: var(--line); font-size: .8rem; }
+.analysis-rail span { writing-mode: vertical-rl; }
+@media (max-width: 1000px) { .analysis-rail { top: auto; bottom: 16px; right: 16px; flex-direction: row; border-radius: 10px; border-right: 1px solid var(--line); padding: 10px 14px; } .analysis-rail span { writing-mode: horizontal-tb; } }
+
+/* Analysis tab: one vertical tab on the workspace's right edge. Open, it rides the analysis panel's left edge. */
+.analysis-tab { grid-column: 1; grid-row: 1; justify-self: end; align-self: start; margin-top: clamp(80px, 38dvh, 360px); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 0; padding: 14px 8px; border-right: 0; border-radius: 10px 0 0 10px; background: var(--surface); border-color: var(--line); color: var(--muted); }
+.analysis-tab:hover { background: var(--raised); color: var(--text); }
+.analysis-tab span { writing-mode: vertical-rl; font-weight: 600; letter-spacing: .04em; }
+.analysis-tab svg:last-child { transform: rotate(180deg); }
+.with-analysis .analysis-tab { grid-column: 2; justify-self: start; transform: translateX(-100%); }
+.with-analysis .analysis-tab svg:last-child { transform: none; }
+@media (max-width: 1000px) { .with-analysis .analysis-tab { display: none; } }
+.play-workspace > .play-area { grid-column: 1; grid-row: 1; }
+.play-workspace > .analysis-panel { grid-column: 2; grid-row: 1; }

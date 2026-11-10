@@ -28,6 +28,7 @@ export function useTableInteractions(table: ObservableTableSession | undefined, 
   const openSeat = (seat: number, anchor: HTMLElement) => { trigger.current = anchor; setMenu({ kind: 'seat', seat, anchor }); };
   const openParticipant = (participantId: string, anchor: HTMLElement) => { trigger.current = anchor; setMenu({ kind: 'participant', participantId, anchor }); };
   const rebuy = () => { if (table) { trigger.current = document.activeElement as HTMLElement; setTask({ kind: 'stack', participantId: table.viewerParticipantId }); } };
+  const leave = () => { if (table) { trigger.current = document.activeElement as HTMLElement; selectParticipantAction('leave', table.viewerParticipantId); } };
   const blocked = command.busy || table?.runtimeStatus?.phase === 'recovering';
   function manage(participantId: string, operation: 'set-sitting-out' | 'stand-up-participant' | 'move-participant', fields: { sittingOut?: boolean; seat?: number } = {}) {
     if (!table || blocked) return;
@@ -59,5 +60,5 @@ export function useTableInteractions(table: ObservableTableSession | undefined, 
     {task?.kind === 'add-bot' && <AddBotDialog key={`bot-${task.seat}`} table={table} seat={task.seat} command={command} handOpen={handOpen} close={closeTask} chooseAgain={() => chooseSeats()} />}
     {task && task.kind !== 'take-seat' && task.kind !== 'add-bot' && <ParticipantDialog key={`${task.kind}-${task.participantId}`} table={table} participantId={task.participantId} task={task.kind} command={command} handOpen={handOpen} close={closeTask} />}
   </>;
-  return { openSeat, openParticipant, chooseSeats, rebuy, choosing, cancelChoosing: () => setChoosing(null), overlays };
+  return { openSeat, openParticipant, chooseSeats, rebuy, leave, choosing, cancelChoosing: () => setChoosing(null), overlays };
 }
