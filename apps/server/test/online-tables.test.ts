@@ -337,13 +337,13 @@ test('Deal, choosing the dealer button and completed-Hand inspection are unavail
   expect((await (await get('/api/table-sessions/' + practice.tableSessionId, table.owner)).json()).inspection.adminMode).toBe(true);
 });
 
-test('saved tables carry each table’s mode, observable stakes and play state, an owned table the Guest has left included', async () => {
+test('saved tables carry only each table’s mode, format and blinds from its stored row, an owned table the Guest has left included', async () => {
   const table = await online(await guest('Ann'), { configuration: { ...stakes, ante: 5 }, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
   const ben = await guest('Ben');
   const benParticipant = (await (await join(table.id, ben)).json()).participantId as string;
   const list = async (cookie: string) => (await (await get('/api/table-sessions', cookie)).json()).tables;
-  const between = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 }, playState: { status: 'between-hands', completedHands: 0, seatedParticipants: 0 } };
-  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...between }]);
+  const row = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 } };
+  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...row }]);
   // Ben and the Bot sit down and a Hand is dealt; the owner watches, then leaves.
   await connectLive(base, ben, table.id);
   expect((await command(table, ben, 'seat-participant', { participantId: benParticipant, seat: 1, buyIn: 400 })).status).toBe(200);
@@ -351,10 +351,9 @@ test('saved tables carry each table’s mode, observable stakes and play state, 
   clock.advanceTo((await announcedCountdown(() => read(table, ben))).endsAt);
   await expect.poll(async () => (await read(table, ben)).view.state.handId).toBe('hand-1');
   expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
-  const playing = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 }, playState: { status: 'active-hand', completedHands: 0, seatedParticipants: 2 } };
-  const benStack = (await read(table, ben)).view.state.participants.find(participant => participant.participantId === benParticipant)!.stack;
-  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...playing, playState: { ...playing.playState, viewerStack: benStack } }]);
-  // The owner who left cannot read the table, yet their saved list still says what it is and how play stands.
+  // The list still says nothing of play: that is the Current Table's live copy alone.
+  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...row }]);
+  // The owner who left cannot read the table, yet their saved list still names it, flagged as left.
   expect((await get('/api/table-sessions/' + table.id, table.owner)).status).toBe(404);
-  expect(await list(table.owner)).toContainEqual({ tableSessionId: table.id, mode: 'online', left: true, ...playing });
+  expect(await list(table.owner)).toContainEqual({ tableSessionId: table.id, mode: 'online', left: true, ...row });
 });

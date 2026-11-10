@@ -1,11 +1,13 @@
 import { useState, type ReactNode } from 'react';
-import { actionTimeLimits, defaultConfiguration, defaultPlayingStrategy, type ActionTimeLimitSeconds, type CreateTableSessionRequest, type SavedTable, type TableMode } from '@poker/contracts';
+import { actionTimeLimits, defaultConfiguration, defaultPlayingStrategy, type ActionTimeLimitSeconds, type CreateTableSessionRequest, type ObservableTableSession, type TableMode } from '@poker/contracts';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { api } from '@poker/client';
 import { StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { chips, tableFormat } from './table-model.js';
+import { liveDetails, openedLabel, savedRows, type SavedRow } from './saved-tables.js';
+import { useSession } from './session.js';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem } from './online-setup.js';
 import type { Command } from './session.js';
 import { DisplayNameForm, DisplayNamePrompt, useDisplayName } from './display-name.js';
@@ -24,7 +26,11 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
   const { command, identity } = useShell();
   const ready = identity.isSuccess;
   const sessions = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: ready });
-  const tables = sessions.data?.tables.filter(saved => saved.mode === mode);
+  // The list holds stored facts only. The Current Table's live details come from the copy its subscription already loaded; nothing is fetched for them.
+  const currentId = sessions.data?.tables.find(saved => saved.mode === 'online' && !saved.left)?.tableSessionId;
+  const currentCopy = useQuery<ObservableTableSession>({ queryKey: ['table-session', currentId], enabled: false });
+  const opened = useSession(state => state.opened);
+  const tables = sessions.data && savedRows(sessions.data.tables, mode, opened, currentId ? liveDetails(currentId, currentCopy.data) : undefined);
   const { displayName } = useDisplayName(), [awaitingName, setAwaitingName] = useState<CreateTableSessionRequest | null>(null);
   // Until the Guest decides, the form is open exactly when there is nothing to pick up instead.
   const [composing, setComposing] = useState<boolean>();
@@ -46,40 +52,35 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
       {sessions.isError && <div className="notice-error ledger-problem" role="alert"><p>Couldn’t load your tables.</p><button onClick={() => void sessions.refetch()}>Retry</button></div>}
       {tables?.length === 0 && <div className="ledger-empty"><SeatGlyph seats={mode === 'practice' ? 6 : 9} /><div><h3>{text.empty}</h3><p>{text.emptyHint}</p></div></div>}
       {!!tables?.length && <table className="ledger">
-        <thead><tr><th scope="col">Table</th><th scope="col">Blinds</th><th scope="col">Status</th><th scope="col"><span className="visually-hidden">Action</span></th></tr></thead>
-        <tbody>{tables.map(saved => <LedgerRow key={saved.tableSessionId} saved={saved} retry={() => void sessions.refetch()} />)}</tbody>
+        <thead><tr><th scope="col">Table</th><th scope="col">Blinds</th><th scope="col">Status</th><th scope="col">Opened</th><th scope="col"><span className="visually-hidden">Action</span></th></tr></thead>
+        <tbody>{tables.map(row => <LedgerRow key={row.tableSessionId} row={row} now={Date.now()} retry={() => void sessions.refetch()} />)}</tbody>
       </table>}
+      {!!tables?.length && <p className="ledger-note">Tables you haven’t opened in this browser are listed last.</p>}
     </section>
     <details className="tables-name"><summary><span>Your name</span><strong>{displayName ?? 'Not set yet'}</strong><Icon name="chevron" size={15} /></summary><div className="tables-name-form"><p className="muted">Used at tables you create or join from now on. Existing tables keep the name you had there.</p><DisplayNameForm key={displayName} current={displayName} /></div></details>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;
 }
 
-/** A saved table that could be read: its format, mode and stakes, then how play stands, all public facts from the list. */
-type ReadableSavedTable = SavedTable & Required<Pick<SavedTable, 'seatCount' | 'stakes' | 'playState'>>;
-const readable = (saved: SavedTable): saved is ReadableSavedTable => saved.seatCount !== undefined && !!saved.stakes && !!saved.playState;
-
 /**
  * One saved table. The whole row opens it: a real link to its address, so it can open in a new browser tab. An
- * Online Table the Guest left opens at its address too, which is its Join Link: its join form returns them.
+ * Online Table the Guest is not at opens at its address too, which is its Join Link: its join form returns them.
  */
-function LedgerRow({ saved, retry }: { saved: SavedTable; retry: () => void }) {
-  if (!readable(saved)) return <tr className="ledger-row is-unreadable"><th scope="row" colSpan={3}><span className="muted">This saved table couldn’t be read.</span></th><td className="ledger-action"><button className="text-button" onClick={retry}>Retry</button></td></tr>;
-  const { seatCount, stakes, playState } = saved;
-  const name = `${tableFormat(seatCount)} Hold’em`, blinds = `${chips(stakes.smallBlind)} / ${chips(stakes.bigBlind)}`;
-  const kind = saved.left ? 'away' : saved.mode === 'practice' ? 'practice' : 'seated';
-  const action = kind === 'away' ? 'Return to table' : kind === 'seated' ? 'Back to game' : 'Continue';
+function LedgerRow({ row, now, retry }: { row: SavedRow; now: number; retry: () => void }) {
+  if (row.kind === 'unreadable') return <tr className="ledger-row is-unreadable"><th scope="row" colSpan={4}><span className="muted">This saved table couldn’t be read.</span></th><td className="ledger-action"><button className="text-button" onClick={retry}>Retry</button></td></tr>;
+  const { kind, seatCount, name, blinds, action, live } = row;
   const label = `${action}: ${name}, ${blinds} blinds`;
   const status = kind === 'practice' ? <span className="muted">Practice</span>
     : kind === 'away' ? <span className="muted">Not at this table</span>
-    : <span className="ledger-live"><b>Current Table</b> · {playState.status === 'active-hand' ? 'Hand in progress' : 'Between hands'} · {playState.viewerStack !== undefined ? <span className="numeric">{chips(playState.viewerStack)} chips</span> : 'Watching'}</span>;
-  const opener = saved.mode === 'online'
-      ? <Link className="ledger-open" aria-label={label} to="/online/$tableSessionId" params={{ tableSessionId: saved.tableSessionId }}>{name}</Link>
-      : <Link className="ledger-open" aria-label={label} to="/practice/$tableSessionId" params={{ tableSessionId: saved.tableSessionId }}>{name}</Link>;
-  return <tr className={`ledger-row is-${kind}`}>
-    <th scope="row"><span className="ledger-name"><SeatGlyph seats={seatCount} you={kind === 'seated' && playState.viewerStack !== undefined} dim={kind === 'away'} />{opener}</span></th>
-    <td className="numeric">{blinds}{stakes.ante ? <span className="ledger-ante"> · ante {chips(stakes.ante)}</span> : null}</td>
+    : <span className="ledger-live"><b>Current Table</b>{live && <> · {live.handInProgress ? 'Hand in progress' : 'Between hands'}{live.stack !== undefined ? <> · <span className="numeric">{chips(live.stack)} chips</span></> : null}</>}</span>;
+  const opener = kind === 'practice'
+    ? <Link className="ledger-open" aria-label={label} to="/practice/$tableSessionId" params={{ tableSessionId: row.tableSessionId }}>{name}</Link>
+    : <Link className="ledger-open" aria-label={label} to="/online/$tableSessionId" params={{ tableSessionId: row.tableSessionId }}>{name}</Link>;
+  return <tr className={`ledger-row is-${kind === 'current' ? 'seated' : kind}`}>
+    <th scope="row"><span className="ledger-name"><SeatGlyph seats={seatCount} you={kind === 'current' && live?.stack !== undefined} dim={kind === 'away'} />{opener}</span></th>
+    <td className="numeric">{blinds}{row.ante ? <span className="ledger-ante"> · ante {row.ante}</span> : null}</td>
     <td>{status}</td>
+    <td className="ledger-opened numeric">{openedLabel(row.openedAt, now)}</td>
     <td className="ledger-action" aria-hidden="true"><span>{action}</span><Icon name="arrow" size={15} /></td>
   </tr>;
 }

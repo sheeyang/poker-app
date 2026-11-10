@@ -1059,21 +1059,17 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         placesTaken: placesTaken(aggregate), alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
     }
     /**
-     * The Guest's saved tables (`savedTableEntries`), each with its public size, stakes and play state from the
-     * committed table, which is acquired for it and so loaded if it is not in memory. A table that cannot be restored is
-     * still listed, without them.
+     * The Guest's saved tables (`savedTableEntries`), each with its format and blinds, read from the stored row: no
+     * table is acquired or loaded, and none of the table's play appears. A row that cannot be upgraded is still listed,
+     * without them.
      */
     async function savedTables(userId: string): Promise<SavedTable[]> {
-      return Promise.all((await savedTableEntries(db, userId)).map(async ({ participantId, ...entry }): Promise<SavedTable> => {
-        const listed = await holding(entry.tableSessionId, async (): Promise<SavedTable> => {
-          const session = tables.get(entry.tableSessionId)!;
-          const state = tableState(session), { seatCount, smallBlind, bigBlind, ante } = tableConfiguration(session);
-          const own = state.participants.find(participant => participant.participantId === participantId && participant.seat !== null);
-          return { ...entry, seatCount, stakes: { smallBlind, bigBlind, ante }, playState: { status: state.status, completedHands: session.game.getCompletedHands().length,
-            seatedParticipants: state.participants.filter(participant => participant.seat !== null).length, ...(own ? { viewerStack: own.stack } : {}) } };
-        }).catch(() => undefined);
-        return listed ?? entry;
-      }));
+      return (await savedTableEntries(db, userId)).map(({ stored, ...entry }): SavedTable => {
+        const aggregate = upgradeTableSession(stored);
+        if (!aggregate) return entry;
+        const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
+        return { ...entry, seatCount, stakes: { smallBlind, bigBlind, ante } };
+      });
     }
     async function readPersistedSession(id: string) {
       const rows = await db.select().from(tableSessions).where(eq(tableSessions.id, id));
