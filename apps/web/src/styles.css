@@ -1064,3 +1064,40 @@ fieldset.composer-field { display: block; }
   .ledger-action > span { display: none; }
   .address-missing { padding-top: 56px; }
 }
+
+/* ==========================================================================
+   The Current Table banner: a live strip of felt attached under the header,
+   on every page but that table's own. It turns brass while it is the
+   viewer's turn, and takes a dashed edge while their leave is pending.
+   ========================================================================== */
+.live-strip { --strip-text: #c6ddd0; --strip-strong: #f4f4df; --strip-line: #4f8a70; --strip-hover: #245442; display: flex; align-items: center; gap: 14px; min-height: 46px; padding: 6px var(--gutter); background: #1c4637; color: var(--strip-text); border-bottom: 1px solid #2c6650; transition: background-color 200ms cubic-bezier(.16,1,.3,1), border-color 200ms cubic-bezier(.16,1,.3,1), color 200ms; }
+.live-strip-dot { width: 8px; height: 8px; border-radius: 50%; background: #9fd3b0; flex-shrink: 0; }
+.live-strip-facts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; min-width: 0; margin: 0; font-size: .86rem; line-height: 1.4; }
+.live-strip-facts strong, .live-strip-stack { color: var(--strip-strong); font-weight: 600; }
+.live-strip-tag { padding: 1px 8px; border: 1px solid #6e7a54; border-radius: 4px; background: #2f3c2b; color: #dfe6cf; font-size: .78rem; }
+.live-strip-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+.live-strip-leave { min-height: 32px; padding: 4px 10px; border-color: transparent; background: transparent; color: var(--strip-text); font-size: .82rem; }
+.live-strip-leave:hover { border-color: transparent; background: var(--strip-hover); color: var(--strip-strong); }
+.live-strip-back { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 12px; border: 1px solid var(--strip-line); border-radius: 7px; color: var(--strip-strong); font-size: .84rem; font-weight: 600; text-decoration: none; transition: background-color 150ms, border-color 150ms; }
+.live-strip-back:hover { background: var(--strip-hover); }
+.live-strip-back svg { transition: transform 150ms cubic-bezier(.16,1,.3,1); }
+.live-strip-back:hover svg { transform: translateX(2px); }
+/* Your turn: the whole strip is brass, and Back to game is the one dark, filled control on it. */
+.live-strip.is-turn { --strip-text: #3b3a24; --strip-strong: #1d2618; --strip-hover: var(--gold-hover); background: var(--gold); border-bottom-color: #c5a96f; }
+.live-strip.is-turn .live-strip-dot { background: #243025; }
+.live-strip.is-turn .live-strip-back { border-color: #243025; background: #243025; color: var(--gold); }
+.live-strip.is-turn .live-strip-back:hover { background: #1a241b; }
+.live-strip.is-turn :is(.live-strip-back, .live-strip-leave):focus-visible { outline-color: #243025; }
+/* Leaving after this hand: a dashed edge, an olive tag where the Hand was, and no second Leave game. */
+.live-strip.is-leaving { background: #22302a; border-bottom: 1px dashed #6e7a54; }
+.live-strip.is-leaving .live-strip-dot { background: #6e7a54; }
+.live-strip.is-turn.is-leaving { background: var(--gold); }
+.live-strip.is-turn .live-strip-tag { border-color: #8a7344; background: #c5a96f; color: #1d2618; }
+@media (max-width: 650px) {
+  .live-strip { flex-wrap: wrap; gap: 6px 12px; padding: 8px var(--gutter); }
+  .live-strip-dot { align-self: center; }
+  .live-strip-facts { flex: 1; gap: 2px 12px; }
+  .live-strip-hand { display: none; }
+  .live-strip-actions { width: 100%; margin-left: 0; justify-content: space-between; }
+  .live-strip-actions > :only-child { margin-left: auto; }
+}
