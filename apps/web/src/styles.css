@@ -790,7 +790,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 /* A field the server turned down: a warm border, and the reason directly under it. */
 input[aria-invalid="true"] { border-color: #c48466; }
 .field-problem { color: #f0c8af; font-weight: 400; line-height: 1.5; }
-.rules-form .password-row { width: min(100%, 360px); }
+.rules-form .password-row { width: 100%; }
 .table-password-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 /* Refused for the Guest's Current Table: the warm green of that table's ledger row, a brass-tinted rule, and the way to it. */
 .current-table-refusal { display: grid; gap: 4px; padding: 14px 16px 10px; background: #1f2c24; border: 1px solid #5c5a40; border-radius: 8px; color: #c3d4c7; font-size: .86rem; line-height: 1.5; }
@@ -1221,3 +1221,13 @@ fieldset.composer-field { display: block; }
 /* The identity button: a lone avatar. Name and status are in its tooltip and the profile panel. */
 .identity-avatar { position: relative; width: 36px; height: 36px; min-height: 0; padding: 0; border-radius: 50%; background: var(--raised); border: 1px solid var(--control-line); color: var(--gold); font-weight: 700; font-size: .95rem; display: grid; place-items: center; }
 .identity-avatar:hover, .identity-avatar[aria-expanded="true"] { background: var(--control-hover); border-color: var(--gold); }
+
+/* Dialogs scroll under the same floating scrollbar as the page: the heading stays put, the body scrolls. */
+.dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.dialog-body { position: relative; flex: 1; min-height: 0; }
+.dialog-scroller { max-height: 100%; height: 100%; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.dialog-scroller::-webkit-scrollbar { display: none; }
+.dialog-body:hover .shell-thumb { opacity: .85; }
+.settings-apply { margin-top: 8px; }
+/* Anything else that scrolls natively gets the same thin, quiet bar. */
+* { scrollbar-width: thin; scrollbar-color: #607866 transparent; }
