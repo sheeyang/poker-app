@@ -5,7 +5,7 @@ import { emptySchedule } from './schedule.js';
  * A human Participant's application membership. Only `joined` grants access to the table.
  * The membership index (`table_memberships`) mirrors it in the same transaction as each commit.
  */
-export type MembershipStatus = 'joined' | 'left' | 'removed';
+export type MembershipStatus = 'joined' | 'left';
 export interface PersistedHumanBinding {
   readonly participantId: string;
   readonly name: string;

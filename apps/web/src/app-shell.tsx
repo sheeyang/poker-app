@@ -55,7 +55,7 @@ export function AppShell() {
       if (router.state.location.pathname === tablePath(mode, ended.tableSessionId)) void router.navigate({ href: listPath(mode), replace: true });
       queryClient.removeQueries({ queryKey: ['table-session', ended.tableSessionId] });
       void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      setNotice(ended.reason === 'left' ? 'You left the table.' : 'The Table Owner removed you from that table.');
+      setNotice('You are no longer at that table.');
     },
     onReady: lifecycle => consumers.current?.onReady?.(lifecycle),
     onAnalysisUpdate: (update, lifecycle) => consumers.current?.onAnalysisUpdate?.(update, lifecycle),

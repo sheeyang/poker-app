@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS table_memberships (
   user_id uuid NOT NULL REFERENCES local_users(id),
   table_session_id uuid NOT NULL REFERENCES table_sessions(id),
   participant_id text NOT NULL,
-  status text NOT NULL CHECK (status IN ('joined', 'left', 'removed')),
+  status text NOT NULL CHECK (status IN ('joined', 'left')),
   PRIMARY KEY(user_id, table_session_id),
   UNIQUE(table_session_id, participant_id)
 );

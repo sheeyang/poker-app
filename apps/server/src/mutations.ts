@@ -23,7 +23,7 @@ import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, n
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
-import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, removedGuest, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
+import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -342,7 +342,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
         ...(applied.events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
         bindings: aggregate.bindings.map(binding => isHuman(binding) && applied.left.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
-          : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'removed' as const }
+          : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
           : isBot(binding) && applied.removed.includes(binding.participantId) ? { ...binding, removed: true as const } : binding) };
       return { requestId: 'after-hand:' + aggregate.sessionRevision, fingerprint: createHash('sha256').update('after-hand-v1:' + canonical({ changes: aggregate.pendingChanges })).digest('hex'),
         events: applied.events, next: { aggregate: next, game: working } };
@@ -577,8 +577,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const participantId = viewer(session, entry.userId);
       if (!participantId) {
         // A Guest whose membership ended is told once, so their client leaves the table; anyone else is dropped silently.
-        const ended = humanBindings(session.aggregate).find(binding => binding.userId === entry.userId && binding.membership !== 'joined')?.membership;
-        if (ended && ended !== 'joined') try { entry.publish({ type: 'table-membership-ended', tableSessionId: id, reason: ended }); } catch { /* The subscriber is gone. */ }
+        const ended = humanBindings(session.aggregate).some(binding => binding.userId === entry.userId && binding.membership === 'left');
+        if (ended) try { entry.publish({ type: 'table-membership-ended', tableSessionId: id }); } catch { /* The subscriber is gone. */ }
         drop(entry); continue;
       }
       // A delivery failure cannot change a confirmed mutation's outcome.
@@ -777,7 +777,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         let proposed: CommittedSession | undefined;
         let acceptedHumanDecision: string | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
-        let ending: { participantId: string; membership: 'left' | 'removed' } | undefined;
+        let ending: { participantId: string; membership: 'left' } | undefined;
         let addedBot: PersistedBotBinding | undefined;
         let removedBot: string | undefined;
         try {
@@ -858,10 +858,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                     return left;
                   }
                   case 'leave-table': case 'remove-participant': {
-                    // Removal differs only in what it records: the Guest may not come back.
+                    // Removal is a Leave Table the owner imposes: nothing records the difference, and the Guest may join again.
                     const participantId = (request as LeaveTableRequest | RemoveParticipantRequest).participantId;
                     const left = standUpAndLeave(working, participantId);
-                    if (left.ok) ending = { participantId, membership: kind === 'remove-participant' ? 'removed' : 'left' };
+                    if (left.ok) ending = { participantId, membership: 'left' };
                     return left;
                   }
                 }
@@ -1015,8 +1015,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             const guest = (await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
             const acknowledged = (participantId: string, next = aggregate): JoinOutcome => ({ ok: true, tableSessionId: id, participantId, pokerRevision: next.pokerRevision, sessionRevision: next.sessionRevision });
             let result: JoinOutcome | undefined;
-            if (binding?.membership === 'removed') result = removedGuest();
-            else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
+            if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
             else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
             // The owner's place is held after they leave, so only someone else can find the table full.
             else if (binding?.userId !== aggregate.ownerUserId && placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
@@ -1045,7 +1044,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }
     /**
      * What an Online Table's Join Link shows before joining, for the Guest opening it: undefined, answered as not
-     * found, for an ID that names no Online Table. A removed Guest is told so instead. It is read from the stored
+     * found, for an ID that names no Online Table. It is read from the stored
      * table, never loading it: the Guest opening the link is not at the table yet.
      */
     async function previewJoin(userId: string, id: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
@@ -1054,7 +1053,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const aggregate = upgradeTableSession(stored);
       if (!aggregate) throw new TableSessionRestorationError();
       const humans = humanBindings(aggregate);
-      if (humans.some(binding => binding.userId === userId && binding.membership === 'removed')) return removedGuest();
       const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
       const returning = humans.find(binding => binding.userId === userId && binding.membership === 'left');
       return { ok: true as const, ownerName: owner.name, configuration: projectConfiguration(recordedConfiguration(aggregate.pokerRecord)), options: projectOptions(aggregate.options),
