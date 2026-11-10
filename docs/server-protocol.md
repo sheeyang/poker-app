@@ -38,8 +38,8 @@ preview live under the Table Session, and need an established Guest identity (40
 
 | Method and path | Request and result |
 | --- | --- |
-| `GET /api/table-sessions/:id/join-preview` | What the link shows a Guest before they join, read from the stored table without loading it: `ownerName`, the public `configuration` and `options`, `placesTaken` (of the table's 20 places, see `table-full` below), whether the Guest is `alreadyJoined`, and `returningAs`, the Participant name of a Guest who left and would return. |
-| `POST /api/table-sessions/:id/join-table` | Requires only `requestId`: the joiner has not seen the table, so there is no expected revision. Joins the Guest as one unseated Participant under their stored display name and returns `{ ok, tableSessionId, participantId, pokerRevision, sessionRevision }`. Joining again, with any request ID, returns the same Participant without another commit, and a Guest who left, the Table Owner included, returns as that Participant under the original name, with their earlier history. |
+| `GET /api/table-sessions/:id/join-preview` | What the link shows a Guest before they join, read from the stored table without loading it: `ownerName`, the public `configuration` and `options`, `placesTaken` (of the table's 20 places, see `table-full` below), whether the Guest is `alreadyJoined`, and `returningAs`, the Participant name of a Guest who left and would return. At a table with a [Table Password](#table-password), a Guest who is not at it gets only `{ ok, ownerName, passwordRequired: true }`. |
+| `POST /api/table-sessions/:id/join-table` | Requires `requestId`: the joiner has not seen the table, so there is no expected revision. A Guest who is not at a table with a Table Password also gives `tablePassword`. Joins the Guest as one unseated Participant under their stored display name and returns `{ ok, tableSessionId, participantId, pokerRevision, sessionRevision }`. Joining again, with any request ID, returns the same Participant without another commit, and a Guest who left, the Table Owner included, returns as that Participant under the original name, with their earlier history. |
 
 An ID that names no table, a malformed ID (anything but a lowercase UUID) and a Practice
 Table's ID all get one identical 404 `not-found`, at both routes and for every Guest, a
@@ -50,9 +50,11 @@ Join rejections: 404 `not-found`; 400 `display-name-required`; 409
 `name-taken` (ignoring case, among all Participants of the table, Bots and departed
 Participants included); 409 `table-full` (all 20 places are taken: by the joined humans, by
 the Bots the owner has not removed, and by the Table Owner, whose place is held after they
-leave so that they can always return); 403
+leave so that they can always return); 403 `table-password-required` (the table has a Table Password and
+the request gave none) and 403 `wrong-table-password` (see [Table Password](#table-password));
 409 `request-id-conflict`; 429 `rate-limited` (see [Public hosting safeguards](#public-hosting-safeguards)). Like creation, definitive rejections are
-remembered per request ID, so retry with a new one after fixing the cause. A
+remembered per request ID, so retry with a new one after fixing the cause. The two password rejections are the
+exception: they are definitive but never remembered, so the same request ID can be tried again with the right password. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
 command, so it advances both revisions and the Participant observes from that point.
 
@@ -61,7 +63,7 @@ included; Practice Tables don't count. Creating an Online Table, and joining or 
 another one, answer 409 `current-table-elsewhere` while the Guest is joined at an Online Table,
 with that table's ID as `rejection.currentTableId`. Joining the Current Table itself is no
 refusal. Creation checks it once the request is otherwise valid, and joining before the table's
-own checks. Unlike other definitive rejections it is not remembered under the request ID: once
+own checks, the Table Password included. Unlike other definitive rejections it is not remembered under the request ID: once
 the Guest leaves their Current Table, the same request succeeds. Each Guest's creations and
 joins run one at a time, whatever table they are for, so two requests from two browser tabs
 cannot both pass the check.
@@ -70,7 +72,7 @@ All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
 | --- | --- |
-| `POST` to the base path | There is no per-Guest table cap, so a Guest may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`) and `bots`, each with `name` and `playingStrategy`. An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
+| `POST` to the base path | There is no per-Guest table cap, so a Guest may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`), `bots`, each with `name` and `playingStrategy`, and an Online Table's `tablePassword` (see [Table Password](#table-password)). An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
@@ -79,6 +81,7 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list. |
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
+| `POST /:id/set-table-password` | Table Owner only, Online Tables only, at any time, even during a Hand. Requires `requestId` and `tablePassword`, a string to set or change the password or `null` to remove it; there is no expected revision. See [Table Password](#table-password). |
 | `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
 | `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
@@ -339,6 +342,35 @@ mode. None of this gives the owner any control over, or sight of, another human.
 - **Who has left.** Every complete view lists `departedParticipantIds` once anyone has
   left: humans who left or were removed, and removed Bots. It is public and carries no reason.
 
+### Table Password
+
+An Online Table may have a Table Password ([ADR-0033](adr/0033-use-the-online-table-address-as-its-join-link.md)):
+4 to 64 characters, case-sensitive, never trimmed. Anything else is 400 `invalid-table-password`.
+
+- **Setting it.** Creation accepts an optional `tablePassword` for an Online Table (400
+  `invalid-creation-settings` with `field: 'tablePassword'` for a Practice Table, which has
+  no Join Link). Afterwards the Table Owner sets, changes or removes it with
+  `POST /:id/set-table-password` (`requestId`, and `tablePassword` or `null`), at any time,
+  even during a Hand: there is no expected revision, and the latest password wins. Each
+  change advances the session revision once and nothing else, so nobody at the table is
+  affected. 403 `table-owner-required` for anyone else, 403 `unavailable-at-practice-tables`
+  at a Practice Table.
+- **Who needs it.** Anyone not currently at the table: a newcomer, a Guest who left or was
+  removed, and the Table Owner after leaving. A Guest at the table joins again without it.
+  The join is checked against the stored table before it loads, and again in the table's
+  turn if the password changed meanwhile.
+- **Wrong passwords.** 403 `wrong-table-password` (or `table-password-required` without
+  one) is a definitive rejection that is not remembered under the request ID, so the Guest
+  can try again with the same request. Attempts are limited per address by the
+  `table-password` rate limit (see [Public hosting safeguards](#public-hosting-safeguards)).
+- **What is kept and shown.** The Persisted Table Session keeps only a salted scrypt hash,
+  server-only: never in the Table Session Record, a projection, a response or a fingerprint.
+  Everyone at the table sees `options.hasTablePassword: true` while one is set (absent
+  otherwise), never the password. The preview of a protected table shows a Guest who is not
+  at it only the owner's name and `passwordRequired: true`. Creation fingerprints exclude the
+  password, and the set-password fingerprint records only whether it sets or removes it, so a
+  request ID used again with another password is the same request.
+
 ### Automatic Dealing at Online Tables
 
 An Online Table never accepts Deal: the server deals
@@ -431,10 +463,12 @@ address and 10 minutes:
 | --- | --- | --- |
 | `creation` | `POST /api/table-sessions` | 10 |
 | `joining` | `POST /:id/join-table` | 30 |
+| `table-password` | `POST /:id/join-table`: each check of a Table Password, right or wrong. A join refused before the password is checked (`current-table-elsewhere`, for one) spends none | 10 |
 
 A refusal is HTTP 429 with a `Retry-After` header (seconds) and
 `{ ok: false, rejection: { code: 'rate-limited', message } }`; the message says how long
-to wait. The limit is checked before authentication and is never remembered with a request ID.
+to wait. The `creation` and `joining` limits are checked before authentication; `table-password` only when a password
+is about to be checked. No limit is ever remembered with a request ID.
 
 **Tables per Guest.** There is no cap: a Guest can own any number of tables, and Practice Tables are a permanent practice history.
 
@@ -445,8 +479,9 @@ canonical JSON:
 
 | Request family | Prefix | Canonical JSON input | Attempt scope |
 | --- | --- | --- | --- |
-| Table creation | `create-table-v1:` | Complete request contents excluding `requestId` | Authenticated user and `requestId` |
-| Joining through a Join Link | `join-table-v1:` | `{ userId }` | Table Session and `requestId` |
+| Table creation | `create-table-v1:` | Complete request contents excluding `requestId` and `tablePassword` | Authenticated user and `requestId` |
+| Joining through a Join Link | `join-table-v1:` | `{ userId }` (never the Table Password) | Table Session and `requestId` |
+| Setting the Table Password | `table-password-v1:` | `{ userId, sets }`, where `sets` is whether it sets (`true`) or removes (`false`) the password | Table Session and `requestId` |
 | Applying after-Hand requests (server-initiated, request ID `after-hand:<session revision>`) | `after-hand-v1:` | `{ changes }`, the pending changes | Table Session and `requestId` |
 | Automatic Dealing (server-initiated, request IDs `countdown:<session revision>`, `deal:<Hand ID>`, `no-deal:<session revision>`) | `next-hand-v2:` | `{ sessionRevision, step }`, where `step` is `announce`, or `expire` with `sittingOut` (the disconnected humans sat out) and `deal` | Table Session and `requestId` |
 | Poker mutation (`add-bot` and `remove-bot` included) | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |

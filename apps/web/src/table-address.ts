@@ -1,4 +1,4 @@
-import type { JoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
+import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
 import { chips, modeLabel, tableFormat } from './table-model.js';
 
@@ -22,6 +22,8 @@ type TableRead = { readonly mode: TableMode } | 'not-found';
  * - `corrected`: the visitor is a Participant, but the address names the other mode; replace it with `to`.
  * - `join-form`: the visitor is not at the Online Table the address names, which is its Join Link: they may join it,
  *   or return to it if they left (`preview.returningAs`).
+ * - `password-join-form`: the same, at an Online Table with a Table Password: the preview names only the owner, and
+ *   joining needs the password.
  * - `missing`: "This table doesn't exist".
  *
  * Undefined while an Online address waits for its Join Link's preview (`joinPreviewWanted`).
@@ -29,14 +31,16 @@ type TableRead = { readonly mode: TableMode } | 'not-found';
 export type TableAddressOutcome =
   | { readonly show: 'table' }
   | { readonly show: 'corrected'; readonly to: string }
-  | { readonly show: 'join-form'; readonly preview: JoinLinkPreview }
+  | { readonly show: 'join-form'; readonly preview: OpenJoinLinkPreview }
+  | { readonly show: 'password-join-form'; readonly preview: ProtectedJoinLinkPreview }
   | { readonly show: 'missing' };
 
 export function tableAddress(routeMode: TableMode, tableSessionId: string, read: TableRead, preview?: JoinLinkPreview | 'not-found'): TableAddressOutcome | undefined {
   if (read !== 'not-found') return read.mode === routeMode ? { show: 'table' } : { show: 'corrected', to: tablePath(read.mode, tableSessionId) };
   if (!joinPreviewWanted(routeMode, read)) return { show: 'missing' };
   if (preview === undefined) return undefined;
-  return preview === 'not-found' ? { show: 'missing' } : { show: 'join-form', preview };
+  if (preview === 'not-found') return { show: 'missing' };
+  return preview.passwordRequired ? { show: 'password-join-form', preview } : { show: 'join-form', preview };
 }
 
 /** Whether the address is an Online Table's Join Link to a visitor who is not at it: only then is its preview asked for. */

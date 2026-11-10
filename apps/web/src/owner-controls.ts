@@ -45,6 +45,17 @@ export function optionChanges(table: ObservableTableSession, form: { actionTimeL
   return Object.keys(changes).length ? changes : undefined;
 }
 
+/**
+ * The Table Password at an Online Table: everyone there sees whether it is set, never the password. Only the owner
+ * sets, changes or removes it, and at any time, even during a Hand: nobody at the table is affected by it.
+ */
+export function tablePasswordControl(table: ObservableTableSession): { shown: boolean; editable: boolean; set: boolean; summary?: string } {
+  if (table.mode !== 'online') return { shown: false, editable: false, set: false };
+  const set = !!table.options.hasTablePassword;
+  return { shown: true, editable: table.viewerParticipantId === table.ownerParticipantId, set,
+    summary: set ? 'Table Password set' : 'No Table Password' };
+}
+
 export interface BotControls {
   readonly sitOut: Availability;
   readonly resume: Availability;

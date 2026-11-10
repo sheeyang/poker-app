@@ -14,6 +14,7 @@ import { currentTableElsewhere } from './rejections.js';
 import { emptySchedule } from './schedule.js';
 import { type AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
+import { hashTablePassword, tablePasswordProblem } from './table-password.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
@@ -24,7 +25,8 @@ export interface CreationTransactionFaults extends AcceptanceFaults { readonly b
  */
 export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, guests: GuestQueue = createGuestQueue()) {
   return (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => guests.run(ownerUserId, async (): Promise<CreationOutcome> => {
-    const { requestId, ...contents } = request;
+    // The Table Password never reaches the fingerprint: retrying with another password is the same creation.
+    const { requestId, tablePassword, ...contents } = request;
     const fingerprint = createHash('sha256').update('create-table-v1:' + canonical(contents)).digest('hex');
     const scope = { kind: 'creation' as const, id: ownerUserId, requestId };
     const attempt = await acceptance.find(scope);
@@ -49,6 +51,8 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
       }
       throw new CommitOutcomeUnknown('An earlier creation transaction remains unresolved.');
     }
+    // Hashed before the transaction: it is slow by design.
+    const tablePasswordHash = request.mode === 'online' && tablePassword !== undefined && !tablePasswordProblem(tablePassword) ? await hashTablePassword(tablePassword) : undefined;
     try { return await acceptance.run(scope, fingerprint, async (tx): Promise<CreationOutcome> => {
       const rows = await tx.select().from(creationRequests).where(and(eq(creationRequests.userId, ownerUserId), eq(creationRequests.requestId, requestId)));
       const existing = rows[0];
@@ -89,6 +93,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           schemaVersion: 2, tableSessionId, ownerUserId, mode, options,
           pokerRecord: created.game.toRecord(), bindings,
           pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
+          ...(tablePasswordHash ? { tablePasswordHash } : {}),
         };
         await writeTableSession(tx, undefined, aggregate);
         outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };

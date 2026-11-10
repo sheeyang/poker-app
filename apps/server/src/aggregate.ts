@@ -69,6 +69,11 @@ export interface PersistedTableSession {
    * rather than that the table changed. Server-only: never projected.
    */
   readonly timedOutWindow?: { readonly participantId: string; readonly decisionId: string; readonly deadlineAt: number; readonly pokerRevision: number };
+  /**
+   * An Online Table's Table Password, as a salted, slow hash (`table-password.ts`), never the password. Server-only:
+   * Participants are told only that it is set (`hasTablePassword` in the projected options).
+   */
+  readonly tablePasswordHash?: string;
 }
 /** Written before M4: one owner-human and a table-level Trainer configuration. Read-only. */
 export interface PersistedTableSessionV1 {

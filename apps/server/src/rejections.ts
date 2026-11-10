@@ -12,11 +12,13 @@ export const unavailableOnline = (message: string) => reject('unavailable-at-onl
 /** A Guest is at one Online Table at a time: creating, joining or returning to another waits until they leave it. */
 export const currentTableElsewhere = (currentTableId: string): ApplicationRejection => ({ ok: false, rejection: { code: 'current-table-elsewhere', currentTableId,
   message: 'You’re already at another Online Table, your Current Table. Leave it first, then try again.' } });
+export const tablePasswordRequired = () => reject('table-password-required', 'This table has a Table Password. Ask the Table Owner for it, then join with it.');
+export const wrongTablePassword = () => reject('wrong-table-password', 'That password isn’t right. Check it with the Table Owner and try again.');
 export const tableFull = (advice: string) => reject('table-full', `This table already has ${onlineTableCapacity} Participants, Bots included. ${advice}`);
 export const liveAnalysisDisallowed = () => reject('live-analysis-disallowed', 'This table did not allow Live Analysis when this decision began. Your decision is analyzed and scored after you act.');
 
 /** Rejections that refuse who is asking: 403. */
-const forbidden: ReadonlySet<string> = new Set(['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'live-analysis-disallowed']);
+const forbidden: ReadonlySet<string> = new Set(['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'live-analysis-disallowed', 'table-password-required', 'wrong-table-password']);
 /** Rejections that a fresh view or a new request resolves, because the table or the request ID moved on: 409. */
 const conflicts: ReadonlySet<string> = new Set(['request-id-conflict', 'stale-poker-revision', 'stale-session-revision', 'action-window-not-open', 'action-deadline-passed', 'payout-phase-not-ended', 'name-taken', 'table-full', 'current-table-elsewhere']);
 /** Rejections that say the table is unavailable for now, not that the request is wrong: 503. */

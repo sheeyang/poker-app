@@ -10,8 +10,8 @@ type Environment = Readonly<Record<string, string | undefined>>;
  * - `TRUSTED_PROXIES`: comma-separated addresses or CIDR ranges of the reverse proxy in front of the server (Caddy,
  *   in the production stack). Forwarding headers are believed only on a connection from one of them. Unset:
  *   no proxy is trusted, and every client's address is the connection's own.
- * - `POKER_RATE_LIMITS`: `true` or `false`. Per-address limits on table creation, joining and Join Link
- *   replacement. Unset: on in production and off elsewhere, so that development on one machine is not limited.
+ * - `POKER_RATE_LIMITS`: `true` or `false`. Per-address limits on table creation, joining and Table
+ *   Password attempts. Unset: on in production and off elsewhere, so that development on one machine is not limited.
  * - `POKER_ADMIN_MODE`: `false` disables completed-Hand inspection.
  */
 export function hostingOptionsFromEnvironment(environment: Environment): Pick<HostedServerOptions, 'secureCookies' | 'adminMode' | 'singleAuthority' | 'trustedProxies' | 'rateLimits'> {
