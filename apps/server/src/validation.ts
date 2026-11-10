@@ -1,4 +1,5 @@
 import { isSupportedStrategy } from '@poker/strategies';
+import { tablePasswordProblem } from './table-password.js';
 import { actionTimeLimits, defaultConfiguration, type ApplicationRejection, type CreateTableSessionRequest } from '@poker/contracts';
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 /** The key by which two Participant names at one table are the same name, ignoring case. */
@@ -40,9 +41,14 @@ export function validateTableOptionChanges(value: unknown): ApplicationRejection
 export function validateCreationRequest(request: CreateTableSessionRequest, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy): ApplicationRejection | undefined {
   const reject = (field: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code: 'invalid-creation-settings', field, message } });
   for (const key of Object.keys(request)) {
-    if (!['requestId', 'mode', 'configuration', 'options', 'bots'].includes(key)) return reject(key, 'Creation accepts only a mode, observable configuration, table options and Bot controller intentions.');
+    if (!['requestId', 'mode', 'configuration', 'options', 'bots', 'tablePassword'].includes(key)) return reject(key, 'Creation accepts only a mode, observable configuration, table options, Bot controller intentions and a Table Password.');
   }
   if (request.mode !== undefined && request.mode !== 'practice' && request.mode !== 'online') return reject('mode', 'Choose a Practice Table or an Online Table.');
+  if (request.tablePassword !== undefined) {
+    if (request.mode !== 'online') return reject('tablePassword', 'Only an Online Table has a Table Password: a Practice Table has no Join Link.');
+    const problem = tablePasswordProblem(request.tablePassword);
+    if (problem) return problem;
+  }
   if (request.options !== undefined) {
     const options = request.options as unknown;
     if (!object(options) || Object.keys(options).some(key => !['actionTimeLimitSeconds', 'allowLiveAnalysis'].includes(key))) return reject('options', 'Table options are an Action Time Limit and whether Live Analysis is allowed.');

@@ -6,7 +6,8 @@ import { api } from '@poker/client';
 import { StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { chips, tableFormat } from './table-model.js';
-import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem } from './online-setup.js';
+import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem, tablePasswordProblem } from './online-setup.js';
+import { PasswordField } from './password-input.js';
 import type { Command } from './session.js';
 import { DisplayNameForm, DisplayNamePrompt, useDisplayName } from './display-name.js';
 import { Skeleton } from './loading-skeleton.js';
@@ -155,6 +156,8 @@ function PracticeComposer({ id, command, ready, launch }: { id: string; command:
 function OnlineComposer({ id, command, ready, displayName, launch }: { id: string; command: Command; ready: boolean; displayName?: string; launch: (request: CreateTableSessionRequest) => void }) {
   const [setup, setSetup] = useState(defaultOnlineSetup);
   const problem = onlineSetupProblem(setup);
+  // The password's own problem shows under it; the form's summary notice covers everything else.
+  const passwordProblem = tablePasswordProblem(setup.tablePassword);
   const number = (key: keyof typeof setup) => (e: { target: { value: string } }) => setSetup({ ...setup, [key]: Number(e.target.value) });
   const resize = (seatCount: number) => setSetup({ ...setup, seatCount, bots: Math.min(setup.bots, seatCount - 1) });
   const seats = Array.from({ length: setup.seatCount }, (_, i): SeatMark => i === 0 ? 'you' : i <= setup.bots ? 'taken' : 'open');
@@ -164,6 +167,9 @@ function OnlineComposer({ id, command, ready, displayName, launch }: { id: strin
       <fieldset disabled={command.busy || !ready}>
         <p className="composer-summary"><strong>{tableFormat(setup.seatCount)} Hold’em</strong><span>{setup.seatCount} seats{botCount} · {setup.actionTimeLimitSeconds}s to act</span></p>
         <Segmented legend="Size" name="online-size" options={sizes} value={setup.seatCount} onChange={resize} />
+        {/* Not an error while it is still being typed: the hint says what it takes, and Create waits for it. */}
+        <PasswordField className="composer-field" id={`${id}-password`} label={<>Table password <span className="field-optional">optional</span></>} name="tablePassword" value={setup.tablePassword} placeholder="None: anyone with the address joins" autoComplete="new-password" aria-describedby={setup.tablePassword ? `${id}-password-hint` : undefined} onChange={e => setSetup({ ...setup, tablePassword: e.target.value })}
+          note={setup.tablePassword && <small id={`${id}-password-hint`} className={passwordProblem ? 'field-hint is-short' : 'field-hint'}>{passwordProblem ? '4 to 64 characters. Capitals count.' : 'Capitals count. Tell it to the people you invite.'}</small>} />
         <BlindsField smallBlind={setup.smallBlind} bigBlind={setup.bigBlind} onChange={(smallBlind, bigBlind) => setSetup({ ...setup, smallBlind, bigBlind })} />
         <details className="composer-more"><summary>More table options<Icon name="chevron" size={15} /></summary><div className="details-content">
           <label>Seats<select value={setup.seatCount} onChange={e => resize(Number(e.target.value))}>{Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 2}>{i + 2} seats</option>)}</select></label>
@@ -175,7 +181,7 @@ function OnlineComposer({ id, command, ready, displayName, launch }: { id: strin
           <label className="check-label"><input type="checkbox" checked={setup.allowSeatChanges} onChange={e => setSetup({ ...setup, allowSeatChanges: e.target.checked })} />Allow seat changes between hands</label>
           <div className="form-pair"><label>Bots<select value={setup.bots} onChange={number('bots')}>{Array.from({ length: setup.seatCount }, (_, i) => <option key={i} value={i}>{i === 0 ? 'No bots' : i === 1 ? '1 bot' : `${i} bots`}</option>)}</select></label>{setup.bots > 0 && <label>Bot Playing Strategy<StrategySelect value={setup.botStrategy} onChange={botStrategy => setSetup({ ...setup, botStrategy })} /></label>}</div>
         </div></details>
-        {problem && <p className="notice-error" role="alert">{problem}</p>}
+        {problem && problem !== passwordProblem && <p className="notice-error" role="alert">{problem}</p>}
         <button className="primary start-practice" type="submit" disabled={!!problem}>{command.busy ? 'Creating your table…' : 'Create online table'}<Icon name="arrow" size={19} /></button>
         <p className="composer-note"><Icon name="info" size={15} /><span>{displayName ? `You join first as ${displayName} and choose your seat.` : 'You join first and choose your seat.'} You’ll get a link to share.</span></p>
       </fieldset>

@@ -123,6 +123,12 @@ export interface TableOptions {
   /** Whether Participants may use Live Analysis at this table. */
   readonly allowLiveAnalysis: boolean;
 }
+/** The table options as Participants see them: the options, and whether the table has a Table Password, never the password. */
+export interface ObservableTableOptions extends TableOptions {
+  readonly hasTablePassword?: true;
+}
+/** A Table Password's length in characters. It is case-sensitive and never trimmed. */
+export const tablePasswordLength = { minimum: 4, maximum: 64 } as const;
 /** Online defaults when creation names no option. */
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
 /**
@@ -137,6 +143,8 @@ export interface CreateTableSessionRequest {
   readonly configuration?: Partial<ObservableGameConfiguration>;
   readonly options?: Partial<TableOptions>;
   readonly bots?: readonly { readonly name: string; readonly playingStrategy: StrategyDescriptor }[];
+  /** An Online Table's optional Table Password. It is never part of the creation's fingerprint or outcome. */
+  readonly tablePassword?: string;
 }
 export interface CreationAcknowledgement {
   readonly ok: true;
@@ -204,15 +212,28 @@ export interface MutationAcknowledgement {
   readonly afterHand?: true;
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
-/** Joining carries a request ID but no expected revision: the joiner has not seen the table. */
-export interface JoinTableRequest { readonly requestId: string }
+/**
+ * Joining carries a request ID but no expected revision: the joiner has not seen the table. A Guest who is not at a
+ * table with a Table Password gives it too; it is never remembered with the request.
+ */
+export interface JoinTableRequest { readonly requestId: string; readonly tablePassword?: string }
 /** The Guest's Participant at the table: the same one every time they join. */
 export interface JoinAcknowledgement extends MutationAcknowledgement { readonly participantId: ParticipantId }
 export type JoinOutcome = JoinAcknowledgement | ApplicationRejection;
-/** What an Online Table's Join Link, its own address, shows a Guest before they join. */
-export interface JoinLinkPreview {
+/**
+ * What an Online Table's Join Link, its own address, shows a Guest before they join. A table with a Table Password
+ * shows a Guest who is not at it only its owner's name (`ProtectedJoinLinkPreview`).
+ */
+export type JoinLinkPreview = OpenJoinLinkPreview | ProtectedJoinLinkPreview;
+export interface ProtectedJoinLinkPreview {
   readonly ok: true;
   readonly ownerName: string;
+  readonly passwordRequired: true;
+}
+export interface OpenJoinLinkPreview {
+  readonly ok: true;
+  readonly ownerName: string;
+  readonly passwordRequired?: undefined;
   readonly configuration: ObservableGameConfiguration;
   readonly options: TableOptions;
   /** How many of the table's `onlineTableCapacity` places are taken (see there). Joining is refused once all are. */
@@ -360,7 +381,7 @@ export interface TableSchedule {
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
-  readonly options: TableOptions;
+  readonly options: ObservableTableOptions;
   /** The Participant this view was projected for: the viewing Guest's own. */
   readonly viewerParticipantId: ParticipantId;
   /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another human. */
@@ -478,6 +499,14 @@ export interface SetTableOptionsRequest {
   readonly requestId: string;
   readonly expectedSessionRevision: Revision;
   readonly options: TableOptionChanges;
+}
+/**
+ * The Table Owner sets, changes (`tablePassword`) or removes (`null`) an Online Table's Table Password, at any time,
+ * even during a Hand. There is no expected revision: the latest password wins, and nobody at the table is affected.
+ */
+export interface SetTablePasswordRequest {
+  readonly requestId: string;
+  readonly tablePassword: string | null;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
 

@@ -2,19 +2,21 @@ import type { ServerClock } from './clock.js';
 
 /** At most `limit` requests from one address in any window of `windowMs`. */
 export interface RateLimit { readonly limit: number; readonly windowMs: number }
-/** What the public server protects itself from: floods of creation and joining. */
-export type RateLimitKind = 'creation' | 'joining';
+/** What the public server protects itself from: floods of creation and joining, and guessing Table Passwords. */
+export type RateLimitKind = 'creation' | 'joining' | 'table-password';
 export type RateLimits = Readonly<Record<RateLimitKind, RateLimit>>;
 
 const tenMinutes = 10 * 60_000;
 /**
  * The limits of the hosted product. Several people may share one address (a home, a school), so they are
  * roomy for a group of friends and still bound what any one address can create: a Table Session is a stored
- * aggregate, and a join is a commit to a table.
+ * aggregate, and a join is a commit to a table. Table Password attempts are tighter, so that a password cannot simply
+ * be guessed.
  */
 export const defaultRateLimits: RateLimits = Object.freeze({
   creation: { limit: 10, windowMs: tenMinutes },
   joining: { limit: 30, windowMs: tenMinutes },
+  'table-password': { limit: 10, windowMs: tenMinutes },
 });
 
 export type RateLimitDecision = { readonly allowed: true } | { readonly allowed: false; readonly retryAfterSeconds: number };

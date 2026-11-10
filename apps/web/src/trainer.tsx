@@ -100,7 +100,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
     useSession.setState({ analysisOpen: false });
     requestAnimationFrame(() => document.getElementById('play-controls')?.focus({ preventScroll: true }));
   }
-  if (outcome?.show === 'join-form') return <JoinTable tableSessionId={selected} preview={outcome.preview} joined={joined} />;
+  if (outcome?.show === 'join-form' || outcome?.show === 'password-join-form') return <JoinTable tableSessionId={selected} preview={outcome.preview} joined={joined} />;
   if (unread && !outcome && !preview.error) return <JoinTableSkeleton />;
   // The Join Link answered, but not with the table: say why, and keep a way to try again when trying could help.
   if (unread && !outcome && preview.error) return <main id="main-table" className="address-missing">
