@@ -11,7 +11,7 @@ import { useSession } from './session.js';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem, tablePasswordProblem } from './online-setup.js';
 import { PasswordField } from './password-input.js';
 import type { Command } from './session.js';
-import { DisplayNameForm, DisplayNamePrompt, useDisplayName } from './display-name.js';
+import { DisplayNamePrompt, useDisplayName } from './display-name.js';
 import { Skeleton } from './loading-skeleton.js';
 import { FeltPreview, SeatGlyph, type SeatMark } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
@@ -61,7 +61,6 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
       </table>}
       {!!tables?.length && <p className="ledger-note">Tables you haven’t opened in this browser are listed last.</p>}
     </section>
-    <details className="tables-name"><summary><span>Your name</span><strong>{displayName ?? 'Not set yet'}</strong><Icon name="chevron" size={15} /></summary><div className="tables-name-form"><p className="muted">Used at tables you create or join from now on. Existing tables keep the name you had there.</p><DisplayNameForm key={displayName} current={displayName} /></div></details>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;
 }
