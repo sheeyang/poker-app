@@ -19,6 +19,25 @@ CREATE TABLE IF NOT EXISTS table_sessions (
   -- A Closed Table, mirroring the aggregate's `closed`, written in the commit that closes it.
   closed boolean NOT NULL DEFAULT false
 );
+-- Tables written before table loading and closing gain these columns. Each table counts as changed at the upgrade, so
+-- no Online Table is closed as idle at once, and none loads at startup until a commit says it has scheduled work. The
+-- guard reads the catalog alone: parallel schemas may be dropped meanwhile.
+DO $$
+DECLARE present text[];
+BEGIN
+  SELECT coalesce(array_agg(a.attname::text), '{}') INTO present FROM pg_attribute AS a JOIN pg_class AS r ON r.oid = a.attrelid JOIN pg_namespace AS n ON n.oid = r.relnamespace
+  WHERE n.nspname = current_schema() AND r.relname = 'table_sessions' AND a.attname IN ('load_at_startup', 'last_committed_at', 'closed') AND NOT a.attisdropped;
+  IF NOT 'load_at_startup' = ANY(present) THEN
+    ALTER TABLE table_sessions ADD COLUMN load_at_startup boolean NOT NULL DEFAULT false;
+  END IF;
+  IF NOT 'last_committed_at' = ANY(present) THEN
+    ALTER TABLE table_sessions ADD COLUMN last_committed_at bigint NOT NULL DEFAULT (extract(epoch FROM now()) * 1000)::bigint;
+    ALTER TABLE table_sessions ALTER COLUMN last_committed_at SET DEFAULT 0;
+  END IF;
+  IF NOT 'closed' = ANY(present) THEN
+    ALTER TABLE table_sessions ADD COLUMN closed boolean NOT NULL DEFAULT false;
+  END IF;
+END $$;
 -- The idle-table sweep reads only the open Online Tables, oldest change first.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'table_sessions' AND indexname = 'table_sessions_open_online') THEN
@@ -63,10 +82,20 @@ CREATE TABLE IF NOT EXISTS table_memberships (
   user_id uuid NOT NULL REFERENCES local_users(id),
   table_session_id uuid NOT NULL REFERENCES table_sessions(id),
   participant_id text NOT NULL,
-  status text NOT NULL CHECK (status IN ('joined', 'left')),
+  status text NOT NULL CONSTRAINT table_memberships_status CHECK (status IN ('joined', 'left')),
   PRIMARY KEY(user_id, table_session_id),
   UNIQUE(table_session_id, participant_id)
 );
+-- Removal used to be its own membership status, under the unnamed check; it is now a Leave Table. Guarded by the named
+-- check, read from the catalog alone, so that later startups take no lock.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint AS c JOIN pg_class AS r ON r.oid = c.conrelid JOIN pg_namespace AS n ON n.oid = r.relnamespace
+    WHERE n.nspname = current_schema() AND r.relname = 'table_memberships' AND c.conname = 'table_memberships_status') THEN
+    UPDATE table_memberships SET status = 'left' WHERE status = 'removed';
+    ALTER TABLE table_memberships DROP CONSTRAINT IF EXISTS table_memberships_status_check,
+      ADD CONSTRAINT table_memberships_status CHECK (status IN ('joined', 'left'));
+  END IF;
+END $$;
 -- Version-1 aggregates predate the index. They are Practice Tables whose one human is joined.
 INSERT INTO table_memberships (user_id, table_session_id, participant_id, status)
 SELECT (binding->>'userId')::uuid, sessions.id, binding->>'participantId', 'joined'

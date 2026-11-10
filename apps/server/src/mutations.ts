@@ -7,7 +7,7 @@ import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, ty
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { currentTable, membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { afterHandRequestsScheduled, currentTable, membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
 import { createGuestQueue, type GuestQueue } from './guest-queue.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
@@ -163,10 +163,17 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    */
   function enqueue<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const handle = tables.retain(id);
+    return inTurn(id, operation).finally(() => handle?.release());
+  }
+  /**
+   * Runs `operation` in the table's FIFO without holding the table, for work that must not keep it in memory or
+   * restart its unload grace. An unload under way still waits for it.
+   */
+  function inTurn<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const previous = queue.get(id) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(operation);
     queue.set(id, next);
-    return next.finally(() => { if (queue.get(id) === next) queue.delete(id); handle?.release(); });
+    return next.finally(() => { if (queue.get(id) === next) queue.delete(id); });
   }
   /** Settles once the table's FIFO is empty: an unload waits for its queued work. */
   async function drained(id: string): Promise<void> {
@@ -189,7 +196,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   /** Makes `session` the loaded table's committed copy, as each commit and each recovery does. */
   function promote(id: string, session: CommittedSession) {
     tables.set(id, session);
-    holdWhile(id, 'after-hand', session.aggregate.pendingChanges.length > 0);
+    holdWhile(id, 'after-hand', afterHandRequestsScheduled(session.aggregate));
   }
   function capture(session: CommittedSession, evaluationRequestId: string) {
     for (const binding of session.aggregate.bindings) {
@@ -283,6 +290,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       }
     }, 100);
     recoveryTimer.unref();
+  }
+  /** Queues a run of the loaded table's schedule in its FIFO, against its copy as it stands when the run starts. */
+  function queueSchedule(id: string) {
+    void enqueue(id, async () => { const current = tables.get(id); if (current) await runSchedule(id, current); }).catch(() => {});
   }
   /**
    * Brings a table up to date with its committed schedule. It runs in the table FIFO, after every commit and
@@ -480,7 +491,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (wakes.get(id) !== entry) return;
         wakes.delete(id);
         // The queued schedule run holds the table from here.
-        if (!stopped) void enqueue(id, async () => { const session = tables.get(id); if (session) await runSchedule(id, session); }).catch(() => {});
+        if (!stopped) queueSchedule(id);
         holdWhile(id, 'wake', wakes.has(id));
       });
     }
@@ -620,7 +631,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (presence.get(id) === connected.join(',')) return;
     presence.set(id, connected.join(','));
     deliver(id, () => ({ type: 'table-presence', tableSessionId: id, connectedParticipantIds: connected }));
-    void enqueue(id, async () => { const current = tables.get(id); if (current) await runSchedule(id, current); }).catch(() => {});
+    queueSchedule(id);
   }
   function publishStatus(id: string, status: TableRuntimeStatus['status']) {
     if (stopped) return;
@@ -682,8 +693,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   /** A table has just been loaded: its scheduled work takes its handles, and its schedule runs. */
   function tableLoaded(id: string, session: CommittedSession) {
     holdWhile(id, 'recovery', recovering.has(id));
-    holdWhile(id, 'after-hand', session.aggregate.pendingChanges.length > 0);
-    if (!stopped) void enqueue(id, async () => { const current = tables.get(id); if (current) await runSchedule(id, current); }).catch(() => {});
+    holdWhile(id, 'after-hand', afterHandRequestsScheduled(session.aggregate));
+    if (!stopped) queueSchedule(id);
   }
   /** A table has left memory: nothing it kept only in memory outlives it. */
   function tableUnloaded(id: string) {
@@ -729,7 +740,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const session = await readCommitted(id);
     if (!session || !tables.get(id)) return;
     promote(id, session);
-    if (!stopped) queueMicrotask(() => { void enqueue(id, async () => { const current = tables.get(id); if (current) await runSchedule(id, current); }).catch(() => {}); });
+    if (!stopped) queueMicrotask(() => queueSchedule(id));
   }
     async function read(id: string, userId: string) {
       return asMember(id, userId, async () => {
@@ -1049,9 +1060,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * that could otherwise succeed spends one: the Current Table refusal comes first.
      */
     async function join(id: string, userId: string, request: JoinTableRequest, passwordAttempt?: () => ApplicationRejection | undefined): Promise<JoinOutcome> {
-      const stored = await storedOnlineTable(db, id);
-      if (!stored) return notFound();
-      if (upgradeTableSession(stored)?.closed) return tableClosed();
+      const found = await joinableTable(id);
+      if ('refusal' in found) return found.refusal;
+      const { stored } = found;
       const { requestId, tablePassword, ...contents } = request;
       if (Object.keys(contents).length || tablePassword !== undefined && typeof tablePassword !== 'string') return reject('invalid-mutation-request', 'Joining carries only a requestId, and the Table Password when the table has one.');
       // The Guest's turn is taken before the table's handle and FIFO, never inside them.
@@ -1111,10 +1122,19 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       })) ?? await notFoundOrClosed(id);
       });
     }
+    /**
+     * The stored Online Table at `id` for a join or its Join Link preview, read without loading it, or why neither can
+     * reach it: there is no such Online Table, or it is a Closed Table.
+     */
+    async function joinableTable(id: string): Promise<{ stored: StoredTableSession } | { refusal: ApplicationRejection }> {
+      const stored = await storedOnlineTable(db, id);
+      if (!stored) return { refusal: notFound() };
+      return upgradeTableSession(stored)?.closed ? { refusal: tableClosed() } : { stored };
+    }
     /** The answer to a join that found no table to load: it closed meanwhile, or it is not there. */
     async function notFoundOrClosed(id: string): Promise<ApplicationRejection> {
-      const stored = await storedOnlineTable(db, id);
-      return stored && upgradeTableSession(stored)?.closed ? tableClosed() : notFound();
+      const found = await joinableTable(id);
+      return 'refusal' in found ? found.refusal : notFound();
     }
     /**
      * Why a Guest cannot join this table with `password`: undefined `refusal` when they need none (no Table Password,
@@ -1132,17 +1152,16 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return await tablePasswordMatches(password, hash) ? { verified: hash } : { refusal: wrongTablePassword() };
     }
     /**
-     * What an Online Table's Join Link shows before joining, for the Guest opening it: undefined, answered as not
-     * found, for an ID that names no Online Table. A Guest not at a table with a Table Password learns only its
+     * What an Online Table's Join Link shows before joining, for the Guest opening it, or why it shows nothing: the ID
+     * names no Online Table, or a Closed Table (`joinableTable`). A Guest not at a table with a Table Password learns only its
      * owner's name and that the password is required. It is read from the stored
      * table, never loading it: the Guest opening the link is not at the table yet.
      */
-    async function previewJoin(userId: string, id: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
-      const stored = await storedOnlineTable(db, id);
-      if (!stored) return undefined;
-      const aggregate = upgradeTableSession(stored);
+    async function previewJoin(userId: string, id: string): Promise<JoinLinkPreview | ApplicationRejection> {
+      const found = await joinableTable(id);
+      if ('refusal' in found) return found.refusal;
+      const aggregate = upgradeTableSession(found.stored);
       if (!aggregate) throw new TableSessionRestorationError();
-      if (aggregate.closed) return tableClosed();
       const humans = humanBindings(aggregate);
       const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
       // Behind a Table Password, the table's details stay with the people at it.
@@ -1272,13 +1291,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }));
   }
   return {
-    // Historical work validates its frozen request/attempt in this queue; live revision may advance. A result that
-    // arrives after its table has unloaded loads it again, so that it is accepted as it would have been.
-    acceptJobResult: async (id: string, participantId: string, accept: () => boolean) => !stopped && !!await holding(id, () => enqueue(id, async () => {
-      const session = tables.get(id);
-      if (stopped || !session || !isHuman(findBinding(session.aggregate, participantId))) return false;
-      return accept();
-    })),
+    // A job result is not a request, a subscription or scheduled work, so it holds no handle on its table (ADR-0035).
+    // At a loaded table it is accepted in the table's turn, where historical work validates its frozen request/attempt
+    // while the live revision may advance, without restarting the unload grace. At a table not in memory the
+    // Participant is checked against the stored record, which loads nothing.
+    acceptJobResult: async (id: string, participantId: string, accept: () => boolean) => {
+      if (stopped) return false;
+      if (tables.get(id)) return inTurn(id, async () => {
+        const session = tables.get(id);
+        return !stopped && !!session && isHuman(findBinding(session.aggregate, participantId)) && accept();
+      });
+      const [row] = await db.select({ aggregate: tableSessions.aggregate, closed: tableSessions.closed }).from(tableSessions).where(eq(tableSessions.id, id));
+      const aggregate = row && !row.closed ? upgradeTableSession(row.aggregate) : undefined;
+      return !stopped && !!aggregate && isHuman(findBinding(aggregate, participantId)) && accept();
+    },
     captureHandSummary: (id: string, userId: string, handId: string) => captureScoreSummary(id, userId, { scope: 'hand', handId }),
     captureSessionSummary: (id: string, userId: string) => captureScoreSummary(id, userId, { scope: 'table-session' }),
     /**

@@ -7,16 +7,24 @@ type Database = Omit<ReturnType<typeof openDatabase>['db'], '$client'>;
 
 /**
  * Whether the committed table has scheduled work that runs with nobody at it (ADR-0035): an Action Deadline, a Bot
- * decision, a Next-Hand Countdown, or After-Hand Requests to apply. In practice that is an Online Table in play, or a
- * timed Practice Table with a Hand in progress. Presentation Phases alone are not: after a restart nobody is
- * connected, so the end of one starts nothing until someone opens the table.
+ * decision, a Next-Hand Countdown, or After-Hand Requests to apply (`afterHandRequestsScheduled`). In practice that is
+ * an Online Table in play, or a timed Practice Table with a Hand in progress. Presentation Phases alone are not: after
+ * a restart nobody is connected, so the end of one starts nothing until someone opens the table.
  */
 export function hasScheduledWork(aggregate: PersistedTableSession): boolean {
   // A Closed Table is never loaded again, so nothing it had scheduled runs.
   if (aggregate.closed) return false;
   const { actionWindow, nextHandCountdown } = aggregate.schedule;
-  return !!nextHandCountdown || aggregate.pendingChanges.length > 0
+  return !!nextHandCountdown || afterHandRequestsScheduled(aggregate)
     || !!actionWindow && (actionWindow.deadlineAt !== undefined || isBot(findBinding(aggregate, actionWindow.participantId)));
+}
+/**
+ * Whether pending After-Hand Requests are scheduled work: only where something advances the Hand without the human,
+ * at an Online Table or a timed Practice Table. At an untimed Practice Table they wait in the record for the human to
+ * finish the Hand.
+ */
+export function afterHandRequestsScheduled(aggregate: PersistedTableSession): boolean {
+  return aggregate.pendingChanges.length > 0 && (aggregate.mode === 'online' || aggregate.options.actionTimeLimitSeconds !== null);
 }
 /**
  * The only way to write a Persisted Table Session. In the caller's transaction it inserts (no `previous`)

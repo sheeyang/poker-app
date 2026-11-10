@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ActionTimeLimitSeconds, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
+import { createStrategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
@@ -17,8 +18,18 @@ const clock = new ManualClock();
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
+/** While set, every Reference Strategy evaluation waits for it: analysis results arrive when a test releases them. */
+let analysisGate: ReturnType<typeof Promise.withResolvers<void>> | undefined;
+let evaluationsStarted = 0;
 async function startServer() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; },
+    strategyFactory: descriptor => {
+      const strategy = createStrategy(descriptor);
+      return { actionSelector: strategy.actionSelector, policy: {
+        checkCompatibility: view => strategy.policy.checkCompatibility(view),
+        evaluate: async (view, options) => { evaluationsStarted++; await analysisGate?.promise; return strategy.policy.evaluate(view, options); },
+      } };
+    } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
@@ -80,6 +91,16 @@ async function subscription(cookie: string, tableSessionId: string) {
   await expect.poll(() => (result = messages.find(message => message.type === 'table-subscription-result'))).toBeDefined();
   return result;
 }
+/** Holds every analysis result until the returned function releases them, and at the latest when the test ends. */
+function holdAnalysis() {
+  const gate = Promise.withResolvers<void>();
+  analysisGate = gate;
+  const release = () => { gate.resolve(); if (analysisGate === gate) analysisGate = undefined; };
+  onTestFinished(release);
+  return release;
+}
+/** The decision scores stored for the table's analysis, read without loading it. */
+const storedScores = async (t: Table) => Number((await administration.query('SELECT count(*) FROM "' + schema + '".analysis_scores WHERE table_session_id = $1', [t.id])).rows[0].count);
 /** Gives the server a full round trip to finish anything already under way, such as an unload that is due. */
 const roundTrip = async () => { await fetch(base + '/api/identity'); };
 
@@ -209,12 +230,13 @@ test('scheduled work holds a table with nobody connected: a timed Practice Hand 
   await expect.poll(() => loaded(t.id)).toBe(false);
 });
 
-test('After-Hand Requests hold their table until the Hand ends and they are applied', async () => {
+test('After-Hand Requests at an untimed Practice Table hold nothing: only its human advances the Hand, so the table unloads and they wait in its record', async () => {
   const t = await handInProgress(null);
   clock.advance(1500); await roundTrip();
   expect(await command(t, 'stand-up-participant', { participantId: t.human })).toMatchObject({ ok: true, afterHand: true });
-  clock.advance(10 * minute); await roundTrip();
-  expect(loaded(t.id)).toBe(true);
+  clock.advance(minute);
+  await expect.poll(() => loaded(t.id)).toBe(false);
+  expect((await stored(t)).pendingChanges).toHaveLength(1);
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   // The payout is shown, then the Stand Up is applied, and nothing holds the table any longer.
   clock.advance(2000);
@@ -231,4 +253,43 @@ test('after a restart, an idle table is not loaded, and loads when its owner ope
   expect(loaded(t.id)).toBe(false);
   expect((await read(t)).view.state.participants.find(p => p.participantId === t.human)).toMatchObject({ seat: 1 });
   expect(loaded(t.id)).toBe(true);
+});
+
+test('automatic analysis results that arrive after the last subscriber leaves do not keep the table loaded any longer', async () => {
+  const release = holdAnalysis();
+  const t = await handInProgress(null);
+  const live = await connectLive(base, t.cookie, t.id);
+  clock.advance(1500); await roundTrip();
+  const started = evaluationsStarted;
+  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await expect.poll(() => evaluationsStarted).toBeGreaterThan(started);
+  // The payout is shown; after it nothing is scheduled.
+  clock.advance(2000); await roundTrip();
+  await unsubscribe(live, t.id);
+  clock.advance(minute / 2); await roundTrip();
+  // The results arrive, and are delivered to the loaded table's human, without restarting its minute.
+  release();
+  await expect.poll(() => live.messages.filter(message => message.type === 'analysis-update' && message.status === 'complete').length).toBe(2);
+  expect(await storedScores(t)).toBe(1);
+  clock.advance(minute / 2);
+  await expect.poll(() => loaded(t.id)).toBe(false);
+});
+
+test('automatic analysis results that arrive after the table has unloaded are kept without loading it again', async () => {
+  const release = holdAnalysis();
+  const t = await handInProgress(null);
+  clock.advance(1500); await roundTrip();
+  const started = evaluationsStarted;
+  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await expect.poll(() => evaluationsStarted).toBeGreaterThan(started);
+  clock.advance(2000); await roundTrip();
+  clock.advance(minute);
+  await expect.poll(() => loaded(t.id)).toBe(false);
+  release();
+  await expect.poll(() => storedScores(t)).toBe(1);
+  await roundTrip();
+  expect(loaded(t.id)).toBe(false);
+  // Opening the table again finds the analysis where it was kept.
+  const analysis = await (await post('/api/table-sessions/' + t.id + '/analysis', t.cookie, { decisionId: 'hand-1/decision-1' })).json();
+  expect(analysis).toMatchObject({ status: 'complete', scoredDecision: { acceptedAction: { type: 'fold' } } });
 });

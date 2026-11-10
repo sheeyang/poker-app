@@ -1,5 +1,6 @@
 import type { ObservableTableSession, SavedTable, TableMode } from '@poker/contracts';
-import { chips, tableFormat } from './table-model.js';
+import { blindsLabel, chips, gameLabel } from './table-model.js';
+import { handInProgress } from './presentation.js';
 
 /** When the Guest last opened each table in this browser, in epoch milliseconds, keyed by table. */
 export type OpenedTimes = Readonly<Record<string, number>>;
@@ -34,12 +35,15 @@ export type SavedRow =
     readonly openedAt?: number;
   };
 
-/** The live details of a loaded table; undefined while it is not loaded. A Guest who is only watching has no stack. */
-export function liveDetails(tableSessionId: string, table: ObservableTableSession | undefined): LiveDetails | undefined {
+/**
+ * The live details of a loaded table at server time `serverNow`; undefined while it is not loaded. A Hand is in
+ * progress until its payout phase ends (`handInProgress`). A Guest who is only watching has no stack.
+ */
+export function liveDetails(tableSessionId: string, table: ObservableTableSession | undefined, serverNow: number): LiveDetails | undefined {
   if (!table) return undefined;
   const { state } = table.view;
   const own = state.participants.find(participant => participant.participantId === table.viewerParticipantId && participant.seat !== null);
-  return { tableSessionId, handInProgress: state.status === 'active-hand', ...(own ? { stack: own.stack } : {}) };
+  return { tableSessionId, handInProgress: handInProgress(table, serverNow), ...(own ? { stack: own.stack } : {}) };
 }
 
 /**
@@ -52,7 +56,7 @@ export function savedRows(saved: readonly SavedTable[], mode: TableMode, opened:
   const rows = saved.filter(entry => entry.mode === mode).map((entry): SavedRow => {
     const { tableSessionId, seatCount, stakes } = entry;
     if (seatCount === undefined || !stakes) return { kind: 'unreadable', tableSessionId };
-    const described = { tableSessionId, seatCount, name: `${tableFormat(seatCount)} Hold’em`, blinds: `${chips(stakes.smallBlind)} / ${chips(stakes.bigBlind)}`,
+    const described = { tableSessionId, seatCount, name: gameLabel(seatCount), blinds: blindsLabel(stakes.smallBlind, stakes.bigBlind),
       ...(stakes.ante ? { ante: chips(stakes.ante) } : {}), ...(opened[tableSessionId] !== undefined ? { openedAt: opened[tableSessionId] } : {}) };
     if (entry.closed) return { kind: 'closed', ...described, status: 'Closed' };
     const kind = entry.mode === 'practice' ? 'practice' : entry.left ? 'away' : 'current';

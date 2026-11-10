@@ -12,6 +12,11 @@
   --text: #e8ede7;
   --gold: #ddc28b;
   --gold-hover: #ecd7ab;
+  --gold-active: #c5a96f;
+  --primary-text: #243025;
+  --field: #17231e;
+  --control-line: #46594d;
+  --control-hover: #304238;
   --felt: #205b46;
   --blue: #94bfd1;
   --error: #efb5a6;
@@ -967,10 +972,10 @@ html { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #4d6455
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .numeric { font-variant-numeric: tabular-nums; }
 /* Links that act as buttons share the button's shape. */
-a.primary, a.button-link { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 40px; padding: 9px 16px; border: 1px solid #46594d; border-radius: 8px; font-weight: 600; text-decoration: none; transition: background-color 150ms, border-color 150ms; }
+a.primary, a.button-link { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 40px; padding: 9px 16px; border: 1px solid var(--control-line); border-radius: 8px; font-weight: 600; text-decoration: none; transition: background-color 150ms, border-color 150ms; }
 a.primary { border-color: var(--gold); font-weight: 700; }
 a.button-link { background: var(--raised); color: var(--text); }
-a.button-link:hover { background: #304238; border-color: #6c8070; }
+a.button-link:hover { background: var(--control-hover); border-color: #6c8070; }
 
 .tables-page { max-width: 1120px; margin: 0 auto; padding: 40px var(--gutter) 72px; }
 .tables-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
@@ -994,7 +999,7 @@ a.button-link:hover { background: #304238; border-color: #6c8070; }
 .composer-summary span { color: var(--muted); font-size: .86rem; }
 fieldset.composer-field { display: block; }
 .composer-field legend { padding: 0; margin-bottom: 8px; font-size: .86rem; font-weight: 600; color: #c1cfc3; }
-.segmented { display: inline-flex; max-width: 100%; border: 1px solid #46594d; border-radius: 8px; overflow: hidden; background: #17231e; }
+.segmented { display: inline-flex; max-width: 100%; border: 1px solid var(--control-line); border-radius: 8px; overflow: hidden; background: var(--field); }
 .segmented label { position: relative; display: block; cursor: pointer; font-size: .92rem; }
 .segmented label + label { border-left: 1px solid var(--line); }
 .segmented input { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 0; margin: 0; opacity: 0; cursor: pointer; }
@@ -1031,7 +1036,7 @@ fieldset.composer-field { display: block; }
 /* A Closed Table: kept as a record, muted, with a dashed tag rather than colour alone, and nothing to open. */
 .ledger-row.is-closed > * { color: var(--muted); }
 .ledger-closed-name { font-weight: 600; }
-.ledger-closed-tag { display: inline-block; padding: 1px 8px; border: 1px dashed #46594d; border-radius: 4px; font-size: .76rem; font-weight: 600; line-height: 1.5; color: var(--muted); }
+.ledger-closed-tag { display: inline-block; padding: 1px 8px; border: 1px dashed var(--control-line); border-radius: 4px; font-size: .76rem; font-weight: 600; line-height: 1.5; color: var(--muted); }
 .ledger-row.is-seated:has(.ledger-open:hover) { background: #243429; }
 .ledger-live { color: #c3d4c7; }
 .ledger-live b { color: var(--gold); font-weight: 600; }
@@ -1115,16 +1120,16 @@ fieldset.composer-field { display: block; }
 .live-strip-back svg { transition: transform 150ms cubic-bezier(.16,1,.3,1); }
 .live-strip-back:hover svg { transform: translateX(2px); }
 /* Your turn: the whole strip is brass, and Back to game is the one dark, filled control on it. */
-.live-strip.is-turn { --strip-text: #3b3a24; --strip-strong: #1d2618; --strip-hover: var(--gold-hover); background: var(--gold); border-bottom-color: #c5a96f; }
-.live-strip.is-turn .live-strip-dot { background: #243025; }
-.live-strip.is-turn .live-strip-back { border-color: #243025; background: #243025; color: var(--gold); }
+.live-strip.is-turn { --strip-text: #3b3a24; --strip-strong: #1d2618; --strip-hover: var(--gold-hover); background: var(--gold); border-bottom-color: var(--gold-active); }
+.live-strip.is-turn .live-strip-dot { background: var(--primary-text); }
+.live-strip.is-turn .live-strip-back { border-color: var(--primary-text); background: var(--primary-text); color: var(--gold); }
 .live-strip.is-turn .live-strip-back:hover { background: #1a241b; }
-.live-strip.is-turn :is(.live-strip-back, .live-strip-leave):focus-visible { outline-color: #243025; }
+.live-strip.is-turn :is(.live-strip-back, .live-strip-leave):focus-visible { outline-color: var(--primary-text); }
 /* Leaving after this hand: a dashed edge, an olive tag where the Hand was, and no second Leave game. */
 .live-strip.is-leaving { background: #22302a; border-bottom: 1px dashed #6e7a54; }
 .live-strip.is-leaving .live-strip-dot { background: #6e7a54; }
 .live-strip.is-turn.is-leaving { background: var(--gold); }
-.live-strip.is-turn .live-strip-tag { border-color: #8a7344; background: #c5a96f; color: #1d2618; }
+.live-strip.is-turn .live-strip-tag { border-color: #8a7344; background: var(--gold-active); color: #1d2618; }
 @media (max-width: 650px) {
   .live-strip { flex-wrap: wrap; gap: 6px 12px; padding: 8px var(--gutter); }
   .live-strip-dot { align-self: center; }

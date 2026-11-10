@@ -91,6 +91,17 @@ test('startup loads only the tables with scheduled work: timed Practice Hands in
   expect(loaded()).toEqual([idle.id, seated.id, untimed.id, timed.id, online.id].sort());
 });
 
+test('pending After-Hand Requests are not scheduled work at an untimed Practice Table: nothing advances its Hand without its human', async () => {
+  const t = await practiceHand(null);
+  expect(await command(t, 'stand-up-participant', { participantId: t.human })).toMatchObject({ ok: true, afterHand: true });
+  await restart();
+  expect(loaded()).not.toContain(t.id);
+  // The request waits in the record, and applies once the human finishes the Hand.
+  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  clock.advance(2000);
+  await expect.poll(async () => (await stored(t)).pendingChanges).toEqual([]);
+});
+
 test('a Bot decision is scheduled work: an untimed Practice Hand loads at startup while its Bot is to act, and not once its human is', async () => {
   const t = await practiceHand(null);
   await command(t, 'act', { participantId: t.human, action: { type: 'call' } });

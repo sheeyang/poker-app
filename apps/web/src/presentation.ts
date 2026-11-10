@@ -55,6 +55,14 @@ export function payoutEnded(table: ObservableTableSession, serverNow: number): b
 }
 
 /**
+ * Whether a Hand is in progress at server time `serverNow`: it is being played, or its payout phase has not ended. The
+ * table, the Current Table banner and the saved-tables ledger all say "Hand in progress" or "Between hands" by this.
+ */
+export function handInProgress(table: ObservableTableSession, serverNow: number): boolean {
+  return table.view.state.status === 'active-hand' || !payoutEnded(table, serverNow);
+}
+
+/**
  * Whether Deal is available at server time `serverNow`: the latest Hand has ended (`payoutEnded`) and no After-Hand
  * Request is still waiting. The server applies those in their own commit before it accepts a Deal, so a Deal sent
  * before the view without them arrives would name a stale revision. Mirrors the server's rule; the server alone decides.

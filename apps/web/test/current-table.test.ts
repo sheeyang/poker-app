@@ -57,7 +57,7 @@ describe('the Current Table banner', () => {
   });
   it('names the table by its owner, then its format and stakes, how play stands and the viewer’s stack, and links back to it', () => {
     expect(currentTableBanner(table(), '/practice', now)).toEqual({
-      href: `/online/${id}`, heading: 'Sam’s table', format: '6-max · 10 / 20', hand: 'Between hands', stack: '2,140 chips',
+      href: `/online/${id}`, heading: 'Sam’s table', format: '6-max Hold’em · 10 / 20', hand: 'Between hands', stack: '2,140 chips',
       yourTurn: false, pending: undefined, handOpen: false, leave: 'now',
     });
   });

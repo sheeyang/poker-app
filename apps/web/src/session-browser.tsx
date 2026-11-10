@@ -16,6 +16,7 @@ import { Skeleton } from './loading-skeleton.js';
 import { FeltPreview, SeatGlyph, type SeatMark } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { CurrentTableRefusal } from './current-table-refusal.js';
+import { usePresentation } from './use-presentation.js';
 
 const copy = {
   practice: { title: 'Practice tables', lead: 'Your practice history. Every table waits exactly where you left it.', create: 'New practice table', empty: 'No practice tables yet.', emptyHint: 'Start practice to play your first hand against Bots.' },
@@ -30,8 +31,10 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
   // The list holds stored facts only. The Current Table's live details come from the copy its subscription already loaded; nothing is fetched for them.
   const currentId = sessions.data?.tables.find(saved => saved.mode === 'online' && !saved.left)?.tableSessionId;
   const currentCopy = useQuery<ObservableTableSession>({ queryKey: ['table-session', currentId], enabled: false });
+  // Its clock, so the row says a Hand is in progress until the payout ends, exactly as the banner does.
+  const currentPresentation = usePresentation(currentCopy.data, currentCopy.data?.viewerParticipantId);
   const opened = useSession(state => state.opened);
-  const tables = sessions.data && savedRows(sessions.data.tables, mode, opened, currentId ? liveDetails(currentId, currentCopy.data) : undefined);
+  const tables = sessions.data && savedRows(sessions.data.tables, mode, opened, currentId && currentPresentation ? liveDetails(currentId, currentCopy.data, currentPresentation.serverNow) : undefined);
   const { displayName } = useDisplayName(), [awaitingName, setAwaitingName] = useState<CreateTableSessionRequest | null>(null);
   // Until the Guest decides, the form is open exactly when there is nothing to pick up instead.
   const [composing, setComposing] = useState<boolean>();
