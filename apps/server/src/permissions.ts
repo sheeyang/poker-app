@@ -36,8 +36,6 @@ export function humanMutationDenial(aggregate: PersistedTableSession, requester:
   if (isHuman(target) && target.participantId !== requester.participantId) return notYours();
   // A Practice Table is never left: its human keeps it in their practice history.
   if (kind === 'leave-table' && aggregate.mode !== 'online') return reject('unavailable-at-practice-tables', 'A Practice Table is never left. Stand Up or sit out instead.');
-  // A Practice Table is never left: its human keeps it in their practice history.
-  if (kind === 'leave-table' && aggregate.mode !== 'online') return reject('unavailable-at-practice-tables', 'A Practice Table is never left. Stand Up or sit out instead.');
   if (isBot(target) && kind === 'leave-table') return reject('participant-not-human', 'Only a human Participant can leave the table. Bots are managed by the Table Owner.');
   if (isBot(target) && kind !== 'act' && !owner) return ownerRequired();
 }

@@ -6,7 +6,7 @@ import type { ObservableTableSession, SavedTables, TableMode } from '@poker/cont
 import { Icon } from './icons.js';
 import { CommandFeedback } from './controls.js';
 import { useCommand, type Command } from './session.js';
-import { listPath, pageTitle, tablePath, type Page } from './table-address.js';
+import { listPath, pageTitle, parseAddress, tablePath, type Page } from './table-address.js';
 import { currentTableId, withMembershipEnded } from './current-table.js';
 import { CurrentTableBanner } from './current-table-banner.js';
 
@@ -27,8 +27,7 @@ export function useShell(): Shell {
 
 /** The section an address belongs to: each mode's list and tables, an Online Table's Join Link included. */
 function sectionOf(pathname: string): TableMode | undefined {
-  const first = pathname.split('/')[1];
-  return first === 'practice' ? 'practice' : first === 'online' ? 'online' : undefined;
+  return parseAddress(pathname)?.mode;
 }
 
 /** Sets the browser-tab title while a page is shown. */

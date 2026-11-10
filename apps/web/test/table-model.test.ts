@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession } from '@poker/contracts';
 import { retainNewestTable } from '@poker/client';
-import { potTotal, presetTotal } from '../src/table-model.js';
+import { blindsLabel, formatAndStakes, potTotal, presetTotal } from '../src/table-model.js';
 
 describe('poker presentation boundaries', () => {
   it('counts active contributions once, then uses settled main and side pots', () => {
@@ -22,5 +22,13 @@ describe('poker presentation boundaries', () => {
     expect(retainNewestTable(table, { ...table, sessionRevision: 4, pokerRevision: 3 })).toBe(table);
     expect(retainNewestTable(table, { ...table, runtimeStatus: { phase: 'recovering' } }).runtimeStatus?.phase).toBe('recovering');
     expect(retainNewestTable(table, { ...table, sessionRevision: 6, pokerRevision: 5 }).pokerRevision).toBe(5);
+  });
+});
+
+describe('a table named by its format and stakes', () => {
+  it('reads "6-max Hold’em · 10 / 20", with spaced blinds', () => {
+    expect(formatAndStakes(6, 10, 20)).toBe('6-max Hold’em · 10 / 20');
+    expect(formatAndStakes(2, 1000, 2000)).toBe('Heads-up Hold’em · 1,000 / 2,000');
+    expect(blindsLabel(5, 10)).toBe('5 / 10');
   });
 });

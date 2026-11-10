@@ -30,7 +30,7 @@ M4 opens the hosted product to the public and establishes the shared lifecycle b
 ### Guests, joining, and seating
 
 - Anyone may create a table. A Guest enters a display name of 1–20 characters before first creating or joining a table. The name prefills later joins and can be edited for future joins.
-- Each Online Table has one unguessable Join Link, distinct from its Table Session ID, which its Table Owner can copy or replace. Replacing it invalidates the previous link without removing joined Participants.
+- An Online Table's address is its Join Link, and it never changes ([ADR-0033](adr/0033-use-the-online-table-address-as-its-join-link.md)). Every Participant can share it. The Table Owner may set an optional Table Password, which anyone not currently at the table then needs to join.
 - Joining makes the Guest an unseated Participant who sees public table information. That includes every Action Window, the Next-Hand Countdown, and each Participant's connection and sitting-out status.
   - Their Observable Session History begins when they join.
   - Names are fixed when the Guest joins and are unique within the table, ignoring case.
@@ -47,15 +47,15 @@ M4 opens the hosted product to the public and establishes the shared lifecycle b
 - At an Online Table, the Table Owner may:
   - change the Action Time Limit length, Allow Live Analysis, and seat-change permission between Hands;
   - manage Bots, including Playing Strategies and stacks;
-  - replace the Join Link;
+  - set, change, or clear the Table Password;
   - remove a human. Removal takes effect after any current Hand; it is a Leave Table the owner imposes, and the Guest may join again.
 
   The owner never acts for, manages, or sees private information of another human. Admin Mode is never available at an Online Table. When the owner leaves, ownership passes to the earliest-joined human still at the table, watchers included, or the table closes if no other human is there ([ADR-0034](adr/0034-pass-online-table-ownership-to-the-earliest-joined-human.md)).
-- The saved-tables list shows owned Practice Tables and Online Tables the Guest has joined and not left, labeled by mode. Owned tables stay listed.
+- The saved-tables list shows the Guest's Practice Tables and every Online Table they have joined, labeled by mode. It is read from stored facts and loads no table. Online Tables they left are marked as left, and Closed Tables as closed.
 - Chips are free play money within the buy-in limits. Never rebuy automatically.
 - Public hosting adds these safeguards:
-  - per-IP rate limits on table creation, joining, and Join Link replacement;
-  - at most 10 tables with seated humans per Guest;
+  - per-IP rate limits on table creation, joining, and Table Password attempts;
+  - no per-Guest table cap: a table is in memory only while it is needed, and an Online Table closes after 24 hours without a committed change ([ADR-0035](adr/0035-close-idle-online-tables-and-load-tables-only-while-needed.md));
   - limits on name length and characters.
 
 ### Server scheduling and presentation contracts

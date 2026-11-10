@@ -1,8 +1,8 @@
 import type { ObservableTableSession, SavedTable, SavedTables } from '@poker/contracts';
-import { actionWindowOpen, payoutEnded, presentTable } from './presentation.js';
+import { actionWindowOpen, handInProgress, presentTable } from './presentation.js';
 import { afterHandRequestLabel, afterHandRequestOf, selfService, type Availability } from './self-service.js';
-import { chips, tableFormat } from './table-model.js';
-import { tablePath } from './table-address.js';
+import { chips, formatAndStakes } from './table-model.js';
+import { parseAddress, tablePath } from './table-address.js';
 
 /**
  * The Guest's Current Table, from their saved tables: the one Online Table they are at and have not left. Undefined
@@ -23,7 +23,7 @@ export interface CurrentTableBanner {
   readonly href: string;
   /** The table by its Table Owner, "Sam’s table" or "Your table"; "Your turn at Sam’s table" while it is. */
   readonly heading: string;
-  /** Format and stakes: "6-max · 10 / 20". */
+  /** Format and stakes: "6-max Hold’em · 10 / 20". */
   readonly format: string;
   /** "Hand 14 in progress" or "Between hands". */
   readonly hand: string;
@@ -46,11 +46,10 @@ export interface CurrentTableBanner {
  */
 export function currentTableBanner(table: ObservableTableSession | undefined, pathname: string, serverNow: number): CurrentTableBanner | undefined {
   if (table?.mode !== 'online') return undefined;
-  const [, , pageTable] = pathname.split('/');
-  if (pageTable === table.tableSessionId) return undefined;
+  if (parseAddress(pathname)?.tableSessionId === table.tableSessionId) return undefined;
   const { view, viewerParticipantId: viewer } = table;
   const owner = table.bindings.find(binding => binding.participantId === table.ownerParticipantId);
-  const handOpen = view.state.status === 'active-hand' || !payoutEnded(table, serverNow);
+  const handOpen = handInProgress(table, serverNow);
   const handIndex = view.history.findIndex(hand => hand.handId === view.state.handId);
   // The stack as the table shows it now: a Hand still paying out has not paid the viewer yet.
   const me = presentTable(table, serverNow).view.state.participants.find(participant => participant.participantId === viewer);
@@ -61,7 +60,7 @@ export function currentTableBanner(table: ObservableTableSession | undefined, pa
   return {
     href: tablePath('online', table.tableSessionId),
     heading: yourTurn ? `Your turn at ${name}` : name[0]!.toUpperCase() + name.slice(1),
-    format: `${tableFormat(configuration.seatCount)} · ${chips(configuration.smallBlind)} / ${chips(configuration.bigBlind)}`,
+    format: formatAndStakes(configuration.seatCount, configuration.smallBlind, configuration.bigBlind),
     hand: handOpen ? `Hand ${handIndex >= 0 ? handIndex + 1 : view.history.length + 1} in progress` : 'Between hands',
     stack: me?.seat != null ? `${chips(me.stack)} chips` : 'Watching',
     yourTurn,

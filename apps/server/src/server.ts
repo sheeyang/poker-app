@@ -189,7 +189,8 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const result = await create(ownerUserId, request.body);
-      return reply.code(result.ok ? 201 : ['request-id-conflict', 'current-table-elsewhere'].includes(result.rejection.code) ? 409 : result.rejection.code === 'commit-not-applied' ? 503 : 400).send(result);
+      // Bot names repeated within the creation request make the request itself wrong, not a conflict with a table.
+      return reply.code(result.ok ? 201 : result.rejection.code === 'name-taken' ? 400 : outcomeStatus(result)).send(result);
     } catch (error) {
       if (error instanceof CommitOutcomeUnknown) return reply.code(503).send({ ok: false, rejection: { code: 'commit-outcome-unknown', message: 'The creation commit outcome is unknown. Check owned sessions or explicitly retry this requestId to resolve it.' } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Creation could not be confirmed. No definitive domain rejection has been stored.' } });
@@ -203,13 +204,11 @@ export async function createServer(options: ServerOptions) {
   });
   // The Join Link is the Online Table's own address (ADR-0033): its preview and joining live under the Table Session.
   // An ID that names no Online Table, malformed or a Practice Table's, gets the one answer a missing table gets.
-  const tableNotFound = (reply: FastifyReply) => reply.code(404).send(notFound());
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/join-preview', async (request, reply) => {
     const userId = await authenticatedUser(request.cookies.poker_local);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     try {
       const preview = await mutations.previewJoin(userId, request.params.id);
-      if (!preview) return tableNotFound(reply);
       return preview.ok ? preview : reply.code(outcomeStatus(preview)).send(preview);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });

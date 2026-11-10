@@ -109,7 +109,7 @@ test('a Stand Up asked for during a Hand cashes out after it, keeps every chip, 
   expect(await (await submit(t, 'stand-up-participant', { participantId: human, expectedPokerRevision: asked.pokerRevision }, 'stand-up-once')).json()).toEqual(asked);
 });
 
-test('a request whose Hand ended while the server was down is applied once when the server starts', async () => {
+test('a request whose Hand ended while the server was down is applied once, when the untimed Practice Table is next opened', async () => {
   const { t, human } = await headsUp();
   await command(t, 'start-hand'); clock.advance(1500);
   await command(t, 'stand-up-participant', { participantId: human });
@@ -118,6 +118,10 @@ test('a request whose Hand ended while the server was down is applied once when 
   // The outage outlasts the payout phase; no timer of the closed server fires.
   clock.advance(60_000);
   await startServer();
+  // Nothing advances an untimed Practice Table without its human, so startup leaves it, and the request, waiting.
+  expect(controllers.loadedTables()).not.toContain(t.id);
+  expect((await controllers.readPersistedSession(t.id))!.pendingChanges).toHaveLength(1);
+  await read(t);
   await expect.poll(async () => (await controllers.readPersistedSession(t.id))!.pendingChanges).toEqual([]);
   const session = (await controllers.readPersistedSession(t.id))!;
   expect(session.bindings.find(binding => binding.participantId === human)).toMatchObject({ membership: 'joined' });

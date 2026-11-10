@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, type JoinLinkPreview, type SavedTable } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
-import { analysisTabParam, currentTableRefusal, joinLink, joinPreviewWanted, pageTitle, tableAddress, tableSearch } from '../src/table-address.js';
+import { analysisTabParam, currentTableRefusal, joinLink, joinPreviewWanted, listPath, pageTitle, parseAddress, tableAddress, tablePath, tableSearch } from '../src/table-address.js';
 
 describe('the analysis tab kept in a table address', () => {
   it('accepts live, hand and session, and ignores anything else', () => {
@@ -71,10 +71,10 @@ describe('browser-tab titles', () => {
     expect([pageTitle({ page: 'list', mode: 'practice' }), pageTitle({ page: 'list', mode: 'online' })]).toEqual(['Practice · Poker Trainer', 'Online · Poker Trainer']);
   });
   it('name a table by its format and stakes, so browser tabs can be told apart', () => {
-    expect(pageTitle({ page: 'table', seatCount: 6, smallBlind: 10, bigBlind: 20 })).toBe('6-max Hold’em 10/20 · Poker Trainer');
-    expect(pageTitle({ page: 'table', seatCount: 2, smallBlind: 1000, bigBlind: 2000 })).toBe('Heads-up Hold’em 1,000/2,000 · Poker Trainer');
-    expect(pageTitle({ page: 'table', seatCount: 9, smallBlind: 5, bigBlind: 10 })).toBe('Full ring Hold’em 5/10 · Poker Trainer');
-    expect(pageTitle({ page: 'table', seatCount: 4, smallBlind: 5, bigBlind: 10 })).toBe('4-player Hold’em 5/10 · Poker Trainer');
+    expect(pageTitle({ page: 'table', seatCount: 6, smallBlind: 10, bigBlind: 20 })).toBe('6-max Hold’em · 10 / 20 · Poker Trainer');
+    expect(pageTitle({ page: 'table', seatCount: 2, smallBlind: 1000, bigBlind: 2000 })).toBe('Heads-up Hold’em · 1,000 / 2,000 · Poker Trainer');
+    expect(pageTitle({ page: 'table', seatCount: 9, smallBlind: 5, bigBlind: 10 })).toBe('Full ring Hold’em · 5 / 10 · Poker Trainer');
+    expect(pageTitle({ page: 'table', seatCount: 4, smallBlind: 5, bigBlind: 10 })).toBe('4-player Hold’em · 5 / 10 · Poker Trainer');
   });
   it('name a Join Link by whose table it opens, since its visitor can’t see the table yet', () => {
     expect(pageTitle({ page: 'join', ownerName: 'Sam' })).toBe('Join Sam’s table · Poker Trainer');
@@ -99,5 +99,17 @@ describe('the refusal of a Guest who is already at another Online Table', () => 
     expect(currentTableRefusal(new RequestFailure('current-table-elsewhere', 'Leave it first.', true), [])).toBeUndefined();
     expect(currentTableRefusal(new Error('offline'), [])).toBeUndefined();
     expect(currentTableRefusal(null, [])).toBeUndefined();
+  });
+});
+
+describe('reading an address', () => {
+  const id = '7f3a0000-0000-4000-8000-000000000001';
+  it('names the mode of a list, and the mode and table of a table address', () => {
+    expect(parseAddress(listPath('practice'))).toEqual({ mode: 'practice' });
+    expect(parseAddress(tablePath('online', id))).toEqual({ mode: 'online', tableSessionId: id });
+    expect(parseAddress('/online/')).toEqual({ mode: 'online' });
+  });
+  it('names nothing outside the two modes', () => {
+    for (const path of ['/', '/somewhere', '/somewhere/' + id, '/join/token']) expect(parseAddress(path)).toBeUndefined();
   });
 });

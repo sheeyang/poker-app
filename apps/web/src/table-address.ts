@@ -1,11 +1,20 @@
 import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
-import { chips, modeLabel, tableFormat } from './table-model.js';
+import { formatAndStakes, modeLabel } from './table-model.js';
 
 /** Each mode's list: the Practice screen and the Online screen. */
 export const listPath = (mode: TableMode) => `/${mode}` as const;
 /** A table's one address, under its own mode. */
 export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/${tableSessionId}`;
+/**
+ * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
+ * there is one; undefined outside the two modes. The table ID is as written: whether it names a table is for the server.
+ */
+export function parseAddress(pathname: string): { readonly mode: TableMode; readonly tableSessionId?: string } | undefined {
+  const [, first, second] = pathname.split('/');
+  if (first !== 'practice' && first !== 'online') return undefined;
+  return second ? { mode: first, tableSessionId: second } : { mode: first };
+}
 
 /** An Online Table's Join Link: its own address, which never changes and which anyone at the table can pass on (ADR-0033). */
 export const joinLink = (origin: string, tableSessionId: string) => origin + tablePath('online', tableSessionId);
@@ -61,7 +70,7 @@ export function currentTableRefusal(error: unknown, saved: readonly SavedTable[]
   const tableSessionId = error.currentTableId;
   const listed = saved?.find(table => table.tableSessionId === tableSessionId);
   return listed?.seatCount !== undefined && listed.stakes
-    ? { tableSessionId, table: `${tableFormat(listed.seatCount)} Hold’em · ${chips(listed.stakes.smallBlind)} / ${chips(listed.stakes.bigBlind)}` } : { tableSessionId };
+    ? { tableSessionId, table: formatAndStakes(listed.seatCount, listed.stakes.smallBlind, listed.stakes.bigBlind) } : { tableSessionId };
 }
 
 export type AnalysisTab ='live' | 'hand' | 'session';
@@ -88,7 +97,7 @@ export type Page =
 export function pageTitle(page: Page): string {
   switch (page.page) {
     case 'list': return `${modeLabel(page.mode)} · ${app}`;
-    case 'table': return `${tableFormat(page.seatCount)} Hold’em ${chips(page.smallBlind)}/${chips(page.bigBlind)} · ${app}`;
+    case 'table': return `${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
     case 'join': return `Join ${page.ownerName}’s table · ${app}`;
     case 'missing-table': return `Table not found · ${app}`;
     case 'closed-table': return `Table closed · ${app}`;
