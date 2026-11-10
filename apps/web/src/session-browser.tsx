@@ -65,10 +65,19 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
 
 /**
  * One saved table. The whole row opens it: a real link to its address, so it can open in a new browser tab. An
- * Online Table the Guest is not at opens at its address too, which is its Join Link: its join form returns them.
+ * Online Table the Guest is not at opens at its address too, which is its Join Link: its join form returns them. A
+ * Closed Table's row opens nothing.
  */
 function LedgerRow({ row, now, retry }: { row: SavedRow; now: number; retry: () => void }) {
   if (row.kind === 'unreadable') return <tr className="ledger-row is-unreadable"><th scope="row" colSpan={4}><span className="muted">This saved table couldn’t be read.</span></th><td className="ledger-action"><button className="text-button" onClick={retry}>Retry</button></td></tr>;
+  // Nobody can open a Closed Table until replay arrives, so its row is kept as a record, with no link.
+  if (row.kind === 'closed') return <tr className="ledger-row is-closed">
+    <th scope="row"><span className="ledger-name"><SeatGlyph seats={row.seatCount} dim /><span className="ledger-closed-name">{row.name}</span></span></th>
+    <td className="numeric">{row.blinds}{row.ante ? <span className="ledger-ante"> · ante {row.ante}</span> : null}</td>
+    <td><span className="ledger-closed-tag">{row.status}</span></td>
+    <td className="ledger-opened numeric">{openedLabel(row.openedAt, now)}</td>
+    <td className="ledger-action"><span className="visually-hidden">Can’t be opened</span></td>
+  </tr>;
   const { kind, seatCount, name, blinds, action, live } = row;
   const label = `${action}: ${name}, ${blinds} blinds`;
   const status = kind === 'practice' ? <span className="muted">Practice</span>

@@ -49,13 +49,13 @@ export function AppShell() {
   const consumers = useRef<TableConsumers | null>(null);
   const [consumeLive] = useState(() => (next: TableConsumers | null) => { consumers.current = next; });
   const live = useTableSynchronization(tableSessionId, identity.isSuccess, {
-    // Left after the Hand, or removed: the server says so when it happens, and a Guest looking at that table returns to its list.
+    // Left after the Hand, removed, or the table closed: the server says so when it happens, and a Guest looking at that table returns to its list.
     onMembershipEnded: ended => {
       const mode = queryClient.getQueryData<ObservableTableSession>(['table-session', ended.tableSessionId])?.mode ?? 'online';
       if (router.state.location.pathname === tablePath(mode, ended.tableSessionId)) void router.navigate({ href: listPath(mode), replace: true });
       queryClient.removeQueries({ queryKey: ['table-session', ended.tableSessionId] });
       void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      setNotice('You are no longer at that table.');
+      setNotice(ended.closed ? 'That table closed, so you are no longer at it.' : 'You are no longer at that table.');
     },
     onReady: lifecycle => consumers.current?.onReady?.(lifecycle),
     onAnalysisUpdate: (update, lifecycle) => consumers.current?.onAnalysisUpdate?.(update, lifecycle),

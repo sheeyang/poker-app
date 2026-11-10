@@ -38,7 +38,7 @@ preview live under the Table Session, and need an established Guest identity (40
 
 | Method and path | Request and result |
 | --- | --- |
-| `GET /api/table-sessions/:id/join-preview` | What the link shows a Guest before they join, read from the stored table without loading it: `ownerName`, the public `configuration` and `options`, `placesTaken` (of the table's 20 places, see `table-full` below), whether the Guest is `alreadyJoined`, and `returningAs`, the Participant name of a Guest who left and would return. At a table with a [Table Password](#table-password), a Guest who is not at it gets only `{ ok, ownerName, passwordRequired: true }`. |
+| `GET /api/table-sessions/:id/join-preview` | What the link shows a Guest before they join, read from the stored table without loading it: `ownerName`, the public `configuration` and `options`, `placesTaken` (of the table's 20 places, see `table-full` below), whether the Guest is `alreadyJoined`, and `returningAs`, the Participant name of a Guest who left and would return. At a table with a [Table Password](#table-password), a Guest who is not at it gets only `{ ok, ownerName, passwordRequired: true }`. A [Closed Table](#closed-tables) answers 410 `table-closed` to every Guest. |
 | `POST /api/table-sessions/:id/join-table` | Requires `requestId`: the joiner has not seen the table, so there is no expected revision. A Guest who is not at a table with a Table Password also gives `tablePassword`. Joins the Guest as one unseated Participant under their stored display name and returns `{ ok, tableSessionId, participantId, pokerRevision, sessionRevision }`. Joining again, with any request ID, returns the same Participant without another commit, and a Guest who left, the Table Owner included, returns as that Participant under the original name, with their earlier history. |
 
 An ID that names no table, a malformed ID (anything but a lowercase UUID) and a Practice
@@ -46,7 +46,7 @@ Table's ID all get one identical 404 `not-found`, at both routes and for every G
 Practice Table's own human included, so neither route tells them apart. Such a request
 never loads a table; a join to an Online Table that exists loads it.
 
-Join rejections: 404 `not-found`; 400 `display-name-required`; 409
+Join rejections: 404 `not-found`; 410 `table-closed` (a [Closed Table](#closed-tables)); 400 `display-name-required`; 409
 `name-taken` (ignoring case, among all Participants of the table, Bots and departed
 Participants included); 409 `table-full` (all 20 places are taken: by the joined humans, by
 the Bots the owner has not removed, and by the Table Owner, whose place is held after they
@@ -73,7 +73,7 @@ All table paths below start with `/api/table-sessions`:
 | Method and path | Request and result |
 | --- | --- |
 | `POST` to the base path | There is no per-Guest table cap, so a Guest may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`), `bots`, each with `name` and `playingStrategy`, and an Online Table's `tablePassword` (see [Table Password](#table-password)). An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
-| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
+| `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, closed?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`, and a [Closed Table](#closed-tables) `closed: true` as well. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
@@ -292,7 +292,28 @@ in that transaction).
 
 A Guest whose Participant leaves or is removed receives one `table-membership-ended` live
 message on their subscription, then no more updates for
-that table.
+that table. When the table closes, everyone subscribed gets it, with `closed: true`.
+
+### Closed tables
+
+An Online Table with no committed change for 24 hours becomes a Closed Table
+([ADR-0035](adr/0035-close-idle-online-tables-and-load-tables-only-while-needed.md)).
+Practice Tables never close. Each `table_sessions` row stores `last_committed_at`, the
+server time of its last commit, and `closed`, both written by every commit. A sweep every
+ten minutes, judged against the server clock
+([`closing.ts`](../apps/server/src/closing.ts)), closes the open Online Tables whose last
+commit is more than 24 hours old. A table in memory closes in its own turn, through the
+ordinary commit path (`close:<session revision>`), and leaves memory at once. One that is
+not loaded closes with a database update and is never loaded.
+
+Closing ends every membership (the bindings and the membership index become `left`),
+clears the After-Hand Requests and `load_at_startup`, and publishes
+`table-membership-ended` with `closed: true` to everyone subscribed. A Closed Table is
+never loaded again. Its reads, subscriptions and every other route answer 404
+`not-found`, as to anyone not at a table; its Join Link preview and joining answer 410
+`table-closed`. It stays in the saved lists of everyone who was at it, marked
+`left: true, closed: true`, until replay arrives in M6. Its Guests are free to create or
+join another Online Table.
 
 ### Owner controls: Bots and table options
 

@@ -1,6 +1,6 @@
 import { createStrategy, isSupportedStrategy, immutableData, type Strategy } from '@poker/strategies';
 import type { JobRunner, JobHandle } from './job-runner.js';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
 import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest } from '@poker/contracts';
@@ -23,8 +23,9 @@ import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, n
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
-import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, tablePasswordRequired, unavailableOnline, wrongTablePassword } from './rejections.js';
+import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableClosed, tableFull, tablePasswordRequired, unavailableOnline, wrongTablePassword } from './rejections.js';
 import { hashTablePassword, tablePasswordMatches, tablePasswordProblem } from './table-password.js';
+import { closedTableSession, idleTableCloseMs, idleTableSweepMs } from './closing.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -307,6 +308,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * schedule too, since it can let the table deal.
    */
   async function runSchedule(id: string, session: CommittedSession, forceBot = false): Promise<void> {
+    // A Closed Table leaves memory once its closing is published: nothing more runs at it.
+    if (session.aggregate.closed) { tables.evict(id); return; }
     if (stopped || recovering.has(id)) return;
     const window = session.aggregate.schedule.actionWindow;
     if (window && pastActionDeadline(window, window.participantId, clock.now())) { await timeOut(id, window); return; }
@@ -450,7 +453,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const rows = await tx.select().from(processedRequests).where(and(eq(processedRequests.tableSessionId, id), eq(processedRequests.requestId, requestId)));
         if (rows[0]) return (rows[0].fingerprint === fingerprint ? rows[0].outcome : requestIdConflict()) as O;
         const decided = await decide(tx);
-        if (decided.next) await writeTableSession(tx, previous, decided.next.aggregate);
+        if (decided.next) await writeTableSession(tx, previous, decided.next.aggregate, clock.now());
         await tx.insert(processedRequests).values({ tableSessionId: id, requestId, fingerprint, outcome: decided.outcome });
         decision = decided;
         return decided.outcome;
@@ -579,7 +582,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (!participantId) {
         // A Guest whose membership ended is told once, so their client leaves the table; anyone else is dropped silently.
         const ended = humanBindings(session.aggregate).some(binding => binding.userId === entry.userId && binding.membership === 'left');
-        if (ended) try { entry.publish({ type: 'table-membership-ended', tableSessionId: id }); } catch { /* The subscriber is gone. */ }
+        if (ended) try { entry.publish({ type: 'table-membership-ended', tableSessionId: id, ...(session.aggregate.closed ? { closed: true as const } : {}) }); } catch { /* The subscriber is gone. */ }
         drop(entry); continue;
       }
       // A delivery failure cannot change a confirmed mutation's outcome.
@@ -669,6 +672,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * loaded table therefore never wait on the journal.
    */
   async function loadTable(id: string): Promise<CommittedSession | undefined> {
+    // A Closed Table is never loaded: to a request it is a table that isn't there.
+    if ((await db.select({ closed: tableSessions.closed }).from(tableSessions).where(eq(tableSessions.id, id)))[0]?.closed !== false) return undefined;
     if (!recovering.has(id) && (await acceptance.attempts()).some(entry => entry.tableSessionId === id && entry.state === 'pending')) pause(id);
     return readCommitted(id);
   }
@@ -1043,6 +1048,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     async function join(id: string, userId: string, request: JoinTableRequest, passwordAttempt?: () => ApplicationRejection | undefined): Promise<JoinOutcome> {
       const stored = await storedOnlineTable(db, id);
       if (!stored) return notFound();
+      if (upgradeTableSession(stored)?.closed) return tableClosed();
       const { requestId, tablePassword, ...contents } = request;
       if (Object.keys(contents).length || tablePassword !== undefined && typeof tablePassword !== 'string') return reject('invalid-mutation-request', 'Joining carries only a requestId, and the Table Password when the table has one.');
       // The Guest's turn is taken before the table's handle and FIFO, never inside them.
@@ -1055,7 +1061,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (checked.refusal) return checked.refusal;
         return await holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
         let session = tables.get(id);
-        if (!session) return notFound();
+        if (!session) return await notFoundOrClosed(id);
         if (stopped) return reject('server-closing', 'The server is closing.');
         const fingerprint = createHash('sha256').update('join-table-v1:' + canonical({ userId })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
@@ -1100,8 +1106,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         });
         if (next) publishCommitted(id, events);
         return outcome;
-      })) ?? notFound();
+      })) ?? await notFoundOrClosed(id);
       });
+    }
+    /** The answer to a join that found no table to load: it closed meanwhile, or it is not there. */
+    async function notFoundOrClosed(id: string): Promise<ApplicationRejection> {
+      const stored = await storedOnlineTable(db, id);
+      return stored && upgradeTableSession(stored)?.closed ? tableClosed() : notFound();
     }
     /**
      * Why a Guest cannot join this table with `password`: undefined `refusal` when they need none (no Table Password,
@@ -1129,6 +1140,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (!stored) return undefined;
       const aggregate = upgradeTableSession(stored);
       if (!aggregate) throw new TableSessionRestorationError();
+      if (aggregate.closed) return tableClosed();
       const humans = humanBindings(aggregate);
       const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
       // Behind a Table Password, the table's details stay with the people at it.
@@ -1166,8 +1178,71 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       // Loading a table queues its schedule run; startup waits for it.
       await Promise.allSettled(rows.map(row => holding(row.id, () => drained(row.id))));
     }
+    /**
+     * Every Online Table whose last committed change is older than `cutoff` (server time) becomes a Closed Table. A table
+     * in memory closes in its own turn, through the one commit path, and then leaves memory. One that is not closes with
+     * a database update, kept out of memory meanwhile, and is not loaded. A table whose last commit is unresolved waits
+     * for its recovery, and anything that fails is tried again at the next sweep.
+     */
+    async function closeIdleTables(cutoff: number) {
+      const rows = await db.select({ id: tableSessions.id }).from(tableSessions)
+        .where(and(eq(tableSessions.closed, false), sql`${tableSessions.aggregate}->>'mode' = 'online'`, lt(tableSessions.lastCommittedAt, cutoff)));
+      for (const { id } of rows) {
+        if (stopped) return;
+        if (recovering.has(id)) continue;
+        try {
+          if (tables.get(id)) await enqueue(id, () => closeLoaded(id, cutoff));
+          else await tables.whileUnloaded(id, () => closeUnloaded(id, cutoff));
+        } catch { /* Tried again at the next sweep. */ }
+      }
+    }
+    /** Whether the stored table is still open and idle since before `cutoff`: a commit may have come since the sweep looked. */
+    async function stillIdle(tx: Transaction | Database, id: string, cutoff: number, lock = false) {
+      const query = tx.select({ closed: tableSessions.closed, lastCommittedAt: tableSessions.lastCommittedAt }).from(tableSessions).where(eq(tableSessions.id, id));
+      const [row] = await (lock ? query.for('update') : query);
+      return !!row && !row.closed && row.lastCommittedAt < cutoff;
+    }
+    /** Closes a loaded idle table in its turn. Publishing it tells everyone following it that their membership ended; then it leaves memory. */
+    async function closeLoaded(id: string, cutoff: number) {
+      const session = tables.get(id);
+      if (!session || stopped || recovering.has(id) || session.aggregate.mode !== 'online' || !await stillIdle(db, id, cutoff)) return;
+      await commitScheduled(id, current => current.aggregate.closed ? undefined : { requestId: 'close:' + current.aggregate.sessionRevision,
+        fingerprint: createHash('sha256').update('close-idle-v1:' + canonical({ sessionRevision: current.aggregate.sessionRevision })).digest('hex'),
+        events: [], next: { aggregate: closedTableSession(current.aggregate), game: current.game } });
+    }
+    /** Closes an idle table that is not in memory, with one update of its stored row and memberships: nothing is loaded. */
+    async function closeUnloaded(id: string, cutoff: number) {
+      await db.transaction(async tx => {
+        if (!await stillIdle(tx, id, cutoff, true)) return;
+        const stored = (await tx.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(eq(tableSessions.id, id)))[0]?.aggregate;
+        const aggregate = stored && upgradeTableSession(stored);
+        if (aggregate?.mode !== 'online') return;
+        await writeTableSession(tx, aggregate, closedTableSession(aggregate), clock.now());
+      });
+    }
+    let cancelSweep: (() => void) | undefined;
+    let sweepCutoff: number | undefined;
+    let sweeping: Promise<void> | undefined;
+    /**
+     * Starts the periodic sweep that closes idle Online Tables (ADR-0035), judged against the server clock. Sweeps never
+     * overlap: one that comes due while another runs waits for it, and only the latest of those runs.
+     */
+    function startClosingIdleTables() {
+      const arm = (at: number) => {
+        cancelSweep = clock.setTimer(at, () => {
+          if (stopped) return;
+          sweepCutoff = at - idleTableCloseMs;
+          sweeping ??= (async () => {
+            while (sweepCutoff !== undefined && !stopped) { const cutoff = sweepCutoff; sweepCutoff = undefined; await closeIdleTables(cutoff).catch(() => {}); }
+          })().finally(() => { sweeping = undefined; });
+          arm(at + idleTableSweepMs);
+        }, 'housekeeping');
+      };
+      if (!stopped && !cancelSweep) arm(clock.now() + idleTableSweepMs);
+    }
     function stop() {
       stopped = true;
+      cancelSweep?.();
       clearInterval(recoveryTimer);
       tables.close();
       for (const pending of wakes.values()) pending.cancel();
@@ -1178,7 +1253,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     async function close() {
       stop();
       await bots?.runner.close();
-      await Promise.allSettled([...queue.values()]);
+      await Promise.allSettled([...queue.values(), sweeping]);
     }
   function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
     return asMember(id, userId, () => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
@@ -1235,6 +1310,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     previewJoin,
     savedTables,
     loadScheduledTables,
+    startClosingIdleTables,
     startRecovery,
     stop,
     close,

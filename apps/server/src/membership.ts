@@ -12,20 +12,22 @@ type Database = Omit<ReturnType<typeof openDatabase>['db'], '$client'>;
  * connected, so the end of one starts nothing until someone opens the table.
  */
 export function hasScheduledWork(aggregate: PersistedTableSession): boolean {
+  // A Closed Table is never loaded again, so nothing it had scheduled runs.
+  if (aggregate.closed) return false;
   const { actionWindow, nextHandCountdown } = aggregate.schedule;
   return !!nextHandCountdown || aggregate.pendingChanges.length > 0
     || !!actionWindow && (actionWindow.deadlineAt !== undefined || isBot(findBinding(aggregate, actionWindow.participantId)));
 }
 /**
  * The only way to write a Persisted Table Session. In the caller's transaction it inserts (no `previous`)
- * or updates the aggregate, with its `loadAtStartup` (`hasScheduledWork`), and writes the membership index rows
- * of every human binding whose membership differs from `previous`. Joining, leaving and Removal therefore only
- * change bindings.
+ * or updates the aggregate, with its `loadAtStartup` (`hasScheduledWork`), whether it is closed, and `committedAt`
+ * (server time) as its last committed change, and writes the membership index rows of every human binding whose
+ * membership differs from `previous`. Joining, leaving, Removal and closing therefore only change bindings.
  */
-export async function writeTableSession(tx: Database, previous: PersistedTableSession | undefined, next: PersistedTableSession) {
-  const loadAtStartup = hasScheduledWork(next);
-  if (previous) await tx.update(tableSessions).set({ aggregate: next, loadAtStartup }).where(eq(tableSessions.id, next.tableSessionId));
-  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ownerUserId: next.ownerUserId, aggregate: next, loadAtStartup });
+export async function writeTableSession(tx: Database, previous: PersistedTableSession | undefined, next: PersistedTableSession, committedAt: number) {
+  const row = { aggregate: next, loadAtStartup: hasScheduledWork(next), closed: !!next.closed, lastCommittedAt: committedAt };
+  if (previous) await tx.update(tableSessions).set(row).where(eq(tableSessions.id, next.tableSessionId));
+  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ownerUserId: next.ownerUserId, ...row });
   const known = new Map(previous ? humanBindings(previous).map(binding => [binding.participantId, binding.membership]) : []);
   const changed = humanBindings(next).filter(binding => known.get(binding.participantId) !== binding.membership);
   if (changed.length) await tx.insert(tableMemberships)
@@ -66,12 +68,14 @@ export async function membership(db: Database, tableSessionId: string, userId: s
 }
 /**
  * Every table the Guest has joined, with the Guest's Participant at each, however their membership ended (Leave Table
- * or Removal, which are the same). A table they have left is marked `left`: its Join Link returns them. Each carries
- * its stored aggregate, so the caller can read the format and blinds from stored rows alone, loading nothing.
+ * or Removal, which are the same, or the table closing). A table they have left is marked `left`: its Join Link
+ * returns them. A Closed Table is marked `closed` as well, its memberships all ended. Each carries its stored aggregate,
+ * so the caller can read the format and blinds from stored rows alone, loading nothing.
  */
-export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left'> & { stored: StoredTableSession })[]> {
-  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, stored: tableSessions.aggregate, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
+export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left' | 'closed'> & { stored: StoredTableSession })[]> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, stored: tableSessions.aggregate, status: tableMemberships.status, closed: tableSessions.closed, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
     .where(eq(tableMemberships.userId, userId));
-  return rows.map(row => ({ tableSessionId: row.tableSessionId, stored: row.stored, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
+  return rows.map(row => ({ tableSessionId: row.tableSessionId, stored: row.stored, mode: row.mode ?? legacyTableMode,
+    ...(row.status === 'joined' ? {} : { left: true as const }), ...(row.closed ? { closed: true as const } : {}) }));
 }

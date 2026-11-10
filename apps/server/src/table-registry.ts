@@ -61,7 +61,8 @@ export function createTableRegistry<T>(options: TableRegistryOptions<T>) {
     entry.unloading = (async () => {
       await options.drain(id).catch(() => {});
       // Queued work may have found more to do, and taken a hold for it: then the table stays.
-      if (closed || entry.holds > 0) return;
+      // An eviction meanwhile has already taken the table out of memory.
+      if (closed || entry.holds > 0 || entries.get(id) !== entry) return;
       entries.delete(id);
       try { options.unloaded(id, entry.table!); } catch { /* The table has left memory whatever its clean-up does. */ }
     })().finally(() => { entry.unloading = undefined; idle(id, entry); });
@@ -101,6 +102,34 @@ export function createTableRegistry<T>(options: TableRegistryOptions<T>) {
     retain(id: string): TableHandle | undefined {
       const entry = entries.get(id);
       return entry?.table === undefined ? undefined : hold(id, entry);
+    },
+    /**
+     * Takes a loaded table out of memory now, whatever still holds it, as closing a table does: the work queued at it
+     * finds it gone. Handles still out release nothing more. An acquire afterwards loads it again from its record.
+     */
+    evict(id: string) {
+      const entry = entries.get(id);
+      if (entry?.table === undefined) return;
+      entry.cancelUnload?.(); entry.cancelUnload = undefined;
+      entries.delete(id);
+      try { options.unloaded(id, entry.table); } catch { /* The table has left memory whatever its clean-up does. */ }
+    },
+    /**
+     * Runs `work` on a table that is not in memory, and keeps it out until the work is done: an acquire meanwhile waits,
+     * then loads it as the work left it. Returns false, without running `work`, when the table is in memory or on its way
+     * in or out.
+     */
+    async whileUnloaded(id: string, work: () => Promise<void>): Promise<boolean> {
+      if (closed || entries.has(id)) return false;
+      const entry: Entry<T> = { holds: 0 };
+      entries.set(id, entry);
+      let failure: { error: unknown } | undefined;
+      // Acquirers wait on this as on an unload; it never rejects, so they never fail for the work's sake.
+      entry.unloading = (async () => { try { await work(); } catch (error) { failure = { error }; } })()
+        .finally(() => { if (entries.get(id) === entry) entries.delete(id); entry.unloading = undefined; });
+      await entry.unloading;
+      if (failure) throw failure.error;
+      return true;
     },
     /** The table in memory, if it is loaded. Holds nothing. */
     get(id: string): T | undefined { return entries.get(id)?.table; },
