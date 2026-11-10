@@ -48,8 +48,8 @@ export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId:
     onSuccess: joined,
     onError: error => {
       if (!(error instanceof RequestFailure)) return;
-      // The owner set a password since this link was opened: show the form that asks for it.
-      if (error.code === 'table-password-required' && !locked) void queryClient.invalidateQueries({ queryKey: ['join-preview', tableSessionId] });
+      // The owner set a password since this link was opened, or the table closed: ask the link again, which shows the form or that it closed.
+      if ((error.code === 'table-password-required' && !locked) || error.code === 'table-closed') void queryClient.invalidateQueries({ queryKey: ['join-preview', tableSessionId] });
       // Ready to retype: the wrong password is selected, the name is untouched.
       if (error.code === 'wrong-table-password') requestAnimationFrame(() => { passwordField.current?.focus(); passwordField.current?.select(); });
     },

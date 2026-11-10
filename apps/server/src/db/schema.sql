@@ -13,8 +13,18 @@ CREATE TABLE IF NOT EXISTS table_sessions (
   owner_user_id uuid NOT NULL REFERENCES local_users(id),
   aggregate jsonb NOT NULL,
   -- True exactly while the table has scheduled work, written in the same commit that creates or ends it.
-  load_at_startup boolean NOT NULL DEFAULT false
+  load_at_startup boolean NOT NULL DEFAULT false,
+  -- Server time (epoch ms) of the last committed change; an Online Table closes 24 hours after it.
+  last_committed_at bigint NOT NULL DEFAULT 0,
+  -- A Closed Table, mirroring the aggregate's `closed`, written in the commit that closes it.
+  closed boolean NOT NULL DEFAULT false
 );
+-- The idle-table sweep reads only the open Online Tables, oldest change first.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'table_sessions' AND indexname = 'table_sessions_open_online') THEN
+    CREATE INDEX table_sessions_open_online ON table_sessions (last_committed_at) WHERE NOT closed AND aggregate->>'mode' = 'online';
+  END IF;
+END $$;
 -- Startup loads only the tables with scheduled work. Guarded: even a no-op CREATE INDEX IF NOT EXISTS takes a SHARE lock.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND tablename = 'table_sessions' AND indexname = 'table_sessions_load_at_startup') THEN

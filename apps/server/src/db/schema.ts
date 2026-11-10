@@ -1,5 +1,5 @@
 import type { CreationOutcome, MutationOutcome } from '@poker/contracts';
-import { boolean, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
 import type { MembershipStatus, StoredTableSession } from '../aggregate.js';
 export const localUsers = pgTable('local_users', {
   id: uuid('id').primaryKey(),
@@ -13,6 +13,10 @@ export const tableSessions = pgTable('table_sessions', {
   aggregate: jsonb('aggregate').$type<StoredTableSession>().notNull(),
   /** True exactly while the table has scheduled work (`hasScheduledWork`), written with each commit; startup loads only these. */
   loadAtStartup: boolean('load_at_startup').notNull().default(false),
+  /** Server time, in epoch milliseconds, of the table's last committed change: an Online Table closes 24 hours after it. */
+  lastCommittedAt: bigint('last_committed_at', { mode: 'number' }).notNull().default(0),
+  /** A Closed Table, mirroring the aggregate's `closed`: never loaded, listed as closed. */
+  closed: boolean('closed').notNull().default(false),
 });
 /** The membership index: one row per human Participant, mirroring its aggregate binding. */
 export const tableMemberships = pgTable('table_memberships', {

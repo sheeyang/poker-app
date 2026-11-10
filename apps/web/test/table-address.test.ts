@@ -52,6 +52,9 @@ describe('what a table address shows its visitor', () => {
   it('tells a visitor that an Online address with no Online Table behind it doesn’t exist, a Practice Table’s ID included', () => {
     expect(tableAddress('online', id, 'not-found', 'not-found')).toEqual({ show: 'missing' });
   });
+  it('tells anyone opening a Closed Table’s address that the table closed', () => {
+    expect(tableAddress('online', id, 'not-found', 'closed')).toEqual({ show: 'closed' });
+  });
   it('lets the table itself, not its preview, answer a Participant', () => {
     expect(tableAddress('online', id, { mode: 'online' }, { ...preview, alreadyJoined: true })).toEqual({ show: 'table' });
   });
@@ -78,6 +81,9 @@ describe('browser-tab titles', () => {
   });
   it('say when there is nothing at the address', () => {
     expect([pageTitle({ page: 'missing-table' }), pageTitle({ page: 'not-found' })]).toEqual(['Table not found · Poker Trainer', 'Page not found · Poker Trainer']);
+  });
+  it('say when the table at the address has closed', () => {
+    expect(pageTitle({ page: 'closed-table' })).toBe('Table closed · Poker Trainer');
   });
 });
 

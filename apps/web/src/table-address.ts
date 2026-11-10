@@ -25,6 +25,7 @@ type TableRead = { readonly mode: TableMode } | 'not-found';
  * - `password-join-form`: the same, at an Online Table with a Table Password: the preview names only the owner, and
  *   joining needs the password.
  * - `missing`: "This table doesn't exist".
+ * - `closed`: "This table closed": the Online Table is a Closed Table, which nobody can open or join.
  *
  * Undefined while an Online address waits for its Join Link's preview (`joinPreviewWanted`).
  */
@@ -33,13 +34,18 @@ export type TableAddressOutcome =
   | { readonly show: 'corrected'; readonly to: string }
   | { readonly show: 'join-form'; readonly preview: OpenJoinLinkPreview }
   | { readonly show: 'password-join-form'; readonly preview: ProtectedJoinLinkPreview }
-  | { readonly show: 'missing' };
+  | { readonly show: 'missing' }
+  | { readonly show: 'closed' };
 
-export function tableAddress(routeMode: TableMode, tableSessionId: string, read: TableRead, preview?: JoinLinkPreview | 'not-found'): TableAddressOutcome | undefined {
+/** The Join Link's preview as its visitor got it: what it opens, or that there is no Online Table there, or that it closed. */
+export type PreviewRead = JoinLinkPreview | 'not-found' | 'closed';
+
+export function tableAddress(routeMode: TableMode, tableSessionId: string, read: TableRead, preview?: PreviewRead): TableAddressOutcome | undefined {
   if (read !== 'not-found') return read.mode === routeMode ? { show: 'table' } : { show: 'corrected', to: tablePath(read.mode, tableSessionId) };
   if (!joinPreviewWanted(routeMode, read)) return { show: 'missing' };
   if (preview === undefined) return undefined;
   if (preview === 'not-found') return { show: 'missing' };
+  if (preview === 'closed') return { show: 'closed' };
   return preview.passwordRequired ? { show: 'password-join-form', preview } : { show: 'join-form', preview };
 }
 
@@ -75,6 +81,7 @@ export type Page =
   | { readonly page: 'table'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
   | { readonly page: 'join'; readonly ownerName: string }
   | { readonly page: 'missing-table' }
+  | { readonly page: 'closed-table' }
   | { readonly page: 'not-found' };
 
 /** Each page's browser-tab title: a table goes by its format and stakes, so several open tables can be told apart. */
@@ -84,6 +91,7 @@ export function pageTitle(page: Page): string {
     case 'table': return `${tableFormat(page.seatCount)} Hold’em ${chips(page.smallBlind)}/${chips(page.bigBlind)} · ${app}`;
     case 'join': return `Join ${page.ownerName}’s table · ${app}`;
     case 'missing-table': return `Table not found · ${app}`;
+    case 'closed-table': return `Table closed · ${app}`;
     case 'not-found': return `Page not found · ${app}`;
   }
 }

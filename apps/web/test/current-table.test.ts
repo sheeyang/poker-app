@@ -32,6 +32,9 @@ describe('the Current Table among saved tables', () => {
     expect(currentTableId(saved([{ mode: 'practice' }, { left: true }]))).toBeUndefined();
     expect(currentTableId(undefined)).toBeUndefined();
   });
+  it('is never a Closed Table, whose memberships the closing ended', () => {
+    expect(currentTableId(saved([{ tableSessionId: id, left: true, closed: true }]))).toBeUndefined();
+  });
   it('is gone as soon as the server says the Guest’s Leave Table or Removal took effect', () => {
     const list = { tables: saved([{ tableSessionId: id }, { mode: 'practice' }]) };
     const ended = withMembershipEnded(list, id);

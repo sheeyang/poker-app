@@ -74,6 +74,11 @@ export interface PersistedTableSession {
    * Participants are told only that it is set (`hasTablePassword` in the projected options).
    */
   readonly tablePasswordHash?: string;
+  /**
+   * A Closed Table (`closing.ts`): an Online Table idle for 24 hours, whose memberships have all ended. Nobody can open,
+   * join or act at it, and it is never loaded again. The `closed` column mirrors it.
+   */
+  readonly closed?: true;
 }
 /** Written before M4: one owner-human and a table-level Trainer configuration. Read-only. */
 export interface PersistedTableSessionV1 {

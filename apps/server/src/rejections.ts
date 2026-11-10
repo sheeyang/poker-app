@@ -12,6 +12,8 @@ export const unavailableOnline = (message: string) => reject('unavailable-at-onl
 /** A Guest is at one Online Table at a time: creating, joining or returning to another waits until they leave it. */
 export const currentTableElsewhere = (currentTableId: string): ApplicationRejection => ({ ok: false, rejection: { code: 'current-table-elsewhere', currentTableId,
   message: 'You’re already at another Online Table, your Current Table. Leave it first, then try again.' } });
+/** A Closed Table: told to anyone who asks to join it or opens its Join Link. */
+export const tableClosed = () => reject('table-closed', 'This table has closed. Nobody can join or play at it any more.');
 export const tablePasswordRequired = () => reject('table-password-required', 'This table has a Table Password. Ask the Table Owner for it, then join with it.');
 export const wrongTablePassword = () => reject('wrong-table-password', 'That password isn’t right. Check it with the Table Owner and try again.');
 export const tableFull = (advice: string) => reject('table-full', `This table already has ${onlineTableCapacity} Participants, Bots included. ${advice}`);
@@ -21,6 +23,8 @@ export const liveAnalysisDisallowed = () => reject('live-analysis-disallowed', '
 const forbidden: ReadonlySet<string> = new Set(['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'live-analysis-disallowed', 'table-password-required', 'wrong-table-password']);
 /** Rejections that a fresh view or a new request resolves, because the table or the request ID moved on: 409. */
 const conflicts: ReadonlySet<string> = new Set(['request-id-conflict', 'stale-poker-revision', 'stale-session-revision', 'action-window-not-open', 'action-deadline-passed', 'payout-phase-not-ended', 'name-taken', 'table-full', 'current-table-elsewhere']);
+/** Rejections that say the table is gone for good: 410. */
+const gone: ReadonlySet<string> = new Set(['table-closed']);
 /** Rejections that say the table is unavailable for now, not that the request is wrong: 503. */
 const unavailable: ReadonlySet<string> = new Set(['session-recovering', 'commit-not-applied']);
 
@@ -28,5 +32,5 @@ const unavailable: ReadonlySet<string> = new Set(['session-recovering', 'commit-
 export function outcomeStatus(outcome: { readonly ok: true } | ApplicationRejection): number {
   if (outcome.ok) return 200;
   const { code } = outcome.rejection;
-  return code === 'not-found' ? 404 : forbidden.has(code) ? 403 : unavailable.has(code) ? 503 : conflicts.has(code) ? 409 : 400;
+  return code === 'not-found' ? 404 : forbidden.has(code) ? 403 : unavailable.has(code) ? 503 : gone.has(code) ? 410 : conflicts.has(code) ? 409 : 400;
 }

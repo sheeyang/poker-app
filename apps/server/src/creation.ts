@@ -14,6 +14,7 @@ import { currentTableElsewhere } from './rejections.js';
 import { emptySchedule } from './schedule.js';
 import { type AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
 import { canonical } from './canonical.js';
+import { systemClock, type ServerClock } from './clock.js';
 import { hashTablePassword, tablePasswordProblem } from './table-password.js';
 export { CommitOutcomeUnknown } from './db/acceptance.js';
 type Database = ReturnType<typeof openDatabase>['db'];
@@ -23,7 +24,7 @@ export interface CreationTransactionFaults extends AcceptanceFaults { readonly b
  * Creates tables, each in its owner's turn (`guests`), which joining shares: an Online Table becomes its owner's Current
  * Table, so creating one is refused while they are at another.
  */
-export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, guests: GuestQueue = createGuestQueue()) {
+export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, guests: GuestQueue = createGuestQueue(), clock: ServerClock = systemClock) {
   return (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => guests.run(ownerUserId, async (): Promise<CreationOutcome> => {
     // The Table Password never reaches the fingerprint: retrying with another password is the same creation.
     const { requestId, tablePassword, ...contents } = request;
@@ -95,7 +96,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
           ...(tablePasswordHash ? { tablePasswordHash } : {}),
         };
-        await writeTableSession(tx, undefined, aggregate);
+        await writeTableSession(tx, undefined, aggregate, clock.now());
         outcome = { ok: true, tableSessionId, bindings: projectBindings(bindings) };
       }
       await tx.insert(creationRequests).values({ userId: ownerUserId, requestId, fingerprint, outcome });

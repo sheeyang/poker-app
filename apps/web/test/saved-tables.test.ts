@@ -25,6 +25,17 @@ describe('the saved rows of one mode', () => {
     expect(rows.find(row => row.tableSessionId === 'left')).not.toHaveProperty('live');
   });
 
+  it('shows a Closed Table as "Closed", with nothing to open it by, and never as the Current Table', () => {
+    const closed: SavedTable = { ...online('c', true), closed: true };
+    const [row] = savedRows([closed], 'online', { c: 100 }, { tableSessionId: 'c', handInProgress: true, stack: 1 });
+    expect(row).toEqual({ kind: 'closed', tableSessionId: 'c', seatCount: 6, name: '6-max Hold’em', blinds: '10 / 20', status: 'Closed', openedAt: 100 });
+  });
+
+  it('orders a Closed Table by when it was last opened, like any other', () => {
+    const rows = savedRows([{ ...online('c', true), closed: true }, online('o', true)], 'online', { c: 200, o: 100 });
+    expect(rows.map(row => row.tableSessionId)).toEqual(['c', 'o']);
+  });
+
   it('shows the Current Table without details while its live copy is not loaded', () => {
     const [row] = savedRows([online('now')], 'online', {});
     expect(row).toMatchObject({ kind: 'current', action: 'Back to game' });

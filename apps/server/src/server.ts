@@ -70,7 +70,7 @@ export async function createServer(options: ServerOptions) {
   const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema);
   // Creating and joining share each Guest's turn, so a Guest is never let in at two Online Tables at once.
   const guests = createGuestQueue();
-  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy, guests);
+  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy, guests, options.clock);
   const jobRunner = new JobRunner(options.jobRunnerOptions);
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis') }, options.clock, guests);
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession, loadedTables: mutations.loadedTables });
@@ -414,6 +414,7 @@ export async function createServer(options: ServerOptions) {
     await initializeDatabase(pool);
     await mutations.startRecovery();
     await mutations.loadScheduledTables();
+    mutations.startClosingIdleTables();
     return app;
   } catch (error) {
     await app.close().catch(() => {});

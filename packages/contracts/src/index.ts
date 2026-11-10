@@ -282,6 +282,8 @@ export interface SavedTable {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
   readonly left?: true;
+  /** A Closed Table: nobody can open, join or act at it. Its memberships have ended, so it is `left` too. */
+  readonly closed?: true;
   readonly seatCount?: number;
   readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
 }
@@ -438,10 +440,16 @@ export type TableSubscriptionResult = {
   readonly tableSessionId: TableSessionId;
 } & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
 /**
- * The last message a Guest's subscription receives after their Participant leaves the table or is removed.
+ * The last message a Guest's subscription receives after their Participant leaves the table or is removed, or the
+ * table closes.
  * Their client returns to its saved tables.
  */
-export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId }
+export interface TableMembershipEnded {
+  readonly type: 'table-membership-ended';
+  readonly tableSessionId: TableSessionId;
+  /** The table closed, which ended everyone's membership: it is a Closed Table now. */
+  readonly closed?: true;
+}
 /**
  * A change of who is connected at an Online Table, sent to everyone subscribed to it. Transient like
  * `table-status`: it advances no revision, and every complete view carries the same list.

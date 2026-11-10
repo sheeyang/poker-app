@@ -1028,6 +1028,10 @@ fieldset.composer-field { display: block; }
 .ledger-row:has(.ledger-open:hover) { background: var(--surface); }
 .ledger-row:has(button.ledger-open:disabled) { opacity: .6; }
 .ledger-row.is-seated { background: #1f2c24; }
+/* A Closed Table: kept as a record, muted, with a dashed tag rather than colour alone, and nothing to open. */
+.ledger-row.is-closed > * { color: var(--muted); }
+.ledger-closed-name { font-weight: 600; }
+.ledger-closed-tag { display: inline-block; padding: 1px 8px; border: 1px dashed #46594d; border-radius: 4px; font-size: .76rem; font-weight: 600; line-height: 1.5; color: var(--muted); }
 .ledger-row.is-seated:has(.ledger-open:hover) { background: #243429; }
 .ledger-live { color: #c3d4c7; }
 .ledger-live b { color: var(--gold); font-weight: 600; }
@@ -1063,6 +1067,8 @@ fieldset.composer-field { display: block; }
 .address-missing > svg { color: var(--gold); margin-bottom: 4px; }
 .address-missing p { color: var(--muted); }
 .address-missing-link { margin-top: 12px; }
+.address-closed > .seat-glyph { width: 64px; height: 40px; margin-bottom: 4px; }
+.address-closed .seat-glyph-felt { stroke-dasharray: 3 2.5; }
 
 @media (max-width: 860px) {
   .composer { grid-template-columns: 1fr; row-gap: 22px; padding: 24px; }

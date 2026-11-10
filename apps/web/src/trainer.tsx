@@ -21,6 +21,7 @@ import { useDecisionAnalysis } from './analysis.js';
 import { useHandSummary, useTableSessionSummary } from './summaries.js';
 import { AnalysisPanel, AnalysisPanelSkeleton } from './analysis-panel.js';
 import { TableSkeleton } from './loading-skeleton.js';
+import { SeatGlyph } from './felt.js';
 import { actionLabel, chips, modeLabel, playerName } from './table-model.js';
 import { usePresentation } from './use-presentation.js';
 
@@ -39,9 +40,10 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const unread = read.error instanceof RequestFailure && read.error.code === 'not-found';
   // The table answers its Participants; only a visitor it turns away asks the Join Link what it opens.
   const preview = useQuery({ queryKey: ['join-preview', selected], queryFn: ({ signal }) => api.previewJoin(selected, signal), enabled: unread && joinPreviewWanted(mode, 'not-found') });
-  const previewed = preview.error instanceof RequestFailure && preview.error.code === 'not-found' ? 'not-found' : preview.data;
+  const previewed = preview.error instanceof RequestFailure && (preview.error.code === 'not-found' || preview.error.code === 'table-closed')
+    ? preview.error.code === 'not-found' ? 'not-found' : 'closed' : preview.data;
   const outcome = unread ? tableAddress(mode, selected, 'not-found', previewed) : read.data ? tableAddress(mode, selected, read.data) : undefined;
-  const missing = outcome?.show === 'missing';
+  const missing = outcome?.show === 'missing', closed = outcome?.show === 'closed';
   const correctedTo = outcome?.show === 'corrected' ? outcome.to : undefined;
   // The analysis tab lives in the address; choosing one replaces the history entry so Back still leaves the table.
   const addressTab = analysisTabParam(useSearch({ strict: false }).analysis);
@@ -59,7 +61,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   // Opening a table, one this Guest is at and can see, notes when in browser storage: it orders the saved lists.
   const opened = outcome?.show === 'table';
   useEffect(() => { if (opened) useSession.getState().markOpened(selected, Date.now()); }, [opened, selected]);
-  usePageTitle(missing ? { page: 'missing-table' } : table.data ? { page: 'table', ...table.data.view.configuration } : undefined);
+  usePageTitle(missing ? { page: 'missing-table' } : closed ? { page: 'closed-table' } : table.data ? { page: 'table', ...table.data.view.configuration } : undefined);
   /** Joined through the Join Link: the same address is now the Guest's table, read and followed live. */
   async function joined() {
     // The form stays, its button busy, until the table can replace it.
@@ -111,6 +113,13 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
     <h1>{'Couldn’t open this table.'}</h1>
     <p>{preview.error.message}</p>
     <div className="button-row address-missing-link">{!(preview.error instanceof RequestFailure && preview.error.definitive) && <button onClick={() => void preview.refetch()}>Try again</button>}<Link className="button-link" to={listPath(mode)}>Go to Online tables</Link></div>
+  </main>;
+  // A Closed Table: the empty felt, why nobody can open it, and the way back to the list where it is kept.
+  if (closed) return <main id="main-table" className="address-missing address-closed">
+    <SeatGlyph seats={0} dim />
+    <h1>This table closed.</h1>
+    <p>Nobody can join or play at it any more. An Online Table closes after 24 hours without play, or when its owner leaves with no one else at it. It stays in your Online tables.</p>
+    <Link className="primary address-missing-link" to={listPath('online')}>Go to Online tables <Icon name="arrow" size={18} /></Link>
   </main>;
   if (missing) return <main id="main-table" className="address-missing">
     <Icon name="cards" size={34} />
