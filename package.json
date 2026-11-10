@@ -14,7 +14,6 @@
     "typecheck": "tsc -p scripts/tsconfig.json && pnpm -r --if-present typecheck",
     "build": "pnpm -r --if-present build",
     "check:boundaries": "node scripts/check-boundaries.mjs",
-    "db:init": "node --import tsx scripts/with-database.ts dev -- pnpm --filter @poker/server db:init",
     "db:with-test": "node --import tsx scripts/with-database.ts test --",
     "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm check:boundaries"
   },

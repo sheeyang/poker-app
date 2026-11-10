@@ -11,6 +11,7 @@ import { cleanup, native } from './postgres-process.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temporaryPrefix = 'poker-test-postgres-';
+const devPrefix = 'poker-dev-postgres-';
 type Binaries = { initdb: string; postgres: string; pg_ctl: string };
 
 async function binaries(): Promise<Binaries> {
@@ -44,7 +45,7 @@ async function reservePort(port: number): Promise<{ server: Server; port: number
     server.once('error', reject);
     server.listen(port, '127.0.0.1', resolve);
   }).catch(error => {
-    throw new Error(`PostgreSQL port ${port} is unavailable. Stop its owning command or set POKER_POSTGRES_PORT to another port.`, { cause: error });
+    throw new Error(`PostgreSQL port ${port} is unavailable. Stop its owning command.`, { cause: error });
   });
   return { server, port: (server.address() as { port: number }).port };
 }
@@ -68,6 +69,7 @@ async function run() {
   if (!['dev', 'test'].includes(mode) || args.length === 0) {
     throw new Error('Usage: with-database.ts <dev|test> -- <command> [arguments]');
   }
+  // Every run owns a throwaway database and, for dev, its own ports: runs never conflict, however many start at once.
   const variable = mode === 'dev' ? 'DATABASE_URL' : 'TEST_DATABASE_URL';
   const configured = process.env[variable];
   let child: ChildProcess | undefined;
@@ -81,7 +83,7 @@ async function run() {
   let cleanupCompletion: Promise<void> | undefined;
   function beginCleanup() {
     if (!cleanupCompletion && tools && directory) {
-      const worker = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/postgres-process.ts'), tools.pg_ctl, directory, mode, String(process.pid), String(pendingNative ?? '')], {
+      const worker = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/postgres-process.ts'), tools.pg_ctl, directory, 'temporary', String(process.pid), String(pendingNative ?? '')], {
         cwd: root, detached: true, windowsHide: true, stdio: 'ignore',
       });
       cleanupCompletion = new Promise<void>((resolve, reject) => {
@@ -116,7 +118,7 @@ async function run() {
       console.log(`[database] Using configured ${variable}; database lifecycle is external.`);
     } else {
       tools = await binaries();
-      directory = mode === 'dev' ? path.join(root, '.local/postgres') : await mkdtemp(path.join(tmpdir(), temporaryPrefix));
+      directory = await mkdtemp(path.join(tmpdir(), mode === 'dev' ? devPrefix : temporaryPrefix));
       await mkdir(directory, { recursive: true });
       try { lock = await open(path.join(directory, 'owner.lock'), 'wx'); }
       catch (error) { throw new Error(`Database directory is already owned: ${directory}. Finish its command, or follow docs/local-development.md after a crash.`, { cause: error }); }
@@ -126,11 +128,7 @@ async function run() {
       if (existsSync(path.join(data, 'postmaster.pid'))) {
         throw new Error(`A PostgreSQL PID file already exists in ${data}. Check its process and follow the manual crash-cleanup instructions.`);
       }
-      const requested = mode === 'test' ? 0 : Number(process.env.POKER_POSTGRES_PORT ?? '54329');
-      if (!Number.isInteger(requested) || requested < (mode === 'test' ? 0 : 1) || requested > 65535) {
-        throw new Error('POKER_POSTGRES_PORT must be an integer from 1 to 65535.');
-      }
-      const reservation = await reservePort(requested);
+      const reservation = await reservePort(0);
       reserved = reservation.server;
       if (signal) return 130;
       const port = reservation.port;
@@ -170,6 +168,14 @@ async function run() {
       console.log(`[database] Bundled pg_ctl: ${tools.pg_ctl}`);
     }
     if (signal) return 130;
+    if (mode === 'dev') {
+      // Free ports for the API and the web server, so parallel runs never meet on 3001 or 5174.
+      const free = async () => { const reservation = await reservePort(0); await releasePort(reservation.server); return String(reservation.port); };
+      process.env.PORT ??= await free();
+      process.env.POKER_WEB_PORT ??= await free();
+      process.env.POKER_API_TARGET ??= `http://127.0.0.1:${process.env.PORT}`;
+      console.log(`[dev] Isolated run. Web: http://127.0.0.1:${process.env.POKER_WEB_PORT}/  API: http://127.0.0.1:${process.env.PORT}/`);
+    }
     const program = args.shift()!;
     const manager = program === 'pnpm' ? process.env.npm_execpath : undefined;
     const managerIsScript = manager && /\.[cm]?js$/i.test(manager);
@@ -187,7 +193,7 @@ async function run() {
     if (tools && directory && lock && (startAttempted || cleanupCompletion)) {
       try {
         if (process.platform === 'win32') await beginCleanup();
-        else await cleanup(tools.pg_ctl, directory, mode === 'test', process.pid);
+        else await cleanup(tools.pg_ctl, directory, true, process.pid);
         console.log('[database] PostgreSQL shut down gracefully.');
       } catch (error) {
         console.error(`[database] Shutdown failed; retain ${directory} and follow the manual cleanup instructions.`);
@@ -196,8 +202,8 @@ async function run() {
       }
     } else {
       if (lock && directory) await unlink(path.join(directory, 'owner.lock'));
-      if (mode === 'test' && directory) {
-        if (path.dirname(directory) !== path.resolve(tmpdir()) || !path.basename(directory).startsWith(temporaryPrefix)) {
+      if (directory) {
+        if (path.dirname(directory) !== path.resolve(tmpdir()) || !(path.basename(directory).startsWith(temporaryPrefix) || path.basename(directory).startsWith(devPrefix))) {
           // biome-ignore lint/correctness/noUnsafeFinally: cleanup must refuse to remove a directory outside the owned temporary location.
           throw new Error('Refusing to remove a directory outside the owned temporary database location.');
         }

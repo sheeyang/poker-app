@@ -15,5 +15,5 @@ export default defineConfig({
     },
   }],
   build: { rolldownOptions: { input: { main: 'index.html', seatFlows: 'seat-flows.html' } } },
-  server: { port: 5174, strictPort: true, proxy: { '/api': { target: process.env.POKER_API_TARGET ?? 'http://127.0.0.1:3001', ws: true } } },
+  server: { port: Number(process.env.POKER_WEB_PORT ?? 5174), strictPort: true, proxy: { '/api': { target: process.env.POKER_API_TARGET ?? 'http://127.0.0.1:3001', ws: true } } },
 });

@@ -45,7 +45,7 @@ export async function cleanup(pgCtl: string, directory: string, temporary: boole
   }
   await unlink(marker);
   if (temporary) {
-    if (path.dirname(directory) !== path.resolve(tmpdir()) || !path.basename(directory).startsWith('poker-test-postgres-')) {
+    if (path.dirname(directory) !== path.resolve(tmpdir()) || !/^poker-(test|dev)-postgres-/.test(path.basename(directory))) {
       throw new Error('Refusing to remove a directory outside the owned temporary database location.');
     }
     await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -58,7 +58,7 @@ export async function cleanup(pgCtl: string, directory: string, temporary: boole
 // response to a crash or a disconnected parent.
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   const [pgCtl, directory, mode, owner, pendingNative] = process.argv.slice(2);
-  cleanup(pgCtl, directory, mode === 'test', Number(owner), Number(pendingNative) || undefined).catch(async error => {
+  cleanup(pgCtl, directory, mode === 'temporary', Number(owner), Number(pendingNative) || undefined).catch(async error => {
     await writeFile(path.join(directory, 'cleanup-error.log'), String(error)).catch(() => {});
     process.exitCode = 1;
   });

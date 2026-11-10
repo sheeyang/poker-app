@@ -19,7 +19,7 @@ const result = await client.query('SELECT 42 AS value');
 if (process.env.PROBE_WRITE === '1') await client.query('CREATE TABLE startup_note (value text)');
 const note = await client.query("SELECT to_regclass('startup_note') AS name");
 await client.end();
-console.log('PROBE:' + JSON.stringify({ url, value: result.rows[0].value, note: note.rows[0].name, args: process.argv.slice(2) }));
+console.log('PROBE:' + JSON.stringify({ url, value: result.rows[0].value, note: note.rows[0].name, ports: [process.env.PORT, process.env.POKER_WEB_PORT], args: process.argv.slice(2) }));
 if (process.env.PROBE_HOLD === '1') process.stdin.resume();
 process.exitCode = Number(process.env.PROBE_EXIT ?? 0);
 `;
@@ -113,20 +113,20 @@ afterEach(async () => {
   }
 }, allowanceMs);
 
-test.skipIf(process.platform === 'win32')('Ctrl+C through the package command stops PostgreSQL and releases ownership while retaining development data', async () => {
+test.skipIf(process.platform === 'win32')('Ctrl+C through the package command stops PostgreSQL and removes the throwaway database', async () => {
   const directory = await checkout();
-  const command = launch(directory, [], { packageScript: true, env: { POKER_POSTGRES_PORT: String(await freePort()), PROBE_HOLD: '1' } });
+  const command = launch(directory, [], { packageScript: true, env: { PROBE_HOLD: '1' } });
   await eventually(() => command.output().includes('PROBE:'), command.output, command);
+  const data = temporaryData(command.output());
   await interrupt(command.child);
   // Windows shells can ask this after delivering Ctrl+C to their command tree.
   if (!command.child.stdin!.destroyed) command.child.stdin!.end('Y\n');
   await command.done;
-  await eventually(() => !existsSync(path.join(directory, '.local/postgres/owner.lock')), command.output);
-  expect(existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))).toBe(false);
-  expect((await readFile(path.join(directory, '.local/postgres/data/PG_VERSION'), 'utf8')).trim()).toBe('18');
+  await eventually(() => !existsSync(data), command.output);
+  expect(existsSync(path.join(directory, '.local'))).toBe(false);
 }, allowanceMs);
 
-function result(output: string): { url: string; value: number; note: string | null; args: string[] } {
+function result(output: string): { url: string; value: number; note: string | null; ports: [string | undefined, string | undefined]; args: string[] } {
   return JSON.parse(output.match(/PROBE:(.+)/)![1]);
 }
 
@@ -150,18 +150,26 @@ test('test invocations have independent databases, ports, and cleanup lifetimes'
   expect(existsSync(temporaryData(first.output()))).toBe(false);
 }, allowanceMs);
 
-test('development data survives package command exits and is relative to the checkout', async () => {
+test('development runs are isolated by default: parallel runs get their own database and ports, and leave nothing behind', async () => {
   const directory = await checkout();
-  const port = String(await freePort());
-  const first = launch(directory, [], { packageScript: true, env: { POKER_POSTGRES_PORT: port, PROBE_WRITE: '1' } });
-  expect(await first.done).toBe(0);
-  const elsewhere = path.join(directory, 'elsewhere');
-  await mkdir(elsewhere);
-  const second = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { cwd: elsewhere, env: { POKER_POSTGRES_PORT: port } });
+  const first = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_WRITE: '1', PROBE_HOLD: '1' } });
+  await eventually(() => first.output().includes('PROBE:'), first.output, first);
+  const second = launch(directory, ['dev', '--', 'node', 'probe.mjs']);
   expect(await second.done).toBe(0);
-  expect(result(second.output()).note).toBe('startup_note');
-  expect(existsSync(path.join(directory, '.local/postgres/owner.lock'))).toBe(false);
-  expect(existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))).toBe(false);
+  expect(result(first.output()).note).toBe('startup_note');
+  expect(result(second.output()).note).toBe(null);
+  expect(result(first.output()).url).not.toBe(result(second.output()).url);
+  const [api, web] = result(first.output()).ports;
+  expect(api).toMatch(/^\d+$/);
+  expect(web).toMatch(/^\d+$/);
+  expect(first.output()).toContain(`Web: http://127.0.0.1:${web}/`);
+  expect(result(second.output()).ports).not.toEqual([api, web]);
+  expect(existsSync(path.join(directory, '.local'))).toBe(false);
+  expect(existsSync(temporaryData(second.output()))).toBe(false);
+  expect(existsSync(temporaryData(first.output()))).toBe(true);
+  first.child.stdin!.end();
+  expect(await first.done).toBe(0);
+  expect(existsSync(temporaryData(first.output()))).toBe(false);
 }, allowanceMs);
 
 test('an explicit test URL takes shell precedence, bypasses local startup, and is left running', async () => {
@@ -190,21 +198,6 @@ test('unreachable configured URLs fail without starting an embedded fallback', a
   expect(command.output()).toContain('embedded fallback is disabled');
   expect(command.output()).not.toContain('PROBE:');
   expect(existsSync(path.join(directory, '.local'))).toBe(false);
-}, allowanceMs);
-
-test('an occupied development port fails without taking over its listener or leaving ownership', async () => {
-  const directory = await checkout();
-  const listener = createServer();
-  await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
-  try {
-    const port = (listener.address() as { port: number }).port;
-    const command = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { POKER_POSTGRES_PORT: String(port) } });
-    expect(await command.done).toBe(1);
-    expect(command.output()).toContain(`PostgreSQL port ${port} is unavailable`);
-    expect(listener.listening).toBe(true);
-    expect(existsSync(path.join(directory, '.local/postgres/owner.lock'))).toBe(false);
-    expect(existsSync(path.join(directory, '.local/postgres/data/PG_VERSION'))).toBe(false);
-  } finally { await new Promise<void>(resolve => listener.close(() => resolve())); }
 }, allowanceMs);
 
 test('a failed child retains its exit status and arguments while its temporary database is removed', async () => {

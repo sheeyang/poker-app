@@ -11,12 +11,13 @@ pnpm install --frozen-lockfile
 pnpm dev:trainer
 ```
 
-Open [the Trainer](http://127.0.0.1:5174). The development command starts the API,
-Trainer, and managed local PostgreSQL database. No `.env` file or manual database
-initialization is required.
+The development command starts the API, the Trainer, and a managed local
+PostgreSQL database, and prints the Trainer's address. Every run gets its own
+throwaway database and its own free ports, so any number of runs can go at once
+without conflict. No `.env` file or manual database initialization is required.
 
-Keep the terminal running. Ctrl+C stops the development processes; database data
-persists in the ignored `.local/postgres` directory.
+Keep the terminal running. Ctrl+C stops the development processes and removes
+the run's database, so each run starts empty.
 
 
 ## Checks

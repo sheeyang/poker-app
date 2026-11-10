@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted (the persistent development data and fixed development port are superseded by ADR-0036)
 ---
 
 # Use Embedded PostgreSQL for Local Development and Tests
