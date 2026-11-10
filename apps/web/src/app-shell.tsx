@@ -2,11 +2,13 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Link, Outlet, useParams, useRouter, useRouterState } from '@tanstack/react-router';
 import { api, useTableSynchronization, type LiveConsumers } from '@poker/client';
-import type { ObservableTableSession, TableMode } from '@poker/contracts';
+import type { ObservableTableSession, SavedTables, TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { CommandFeedback } from './controls.js';
 import { useCommand, type Command } from './session.js';
 import { listPath, pageTitle, tablePath, type Page } from './table-address.js';
+import { currentTableId, withMembershipEnded } from './current-table.js';
+import { CurrentTableBanner } from './current-table-banner.js';
 
 type TableConsumers = Pick<LiveConsumers, 'onReady' | 'onAnalysisUpdate'>;
 interface Shell {
@@ -48,18 +50,23 @@ export function AppShell() {
   const command = useCommand();
   const consumers = useRef<TableConsumers | null>(null);
   const [consumeLive] = useState(() => (next: TableConsumers | null) => { consumers.current = next; });
+  // The saved tables say which Online Table is the Guest's Current Table; the shell follows it live from every page.
+  const saved = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
+  const currentTable = currentTableId(saved.data?.tables) ?? null;
   const live = useTableSynchronization(tableSessionId, identity.isSuccess, {
     // Left after the Hand, or removed: the server says so when it happens, and a Guest looking at that table returns to its list.
     onMembershipEnded: ended => {
       const mode = queryClient.getQueryData<ObservableTableSession>(['table-session', ended.tableSessionId])?.mode ?? 'online';
       if (router.state.location.pathname === tablePath(mode, ended.tableSessionId)) void router.navigate({ href: listPath(mode), replace: true });
+      // It is no longer their Current Table: the banner goes now, not when the saved tables are read again.
+      queryClient.setQueryData<SavedTables>(['table-sessions'], list => withMembershipEnded(list, ended.tableSessionId));
       queryClient.removeQueries({ queryKey: ['table-session', ended.tableSessionId] });
       void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       setNotice('You are no longer at that table.');
     },
     onReady: lifecycle => consumers.current?.onReady?.(lifecycle),
     onAnalysisUpdate: (update, lifecycle) => consumers.current?.onAnalysisUpdate?.(update, lifecycle),
-  });
+  }, currentTable);
   const shell: Shell = { identity, command, live, consumeLive };
   const atTable = tableSessionId !== null;
   // A notice about leaving belongs to the list it returned to, not to the next table.
@@ -76,6 +83,7 @@ export function AppShell() {
         </nav>
         <span className="identity-status">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span>
       </header>
+      {identity.isSuccess && currentTable && <CurrentTableBanner key={currentTable} tableSessionId={currentTable} command={command} />}
       {!atTable && <>
         <CommandFeedback command={command} />
         {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>Your tables are saved. Try again in a moment.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}

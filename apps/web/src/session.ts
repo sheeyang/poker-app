@@ -3,8 +3,9 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ObservableTableSession, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
+import { withMembershipEnded } from './current-table.js';
 import { recordOpened, type OpenedTimes } from './saved-tables.js';
 
 type TableAttempt = { readonly tableId: string } & (
@@ -98,6 +99,8 @@ export function useCommand() {
       if (attempt.kind === 'manage' && attempt.operation === 'leave-table' && !('afterHand' in result)) {
         // Back never returns to a table this Guest is no longer at.
         if (showing(result.tableSessionId)) void router.navigate({ to: listPath(modeOf(result.tableSessionId)), replace: true });
+        // No longer their Current Table: the banner goes at once.
+        queryClient.setQueryData<SavedTables>(['table-sessions'], list => withMembershipEnded(list, result.tableSessionId));
         queryClient.removeQueries({ queryKey: ['table-session', result.tableSessionId] });
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
         return;

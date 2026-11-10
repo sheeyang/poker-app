@@ -30,6 +30,8 @@ export function usePresentation(table: ObservableTableSession | undefined, viewe
   if (!table) return undefined;
   return {
     table: presentTable(table, serverNow),
+    /** The estimated server time this render shows. */
+    serverNow,
     /** The viewer may act now: their window is open and its Action Deadline, if any, has not been reached. */
     actionOpen: actionWindowOpen(table, viewerId, serverNow),
     /** Whole seconds left before the acting Participant's Action Deadline, or `undefined` without one. */
