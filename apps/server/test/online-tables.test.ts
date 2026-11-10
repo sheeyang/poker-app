@@ -41,10 +41,10 @@ async function online(cookie: string, contents: object = {}) {
   return { id: created.tableSessionId as string, owner: cookie, ownerParticipant: created.bindings[0].participantId as string, bindings: created.bindings as { participantId: string; name: string }[] };
 }
 type Table = Awaited<ReturnType<typeof online>>;
-const read = async (t: Table, cookie = t.owner): Promise<ObservableTableSession & { joinToken?: string; viewerParticipantId: string }> => (await get('/api/table-sessions/' + t.id, cookie)).json();
+const read = async (t: Table, cookie = t.owner): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, cookie)).json();
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
 
-test('an Online Table is created with its fixed mode and options, the owner joined and unseated, and a Join Link only the owner can read', async () => {
+test('an Online Table is created with its fixed mode and options, the owner joined and unseated, and no secret of its own: its address is its Join Link', async () => {
   const cookie = await guest('Ann');
   const table = await online(cookie, { configuration: { seatCount: 4, smallBlind: 5, bigBlind: 10, ante: 1, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000, allowSeatChanges: false }, options: { actionTimeLimitSeconds: 15, allowLiveAnalysis: false }, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
   expect(table.bindings).toEqual([{ participantId: expect.any(String), name: 'Ann', controller: { kind: 'human' } }, { participantId: expect.any(String), name: 'Rex', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }]);
@@ -54,15 +54,14 @@ test('an Online Table is created with its fixed mode and options, the owner join
     inspection: { adminMode: false, completedHands: [] },
     view: { configuration: { seatCount: 4, smallBlind: 5, bigBlind: 10, ante: 1, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000, allowSeatChanges: false }, state: { status: 'between-hands', participants: [{ participantId: table.ownerParticipant, seat: null, stack: 0, sittingOut: false }] } },
   });
-  // The Join Link is unguessable and distinct from the Table Session ID.
-  expect(view.joinToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
-  expect(view.joinToken).not.toContain(table.id);
-  expect((await read(table)).joinToken).toBe(view.joinToken);
+  // There is no separate token: the table's own ID, already in every Participant's view, is what the Join Link names.
+  expect(view).not.toHaveProperty('joinToken');
   expect((await (await get('/api/table-sessions', cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: table.id, mode: 'online' }));
-  // A Practice Table keeps its fixed mode, no Join Link, and no Action Time Limit.
+  // A Practice Table keeps its fixed mode and no Action Time Limit.
   const practice = await (await post('/api/table-sessions', cookie, { requestId: randomUUID() })).json();
   expect(await (await get('/api/table-sessions/' + practice.tableSessionId, cookie)).json()).toMatchObject({ mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true } });
-  expect(JSON.stringify(await (await get('/api/table-sessions/' + practice.tableSessionId, cookie)).json())).not.toContain('joinToken');
+  // Nothing replaces a Join Link any more.
+  expect((await post('/api/table-sessions/' + table.id + '/replace-join-link', cookie, { requestId: randomUUID(), expectedSessionRevision: view.sessionRevision })).status).toBe(404);
 });
 
 test('Online creation defaults to a 30 second Action Time Limit with Live Analysis allowed, and rejects options an Online Table cannot have', async () => {
@@ -82,43 +81,44 @@ test('Online creation defaults to a 30 second Action Time Limit with Live Analys
     expect(await rejected({ bots: [{ name, playingStrategy: baselinePlayingStrategy }] })).toEqual({ status: 400, code: 'invalid-creation-settings' });
 });
 
-const join = (token: string, cookie: string, requestId = randomUUID()) => post('/api/join-links/' + encodeURIComponent(token) + '/join', cookie, { requestId });
-const tokenOf = async (t: Table) => (await read(t)).joinToken!;
+/** Joining and its preview live under the Table Session: the Join Link is the table's own address. */
+const join = (id: string, cookie: string, requestId = randomUUID()) => post('/api/table-sessions/' + encodeURIComponent(id) + '/join-table', cookie, { requestId });
+const preview = (id: string, cookie: string) => get('/api/table-sessions/' + encodeURIComponent(id) + '/join-preview', cookie);
 
-test('a Guest opens a Join Link, joins as an unseated Participant under their display name, and joining again returns the same Participant', async () => {
+test('a Guest opens a table’s Join Link, joins as an unseated Participant under their display name, and joining again returns the same Participant', async () => {
   const ann = await guest('Ann');
   const table = await online(ann, { bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
-  const token = await tokenOf(table);
   const ben = await guest('Ben');
-  expect(await (await get('/api/join-links/' + token, ben)).json()).toEqual({
+  expect(await (await preview(table.id, ben)).json()).toEqual({
     ok: true, ownerName: 'Ann', placesTaken: 2, alreadyJoined: false,
     configuration: { seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000, allowSeatChanges: true },
     options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true },
   });
   const before = await read(table);
   const requestId = randomUUID();
-  const joined = await join(token, ben, requestId);
+  const joined = await join(table.id, ben, requestId);
   expect(joined.status).toBe(200);
   const outcome = await joined.json();
   expect(outcome).toMatchObject({ ok: true, tableSessionId: table.id, participantId: expect.any(String) });
-  // The Guest sees the public table from their own Participant, with no Seat, and cannot read the Join Link.
+  // The Guest sees the public table from their own Participant, with no Seat.
   const seen = await read(table, ben);
   expect(seen).toMatchObject({ mode: 'online', viewerParticipantId: outcome.participantId, ownerParticipantId: table.ownerParticipant, view: { state: { status: 'between-hands', participants: expect.arrayContaining([{ participantId: outcome.participantId, seat: null, stack: 0, sittingOut: false }]) } } });
   expect(seen.bindings).toContainEqual({ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } });
-  expect(JSON.stringify(seen)).not.toContain(token);
-  expect(await read(table)).toMatchObject({ joinToken: token, bindings: expect.arrayContaining([{ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } }]) });
+  expect(await read(table)).toMatchObject({ bindings: expect.arrayContaining([{ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } }]) });
   expect((await read(table)).pokerRevision).toBe(before.pokerRevision + 1);
   expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ tableSessionId: table.id, mode: 'online' }]);
   // Retrying the request, or joining again, returns the Guest's existing Participant without another commit.
-  expect(await (await join(token, ben, requestId)).json()).toEqual(outcome);
-  const again = await (await join(token, ben)).json();
+  expect(await (await join(table.id, ben, requestId)).json()).toEqual(outcome);
+  const again = await (await join(table.id, ben)).json();
   expect(again).toMatchObject({ ok: true, participantId: outcome.participantId, pokerRevision: outcome.pokerRevision, sessionRevision: outcome.sessionRevision });
-  expect(await refusal(await join(token, await guest('Cy'), requestId))).toEqual({ status: 409, code: 'request-id-conflict' });
-  expect(await (await get('/api/join-links/' + token, ben)).json()).toMatchObject({ placesTaken: 3, alreadyJoined: true });
+  expect(await refusal(await join(table.id, await guest('Cy'), requestId))).toEqual({ status: 409, code: 'request-id-conflict' });
+  expect(await (await preview(table.id, ben)).json()).toMatchObject({ placesTaken: 3, alreadyJoined: true });
+  // Any Participant can pass the link on: the address in Ben's view lets Dee in.
+  expect((await join(seen.tableSessionId, await guest('Dee'))).status).toBe(200);
   // The membership and the Join Link survive a restart.
   await server.close();
   await start();
-  expect(await (await join(token, ben)).json()).toMatchObject({ participantId: outcome.participantId });
+  expect(await (await join(table.id, ben)).json()).toMatchObject({ participantId: outcome.participantId });
   expect((await read(table, ben)).viewerParticipantId).toBe(outcome.participantId);
 });
 
@@ -129,71 +129,111 @@ test('the owner sees a Guest arrive in a live update', async () => {
   socket.on('message', data => { const message = JSON.parse(data.toString()); if (message.type === 'table-update') updates.push(message); });
   try {
     await expect.poll(() => updates.length).toBe(1);
-    const joined = await (await join(await tokenOf(table), await guest('Eli'))).json();
+    const joined = await (await join(table.id, await guest('Eli'))).json();
     await expect.poll(() => updates.at(-1)?.bindings.map(binding => binding.name)).toEqual(['Dee', 'Eli']);
     expect(updates.at(-1)?.view.state.participants).toContainEqual({ participantId: joined.participantId, seat: null, stack: 0, sittingOut: false });
     expect(updates.at(-1)?.pokerRevision).toBe(updates[0]!.pokerRevision + 1);
   } finally { socket.terminate(); }
 });
 
-test('an invalid Join Link, a missing name, and a name already used at the table each get their own rejection', async () => {
+test('an unknown, malformed or Practice Table ID gets one identical not-found, and a missing name or a name already used at the table each get their own rejection', async () => {
   const table = await online(await guest('Fay'), { bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
-  const token = await tokenOf(table);
   const stranger = await guest('Gus');
-  const invalid = { status: 404, code: 'invalid-join-link' };
-  for (const bad of ['x'.repeat(43), 'short', table.id, '../' + table.id]) {
-    expect(await refusal(await join(bad, stranger))).toEqual(invalid);
-    expect(await refusal(await get('/api/join-links/' + encodeURIComponent(bad), stranger))).toEqual(invalid);
+  // A Practice Table has no Join Link, even for its own human: nothing about it is told apart from a table that doesn't exist.
+  const practice = (await (await post('/api/table-sessions', stranger, { requestId: randomUUID() })).json()).tableSessionId as string;
+  const answers: unknown[] = [];
+  for (const bad of [randomUUID(), 'short', table.id.toUpperCase(), table.id + '0', '0'.repeat(36), '-'.repeat(36), practice]) {
+    for (const response of [await preview(bad, stranger), await join(bad, stranger)]) answers.push({ status: response.status, body: await response.json() });
   }
-  // A Practice Table has no Join Link, so nothing joins it.
-  const practice = await (await post('/api/table-sessions', stranger, { requestId: randomUUID() })).json();
-  expect(await refusal(await join(practice.tableSessionId, stranger))).toEqual(invalid);
-  expect(await refusal(await post('/api/join-links/' + token + '/join', stranger, { requestId: randomUUID(), expectedPokerRevision: 0 }))).toEqual({ status: 400, code: 'invalid-mutation-request' });
-  expect(await refusal(await post('/api/join-links/' + token + '/join', stranger, {}))).toEqual({ status: 400, code: 'invalid-request-id' });
-  expect((await fetch(base + '/api/join-links/' + token + '/join', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r' }) })).status).toBe(401);
+  expect(answers[0]).toEqual({ status: 404, body: { ok: false, rejection: { code: 'not-found', message: expect.any(String) } } });
+  expect(answers.filter(answer => JSON.stringify(answer) !== JSON.stringify(answers[0]))).toEqual([]);
+  expect((await get('/api/table-sessions/' + practice, stranger)).status).toBe(200);
+  expect(await refusal(await post('/api/table-sessions/' + table.id + '/join-table', stranger, { requestId: randomUUID(), expectedPokerRevision: 0 }))).toEqual({ status: 400, code: 'invalid-mutation-request' });
+  expect(await refusal(await post('/api/table-sessions/' + table.id + '/join-table', stranger, {}))).toEqual({ status: 400, code: 'invalid-request-id' });
+  expect((await fetch(base + '/api/table-sessions/' + table.id + '/join-table', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r' }) })).status).toBe(401);
+  expect((await fetch(base + '/api/table-sessions/' + table.id + '/join-preview')).status).toBe(401);
+  // The old token routes are gone.
+  expect((await get('/api/join-links/' + 'x'.repeat(43), stranger)).status).toBe(404);
 
   // Joining requires a display name, which the Guest sets first and then joins with a fresh request ID.
   const unnamed = await guest();
-  expect(await refusal(await join(token, unnamed))).toEqual({ status: 400, code: 'display-name-required' });
+  expect(await refusal(await join(table.id, unnamed))).toEqual({ status: 400, code: 'display-name-required' });
   await nameGuest(base, unnamed, 'Hal');
-  expect((await join(token, unnamed)).status).toBe(200);
+  expect((await join(table.id, unnamed)).status).toBe(200);
 
   // Names are unique at the table, ignoring case, among humans and Bots.
   for (const taken of ['FAY', 'rex', 'hal']) {
     const other = await guest(taken);
-    expect(await refusal(await join(token, other))).toEqual({ status: 409, code: 'name-taken' });
+    expect(await refusal(await join(table.id, other))).toEqual({ status: 409, code: 'name-taken' });
     expect((await get('/api/table-sessions', other).then(r => r.json())).tables).toEqual([]);
     await nameGuest(base, other, taken + '2');
-    expect((await join(token, other)).status).toBe(200);
+    expect((await join(table.id, other)).status).toBe(200);
   }
   // A Participant's name is fixed when they join, whatever the Guest is later called.
   await nameGuest(base, unnamed, 'Hal Renamed');
   expect((await read(table, unnamed)).bindings.map(binding => binding.name)).toEqual(['Fay', 'Rex', 'Hal', 'FAY2', 'rex2', 'hal2']);
 });
 
-test('an Online Table holds at most 20 Participants, Bots included, and keeps a place for its owner while they are away', async () => {
+test('a Guest who left returns through the same Join Link as the same Participant, with their earlier history, and is a stranger to every other route meanwhile', async () => {
+  const table = await online(await guest('Ann'), { configuration: stakes, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
+  const ben = await guest('Ben');
+  const benId = (await (await join(table.id, ben)).json()).participantId as string;
+  await command(table, table.owner, 'seat-participant', { participantId: table.bindings[1]!.participantId, seat: 1 });
+  await command(table, table.owner, 'seat-participant', { participantId: table.ownerParticipant, seat: 2 });
+  await deal(table);
+  // Ben watches Rex, on the button, fold Hand 1; then the payout phase ends.
+  const dealt = await read(table, ben);
+  expect(dealt.view.state.actorId).toBe(table.bindings[1]!.participantId);
+  expect((await controller.submitAction(table.id, { requestId: randomUUID(), expectedPokerRevision: dealt.pokerRevision, participantId: dealt.view.state.actorId!, action: { type: 'fold' } })).ok).toBe(true);
+  clock.advance(2000);
+  const watched = await read(table, ben);
+  expect(watched.view.history.map(hand => hand.handId)).toEqual(['hand-1']);
+  // Ben leaves between Hands, and is then answered as anyone not at the table is.
+  expect((await command(table, ben, 'leave-table', { participantId: benId })).status).toBe(200);
+  expect(await refusal(await get('/api/table-sessions/' + table.id, ben))).toEqual({ status: 404, code: 'not-found' });
+  expect(await refusal(await post('/api/table-sessions/' + table.id + '/set-sitting-out', ben, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: benId, sittingOut: true }))).toEqual({ status: 404, code: 'not-found' });
+  expect(await refusal(await post('/api/table-sessions/' + table.id + '/set-trainer-configuration', ben, { requestId: randomUUID(), expectedSessionRevision: 0, trainerConfiguration: {} }))).toEqual({ status: 404, code: 'not-found' });
+  const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: ben } });
+  const messages: { type: string; status?: string; code?: string }[] = [];
+  socket.on('message', data => messages.push(JSON.parse(data.toString())));
+  try {
+    await expect.poll(() => messages.length).toBe(1);
+    socket.send(JSON.stringify({ type: 'subscribe-table', requestId: 'r', tableSessionId: table.id }));
+    await expect.poll(() => messages.find(message => message.type === 'table-subscription-result')).toMatchObject({ status: 'rejected', code: 'not-found' });
+  } finally { socket.terminate(); }
+  // The preview tells him who he will be, and joining gives back that Participant with what he saw before.
+  expect(await (await preview(table.id, ben)).json()).toMatchObject({ ok: true, alreadyJoined: false, returningAs: 'Ben' });
+  expect(await (await join(table.id, ben)).json()).toMatchObject({ ok: true, participantId: benId });
+  const back = await read(table, ben);
+  expect(back.viewerParticipantId).toBe(benId);
+  expect(back.view.history.map(hand => hand.handId)).toEqual(['hand-1']);
+  expect(back.bindings.filter(binding => binding.name === 'Ben')).toHaveLength(1);
+});
+
+test('an Online Table holds at most 20 Participants, Bots included, and holds no place for anyone who left, its former owner included', async () => {
   const table = await online(await guest('Owner'), { bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Tim', playingStrategy: baselinePlayingStrategy }] });
-  const token = await tokenOf(table);
-  const placesTaken = async (cookie: string) => (await (await get('/api/join-links/' + token, cookie)).json()).placesTaken;
+  const placesTaken = async (cookie: string) => (await (await preview(table.id, cookie)).json()).placesTaken;
   // The owner and the two Bots take three of the twenty places.
-  for (let index = 1; index <= 17; index++) expect((await join(token, await guest('Guest ' + index))).status).toBe(200);
+  for (let index = 1; index <= 17; index++) expect((await join(table.id, await guest('Guest ' + index))).status).toBe(200);
   const late = await guest('Late');
-  expect(await refusal(await join(token, late))).toEqual({ status: 409, code: 'table-full' });
+  expect(await refusal(await join(table.id, late))).toEqual({ status: 409, code: 'table-full' });
   expect((await get('/api/table-sessions/' + table.id, late)).status).toBe(404);
   expect(await placesTaken(late)).toBe(20);
   // A full table takes no more Bots either.
   expect(await refusal(await command(table, table.owner, 'add-bot', { name: 'Zed', playingStrategy: baselinePlayingStrategy }))).toEqual({ status: 409, code: 'table-full' });
   // Someone already at a full table still gets their own Participant back.
-  expect((await join(token, table.owner)).status).toBe(200);
-  // The owner's place is held while they are away, so they can always return to manage their table.
-  expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
-  expect(await placesTaken(late)).toBe(20);
-  expect(await refusal(await join(token, late))).toEqual({ status: 409, code: 'table-full' });
-  expect(await (await post('/api/table-sessions/' + table.id + '/rejoin-table', table.owner, { requestId: randomUUID() })).json()).toMatchObject({ ok: true, participantId: table.ownerParticipant });
+  expect((await join(table.id, table.owner)).status).toBe(200);
   // A Bot the owner removes frees its place.
   expect((await command(table, table.owner, 'remove-bot', { participantId: table.bindings[1]!.participantId })).status).toBe(200);
   expect(await placesTaken(late)).toBe(19);
-  expect((await join(token, late)).status).toBe(200);
+  // The owner who leaves frees theirs too: ownership has passed, and nobody holds a place to return to.
+  expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
+  expect(await placesTaken(late)).toBe(18);
+  expect((await join(table.id, late)).status).toBe(200);
+  expect((await join(table.id, await guest('Later'))).status).toBe(200);
+  // The former owner returns through the Join Link like anyone else, and finds the table full; there is no owner-only way back.
+  expect((await post('/api/table-sessions/' + table.id + '/rejoin-table', table.owner, { requestId: randomUUID() })).status).toBe(404);
+  expect(await refusal(await join(table.id, table.owner))).toEqual({ status: 409, code: 'table-full' });
 });
 
 async function command(t: Table, cookie: string, kind: string, contents: object = {}) {
@@ -217,9 +257,8 @@ test('unseated Participants see the public table and the Hand in progress, and t
   expect((await command(table, table.owner, 'seat-participant', { participantId: rex, seat: 1 })).status).toBe(200);
   expect((await command(table, table.owner, 'seat-participant', { participantId: ann, seat: 2, buyIn: 300 })).status).toBe(200);
   await deal(table);
-  const token = await tokenOf(table);
   const ben = await guest('Ben');
-  const benParticipant = (await (await join(token, ben)).json()).participantId as string;
+  const benParticipant = (await (await join(table.id, ben)).json()).participantId as string;
 
   // Mid-Hand, the newcomer sees seats, names, stacks, blinds and pots, and nobody's hole cards.
   const watching = await read(table, ben);
@@ -238,7 +277,7 @@ test('unseated Participants see the public table and the Hand in progress, and t
   const accepted = await controller.submitAction(table.id, { requestId: randomUUID(), expectedPokerRevision: watching.pokerRevision, participantId: actor, action: { type: 'fold' } });
   expect(accepted.ok).toBe(true);
   const cy = await guest('Cy');
-  await join(token, cy);
+  await join(table.id, cy);
   for (const cookie of [table.owner, ben]) {
     const seen = await read(table, cookie);
     expect(seen.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
@@ -257,7 +296,7 @@ test('any Participant takes an empty Seat within the buy-in limits, even during 
   await command(table, table.owner, 'seat-participant', { participantId: ann, seat: 2 });
   await deal(table);
   const ben = await guest('Ben');
-  const benParticipant = (await (await join(await tokenOf(table), ben)).json()).participantId as string;
+  const benParticipant = (await (await join(table.id, ben)).json()).participantId as string;
   const sit = (cookie: string, contents: object) => command(table, cookie, 'seat-participant', contents);
 
   expect(await refusal(await sit(ben, { participantId: benParticipant, seat: 3, buyIn: 199 }))).toEqual({ status: 400, code: 'invalid-buy-in' });
@@ -277,7 +316,7 @@ test('any Participant takes an empty Seat within the buy-in limits, even during 
 test('Deal, choosing the dealer button and completed-Hand inspection are unavailable at an Online Table, for its owner and its other Participants', async () => {
   const table = await online(await guest('Ann'), { configuration: stakes, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
   const ben = await guest('Ben');
-  await join(await tokenOf(table), ben);
+  await join(table.id, ben);
   const owner = await refusal(await command(table, table.owner, 'start-hand'));
   expect(owner).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
   expect(await refusal(await command(table, ben, 'start-hand'))).toEqual({ status: 403, code: 'table-owner-required' });
@@ -298,13 +337,13 @@ test('Deal, choosing the dealer button and completed-Hand inspection are unavail
   expect((await (await get('/api/table-sessions/' + practice.tableSessionId, table.owner)).json()).inspection.adminMode).toBe(true);
 });
 
-test('saved tables carry each table’s mode, observable stakes and play state, an owned table the Guest has left included', async () => {
+test('saved tables carry only each table’s mode, format and blinds from its stored row, an owned table the Guest has left included', async () => {
   const table = await online(await guest('Ann'), { configuration: { ...stakes, ante: 5 }, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
   const ben = await guest('Ben');
-  const benParticipant = (await (await join(await tokenOf(table), ben)).json()).participantId as string;
+  const benParticipant = (await (await join(table.id, ben)).json()).participantId as string;
   const list = async (cookie: string) => (await (await get('/api/table-sessions', cookie)).json()).tables;
-  const between = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 }, playState: { status: 'between-hands', completedHands: 0, seatedParticipants: 0 } };
-  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...between }]);
+  const row = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 } };
+  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...row }]);
   // Ben and the Bot sit down and a Hand is dealt; the owner watches, then leaves.
   await connectLive(base, ben, table.id);
   expect((await command(table, ben, 'seat-participant', { participantId: benParticipant, seat: 1, buyIn: 400 })).status).toBe(200);
@@ -312,10 +351,9 @@ test('saved tables carry each table’s mode, observable stakes and play state, 
   clock.advanceTo((await announcedCountdown(() => read(table, ben))).endsAt);
   await expect.poll(async () => (await read(table, ben)).view.state.handId).toBe('hand-1');
   expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
-  const playing = { seatCount: 3, stakes: { smallBlind: 10, bigBlind: 20, ante: 5 }, playState: { status: 'active-hand', completedHands: 0, seatedParticipants: 2 } };
-  const benStack = (await read(table, ben)).view.state.participants.find(participant => participant.participantId === benParticipant)!.stack;
-  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...playing, playState: { ...playing.playState, viewerStack: benStack } }]);
-  // The owner who left cannot read the table, yet their saved list still says what it is and how play stands.
+  // The list still says nothing of play: that is the Current Table's live copy alone.
+  expect(await list(ben)).toEqual([{ tableSessionId: table.id, mode: 'online', ...row }]);
+  // The owner who left cannot read the table, yet their saved list still names it, flagged as left.
   expect((await get('/api/table-sessions/' + table.id, table.owner)).status).toBe(404);
-  expect(await list(table.owner)).toContainEqual({ tableSessionId: table.id, mode: 'online', left: true, ...playing });
+  expect(await list(table.owner)).toContainEqual({ tableSessionId: table.id, mode: 'online', left: true, ...row });
 });

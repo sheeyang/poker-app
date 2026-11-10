@@ -23,11 +23,13 @@ export interface OnlineTrayActions {
 export function CommandFeedback({ command }: { command: Command }) {
   if (command.sending || !command.pending && !command.error) return null;
   const code = command.error instanceof RequestFailure ? command.error.code : undefined;
+  // A creation refused for the Guest's Current Table is explained in the creation form, beside what was refused.
+  if (code === 'current-table-elsewhere' && !command.pending) return null;
   const aborted = code === 'commit-not-applied';
   // A late action: the server played the Timeout Action instead, and its message says which.
   const late = code === 'action-deadline-passed';
   return <div className={`command-feedback ${command.error ? 'notice-error' : ''}`} role={command.error ? 'alert' : 'status'}>
-    <div><strong>{command.sending ? 'Confirming your request…' : aborted ? 'This attempt was not applied.' : late ? 'Your time ran out.' : code === 'rate-limited' ? 'Too many requests.' : code === 'table-limit-reached' ? 'You have too many active tables.' : command.pending ? 'Waiting for confirmation.' : 'The request was not accepted.'}</strong><p>{command.error?.message ?? 'Your last confirmed table stays visible.'}</p></div>
+    <div><strong>{command.sending ? 'Confirming your request…' : aborted ? 'This attempt was not applied.' : late ? 'Your time ran out.' : code === 'rate-limited' ? 'Too many requests.' : command.pending ? 'Waiting for confirmation.' : 'The request was not accepted.'}</strong><p>{command.error?.message ?? 'Your last confirmed table stays visible.'}</p></div>
     {command.pending && !command.sending && !aborted && <button onClick={command.check}>Check status</button>}
     {(!command.pending || aborted) && <button onClick={command.dismiss}>{aborted ? 'Start a new attempt' : 'Dismiss'}</button>}
   </div>;
@@ -84,7 +86,7 @@ function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSetti
   const reason = nextHand?.kind === 'waiting' ? waitingReason(table) : undefined;
   const needsPlayers = reason?.kind === 'players';
   const resume = () => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'set-sitting-out', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, sittingOut: false } });
-  const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, !!online?.openJoinLink, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
+  const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, table.viewerParticipantId === table.ownerParticipantId, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';
   return <div className="action-tray idle-tray next-hand online-next-hand">
     <div className="next-hand-copy" role="timer"><strong>{nextHandLabel(nextHand) ?? 'Waiting for the next hand'}</strong><p>{detail}</p></div>
     <div className="next-hand-actions">

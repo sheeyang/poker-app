@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, open, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -7,10 +8,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client } from 'pg';
+import { removeRun, stopRequested, touchRecord, writeRecord, type RunRecord } from './dev-runs.js';
 import { cleanup, native } from './postgres-process.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const temporaryPrefix = 'poker-test-postgres-';
+const devPrefix = 'poker-dev-postgres-';
 type Binaries = { initdb: string; postgres: string; pg_ctl: string };
 
 async function binaries(): Promise<Binaries> {
@@ -44,7 +47,7 @@ async function reservePort(port: number): Promise<{ server: Server; port: number
     server.once('error', reject);
     server.listen(port, '127.0.0.1', resolve);
   }).catch(error => {
-    throw new Error(`PostgreSQL port ${port} is unavailable. Stop its owning command or set POKER_POSTGRES_PORT to another port.`, { cause: error });
+    throw new Error(`PostgreSQL port ${port} is unavailable. Stop its owning command.`, { cause: error });
   });
   return { server, port: (server.address() as { port: number }).port };
 }
@@ -68,6 +71,7 @@ async function run() {
   if (!['dev', 'test'].includes(mode) || args.length === 0) {
     throw new Error('Usage: with-database.ts <dev|test> -- <command> [arguments]');
   }
+  // Every run owns a throwaway database and, for dev, its own ports: runs never conflict, however many start at once.
   const variable = mode === 'dev' ? 'DATABASE_URL' : 'TEST_DATABASE_URL';
   const configured = process.env[variable];
   let child: ChildProcess | undefined;
@@ -79,9 +83,22 @@ async function run() {
   let startAttempted = false;
   let pendingNative: number | undefined;
   let cleanupCompletion: Promise<void> | undefined;
+  // Development runs register where `dev:stop` and `dev:status` can find them, beat so a dead run is recognised, and watch for a stop request.
+  let record: RunRecord | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
+  let shutdownFailed = false;
+  const register = async (patch: Partial<RunRecord>) => {
+    if (mode !== 'dev') return;
+    record = { id: record?.id ?? randomUUID().slice(0, 8), pid: process.pid, startedAt: record?.startedAt ?? Date.now(), checkout: root, ...record, ...patch };
+    await writeRecord(record);
+    heartbeat ??= setInterval(() => {
+      void touchRecord(record!.id);
+      if (stopRequested(record!.id)) stopFromMarker();
+    }, 1000);
+  };
   function beginCleanup() {
     if (!cleanupCompletion && tools && directory) {
-      const worker = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/postgres-process.ts'), tools.pg_ctl, directory, mode, String(process.pid), String(pendingNative ?? '')], {
+      const worker = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/postgres-process.ts'), tools.pg_ctl, directory, 'temporary', String(process.pid), String(pendingNative ?? '')], {
         cwd: root, detached: true, windowsHide: true, stdio: 'ignore',
       });
       cleanupCompletion = new Promise<void>((resolve, reject) => {
@@ -107,6 +124,12 @@ async function run() {
     child?.unref();
     cancellation.resolve(received === 'SIGINT' ? 130 : 143);
   };
+  // The same shutdown as Ctrl+C, asked for by file. Windows children are not signalled, so the child tree is ended first.
+  const stopFromMarker = () => {
+    if (signal) return;
+    if (process.platform === 'win32' && child?.pid) spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    interrupted('SIGTERM');
+  };
   process.on('SIGINT', interrupted);
   process.on('SIGTERM', interrupted);
   try {
@@ -116,21 +139,18 @@ async function run() {
       console.log(`[database] Using configured ${variable}; database lifecycle is external.`);
     } else {
       tools = await binaries();
-      directory = mode === 'dev' ? path.join(root, '.local/postgres') : await mkdtemp(path.join(tmpdir(), temporaryPrefix));
+      directory = await mkdtemp(path.join(tmpdir(), mode === 'dev' ? devPrefix : temporaryPrefix));
       await mkdir(directory, { recursive: true });
       try { lock = await open(path.join(directory, 'owner.lock'), 'wx'); }
       catch (error) { throw new Error(`Database directory is already owned: ${directory}. Finish its command, or follow docs/local-development.md after a crash.`, { cause: error }); }
       await lock.writeFile(JSON.stringify({ pid: process.pid }));
+      await register({ dataDir: path.join(directory, 'data'), pgCtl: tools.pg_ctl });
       if (signal) return 130;
       const data = path.join(directory, 'data');
       if (existsSync(path.join(data, 'postmaster.pid'))) {
         throw new Error(`A PostgreSQL PID file already exists in ${data}. Check its process and follow the manual crash-cleanup instructions.`);
       }
-      const requested = mode === 'test' ? 0 : Number(process.env.POKER_POSTGRES_PORT ?? '54329');
-      if (!Number.isInteger(requested) || requested < (mode === 'test' ? 0 : 1) || requested > 65535) {
-        throw new Error('POKER_POSTGRES_PORT must be an integer from 1 to 65535.');
-      }
-      const reservation = await reservePort(requested);
+      const reservation = await reservePort(0);
       reserved = reservation.server;
       if (signal) return 130;
       const port = reservation.port;
@@ -170,6 +190,16 @@ async function run() {
       console.log(`[database] Bundled pg_ctl: ${tools.pg_ctl}`);
     }
     if (signal) return 130;
+    if (mode === 'dev') {
+      // Free ports for the API and the web server, so parallel runs never meet on 3001 or 5174.
+      const free = async () => { const reservation = await reservePort(0); await releasePort(reservation.server); return String(reservation.port); };
+      process.env.PORT ??= await free();
+      process.env.POKER_WEB_PORT ??= await free();
+      process.env.POKER_API_TARGET ??= `http://127.0.0.1:${process.env.PORT}`;
+      const webUrl = `http://127.0.0.1:${process.env.POKER_WEB_PORT}/`, apiUrl = `http://127.0.0.1:${process.env.PORT}/`;
+      await register({ webUrl, apiUrl });
+      console.log(`[dev] Isolated run ${record!.id}. Web: ${webUrl}  API: ${apiUrl}  Stop: pnpm dev:stop ${record!.id}`);
+    }
     const program = args.shift()!;
     const manager = program === 'pnpm' ? process.env.npm_execpath : undefined;
     const managerIsScript = manager && /\.[cm]?js$/i.test(manager);
@@ -182,28 +212,32 @@ async function run() {
     });
     return await Promise.race([exited, cancellation.promise]);
   } finally {
+    clearInterval(heartbeat);
     if (reserved) await releasePort(reserved);
     if (lock) await lock.close();
     if (tools && directory && lock && (startAttempted || cleanupCompletion)) {
       try {
         if (process.platform === 'win32') await beginCleanup();
-        else await cleanup(tools.pg_ctl, directory, mode === 'test', process.pid);
+        else await cleanup(tools.pg_ctl, directory, true, process.pid);
         console.log('[database] PostgreSQL shut down gracefully.');
       } catch (error) {
+        shutdownFailed = true;
         console.error(`[database] Shutdown failed; retain ${directory} and follow the manual cleanup instructions.`);
         process.exitCode = 1;
         console.error(error);
       }
     } else {
       if (lock && directory) await unlink(path.join(directory, 'owner.lock'));
-      if (mode === 'test' && directory) {
-        if (path.dirname(directory) !== path.resolve(tmpdir()) || !path.basename(directory).startsWith(temporaryPrefix)) {
+      if (directory) {
+        if (path.dirname(directory) !== path.resolve(tmpdir()) || !(path.basename(directory).startsWith(temporaryPrefix) || path.basename(directory).startsWith(devPrefix))) {
           // biome-ignore lint/correctness/noUnsafeFinally: cleanup must refuse to remove a directory outside the owned temporary location.
           throw new Error('Refusing to remove a directory outside the owned temporary database location.');
         }
         await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }
+    // A run whose shutdown failed keeps its record, so `dev:stop` can finish the cleanup.
+    if (record && !shutdownFailed) await removeRun(record.id);
     process.off('SIGINT', interrupted);
     process.off('SIGTERM', interrupted);
   }

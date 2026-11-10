@@ -1,10 +1,11 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, expect, test } from 'vitest';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -19,7 +20,7 @@ const result = await client.query('SELECT 42 AS value');
 if (process.env.PROBE_WRITE === '1') await client.query('CREATE TABLE startup_note (value text)');
 const note = await client.query("SELECT to_regclass('startup_note') AS name");
 await client.end();
-console.log('PROBE:' + JSON.stringify({ url, value: result.rows[0].value, note: note.rows[0].name, args: process.argv.slice(2) }));
+console.log('PROBE:' + JSON.stringify({ url, value: result.rows[0].value, note: note.rows[0].name, ports: [process.env.PORT, process.env.POKER_WEB_PORT], args: process.argv.slice(2) }));
 if (process.env.PROBE_HOLD === '1') process.stdin.resume();
 process.exitCode = Number(process.env.PROBE_EXIT ?? 0);
 `;
@@ -52,6 +53,8 @@ function launch(directory: string, args: string[], options: { packageScript?: bo
   const env = { ...process.env };
   delete env.DATABASE_URL;
   delete env.TEST_DATABASE_URL;
+  // The run registry is per fixture, so a test never sees or stops the runs of the person running it.
+  env.POKER_DEV_RUNS_DIR = path.join(directory, 'dev-runs');
   Object.assign(env, options.env);
   const manager = options.packageScript ? process.env.npm_execpath : undefined;
   if (options.packageScript && !manager) throw new Error('Run command-boundary tests through pnpm test.');
@@ -113,20 +116,20 @@ afterEach(async () => {
   }
 }, allowanceMs);
 
-test.skipIf(process.platform === 'win32')('Ctrl+C through the package command stops PostgreSQL and releases ownership while retaining development data', async () => {
+test.skipIf(process.platform === 'win32')('Ctrl+C through the package command stops PostgreSQL and removes the throwaway database', async () => {
   const directory = await checkout();
-  const command = launch(directory, [], { packageScript: true, env: { POKER_POSTGRES_PORT: String(await freePort()), PROBE_HOLD: '1' } });
+  const command = launch(directory, [], { packageScript: true, env: { PROBE_HOLD: '1' } });
   await eventually(() => command.output().includes('PROBE:'), command.output, command);
+  const data = temporaryData(command.output());
   await interrupt(command.child);
   // Windows shells can ask this after delivering Ctrl+C to their command tree.
   if (!command.child.stdin!.destroyed) command.child.stdin!.end('Y\n');
   await command.done;
-  await eventually(() => !existsSync(path.join(directory, '.local/postgres/owner.lock')), command.output);
-  expect(existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))).toBe(false);
-  expect((await readFile(path.join(directory, '.local/postgres/data/PG_VERSION'), 'utf8')).trim()).toBe('18');
+  await eventually(() => !existsSync(data), command.output);
+  expect(existsSync(path.join(directory, '.local'))).toBe(false);
 }, allowanceMs);
 
-function result(output: string): { url: string; value: number; note: string | null; args: string[] } {
+function result(output: string): { url: string; value: number; note: string | null; ports: [string | undefined, string | undefined]; args: string[] } {
   return JSON.parse(output.match(/PROBE:(.+)/)![1]);
 }
 
@@ -150,19 +153,74 @@ test('test invocations have independent databases, ports, and cleanup lifetimes'
   expect(existsSync(temporaryData(first.output()))).toBe(false);
 }, allowanceMs);
 
-test('development data survives package command exits and is relative to the checkout', async () => {
+test('development runs are isolated by default: parallel runs get their own database and ports, and leave nothing behind', async () => {
   const directory = await checkout();
-  const port = String(await freePort());
-  const first = launch(directory, [], { packageScript: true, env: { POKER_POSTGRES_PORT: port, PROBE_WRITE: '1' } });
-  expect(await first.done).toBe(0);
-  const elsewhere = path.join(directory, 'elsewhere');
-  await mkdir(elsewhere);
-  const second = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { cwd: elsewhere, env: { POKER_POSTGRES_PORT: port } });
+  const first = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_WRITE: '1', PROBE_HOLD: '1' } });
+  await eventually(() => first.output().includes('PROBE:'), first.output, first);
+  const second = launch(directory, ['dev', '--', 'node', 'probe.mjs']);
   expect(await second.done).toBe(0);
-  expect(result(second.output()).note).toBe('startup_note');
-  expect(existsSync(path.join(directory, '.local/postgres/owner.lock'))).toBe(false);
-  expect(existsSync(path.join(directory, '.local/postgres/data/postmaster.pid'))).toBe(false);
+  expect(result(first.output()).note).toBe('startup_note');
+  expect(result(second.output()).note).toBe(null);
+  expect(result(first.output()).url).not.toBe(result(second.output()).url);
+  const [api, web] = result(first.output()).ports;
+  expect(api).toMatch(/^\d+$/);
+  expect(web).toMatch(/^\d+$/);
+  expect(first.output()).toContain(`Web: http://127.0.0.1:${web}/`);
+  expect(result(second.output()).ports).not.toEqual([api, web]);
+  expect(existsSync(path.join(directory, '.local'))).toBe(false);
+  expect(existsSync(temporaryData(second.output()))).toBe(false);
+  expect(existsSync(temporaryData(first.output()))).toBe(true);
+  first.child.stdin!.end();
+  expect(await first.done).toBe(0);
+  expect(existsSync(temporaryData(first.output()))).toBe(false);
 }, allowanceMs);
+
+/** Runs `dev-runs.ts <command>` of a fixture checkout against that fixture's runs. */
+async function devRuns(directory: string, ...args: string[]) {
+  const env = { ...process.env, POKER_DEV_RUNS_DIR: path.join(directory, 'dev-runs') };
+  return promisify(execFile)(process.execPath, ['--import', 'tsx', path.join(directory, 'scripts/dev-runs.ts'), ...args], { cwd: directory, env, windowsHide: true }).then(
+    ({ stdout, stderr }) => ({ code: 0, output: stdout + stderr }),
+    (error: { code?: number; stdout?: string; stderr?: string }) => ({ code: error.code ?? 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` }),
+  );
+}
+const runId = (output: string) => output.match(/Isolated run (\w+)\./)![1]!;
+
+test('dev:stop ends a run gracefully by id, and by checkout, and removes its database', async () => {
+  const directory = await checkout();
+  const first = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1' } });
+  const second = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1' } });
+  await eventually(() => first.output().includes('PROBE:') && second.output().includes('PROBE:'), () => first.output() + second.output(), first);
+  const listed = JSON.parse((await devRuns(directory, 'status', '--json')).output) as Array<{ id: string; state: string }>;
+  expect(listed.map(run => run.state)).toEqual(['live', 'live']);
+  expect(listed.map(run => run.id).sort()).toEqual([runId(first.output()), runId(second.output())].sort());
+  const one = await devRuns(directory, 'stop', runId(first.output()));
+  expect(one.code).toBe(0);
+  await first.done;
+  expect(existsSync(temporaryData(first.output()))).toBe(false);
+  expect(existsSync(temporaryData(second.output()))).toBe(true);
+  const rest = await devRuns(directory, 'stop');
+  expect(rest.code).toBe(0);
+  await second.done;
+  expect(existsSync(temporaryData(second.output()))).toBe(false);
+  expect((await devRuns(directory, 'status')).output).toContain('No development runs.');
+}, allowanceMs * 2);
+
+test('dev:stop cleans up a run whose launcher died without shutting down', async () => {
+  const directory = await checkout();
+  const crashed = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1' } });
+  await eventually(() => crashed.output().includes('PROBE:'), crashed.output, crashed);
+  const data = temporaryData(crashed.output());
+  // Kill the launcher alone, so nothing shuts the database down: PostgreSQL and its directory are left behind.
+  process.kill(crashed.child.pid!, 'SIGKILL');
+  await crashed.done;
+  expect(existsSync(path.join(data, 'data/postmaster.pid'))).toBe(true);
+  const listed = JSON.parse((await devRuns(directory, 'status', '--json')).output) as Array<{ state: string }>;
+  expect(listed.map(run => run.state)).toEqual(['dead']);
+  const cleaned = await devRuns(directory, 'stop');
+  expect(cleaned.output).toContain('Cleaned up crashed run');
+  expect(existsSync(data)).toBe(false);
+  expect((await devRuns(directory, 'status')).output).toContain('No development runs.');
+}, allowanceMs * 2);
 
 test('an explicit test URL takes shell precedence, bypasses local startup, and is left running', async () => {
   const ownerDirectory = await checkout();
@@ -190,21 +248,6 @@ test('unreachable configured URLs fail without starting an embedded fallback', a
   expect(command.output()).toContain('embedded fallback is disabled');
   expect(command.output()).not.toContain('PROBE:');
   expect(existsSync(path.join(directory, '.local'))).toBe(false);
-}, allowanceMs);
-
-test('an occupied development port fails without taking over its listener or leaving ownership', async () => {
-  const directory = await checkout();
-  const listener = createServer();
-  await new Promise<void>(resolve => listener.listen(0, '127.0.0.1', resolve));
-  try {
-    const port = (listener.address() as { port: number }).port;
-    const command = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { POKER_POSTGRES_PORT: String(port) } });
-    expect(await command.done).toBe(1);
-    expect(command.output()).toContain(`PostgreSQL port ${port} is unavailable`);
-    expect(listener.listening).toBe(true);
-    expect(existsSync(path.join(directory, '.local/postgres/owner.lock'))).toBe(false);
-    expect(existsSync(path.join(directory, '.local/postgres/data/PG_VERSION'))).toBe(false);
-  } finally { await new Promise<void>(resolve => listener.close(() => resolve())); }
 }, allowanceMs);
 
 test('a failed child retains its exit status and arguments while its temporary database is removed', async () => {

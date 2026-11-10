@@ -8,8 +8,10 @@ The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreS
 
 | Command | Default database lifecycle |
 | --- | --- |
-| `pnpm dev:trainer` / `pnpm dev` | Start the persistent development database, API and Trainer at `127.0.0.1:5174`; gracefully stop the database when the command ends. |
-| `pnpm db:init` | Start the development database, initialize the schema, then stop while retaining data. |
+| `pnpm dev:trainer` / `pnpm dev` | Start a throwaway development database, the API and the Trainer on free ports, print their addresses, and remove the database when the command ends. |
+| `pnpm dev:status` | List the development runs on this machine with their id, state (`live`, `stalled` or `dead`), age and addresses. `-- --json` for scripts. |
+| `pnpm dev:stop [id]` | Stop this checkout's runs gracefully, or one run by id. `-- --all` stops every run on the machine. A crashed run is cleaned up: its PostgreSQL is stopped and its directory removed. |
+| `pnpm --filter @poker/server db:init` | Initialize the schema in the database named by `DATABASE_URL`. A managed development database needs none: the server initializes it at startup. |
 | `pnpm test [filters/options]` | Start a fresh test database on a separate port; stop and remove temporary data afterward. |
 | `pnpm lint` | Lint the repository with [Biome](https://biomejs.dev/linter/); configured in `biome.jsonc`. |
 | `pnpm check` | Run the checks; its test step manages a fresh test database. |
@@ -25,9 +27,9 @@ or `pnpm --filter @poker/server dev`. The backend-only command requires an
 already running database and a configured `DATABASE_URL`; use the root development
 commands for automatic database management.
 
-Development data is under `.local/postgres/data`, resolved relative to this checkout. Its parent holds the server log and command ownership file. The database binds only to `127.0.0.1`; its default port is 54329, configurable through `POKER_POSTGRES_PORT`. The default local database and credentials are `poker` / `poker` / `poker`, intended only for local development.
+Each development run owns a throwaway database in an operating-system temporary directory (`poker-dev-postgres-…`), and removes it on exit, so a run starts empty and development data is never shared or kept. The database binds only to `127.0.0.1` on a free port, and the run prints the API and Trainer addresses it chose. The default local database and credentials are `poker` / `poker` / `poker`, intended only for local development.
 
-Test instances use separate operating-system temporary directories and ports. Existing fixtures continue to create isolated schemas within that database. Concurrent test invocations and development therefore have independent database lifecycles. Tests never fall back to the application's `DATABASE_URL`.
+Test instances use the same arrangement. Existing fixtures continue to create isolated schemas within that database. Concurrent test and development runs therefore have independent database lifecycles, in one checkout or several. Tests never use development data.
 
 For a browser fixture, for example:
 
@@ -73,22 +75,17 @@ The build includes the SQL initialization asset. Compiled startup requires
 
 ## Server and proxy settings
 
-Set `PORT` for the API listener and `POKER_API_TARGET` for the Vite proxy target.
-Use Vite's `--port` option for another frontend port. Concurrent checkouts also
-need distinct `POKER_POSTGRES_PORT` values when using managed development
-databases.
+Each development run picks free ports for the API (`PORT`) and the Trainer (`POKER_WEB_PORT`) and points the Vite proxy (`POKER_API_TARGET`) at the API it chose. Set any of the three yourself to pin it, or run `pnpm --filter @poker/web dev` alone for the default 5174.
 
-Online Tables are in beta and off by default. To enable them, start the server with
-`POKER_ONLINE_PLAY=true`; without it
-the web client offers only Practice Tables and Join Links are refused.
 
 Admin Mode defaults on locally. Set `POKER_ADMIN_MODE=false` before starting the
 server to disable completed-Hand hidden-information reveal.
 
-Per-IP rate limits on table creation, joining and Join Link replacement are on in
-production and off locally, so repeated manual checks from one machine are not
+Per-IP rate limits on table creation, joining and Table Password attempts are on
+in production and off locally, so repeated manual checks from one machine are not
 limited. Set `POKER_RATE_LIMITS=true` to try them (10 creations, 30 joins and 10
-replacements per address per 10 minutes) or `false` to turn them off. By default no
+Table Password attempts per address per 10 minutes) or `false` to turn them off.
+By default no
 reverse proxy is trusted and every client's address is the connection's own; behind
 one, set `TRUSTED_PROXIES` to its address (comma-separated addresses or CIDR ranges)
 and only a connection from it may supply `X-Forwarded-For`. The production stack
@@ -173,9 +170,7 @@ Production runs PostgreSQL 18 beside the server on one VM, as described in the [
 
 ## Troubleshooting
 
-- **Port already occupied:** stop the development command using it, or choose a different `POKER_POSTGRES_PORT`. A listening port never establishes ownership; the launcher does not take over an existing database.
-- **Another command owns the data directory:** finish that command before starting another development command for this checkout. Different checkouts have separate development data but need different configured ports when run together.
-- **Crash or forced terminal termination:** cleanup is manual. Check the recorded owner PID and PostgreSQL's `postmaster.pid` against running processes before removing a leftover ownership file. If PostgreSQL is still running, use its bundled `pg_ctl` tool with the exact data directory and `-m fast -w stop` to shut it down gracefully first. The launcher prints the bundled tool path. Do not delete the development data directory. Abandoned test directories are prefixed `poker-test-postgres-` in the OS temporary directory; remove one only after confirming its database has stopped. There is no recovery command or automatic crash cleanup.
-- **Initialization or startup failure:** inspect the printed error and `.local/postgres/server.log` for development. Unsupported platforms, missing optional binary packages, or permission errors fail explicitly. Run dependency installation normally with its approved platform scripts; avoid elevated/root execution on Unix.
+- **Crash or forced terminal termination:** run `pnpm dev:status`. A run shown as `dead` lost its launcher; `pnpm dev:stop` stops its PostgreSQL and removes its directory. Never end a run by killing its processes: on Windows that skips the launcher's shutdown and leaves PostgreSQL running. Use `pnpm dev:stop` or Ctrl+C. A run shown as `stalled` still has a process but has stopped beating (a paused machine, for example): `pnpm dev:stop` asks it to stop and reports if it does not.
+- **Initialization or startup failure:** inspect the printed error and the `server.log` in the run's temporary directory. Unsupported platforms, missing optional binary packages, or permission errors fail explicitly. Run dependency installation normally with its approved platform scripts; avoid elevated/root execution on Unix.
 
-Normal Ctrl+C and handled errors shut down owned databases gracefully. Development data is retained. The previous task's `.scratch/m2-runtime/data` is separate and remains untouched. Existing pre-release schema initialization and record compatibility remain governed by [ADR-0014](adr/0014-allow-pre-release-record-breaking-changes.md).
+Normal Ctrl+C and handled errors shut down owned databases gracefully and remove them. The previous task's `.scratch/m2-runtime/data` is separate and remains untouched. Existing pre-release schema initialization and record compatibility remain governed by [ADR-0014](adr/0014-allow-pre-release-record-breaking-changes.md).

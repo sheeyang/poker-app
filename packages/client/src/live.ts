@@ -17,15 +17,37 @@ export interface UserChannelLifecycle { readonly generation: number; readonly re
 export interface LiveConsumers {
   readonly onReady?: (lifecycle: UserChannelLifecycle) => void;
   readonly onAnalysisUpdate?: (update: AnalysisUpdate, lifecycle: UserChannelLifecycle) => void;
-  /** The open table no longer includes this Guest's Participant: they left it (or were removed). */
+  /** A followed table no longer includes this Guest's Participant: they left it (or were removed). */
   readonly onMembershipEnded?: (ended: TableMembershipEnded) => void;
 }
-/** One app-lifetime socket; changing the open table only changes its subscription. */
-export function useTableSynchronization(id: string | null, enabled: boolean, consumers: LiveConsumers = {}) {
+/** Per followed table, the latest word of the current connection. */
+type PerTable<T> = { readonly generation: number; readonly tables: Readonly<Record<string, T>> };
+const none = { generation: 0, tables: {} };
+type Setter<T> = (update: (previous: PerTable<T>) => PerTable<T>) => void;
+/** Records a connection's latest word about one table; `undefined` forgets it. */
+function record<T>(set: Setter<T>, generation: number, tableId: string, value: T | undefined) {
+  set(previous => {
+    const { [tableId]: _replaced, ...others } = previous.generation === generation ? previous.tables : {};
+    return { generation, tables: value === undefined ? others : { ...others, [tableId]: value } };
+  });
+}
+
+/**
+ * One app-lifetime socket; changing the open table only changes its subscriptions. It follows the open table, `id`,
+ * and also `following`, the Guest's Current Table, from every page: the server counts a Guest connected to a table
+ * while any of their live connections is subscribed to it, so looking at another page never sits them out. Updates
+ * to either table reach the query cache, and `onMembershipEnded` hears of either; what this returns is about the open
+ * table, so opening the followed table finds its live state already there.
+ */
+export function useTableSynchronization(id: string | null, enabled: boolean, consumers: LiveConsumers = {}, following: string | null = null) {
   const queryClient = useQueryClient();
   const [paused, setPaused] = useState(false);
   const generation = useRef(0);
   const selected = useRef(id); selected.current = id;
+  const wanted = [...new Set([id, following].filter((table): table is string => !!table))];
+  const followed = useRef(wanted); followed.current = wanted;
+  // The tables subscribed to, or asked for, on the current connection.
+  const asked = useRef(new Set<string>());
   const callbacks = useRef(consumers); callbacks.current = consumers;
   const socket = useRef<WebSocket | null>(null);
   const ready = useRef(false);
@@ -33,46 +55,53 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
   const pendingControls = useRef(new Map<string, ClientLiveMessage>());
   const [connection, setConnection] = useState<{ state: Connection; generation: number }>({ state: 'connecting', generation: 0 });
   const [userChannel, setUserChannel] = useState<UserChannelLifecycle | null>(null);
-  const [subscription, setSubscription] = useState<{ id: string; generation: number; accepted: boolean } | null>(null);
-  const [inspection, setInspection] = useState<{ id: string; generation: number; capabilities: InspectionCapabilities } | null>(null);
+  const [subscriptions, setSubscriptions] = useState<PerTable<boolean>>(none);
+  const [inspection, setInspection] = useState<PerTable<InspectionCapabilities>>(none);
   const [events, setEvents] = useState<{ id: string; count: number; recent: readonly ObservablePresentationEvent[] } | null>(null);
-  const [runtime, setRuntime] = useState<{ id: string; status: TableRuntimeStatus['status'] } | null>(null);
+  const [runtime, setRuntime] = useState<PerTable<TableRuntimeStatus['status']>>(none);
   // Who is connected changes without a revision, so the latest live message, not the cached view, says it.
-  const [presence, setPresence] = useState<{ id: string; connected: readonly string[] } | null>(null);
+  const [presence, setPresence] = useState<PerTable<readonly string[]>>(none);
   function control(type: ClientLiveMessage['type'], tableSessionId: string) {
-    if (!ready.current || socket.current?.readyState !== WebSocket.OPEN) return;
+    if (!ready.current || socket.current?.readyState !== WebSocket.OPEN) return false;
     const message: ClientLiveMessage = { type, requestId: crypto.randomUUID(), tableSessionId };
     pendingControls.current.set(tableSessionId, message);
     socket.current.send(JSON.stringify(message));
+    return true;
   }
+  /** Subscribes to each followed table not yet asked for on this connection, and drops those no longer followed. */
+  function follow() {
+    for (const table of followed.current) if (!asked.current.has(table) && control('subscribe-table', table)) asked.current.add(table);
+    for (const table of asked.current) if (!followed.current.includes(table) && control('unsubscribe-table', table)) asked.current.delete(table);
+  }
+  const wantedKey = wanted.join(' ');
+  useEffect(() => { if (enabled) follow(); }, [wantedKey, enabled]);
   useEffect(() => {
-    setEvents(null); setRuntime(null); setPresence(null); setInspection(null); setSubscription(null);
-    if (enabled && id) control('subscribe-table', id);
-    return () => {
-      if (enabled && id) control('unsubscribe-table', id);
-      if (id) void queryClient.cancelQueries({ queryKey: ['table-session', id] });
-    };
-  }, [id, enabled, queryClient]);
+    setEvents(null);
+    // A table no longer followed stops reading; one still followed, such as the Current Table, keeps its reads.
+    return () => { if (id && !followed.current.includes(id)) void queryClient.cancelQueries({ queryKey: ['table-session', id] }); };
+  }, [id, queryClient]);
   useEffect(() => {
     if (!enabled) return;
-    if (paused) { setInspection(null); setUserChannel(null); setConnection({ state: 'disconnected', generation: ++generation.current }); return; }
+    if (paused) { setInspection(none); setUserChannel(null); setConnection({ state: 'disconnected', generation: ++generation.current }); return; }
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempts = 0;
     function connect() {
       if (stopped) return;
       const currentGeneration = ++generation.current;
-      let inspectionRevision = -1;
+      const inspectionRevisions = new Map<string, number>();
       let lifecycle: UserChannelLifecycle | undefined;
       ready.current = false;
-      pendingControls.current.clear();
-      setInspection(null); setRuntime(null); setPresence(null); setSubscription(null); setUserChannel(null);
+      pendingControls.current.clear(); asked.current.clear();
+      const fresh = { generation: currentGeneration, tables: {} };
+      setInspection(fresh); setRuntime(fresh); setPresence(fresh); setSubscriptions(fresh); setUserChannel(null);
       setConnection({ state: connectedBefore.current ? 'reconnecting' : 'connecting', generation: currentGeneration });
       const url = new URL('/api/live', location.href);
       url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const currentSocket = new WebSocket(url);
       socket.current = currentSocket;
       const current = () => !stopped && socket.current === currentSocket && generation.current === currentGeneration;
+      const remember = <T,>(set: Setter<T>, tableId: string, value: T | undefined) => record(set, currentGeneration, tableId, value);
       currentSocket.onmessage = event => {
         if (!current()) return;
         let message: ServerLiveMessage;
@@ -85,13 +114,12 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
           connectedBefore.current = true;
           setUserChannel(lifecycle);
           setConnection({ state: 'connected', generation: currentGeneration });
-          if (selected.current) {
-            const tableId = selected.current;
-            control('subscribe-table', tableId);
+          follow();
+          for (const tableId of followed.current) {
             // Cancel old-lifecycle reads before HTTP reconciliation. Query cancellation
             // also stops a delayed equal-revision response from restoring stale status.
             void queryClient.cancelQueries({ queryKey: ['table-session', tableId] }).then(() => {
-              if (current() && selected.current === tableId) void queryClient.invalidateQueries({ queryKey: ['table-session', tableId] });
+              if (current() && followed.current.includes(tableId)) void queryClient.invalidateQueries({ queryKey: ['table-session', tableId] });
             });
           }
           callbacks.current.onReady?.(lifecycle);
@@ -107,42 +135,46 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
           const pending = pendingControls.current.get(tableId);
           if (!pending || pending.requestId !== message.requestId) return;
           pendingControls.current.delete(tableId);
-          if (tableId !== selected.current) return;
-          if (message.status === 'subscribed') inspectionRevision = -1;
-          setSubscription({ id: tableId, generation: currentGeneration, accepted: message.status === 'subscribed' });
+          inspectionRevisions.delete(tableId);
+          if (message.status === 'unsubscribed') {
+            // A table no longer followed keeps nothing of this connection's word about it.
+            remember(setSubscriptions, tableId, undefined); remember(setPresence, tableId, undefined);
+            remember(setInspection, tableId, undefined); remember(setRuntime, tableId, undefined);
+          } else remember(setSubscriptions, tableId, message.status === 'subscribed');
           return;
         }
-        if (tableId !== selected.current) return;
+        if (!followed.current.includes(tableId)) return;
         if (message.type === 'table-membership-ended') { callbacks.current.onMembershipEnded?.(message); return; }
-        if (message.type === 'table-presence') { setPresence({ id: tableId, connected: message.connectedParticipantIds }); return; }
+        if (message.type === 'table-presence') { remember(setPresence, tableId, message.connectedParticipantIds); return; }
         if (message.type === 'table-status') {
-          setRuntime({ id: tableId, status: message.status });
+          remember(setRuntime, tableId, message.status);
           queryClient.setQueryData<ObservableTableSession>(key, cached => cached ? { ...cached, runtimeStatus: message.status } : cached);
           return;
         }
         if (message.type !== 'table-update') return;
         // Every complete update says who is connected as it was sent, even one older than the cached revision.
         const connected = message.connectedParticipantIds;
-        if (connected) setPresence({ id: tableId, connected });
+        if (connected) remember(setPresence, tableId, connected);
         // Capabilities are tied to this connection, never taken from HTTP/cache.
-        if (message.sessionRevision > inspectionRevision) {
-          inspectionRevision = message.sessionRevision;
-          setInspection({ id: tableId, generation: currentGeneration, capabilities: message.inspection });
+        if (message.sessionRevision > (inspectionRevisions.get(tableId) ?? -1)) {
+          inspectionRevisions.set(tableId, message.sessionRevision);
+          remember(setInspection, tableId, message.inspection);
         }
         let accepted = false;
         queryClient.setQueryData<ObservableTableSession>(key, cached => {
           accepted = !cached || message.sessionRevision > cached.sessionRevision;
           return retainNewestTable(cached, message);
         });
-        if (accepted) setEvents(previous => ({ id: tableId, count: (previous?.id === tableId ? previous.count : 0) + message.presentationEvents.length, recent: message.presentationEvents }));
+        // Presentation events animate the open table only.
+        if (accepted && tableId === selected.current) setEvents(previous => ({ id: tableId, count: (previous?.id === tableId ? previous.count : 0) + message.presentationEvents.length, recent: message.presentationEvents }));
       };
       currentSocket.onclose = () => {
         if (!current()) return;
         socket.current = null; ++generation.current;
         ready.current = false;
-        setInspection(null); setUserChannel(null); setSubscription(null); setPresence(null);
+        setInspection(none); setUserChannel(null); setSubscriptions(none); setPresence(none);
         setConnection({ state: 'reconnecting', generation: currentGeneration });
-        if (selected.current) void queryClient.cancelQueries({ queryKey: ['table-session', selected.current] });
+        for (const tableId of followed.current) void queryClient.cancelQueries({ queryKey: ['table-session', tableId] });
         timer = setTimeout(connect, Math.min(500 * 2 ** attempts++, 5000));
       };
       currentSocket.onerror = () => { if (current()) currentSocket.close(); };
@@ -151,23 +183,30 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
     return () => {
       stopped = true; ready.current = false; ++generation.current;
       clearTimeout(timer);
-      if (selected.current) void queryClient.cancelQueries({ queryKey: ['table-session', selected.current] });
+      for (const tableId of followed.current) void queryClient.cancelQueries({ queryKey: ['table-session', tableId] });
       const retired = socket.current; socket.current = null;
       if (retired) { retired.onmessage = null; retired.onclose = null; retired.onerror = null; retired.close(); }
-      pendingControls.current.clear();
+      pendingControls.current.clear(); asked.current.clear();
     };
   }, [enabled, paused, queryClient]);
-  const subscribed = subscription?.id === id && subscription.generation === connection.generation && subscription.accepted;
+  /** This connection's latest word about the open table. */
+  const latest = <T,>(state: PerTable<T>) => id && state.generation === connection.generation ? state.tables[id] : undefined;
+  const subscribed = latest(subscriptions) === true;
   return {
     userChannel,
-    inspectionCapabilities: inspection?.id === id && inspection.generation === connection.generation ? inspection.capabilities : undefined,
+    inspectionCapabilities: latest(inspection),
     inspectionGeneration: connection.generation,
     connection: connection.state === 'connected' && id && !subscribed ? 'connecting' : connection.state,
     eventCount: events?.id === id ? events.count : 0,
     recentEvents: events?.id === id ? events.recent : [],
-    runtimeStatus: runtime?.id === id ? runtime.status : undefined,
+    runtimeStatus: latest(runtime),
     /** At an Online Table, the Participants connected now, from this connection's latest message. */
-    connectedParticipantIds: presence?.id === id ? presence.connected : undefined,
+    connectedParticipantIds: latest(presence),
+    /**
+     * Asks again for the open table, whose subscription the server refused while this Guest was not at it: after
+     * joining through its Join Link, the same address becomes their table.
+     */
+    resubscribe: () => { if (enabled && selected.current && control('subscribe-table', selected.current)) asked.current.add(selected.current); },
     disconnect: () => setPaused(true),
     reconnect: () => setPaused(false),
   };

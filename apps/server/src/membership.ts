@@ -1,34 +1,72 @@
-import { randomBytes } from 'node:crypto';
 import { and, eq, or, sql } from 'drizzle-orm';
 import type { SavedTable, TableMode } from '@poker/contracts';
-import { humanBindings, legacyTableMode, type PersistedTableSession } from './aggregate.js';
+import { findBinding, humanBindings, isBot, legacyTableMode, type PersistedTableSession, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { tableMemberships, tableSessions } from './db/schema.js';
 type Database = Omit<ReturnType<typeof openDatabase>['db'], '$client'>;
 
 /**
- * The only way to write a Persisted Table Session. In the caller's transaction it inserts (no `previous`)
- * or updates the aggregate, and writes the membership index rows of every human binding whose
- * membership differs from `previous`. Joining, leaving and Removal therefore only change bindings.
+ * Whether the committed table has scheduled work that runs with nobody at it (ADR-0035): an Action Deadline, a Bot
+ * decision, a Next-Hand Countdown, or After-Hand Requests to apply (`afterHandRequestsScheduled`). In practice that is
+ * an Online Table in play, or a timed Practice Table with a Hand in progress. Presentation Phases alone are not: after
+ * a restart nobody is connected, so the end of one starts nothing until someone opens the table.
  */
-export async function writeTableSession(tx: Database, previous: PersistedTableSession | undefined, next: PersistedTableSession) {
-  if (previous) await tx.update(tableSessions).set({ aggregate: next }).where(eq(tableSessions.id, next.tableSessionId));
-  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ownerUserId: next.ownerUserId, aggregate: next });
+export function hasScheduledWork(aggregate: PersistedTableSession): boolean {
+  // A Closed Table is never loaded again, so nothing it had scheduled runs.
+  if (aggregate.closed) return false;
+  const { actionWindow, nextHandCountdown } = aggregate.schedule;
+  return !!nextHandCountdown || afterHandRequestsScheduled(aggregate)
+    || !!actionWindow && (actionWindow.deadlineAt !== undefined || isBot(findBinding(aggregate, actionWindow.participantId)));
+}
+/**
+ * Whether pending After-Hand Requests are scheduled work: only where something advances the Hand without the human,
+ * at an Online Table or a timed Practice Table. At an untimed Practice Table they wait in the record for the human to
+ * finish the Hand.
+ */
+export function afterHandRequestsScheduled(aggregate: PersistedTableSession): boolean {
+  return aggregate.pendingChanges.length > 0 && (aggregate.mode === 'online' || aggregate.options.actionTimeLimitSeconds !== null);
+}
+/**
+ * The only way to write a Persisted Table Session. In the caller's transaction it inserts (no `previous`)
+ * or updates the aggregate, with its owner, its `loadAtStartup` (`hasScheduledWork`), whether it is closed, and `committedAt`
+ * (server time) as its last committed change, and writes the membership index rows of every human binding whose
+ * membership differs from `previous`. Joining, leaving, Removal and closing therefore only change bindings.
+ */
+export async function writeTableSession(tx: Database, previous: PersistedTableSession | undefined, next: PersistedTableSession, committedAt: number) {
+  // Ownership can pass when the owner leaves (`ownership.ts`), so the owner column follows the aggregate's.
+  const row = { aggregate: next, ownerUserId: next.ownerUserId, loadAtStartup: hasScheduledWork(next), closed: !!next.closed, lastCommittedAt: committedAt };
+  if (previous) await tx.update(tableSessions).set(row).where(eq(tableSessions.id, next.tableSessionId));
+  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ...row });
   const known = new Map(previous ? humanBindings(previous).map(binding => [binding.participantId, binding.membership]) : []);
   const changed = humanBindings(next).filter(binding => known.get(binding.participantId) !== binding.membership);
   if (changed.length) await tx.insert(tableMemberships)
     .values(changed.map(binding => ({ userId: binding.userId, tableSessionId: next.tableSessionId, participantId: binding.participantId, status: binding.membership })))
     .onConflictDoUpdate({ target: [tableMemberships.userId, tableMemberships.tableSessionId], set: { status: sql`excluded.status` } });
 }
-/** A Join Link token is 32 random bytes in base64url. Anything else cannot be a link, so is never looked up. */
-export const joinTokenPattern = /^[A-Za-z0-9_-]{43}$/;
-/** A fresh, unguessable Join Link token. */
-export const newJoinToken = () => randomBytes(32).toString('base64url');
-/** The Online Table a Join Link currently opens. A replaced token no longer matches anything. */
-export async function tableOfJoinLink(db: Database, token: string): Promise<string | undefined> {
-  if (!joinTokenPattern.test(token)) return undefined;
-  const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(sql`${tableSessions.aggregate}->>'joinToken' = ${token}`);
-  return rows[0]?.id;
+/**
+ * A Table Session ID as the server issues it: a lowercase UUID. Anything else names no table, so it is never looked up,
+ * and is answered as a table that doesn't exist is.
+ */
+export const tableSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * The stored aggregate of the Online Table a Join Link names, read without loading the table; undefined for an ID that
+ * names no table, or names a Practice Table, which has no Join Link.
+ */
+export async function storedOnlineTable(db: Database, tableSessionId: string): Promise<StoredTableSession | undefined> {
+  if (!tableSessionIdPattern.test(tableSessionId)) return undefined;
+  const rows = await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions)
+    .where(and(eq(tableSessions.id, tableSessionId), sql`${tableSessions.aggregate}->>'mode' = 'online'`));
+  return rows[0]?.aggregate;
+}
+/**
+ * The Guest's Current Table: the one Online Table they are joined at, watching counts, or undefined. Practice Tables
+ * never count. Read from the membership index, so it loads nothing.
+ */
+export async function currentTable(db: Database, userId: string): Promise<string | undefined> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId })
+    .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
+    .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.status, 'joined'), sql`${tableSessions.aggregate}->>'mode' = 'online'`));
+  return rows[0]?.tableSessionId;
 }
 /** The Guest's joined, unremoved Participant at a table, whether the Guest owns it and its mode, without restoring the table. */
 export async function membership(db: Database, tableSessionId: string, userId: string): Promise<{ participantId: string; owner: boolean; mode: TableMode } | undefined> {
@@ -37,19 +75,16 @@ export async function membership(db: Database, tableSessionId: string, userId: s
     .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId), eq(tableMemberships.status, 'joined')));
   return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId, mode: rows[0].mode ?? legacyTableMode };
 }
-/** Whether the Guest owns the table, without restoring it. Ownership is kept after leaving and never transfers. */
-export async function ownsTable(db: Database, tableSessionId: string, userId: string): Promise<boolean> {
-  const rows = await db.select({ id: tableSessions.id }).from(tableSessions).where(and(eq(tableSessions.id, tableSessionId), eq(tableSessions.ownerUserId, userId)));
-  return rows.length > 0;
-}
 /**
- * Tables the Guest owns, even after leaving them, plus tables the Guest has joined and not left, with the Guest's
- * Participant at each. An owned table the Guest has left is marked `left`: opening it rejoins them. The index has no
- * seating, so the caller adds each table's public stakes and play state.
+ * Every table the Guest has joined, with the Guest's Participant at each, however their membership ended (Leave Table
+ * or Removal, which are the same, or the table closing). A table they have left is marked `left`: its Join Link
+ * returns them. A Closed Table is marked `closed` as well, its memberships all ended. Each carries its stored aggregate,
+ * so the caller can read the format and blinds from stored rows alone, loading nothing.
  */
-export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left'> & { participantId: string })[]> {
-  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, participantId: tableMemberships.participantId, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
+export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left' | 'closed'> & { stored: StoredTableSession })[]> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, stored: tableSessions.aggregate, status: tableMemberships.status, closed: tableSessions.closed, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
-    .where(and(eq(tableMemberships.userId, userId), or(eq(tableMemberships.status, 'joined'), eq(tableSessions.ownerUserId, userId))));
-  return rows.map(row => ({ tableSessionId: row.tableSessionId, participantId: row.participantId, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
+    .where(eq(tableMemberships.userId, userId));
+  return rows.map(row => ({ tableSessionId: row.tableSessionId, stored: row.stored, mode: row.mode ?? legacyTableMode,
+    ...(row.status === 'joined' ? {} : { left: true as const }), ...(row.closed ? { closed: true as const } : {}) }));
 }

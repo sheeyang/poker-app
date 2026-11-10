@@ -1,4 +1,4 @@
-import { defaultPlayingStrategy, type ActionTimeLimitSeconds, type CreateTableSessionRequest, type StrategyDescriptor } from '@poker/contracts';
+import { defaultPlayingStrategy, tablePasswordLength, type ActionTimeLimitSeconds, type CreateTableSessionRequest, type StrategyDescriptor } from '@poker/contracts';
 
 /** What the Online creation form edits: blinds in chips, stacks and buy-in limits in big blinds. */
 export interface OnlineSetup {
@@ -14,10 +14,12 @@ export interface OnlineSetup {
   readonly allowSeatChanges: boolean;
   readonly bots: number;
   readonly botStrategy: StrategyDescriptor;
+  /** The optional Table Password, exactly as typed; empty for none. Held only in the form's memory. */
+  readonly tablePassword: string;
 }
 export const defaultOnlineSetup: OnlineSetup = {
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0, startingStackBB: 100, minimumBuyInBB: 20, maximumBuyInBB: 200,
-  actionTimeLimitSeconds: 30, allowLiveAnalysis: true, allowSeatChanges: true, bots: 0, botStrategy: defaultPlayingStrategy,
+  actionTimeLimitSeconds: 30, allowLiveAnalysis: true, allowSeatChanges: true, bots: 0, botStrategy: defaultPlayingStrategy, tablePassword: '',
 };
 
 /** Why this setup cannot be created, in words for the person filling in the form; undefined when it can. */
@@ -31,6 +33,13 @@ export function onlineSetupProblem(setup: OnlineSetup): string | undefined {
   if (!whole(setup.startingStackBB) || setup.startingStackBB < setup.minimumBuyInBB) return 'The starting stack cannot be below the minimum buy-in.';
   if (!whole(setup.maximumBuyInBB) || setup.maximumBuyInBB < setup.startingStackBB || !whole(setup.bigBlind * setup.maximumBuyInBB)) return 'The maximum buy-in cannot be below the starting stack.';
   if (!whole(setup.bots) || setup.bots < 0 || setup.bots > setup.seatCount - 1) return 'Leave at least one seat for a person: add at most ' + (setup.seatCount - 1) + ' Bots.';
+  return tablePasswordProblem(setup.tablePassword);
+}
+
+/** Why a typed Table Password cannot be used; an empty one is none, which is fine. */
+export function tablePasswordProblem(password: string): string | undefined {
+  const length = [...password].length;
+  if (length > 0 && (length < tablePasswordLength.minimum || length > tablePasswordLength.maximum)) return `A Table Password is ${tablePasswordLength.minimum} to ${tablePasswordLength.maximum} characters, or leave it empty.`;
 }
 
 export function onlineCreationRequest(setup: OnlineSetup, requestId: string): CreateTableSessionRequest | undefined {
@@ -44,5 +53,6 @@ export function onlineCreationRequest(setup: OnlineSetup, requestId: string): Cr
     },
     options: { actionTimeLimitSeconds: setup.actionTimeLimitSeconds, allowLiveAnalysis: setup.allowLiveAnalysis },
     bots: Array.from({ length: setup.bots }, (_, index) => ({ name: `Bot ${index + 1}`, playingStrategy: setup.botStrategy })),
+    ...(setup.tablePassword ? { tablePassword: setup.tablePassword } : {}),
   };
 }

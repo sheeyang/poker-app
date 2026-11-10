@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, simpleHeuristicPlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem } from '../src/online-setup.js';
-import { joinLink } from '../src/join-link.js';
 import { canManage, modeLabel, playerName } from '../src/table-model.js';
 
 function table(overrides: Partial<ObservableTableSession> = {}): ObservableTableSession {
@@ -33,6 +32,15 @@ describe('creating an Online Table', () => {
       bots: [{ name: 'Bot 1', playingStrategy: simpleHeuristicPlayingStrategy }, { name: 'Bot 2', playingStrategy: simpleHeuristicPlayingStrategy }],
     });
   });
+  it('sends a Table Password only when one is given, exactly as typed', () => {
+    expect(onlineCreationRequest({ ...defaultOnlineSetup, tablePassword: ' Sesame ' }, 'r')).toMatchObject({ tablePassword: ' Sesame ' });
+    expect(onlineCreationRequest({ ...defaultOnlineSetup, tablePassword: '' }, 'r')).not.toHaveProperty('tablePassword');
+  });
+  it('explains a Table Password that is too short or too long', () => {
+    expect(onlineSetupProblem({ ...defaultOnlineSetup, tablePassword: 'abc' })).toBe('A Table Password is 4 to 64 characters, or leave it empty.');
+    expect(onlineSetupProblem({ ...defaultOnlineSetup, tablePassword: 'x'.repeat(65) })).toBe('A Table Password is 4 to 64 characters, or leave it empty.');
+    expect(onlineSetupProblem({ ...defaultOnlineSetup, tablePassword: 'abcd' })).toBeUndefined();
+  });
   it.each([
     [{ seatCount: 1 }], [{ seatCount: 10 }], [{ bigBlind: 5 }], [{ smallBlind: 0 }], [{ ante: -1 }],
     [{ bots: 6 }], [{ bots: -1 }], [{ startingStackBB: 10 }], [{ startingStackBB: 500 }], [{ minimumBuyInBB: 0 }],
@@ -40,9 +48,6 @@ describe('creating an Online Table', () => {
     const setup = { ...defaultOnlineSetup, ...override };
     expect(onlineSetupProblem(setup)).toEqual(expect.any(String));
     expect(onlineCreationRequest(setup, 'r')).toBeUndefined();
-  });
-  it('builds a Join Link from the page origin and the secret token', () => {
-    expect(joinLink('https://poker.example', 'abc_DEF-123')).toBe('https://poker.example/join/abc_DEF-123');
   });
 });
 

@@ -1,6 +1,8 @@
-import type { ConcreteAction, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
-import { CashGame, type CashGameEvent } from '@poker/engine';
+import type { ConcreteAction, ObservableTableOptions, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
+import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
+import { handInProgress } from './after-hand.js';
+import { ownerSuccession } from './ownership.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
   return action.type === 'bet' ? { type: 'bet', betTo: action.betTo } : action.type === 'raise' ? { type: 'raise', raiseTo: action.raiseTo } : { type: action.type };
 }
@@ -33,9 +35,22 @@ export function projectBindings(bindings: readonly ParticipantBinding[]): Partic
 export function projectConfiguration(c: ObservableGameConfiguration): ObservableGameConfiguration {
   return { seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante, minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn, allowSeatChanges: c.allowSeatChanges };
 }
+/**
+ * The Observable Game Configuration as it stands now, read from the record without replaying it: of its fields, only
+ * the seat-change permission changes after creation, and only by its own command.
+ */
+export function recordedConfiguration(record: TableSessionRecord): ObservableGameConfiguration {
+  const { seed: _seed, ...configuration } = record.configuration;
+  const seatChanges = record.commands.findLast(command => command.type === 'set-seat-changes');
+  return { ...configuration, ...(seatChanges?.type === 'set-seat-changes' ? { allowSeatChanges: seatChanges.allowSeatChanges } : {}) };
+}
 /** The table options, field by field (ADR-0017): a field added to the stored options is never projected by accident. */
 export function projectOptions(options: TableOptions): TableOptions {
   return { actionTimeLimitSeconds: options.actionTimeLimitSeconds, allowLiveAnalysis: options.allowLiveAnalysis };
+}
+/** The options Participants see: whether the table has a Table Password, and never its hash. */
+export function projectTableOptions(aggregate: PersistedTableSession): ObservableTableOptions {
+  return { ...projectOptions(aggregate.options), ...(aggregate.tablePasswordHash ? { hasTablePassword: true as const } : {}) };
 }
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {
@@ -64,9 +79,11 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   const inspectable = adminMode && aggregate.mode === 'practice';
   // Humans who left or were removed, and Bots the owner removed: public, so nobody is offered what no longer applies.
   const departed = aggregate.bindings.filter(binding => isHuman(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
+  // The owner's own view says what their Leave Table would do to ownership: it waits for the Hand if they are seated in one.
+  const succession = aggregate.mode === 'online' && viewer.userId === aggregate.ownerUserId
+    ? ownerSuccession(aggregate, view.state.participants.some(p => p.participantId === participantId && p.seat !== null) && handInProgress(view.state.status, aggregate.schedule, serverTime)) : undefined;
   return {
-    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectOptions(aggregate.options), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
-    ...(aggregate.joinToken && viewer.userId === aggregate.ownerUserId ? { joinToken: aggregate.joinToken } : {}),
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectTableOptions(aggregate), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: { referenceStrategy: projectStrategy(viewer.trainerConfiguration.referenceStrategy), liveAnalysis: viewer.trainerConfiguration.liveAnalysis },
@@ -74,6 +91,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     pendingChanges: aggregate.pendingChanges.map(entry => ({ participantId: entry.participantId, change: entry.change })),
     ...(aggregate.mode === 'online' ? { connectedParticipantIds: [...connected] } : {}),
     ...(departed.length ? { departedParticipantIds: departed } : {}),
+    ...(succession ? { ownerSuccession: succession } : {}),
     inspection: { adminMode: inspectable, completedHands: inspectable ? game.getCompletedHands().map(hand => ({ handId: hand.handId, sequence: hand.sequence })) : [] },
     view: {
       configuration: projectConfiguration(view.configuration),

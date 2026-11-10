@@ -5,7 +5,7 @@ import { emptySchedule } from './schedule.js';
  * A human Participant's application membership. Only `joined` grants access to the table.
  * The membership index (`table_memberships`) mirrors it in the same transaction as each commit.
  */
-export type MembershipStatus = 'joined' | 'left' | 'removed';
+export type MembershipStatus = 'joined' | 'left';
 export interface PersistedHumanBinding {
   readonly participantId: string;
   readonly name: string;
@@ -46,8 +46,6 @@ export interface PersistedTableSession {
   readonly ownerUserId: string;
   readonly mode: TableMode;
   readonly options: TableOptions;
-  /** The Online Table's current Join Link token. A unique index in schema.sql reads this exact key. */
-  readonly joinToken?: string;
   readonly pokerRecord: TableSessionRecord;
   readonly bindings: readonly PersistedBinding[];
   readonly pokerRevision: number;
@@ -71,6 +69,16 @@ export interface PersistedTableSession {
    * rather than that the table changed. Server-only: never projected.
    */
   readonly timedOutWindow?: { readonly participantId: string; readonly decisionId: string; readonly deadlineAt: number; readonly pokerRevision: number };
+  /**
+   * An Online Table's Table Password, as a salted, slow hash (`table-password.ts`), never the password. Server-only:
+   * Participants are told only that it is set (`hasTablePassword` in the projected options).
+   */
+  readonly tablePasswordHash?: string;
+  /**
+   * A Closed Table (`closing.ts`): an Online Table idle for 24 hours, whose memberships have all ended. Nobody can open,
+   * join or act at it, and it is never loaded again. The `closed` column mirrors it.
+   */
+  readonly closed?: true;
 }
 /** Written before M4: one owner-human and a table-level Trainer configuration. Read-only. */
 export interface PersistedTableSessionV1 {
@@ -119,14 +127,11 @@ export const humanBindings = (aggregate: PersistedTableSession) => aggregate.bin
 export const memberBinding = (aggregate: PersistedTableSession, userId: string) => humanBindings(aggregate).find(binding => binding.userId === userId && binding.membership === 'joined');
 export const findBinding = (aggregate: PersistedTableSession, participantId: unknown) => aggregate.bindings.find(binding => binding.participantId === participantId);
 /**
- * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant, every Bot the
- * owner has not removed, and the Table Owner's own place after they leave, so that they can always return to
- * manage their table.
+ * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant and every Bot
+ * the owner has not removed. None is held for anyone who left, a former Table Owner included (ADR-0034).
  */
 export function placesTaken(aggregate: PersistedTableSession): number {
-  const humans = humanBindings(aggregate);
-  const joined = humans.filter(binding => binding.membership === 'joined').length;
+  const joined = humanBindings(aggregate).filter(binding => binding.membership === 'joined').length;
   const bots = aggregate.bindings.filter(binding => isBot(binding) && !binding.removed).length;
-  const ownerAway = humans.some(binding => binding.userId === aggregate.ownerUserId && binding.membership !== 'joined');
-  return joined + bots + (ownerAway ? 1 : 0);
+  return joined + bots;
 }

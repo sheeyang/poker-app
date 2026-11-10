@@ -1,8 +1,12 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, JoinTableRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, ReplaceJoinLinkRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import { listPath, tablePath } from './table-address.js';
+import { withMembershipEnded } from './current-table.js';
+import { recordOpened, type OpenedTimes } from './saved-tables.js';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -16,34 +20,42 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'add-bot'; readonly body: AddBotRequest }
   /** The Table Owner changes an Online Table's options between Hands. */
   | { readonly kind: 'options'; readonly body: SetTableOptionsRequest }
-  /** The Table Owner replaces the Online Table's Join Link. */
-  | { readonly kind: 'replace-link'; readonly body: ReplaceJoinLinkRequest }
-  /** The Table Owner returns to a table they left, without the Join Link. */
-  | { readonly kind: 'rejoin'; readonly body: JoinTableRequest }
+  /** The Table Owner sets, changes or removes an Online Table's Table Password, at any time. Held in memory only. */
+  | { readonly kind: 'password'; readonly body: SetTablePasswordRequest }
 );
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
 interface SessionState {
-  selectedId: string | null;
   pending: Attempt | null;
   analysisOpen: boolean;
   animations: boolean;
+  /** When each table was last opened in this browser: the order of the saved lists. */
+  opened: OpenedTimes;
+  markOpened: (tableSessionId: string, at: number) => void;
   setup: { requestId: string; tableId?: string; paused?: string; afterHandId?: string | null } | null;
   setSetup: (setup: SessionState['setup']) => void;
-  select: (id: string | null) => void;
   setPending: (pending: Attempt | null) => void;
   toggleAnalysis: () => void;
   setAnimations: (enabled: boolean) => void;
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  selectedId: null, pending: null, analysisOpen: true, animations: true, setup: null,
+  pending: null, analysisOpen: true, animations: true, opened: {}, setup: null,
+  markOpened: (tableSessionId, at) => set(state => ({ opened: recordOpened(state.opened, tableSessionId, at) })),
   setSetup: setup => set({ setup }),
-  select: selectedId => set({ selectedId }),
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
   setAnimations: animations => set({ animations }),
-}), { name: 'poker-trainer-v1' }));
+}), {
+  name: 'poker-trainer-v1',
+  // Browser storage keeps only preferences and when each table was last opened. A request, and anything a Guest typed into one, lives in memory for the life of the page.
+  version: 2,
+  partialize: ({ analysisOpen, animations, opened }) => ({ analysisOpen, animations, opened }),
+  migrate: stored => {
+    const { analysisOpen, animations, opened } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations' | 'opened'>>;
+    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true, opened: opened && typeof opened === 'object' ? opened : {} } as SessionState;
+  },
+}));
 
 function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAcknowledgement> {
   if (attempt.kind === 'create') return api.createSession(attempt.body);
@@ -56,19 +68,21 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'trainer': return api.setTrainerConfiguration(tableId, attempt.body);
     case 'strategy': return api.setPlayingStrategy(tableId, attempt.body);
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
-    case 'rejoin': return api.rejoinTable(tableId, attempt.body);
-    case 'replace-link': return api.replaceJoinLink(tableId, attempt.body);
     case 'add-bot': return api.addBot(tableId, attempt.body);
     case 'options': return api.setTableOptions(tableId, attempt.body);
+    case 'password': return api.setTablePassword(tableId, attempt.body);
   }
 }
 
-/** Persist the exact attempt before transmission; an ambiguous response never creates a second action. */
+/** Hold the exact attempt in memory before transmission; an ambiguous response never creates a second action within a page's life. */
 export function useCommand() {
   const queryClient = useQueryClient();
   const pending = useSession(state => state.pending);
   const setPending = useSession(state => state.setPending);
-  const select = useSession(state => state.select);
+  const router = useRouter();
+  // The table's own mode, for its address; a table not in the cache is an Online one, the only kind a Guest can leave.
+  const modeOf = (id: string): TableMode => queryClient.getQueryData<ObservableTableSession>(['table-session', id])?.mode ?? 'online';
+  const showing = (id: string) => router.state.location.pathname === tablePath(modeOf(id), id);
   const mutation = useMutation({
     mutationFn: execute,
     retry: false,
@@ -77,17 +91,20 @@ export function useCommand() {
       if (attempt.kind === 'create') {
         const setup = useSession.getState().setup;
         if (setup?.requestId === attempt.body.requestId) useSession.getState().setSetup({ ...setup, tableId: result.tableSessionId });
-        select(result.tableSessionId);
+        // Creating a table opens it: one Back step returns to the list it was created from.
+        void router.navigate({ to: tablePath(attempt.body.mode ?? 'practice', result.tableSessionId) });
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       }
       // Leaving at once ends this Guest's place at the table; leaving after the Hand is announced when it happens.
       if (attempt.kind === 'manage' && attempt.operation === 'leave-table' && !('afterHand' in result)) {
-        select(null);
+        // Back never returns to a table this Guest is no longer at.
+        if (showing(result.tableSessionId)) void router.navigate({ to: listPath(modeOf(result.tableSessionId)), replace: true });
+        // No longer their Current Table: the banner goes at once.
+        queryClient.setQueryData<SavedTables>(['table-sessions'], list => withMembershipEnded(list, result.tableSessionId));
         queryClient.removeQueries({ queryKey: ['table-session', result.tableSessionId] });
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
         return;
       }
-      if (attempt.kind === 'rejoin') { select(result.tableSessionId); await queryClient.invalidateQueries({ queryKey: ['table-sessions'] }); }
       await queryClient.invalidateQueries({ queryKey: ['table-session', result.tableSessionId] });
     },
     onError: async (error, attempt) => {

@@ -57,8 +57,7 @@ async function completedHand(t: Table) {
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   clock.advance(2000);
 }
-const join = (t: Table, cookie: string) => post('/api/join-links/' + encodeURIComponent(joinTokens.get(t.id)!) + '/join', cookie, { requestId: randomUUID() });
-const joinTokens = new Map<string, string>();
+const join = (t: Table, cookie: string) => post('/api/table-sessions/' + t.id + '/join-table', cookie, { requestId: randomUUID() });
 async function settledAnalysis(t: Table, decisionId = 'hand-1/decision-1', cookie = t.cookie) {
   const requested = await (await post('/api/table-sessions/' + t.id + '/analysis', cookie, { decisionId })).json();
   await expect.poll(async () => (await (await get('/api/table-sessions/' + t.id + '/analysis/' + requested.requestId, cookie)).json()).status, { timeout: 10000 }).toBe('complete');
@@ -153,7 +152,6 @@ test('a Guest who has not joined a table is refused every route and live subscri
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
 test('each human acts, manages and studies only through their own Participant, and only the owner manages the table', async () => {
   const owner = await table(await guest('Ann'), 'online');
-  joinTokens.set(owner.id, (await read(owner)).joinToken!);
   await completedHand(owner);
   const ownerAnalysis = await settledAnalysis(owner);
   const ownerSummary = await (await post('/api/table-sessions/' + owner.id + '/session-summaries', owner.cookie, {})).json();
@@ -175,7 +173,8 @@ test('each human acts, manages and studies only through their own Participant, a
   expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
   for (const cookie of [leftCookie, removedCookie]) {
     expect((await get('/api/table-sessions/' + owner.id, cookie)).status).toBe(404);
-    expect(await (await get('/api/table-sessions', cookie)).json()).toEqual({ tables: [] });
+    // The table stays in their saved list, as one they have left, whether they left or were removed.
+    expect((await (await get('/api/table-sessions', cookie)).json()).tables).toMatchObject([{ tableSessionId: owner.id, left: true }]);
   }
   expect(await (await get('/api/table-sessions', otherCookie)).json()).toMatchObject({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
   expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: owner.id, mode: 'online' }));

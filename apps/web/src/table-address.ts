@@ -1,0 +1,106 @@
+import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
+import { RequestFailure } from '@poker/client';
+import { formatAndStakes, modeLabel } from './table-model.js';
+
+/** Each mode's list: the Practice screen and the Online screen. */
+export const listPath = (mode: TableMode) => `/${mode}` as const;
+/** A table's one address, under its own mode. */
+export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/${tableSessionId}`;
+/**
+ * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
+ * there is one; undefined outside the two modes. The table ID is as written: whether it names a table is for the server.
+ */
+export function parseAddress(pathname: string): { readonly mode: TableMode; readonly tableSessionId?: string } | undefined {
+  const [, first, second] = pathname.split('/');
+  if (first !== 'practice' && first !== 'online') return undefined;
+  return second ? { mode: first, tableSessionId: second } : { mode: first };
+}
+
+/** An Online Table's Join Link: its own address, which never changes and which anyone at the table can pass on (ADR-0033). */
+export const joinLink = (origin: string, tableSessionId: string) => origin + tablePath('online', tableSessionId);
+
+/** The table read as its visitor got it: the table, for a Participant, or "not found" for anyone else. */
+type TableRead = { readonly mode: TableMode } | 'not-found';
+
+/**
+ * What a table address shows its visitor. Pure: the server alone decides who may see a table, and answers
+ * "not found" to anyone who is not one of its Participants, so a Practice Table is never revealed to anyone
+ * but its human, whatever mode the address names.
+ *
+ * - `table`: the visitor is a Participant and the address names the table's own mode.
+ * - `corrected`: the visitor is a Participant, but the address names the other mode; replace it with `to`.
+ * - `join-form`: the visitor is not at the Online Table the address names, which is its Join Link: they may join it,
+ *   or return to it if they left (`preview.returningAs`).
+ * - `password-join-form`: the same, at an Online Table with a Table Password: the preview names only the owner, and
+ *   joining needs the password.
+ * - `missing`: "This table doesn't exist".
+ * - `closed`: "This table closed": the Online Table is a Closed Table, which nobody can open or join.
+ *
+ * Undefined while an Online address waits for its Join Link's preview (`joinPreviewWanted`).
+ */
+export type TableAddressOutcome =
+  | { readonly show: 'table' }
+  | { readonly show: 'corrected'; readonly to: string }
+  | { readonly show: 'join-form'; readonly preview: OpenJoinLinkPreview }
+  | { readonly show: 'password-join-form'; readonly preview: ProtectedJoinLinkPreview }
+  | { readonly show: 'missing' }
+  | { readonly show: 'closed' };
+
+/** The Join Link's preview as its visitor got it: what it opens, or that there is no Online Table there, or that it closed. */
+export type PreviewRead = JoinLinkPreview | 'not-found' | 'closed';
+
+export function tableAddress(routeMode: TableMode, tableSessionId: string, read: TableRead, preview?: PreviewRead): TableAddressOutcome | undefined {
+  if (read !== 'not-found') return read.mode === routeMode ? { show: 'table' } : { show: 'corrected', to: tablePath(read.mode, tableSessionId) };
+  if (!joinPreviewWanted(routeMode, read)) return { show: 'missing' };
+  if (preview === undefined) return undefined;
+  if (preview === 'not-found') return { show: 'missing' };
+  if (preview === 'closed') return { show: 'closed' };
+  return preview.passwordRequired ? { show: 'password-join-form', preview } : { show: 'join-form', preview };
+}
+
+/** Whether the address is an Online Table's Join Link to a visitor who is not at it: only then is its preview asked for. */
+export const joinPreviewWanted = (routeMode: TableMode, read: TableRead) => routeMode === 'online' && read === 'not-found';
+
+/**
+ * Where a refusal to create, join or return to an Online Table sends a Guest who is already at another one: their
+ * Current Table, and its format and stakes when their saved tables list it. Undefined for any other failure.
+ */
+export function currentTableRefusal(error: unknown, saved: readonly SavedTable[] | undefined): { readonly tableSessionId: string; readonly table?: string } | undefined {
+  if (!(error instanceof RequestFailure) || error.code !== 'current-table-elsewhere' || !error.currentTableId) return undefined;
+  const tableSessionId = error.currentTableId;
+  const listed = saved?.find(table => table.tableSessionId === tableSessionId);
+  return listed?.seatCount !== undefined && listed.stakes
+    ? { tableSessionId, table: formatAndStakes(listed.seatCount, listed.stakes.smallBlind, listed.stakes.bigBlind) } : { tableSessionId };
+}
+
+export type AnalysisTab ='live' | 'hand' | 'session';
+/** The analysis tab an address names; anything absent or invalid names none, and the current default applies. */
+export function analysisTabParam(value: unknown): AnalysisTab | undefined {
+  return value === 'live' || value === 'hand' || value === 'session' ? value : undefined;
+}
+/** The search a table route accepts: `analysis=live|hand|session`. */
+export function tableSearch(search: Record<string, unknown>): { analysis?: AnalysisTab } {
+  const analysis = analysisTabParam(search.analysis);
+  return analysis ? { analysis } : {};
+}
+
+const app = 'Poker Trainer';
+export type Page =
+  | { readonly page: 'list'; readonly mode: TableMode }
+  | { readonly page: 'table'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
+  | { readonly page: 'join'; readonly ownerName: string }
+  | { readonly page: 'missing-table' }
+  | { readonly page: 'closed-table' }
+  | { readonly page: 'not-found' };
+
+/** Each page's browser-tab title: a table goes by its format and stakes, so several open tables can be told apart. */
+export function pageTitle(page: Page): string {
+  switch (page.page) {
+    case 'list': return `${modeLabel(page.mode)} · ${app}`;
+    case 'table': return `${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
+    case 'join': return `Join ${page.ownerName}’s table · ${app}`;
+    case 'missing-table': return `Table not found · ${app}`;
+    case 'closed-table': return `Table closed · ${app}`;
+    case 'not-found': return `Page not found · ${app}`;
+  }
+}

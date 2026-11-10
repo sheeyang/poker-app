@@ -43,12 +43,11 @@ async function onlineTable(bots: string[] = ['Rex']) {
   const id = created.tableSessionId as string;
   const [annId, ...botIds] = created.bindings.map((binding: { participantId: string }) => binding.participantId) as string[];
   const view = async (cookie = ann): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + id, cookie)).json();
-  const token = (await view()).joinToken!;
   const t = {
-    id, ann, annId: annId!, botIds, token, view,
+    id, ann, annId: annId!, botIds, view,
     async join(name: string) {
       const cookie = await guest(name);
-      const joined = await (await post('/api/join-links/' + token + '/join', cookie, { requestId: randomUUID() })).json();
+      const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
     /** A request from a Guest, at the poker revision that Guest last saw. */
@@ -217,6 +216,30 @@ test('connection status is public and transient: it counts any of a Guest’s co
   expect((await t.view(ben.cookie)).connectedParticipantIds).toEqual([]);
   await t.connect(ben.cookie);
   await expect.poll(async () => (await t.view()).connectedParticipantIds).toEqual([ben.participantId]);
+});
+
+test('a Guest looking at another table stays connected to their Current Table and dealt in: one connection follows both, and dropping the other changes nothing', async () => {
+  const t = await onlineTable();
+  const live = await t.connect();
+  const practice = await (await post('/api/table-sessions', t.ann, { requestId: randomUUID(), configuration: stakes, bots: [{ name: 'Bot 1', playingStrategy: baselinePlayingStrategy }] })).json();
+  /** The same connection subscribes to, or drops, another table, as the app does when its Guest opens another page. */
+  async function control(type: 'subscribe-table' | 'unsubscribe-table') {
+    const requestId = randomUUID();
+    live.socket.send(JSON.stringify({ type, requestId, tableSessionId: practice.tableSessionId }));
+    await expect.poll(() => live.messages.find(message => message.type === 'table-subscription-result' && message.requestId === requestId)).toMatchObject({ status: type === 'subscribe-table' ? 'subscribed' : 'unsubscribed' });
+  }
+  await control('subscribe-table');
+  expect((await t.view()).connectedParticipantIds).toEqual([t.annId]);
+  await t.seat(t.ann, t.annId, 1); await t.seat(t.ann, t.botIds[0]!, 2);
+  await dealt(t);
+  expect(participant(await t.view(), t.annId)).toMatchObject({ inHand: true, sittingOut: false });
+  // Both tables' updates reach the one connection.
+  await expect.poll(() => updates(live).some(update => update.tableSessionId === practice.tableSessionId)).toBe(true);
+  await expect.poll(() => updates(live).at(-1)?.view.state.handId).toBe('hand-1');
+  await control('unsubscribe-table');
+  expect((await t.view()).connectedParticipantIds).toEqual([t.annId]);
+  await act(t, annOnly(t), { type: 'fold' });
+  expect((await t.view()).view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
 });
 
 test('every Online Table enforces its Action Time Limit: a missed deadline plays the Timeout Action, later missed decisions in the Hand time out too, the human is sat out after the Hand, and resuming is explicit', async () => {

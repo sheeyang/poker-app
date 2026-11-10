@@ -131,3 +131,47 @@ test('a version-1 table without its Trainer configuration fails restoration inst
   const stranger = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!;
   expect((await get('/api/table-sessions/' + t.id, stranger)).status).toBe(404);
 });
+
+/** Returns the database to the shape written before table loading and closing: no such columns, and Removal still a membership status. */
+async function revertToPreAddressesSchema() {
+  await administration.query(`SET search_path = "${schema}"`);
+  // Dropping the columns drops the partial indexes on them.
+  await administration.query('ALTER TABLE table_sessions DROP COLUMN load_at_startup, DROP COLUMN last_committed_at, DROP COLUMN closed');
+  await administration.query(`ALTER TABLE table_memberships DROP CONSTRAINT table_memberships_status, ADD CONSTRAINT table_memberships_status_check CHECK (status IN ('joined', 'left', 'removed'))`);
+  await administration.query('RESET search_path');
+}
+
+test('a database written before table loading and closing upgrades in place, without a reset', async () => {
+  await start();
+  const guest = async (name: string) => { const cookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie, name); return cookie; };
+  const ann = await guest('Ann'), ben = await guest('Ben');
+  const id = (await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json()).tableSessionId as string;
+  const benId = (await (await post('/api/table-sessions/' + id + '/join-table', ben, { requestId: randomUUID() })).json()).participantId as string;
+  const revision = (await (await get('/api/table-sessions/' + id, ben)).json()).pokerRevision;
+  expect((await post('/api/table-sessions/' + id + '/leave-table', ben, { requestId: randomUUID(), expectedPokerRevision: revision, participantId: benId })).status).toBe(200);
+  await stop();
+  await revertToPreAddressesSchema();
+  // Removal used to be recorded as its own membership status.
+  await administration.query(`UPDATE "${schema}".table_memberships SET status = 'removed' WHERE table_session_id = $1 AND participant_id = $2`, [id, benId]);
+  const upgradedAt = Date.now();
+  await start();
+
+  const columns = await administration.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'table_sessions' ORDER BY column_name`, [schema]);
+  expect(columns.rows.map(row => row.column_name)).toEqual(expect.arrayContaining(['closed', 'last_committed_at', 'load_at_startup']));
+  const indexes = await administration.query(`SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = 'table_sessions'`, [schema]);
+  expect(indexes.rows.map(row => row.indexname)).toEqual(expect.arrayContaining(['table_sessions_open_online', 'table_sessions_load_at_startup']));
+  // An existing table is open, and counts as changed when the database was upgraded: it is not closed as idle at once.
+  const [row] = (await administration.query(`SELECT closed, last_committed_at, load_at_startup FROM "${schema}".table_sessions WHERE id = $1`, [id])).rows;
+  expect(row).toMatchObject({ closed: false, load_at_startup: false });
+  expect(Number(row.last_committed_at)).toBeGreaterThanOrEqual(upgradedAt);
+  // A Removal is now a Leave Table, and the status is gone.
+  expect((await administration.query(`SELECT status FROM "${schema}".table_memberships WHERE table_session_id = $1 AND participant_id = $2`, [id, benId])).rows).toEqual([{ status: 'left' }]);
+  await expect(administration.query(`UPDATE "${schema}".table_memberships SET status = 'removed' WHERE table_session_id = $1`, [id])).rejects.toThrow(/table_memberships_status/);
+  expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ tableSessionId: id, mode: 'online', left: true }]);
+  expect((await get('/api/table-sessions/' + id, ann)).status).toBe(200);
+
+  // Later startups find nothing to upgrade.
+  await stop();
+  await start();
+  expect((await administration.query(`SELECT last_committed_at FROM "${schema}".table_sessions WHERE id = $1`, [id])).rows[0].last_committed_at).toBe(row.last_committed_at);
+});

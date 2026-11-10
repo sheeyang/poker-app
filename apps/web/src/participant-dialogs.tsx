@@ -2,6 +2,8 @@ import { useId, useState } from 'react';
 import { defaultPlayingStrategy, type ObservableTableSession, type StrategyDescriptor } from '@poker/contracts';
 import { Dialog } from './dialog.js';
 import { CommandFeedback } from './controls.js';
+import { Icon } from './icons.js';
+import { leaveWarning } from './ownership.js';
 import { useCommandDialog } from './command-dialog.js';
 import { nextBotName, openSeats } from './owner-controls.js';
 import { participantActions, stackBounds } from './participant-actions.js';
@@ -27,6 +29,9 @@ export function ParticipantDialog({ table, command, handOpen, close, participant
   const allowed = !!action && action.timing !== 'unavailable';
   const target = Number(amount);
   const valid = amount.trim() !== '' && Number.isSafeInteger(target) && target >= bounds.minimum && target <= bounds.maximum;
+  // The owner is told who takes the table over, or that it closes, wherever they leave from: the table or the banner.
+  const warning = task === 'leave' && action && allowed ? leaveWarning(table, action.timing === 'after-hand' ? 'after-hand' : 'now') : undefined;
+  const closes = warning?.kind === 'closes';
   const title = task === 'stack' ? `${rebuy ? 'Rebuy' : 'Top up'}${own ? '' : ` ${name}`}` : task === 'strategy' ? `${name} · Playing Strategy` : task === 'leave' ? 'Leave table?' : `Remove ${name}?`;
   const metadata = () => ({ requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId });
   const send = () => {
@@ -42,11 +47,16 @@ export function ParticipantDialog({ table, command, handOpen, close, participant
       <button className="primary" disabled={busy || !allowed || !valid}>{command.sending ? 'Confirming…' : rebuy ? 'Rebuy' : 'Top up'}<span>{valid ? `${chips(target)} chips` : ''}</span></button>
     </form> : task === 'strategy' ? <form className="seat-form" onSubmit={event => { event.preventDefault(); send(); }}><label>Playing Strategy<StrategySelect value={strategy} disabled={busy || !allowed} onChange={setStrategy} /></label><button className="primary" data-autofocus disabled={busy || !allowed}>Apply strategy</button></form> : <>
       <p className="muted">{task === 'leave'
-        ? `${action?.timing === 'after-hand' ? 'You finish this hand, then stand up and leave.' : `You stand up and cash out ${chips(participant?.stack ?? 0)} chips.`} You can return from your saved tables or the Join Link.`
+        ? `${action?.timing === 'after-hand' ? 'You finish this hand, then stand up and leave.' : participant?.seat == null ? 'You leave the table now.' : `You stand up and cash out ${chips(participant.stack)} chips.`}${closes ? '' : ' You can return from your saved tables or the Join Link.'}`
         : task === 'remove-participant'
-          ? `${name} can’t join this table again, even with a new Join Link. ${action?.timing === 'after-hand' ? 'They finish this hand, then leave.' : 'They stand up, cash out and leave now.'}`
+          ? `${action?.timing === 'after-hand' ? `${name} finishes this hand, then leaves.` : `${name} stands up, cashes out and leaves now.`} They can join again through the Join Link.`
           : `${name} ${action?.timing === 'after-hand' ? 'finishes this hand, then leaves' : 'stands up, cashes out and leaves'}. Its name stays taken.`}</p>
-      <div className="button-row"><button className="leave-button" disabled={busy || !allowed} onClick={send}>{command.sending ? 'Confirming…' : task === 'leave' ? 'Leave table' : `Remove ${name}`}</button><button data-autofocus disabled={busy} onClick={close}>Cancel</button></div>
+      {warning && <div className={`leave-warning is-${warning.kind}`} role="note">
+        <Icon name={closes ? 'info' : 'exit'} size={18} />
+        <strong>{warning.heading}</strong>
+        <p>{warning.detail}</p>
+      </div>}
+      <div className="button-row"><button className={`leave-button${closes ? ' is-closing' : ''}`} disabled={busy || !allowed} onClick={send}>{command.sending ? 'Confirming…' : warning ? warning.confirm : task === 'leave' ? 'Leave table' : `Remove ${name}`}</button><button data-autofocus disabled={busy} onClick={close}>Cancel</button></div>
     </>}
   </div></Dialog>;
 }

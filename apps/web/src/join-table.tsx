@@ -1,112 +1,159 @@
-import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, RequestFailure } from '@poker/client';
-import { onlineTableCapacity, type ObservableTableSession } from '@poker/contracts';
-import { CommandFeedback } from './controls.js';
+import { onlineTableCapacity, type JoinLinkPreview, type ObservableTableSession, type OpenJoinLinkPreview } from '@poker/contracts';
 import { Dialog } from './dialog.js';
 import { Icon } from './icons.js';
-import { joinLink } from './join-link.js';
-import { useSession, type Command } from './session.js';
-import { chips } from './table-model.js';
+import { FeltPreview, type SeatMark } from './felt.js';
+import { Skeleton } from './loading-skeleton.js';
+import { usePageTitle, useShell } from './app-shell.js';
+import { currentTableRefusal, joinLink } from './table-address.js';
+import { CurrentTableRefusal } from './current-table-refusal.js';
+import { chips, tableFormat } from './table-model.js';
+import { joinProblem, joinRequest, type JoinProblemField } from './join-form.js';
+import { PasswordField } from './password-input.js';
 
-const hint = 'Up to 20 letters, digits, spaces or basic punctuation. It is fixed for this table once you join.';
-
-/** The page a Join Link opens: confirm a display name, join unseated, then land at the table. */
-export function JoinTable({ token }: { token: string }) {
-  const queryClient = useQueryClient(), navigate = useNavigate(), select = useSession(s => s.select);
-  const identity = useQuery({ queryKey: ['identity'], queryFn: api.establishIdentity });
-  const preview = useQuery({ queryKey: ['join-link', token], queryFn: ({ signal }) => api.previewJoinLink(token, signal), enabled: identity.isSuccess });
+/**
+ * The join form an Online Table's address shows a Guest who is not at the table: the table as its Join Link
+ * describes it on the left, and on the right their name, then Join. A Guest who left returns as the same
+ * Participant, under the name they had. Joining keeps the address: it becomes their table.
+ *
+ * Behind a Table Password the left pane shows only whose table it is, and the form asks for the password with the
+ * name, as one step. A wrong password keeps everything typed, explains itself under the password, and lets the Guest
+ * try again. The password lives only in this form's memory.
+ */
+export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId: string; preview: JoinLinkPreview; joined: () => void }) {
+  const queryClient = useQueryClient();
+  const { identity } = useShell();
+  usePageTitle({ page: 'join', ownerName: preview.ownerName });
   const [typed, setTyped] = useState<string>();
+  const [tablePassword, setTablePassword] = useState('');
   const stored = identity.data?.displayName ?? '';
   const value = typed ?? stored;
-  const autoOpened = useRef<string | null>(null);
+  const locked = !!preview.passwordRequired;
+  const returning = preview.passwordRequired ? undefined : preview.returningAs;
+  const alreadyJoined = !preview.passwordRequired && preview.alreadyJoined;
+  // A Guest already at the table, or coming back to it, keeps the name they had there.
+  const named = !returning && !alreadyJoined;
+  const nameField = useRef<HTMLInputElement>(null), passwordField = useRef<HTMLInputElement>(null);
   const join = useMutation({
     mutationFn: async () => {
       // The name is the Guest's own; saving it first lets the join see it. Each attempt is a fresh request.
-      if (!returning && !preview.data?.alreadyJoined && value.trim() !== stored) {
+      if (named && value.trim() !== stored) {
         const saved = await api.setDisplayName(value.trim());
         queryClient.setQueryData(['identity'], { ok: true, displayName: saved.displayName });
       }
-      return api.joinTable(token, { requestId: crypto.randomUUID() });
+      return api.joinTable(tableSessionId, joinRequest(crypto.randomUUID(), { passwordRequired: locked, tablePassword }));
     },
-    onSuccess: async result => {
-      select(result.tableSessionId);
-      await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
-      await navigate({ to: '/', replace: true });
+    onSuccess: joined,
+    onError: error => {
+      if (!(error instanceof RequestFailure)) return;
+      // The owner set a password since this link was opened, or the table closed: ask the link again, which shows the form or that it closed.
+      if ((error.code === 'table-password-required' && !locked) || error.code === 'table-closed') void queryClient.invalidateQueries({ queryKey: ['join-preview', tableSessionId] });
+      // Ready to retype: the wrong password is selected, the name is untouched.
+      if (error.code === 'wrong-table-password') requestAnimationFrame(() => { passwordField.current?.focus(); passwordField.current?.select(); });
     },
   });
-  const returning = !!preview.data?.returningAs;
-  const failure = join.error instanceof RequestFailure ? join.error.message : join.error ? 'Couldn’t join this table. Check your connection and try again.' : undefined;
-  const data = preview.data;
-  useEffect(() => {
-    if (data?.alreadyJoined && autoOpened.current !== token) { autoOpened.current = token; join.mutate(); }
-  }, [data?.alreadyJoined, token, join.mutate]);
-  // A replaced link and a removal are final: trying again changes nothing.
-  const dead = preview.error instanceof RequestFailure && ['invalid-join-link', 'guest-removed', 'online-play-disabled'].includes(preview.error.code);
-  const removed = preview.error instanceof RequestFailure && preview.error.code === 'guest-removed';
-  const offline = preview.error instanceof RequestFailure && preview.error.code === 'online-play-disabled';
+  // At another Online Table already: what to do about it is shown on its own, with a way to that table.
+  const problem = join.error && !currentTableRefusal(join.error, undefined) ? joinProblem(join.error instanceof RequestFailure ? { code: join.error.code, message: join.error.message } : undefined, preview.ownerName) : undefined;
+  const fieldProblem = (field: JoinProblemField) => problem?.field === field ? problem.message : undefined;
+  const nameProblem = fieldProblem('displayName'), passwordProblem = fieldProblem('tablePassword'), formProblem = fieldProblem('form');
+  const edited = () => { if (join.error) join.reset(); };
+  const address = joinLink(window.location.host, tableSessionId);
   return <main id="main-table" className="join-page">
     <div className="join-card">
-      <span className="brand-mark"><Icon name="spade" size={23} /></span>
-      {(identity.isPending || preview.isPending && identity.isSuccess) && <p className="muted" role="status">Opening your invitation…</p>}
-      {identity.isError && <div className="notice-error" role="alert"><p>Couldn’t connect to the poker server.</p><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
-      {preview.isError && (dead
-        ? <><h1>{removed ? 'You can’t join this table.' : offline ? 'Online tables are in beta and turned off.' : 'This link doesn’t work.'}</h1><p className="notice-error" role="alert">{preview.error.message}</p><button className="primary" onClick={() => void navigate({ to: '/' })}>Go to my tables</button></>
-        : <div className="notice-error" role="alert"><p>{preview.error instanceof RequestFailure ? preview.error.message : 'Couldn’t open this table.'}</p><button onClick={() => void preview.refetch()}>Try again</button></div>)}
-      {data?.alreadyJoined ? <div className="dialog-stack"><p role="status" className="muted">Opening your table…</p>{failure && <div className="notice-error" role="alert"><p>{failure}</p><button className="primary" disabled={join.isPending} onClick={() => join.mutate()}>Try opening again</button></div>}</div> : data && <>
-        <h1>{data.alreadyJoined ? 'You’re already at this table.' : returning ? `Return to ${data.ownerName}’s table` : `Join ${data.ownerName}’s table`}</h1>
-        <dl className="join-facts">
-          <div><dt>Blinds</dt><dd>{chips(data.configuration.smallBlind)} / {chips(data.configuration.bigBlind)}</dd></div>
-          <div><dt>Seats</dt><dd>{data.configuration.seatCount}</dd></div>
-          {data.options.actionTimeLimitSeconds && <div><dt>Time to act</dt><dd>{data.options.actionTimeLimitSeconds}s</dd></div>}
-          <div><dt>Buy-in</dt><dd>{chips(data.configuration.minimumBuyIn)}–{chips(data.configuration.maximumBuyIn)}</dd></div>
-        </dl>
-        {/* Places count everyone at the table, seated or watching, Bots included; only nearness to the limit matters to a newcomer. */}
-        {!data.alreadyJoined && !returning && onlineTableCapacity - data.placesTaken <= 3 && <p className="muted">{onlineTableCapacity - data.placesTaken <= 0 ? 'This table is full.' : `Only ${onlineTableCapacity - data.placesTaken} ${onlineTableCapacity - data.placesTaken === 1 ? 'place is' : 'places are'} left at this table.`}</p>}
-        <form onSubmit={e => { e.preventDefault(); if (!join.isPending && (returning || value.trim())) join.mutate(); }}>
-          {data.alreadyJoined ? <p className="muted">You keep your seat, stack and history.</p> : returning ? <p className="muted">You’ll come back as {data.returningAs}, with your history from before. You stand up when you leave, so choose a seat again when you’re ready.</p> : <label>Your name at this table<input name="displayName" value={value} maxLength={40} autoComplete="nickname" required aria-describedby="join-name-hint" aria-invalid={!!failure} onChange={e => { setTyped(e.target.value); if (join.error) join.reset(); }} /><small id="join-name-hint" className="muted">{hint}</small></label>}
-          {failure && <p className="notice-error" role="alert">{failure}</p>}
-          <button className="primary" disabled={join.isPending || !returning && !value.trim()}>{join.isPending ? 'Joining…' : data.alreadyJoined ? 'Open table' : returning ? 'Return to table' : 'Join table'}<Icon name="arrow" size={19} /></button>
-        </form>
-        {!data.alreadyJoined && !returning && <p className="muted">You’ll watch the table first and can take an open seat whenever you’re ready.</p>}
-      </>}
+      <section className="join-table" aria-labelledby="join-title">
+        <p className="join-address"><Icon name="link" size={15} /><span>{address}</span></p>
+        <h1 id="join-title">{preview.ownerName}’s table</h1>
+        {preview.passwordRequired
+          ? <>
+            <FeltPreview seats={[]} label="A table protected by a Table Password"><span className="felt-locked"><Icon name="lock" size={15} />Password required</span></FeltPreview>
+            <p className="join-protected">Protected by a Table Password. The table’s details appear once you join.</p>
+          </>
+          : <OpenTable preview={preview} />}
+      </section>
+      <form className="join-form" aria-labelledby="join-form-title" noValidate onSubmit={e => {
+        e.preventDefault();
+        if (join.isPending) return;
+        if (named && !value.trim()) { nameField.current?.focus(); return; }
+        if (locked && !tablePassword) { passwordField.current?.focus(); return; }
+        join.mutate();
+      }}>
+        <h2 id="join-form-title">{alreadyJoined ? 'You’re at this table' : returning ? `Return as ${returning}` : 'Join as a Guest'}</h2>
+        {named
+          ? <label>Your name at this table<input ref={nameField} name="displayName" value={value} maxLength={20} autoComplete="nickname" required aria-describedby={nameProblem ? 'join-name-problem' : 'join-name-hint'} aria-invalid={!!nameProblem} onChange={e => { setTyped(e.target.value); edited(); }} />
+            {nameProblem ? <small id="join-name-problem" className="field-problem" role="alert">{nameProblem}</small> : <small id="join-name-hint" className="muted">Fixed for this table once you join.</small>}</label>
+          : <p className="muted">{alreadyJoined ? 'You keep your seat, stack and history.' : `You come back as ${returning}, with your history from before. Take a seat again when you’re ready.`}</p>}
+        {locked && <PasswordField ref={passwordField} id="join-table-password" label="Table password" name="tablePassword" value={tablePassword} autoComplete="current-password" required aria-describedby={passwordProblem ? 'join-password-problem' : undefined} aria-invalid={!!passwordProblem} onChange={e => { setTablePassword(e.target.value); edited(); }}
+          note={passwordProblem && <small id="join-password-problem" className="field-problem" role="alert">{passwordProblem}</small>} />}
+        {!preview.passwordRequired && named && <RoomNote placesTaken={preview.placesTaken} />}
+        {formProblem && <p className="notice-error" role="alert">{formProblem}</p>}
+        <CurrentTableRefusal error={join.error} />
+        <button type="submit" className="primary start-practice" disabled={join.isPending}>{join.isPending ? 'Joining…' : alreadyJoined ? 'Open table' : returning ? 'Return to table' : 'Join table'}<Icon name="arrow" size={19} /></button>
+        {named && <p className="muted join-note">You’ll watch first, then take an open seat when you’re ready.</p>}
+      </form>
+    </div>
+  </main>;
+}
+
+/** The table a Join Link without a Table Password describes: its stakes on the felt, then its buy-in and places. */
+function OpenTable({ preview }: { preview: OpenJoinLinkPreview }) {
+  const { configuration, options } = preview;
+  const seats = Array.from({ length: configuration.seatCount }, (): SeatMark => 'open');
+  const format = tableFormat(configuration.seatCount);
+  const timed = options.actionTimeLimitSeconds ? ` · ${options.actionTimeLimitSeconds}s to act` : '';
+  return <>
+    <FeltPreview seats={seats} label={`${format} table with ${configuration.seatCount} seats, blinds ${chips(configuration.smallBlind)} / ${chips(configuration.bigBlind)}${timed}`}>
+      <strong className="numeric">{chips(configuration.smallBlind)} / {chips(configuration.bigBlind)}</strong>
+      <span>{format}{timed}</span>
+    </FeltPreview>
+    <dl className="join-facts">
+      <div><dt>Buy-in</dt><dd>{chips(configuration.minimumBuyIn)}–{chips(configuration.maximumBuyIn)}</dd></div>
+      {configuration.ante > 0 && <div><dt>Ante</dt><dd>{chips(configuration.ante)}</dd></div>}
+      <div><dt>Places taken</dt><dd>{preview.placesTaken} of {onlineTableCapacity}</dd></div>
+    </dl>
+  </>;
+}
+
+/** Places count everyone at the table, seated or watching, Bots included; only nearness to the limit matters to a newcomer. */
+function RoomNote({ placesTaken }: { placesTaken: number }) {
+  const left = onlineTableCapacity - placesTaken;
+  if (left > 3) return null;
+  return <p className="join-room">{left <= 0 ? 'This table is full. Ask the Table Owner to make room.' : `Only ${left} ${left === 1 ? 'place is' : 'places are'} left at this table.`}</p>;
+}
+
+/** The join form's shape while its Join Link is read: no fabricated table, only where its parts will be. */
+export function JoinTableSkeleton() {
+  return <main id="main-table" className="join-page">
+    <div className="join-card" role="status" aria-label="Opening the Join Link">
+      <div className="join-table" aria-hidden="true"><Skeleton className="skeleton-join-address" /><Skeleton className="skeleton-join-title" /><FeltPreview seats={[]} label="" /></div>
+      <div className="join-form" aria-hidden="true"><Skeleton className="skeleton-join-heading" /><Skeleton className="skeleton-join-field" /><Skeleton className="skeleton-join-button" /></div>
     </div>
   </main>;
 }
 
 /**
- * The owner's copy of the Join Link, with a manual fallback where the clipboard is unavailable, and the way to
- * replace it: the old link stops working at once, and everyone who has already joined stays.
+ * The table's Join Link, for any Participant to pass on: its own address, with a manual fallback where the
+ * clipboard is unavailable.
  */
-export function JoinLinkDialog({ table, command, close }: { table: ObservableTableSession; command: Command; close: () => void }) {
-  const token = table.joinToken ?? '';
-  const link = joinLink(window.location.origin, token);
+export function JoinLinkDialog({ table, close }: { table: ObservableTableSession; close: () => void }) {
+  const link = joinLink(window.location.origin, table.tableSessionId);
   const field = useRef<HTMLInputElement>(null);
   const [copy, setCopy] = useState<'idle' | 'copied' | 'manual'>('idle');
-  const [replacing, setReplacing] = useState(false);
-  // A replaced link is a new link to copy.
-  useEffect(() => { setCopy('idle'); setReplacing(false); }, [token]);
   async function copyLink() {
     try { await navigator.clipboard.writeText(link); setCopy('copied'); }
     catch { field.current?.select(); setCopy('manual'); }
   }
   return <Dialog title="Join link" close={close}>
     <div className="dialog-stack">
-      <CommandFeedback command={command} />
-      <p className="muted">Anyone with this link can join your table, watch, and take a seat. Share it only with the people you want to play with.</p>
+      <p className="muted">{table.options.hasTablePassword
+        ? 'This table’s address is its Join Link. Anyone you send it to can join with the Table Password, then watch and take an open seat.'
+        : 'This table’s address is its Join Link. Anyone you send it to can join, watch, and take an open seat.'}</p>
       <div className="link-field">
         <input aria-label="Join link" ref={field} readOnly value={link} onFocus={e => e.target.select()} />
         <button className="primary" data-autofocus onClick={() => void copyLink()}>{copy === 'copied' ? <><Icon name="check" size={18} />Copied</> : <><Icon name="link" size={18} />Copy link</>}</button>
         <p className="muted link-status" role="status">{copy === 'manual' ? 'Copying isn’t available here. The link is selected: copy it yourself.' : copy === 'copied' ? 'Copied. Paste it wherever your friends will see it.' : ''}</p>
       </div>
-      <section className="replace-link"><h3>Link leaked?</h3>
-        {replacing
-          ? <><p className="muted">The current link stops working right away. Players who already joined stay at the table and don’t need the new link. You’ll have a new link to share.</p>
-            <div className="button-row"><button className="leave-button" disabled={command.busy} onClick={() => { setReplacing(false); command.submit({ kind: 'replace-link', tableId: table.tableSessionId, body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision } }); }}>Replace link</button><button onClick={() => setReplacing(false)}>Keep current link</button></div></>
-          : <><p className="muted">Replace the link to shut out anyone who shouldn’t have it. Players who already joined are not affected.</p>
-            <div className="button-row"><button className="leave-button" disabled={command.busy} onClick={() => setReplacing(true)}>Replace link…</button></div></>}
-      </section>
     </div>
   </Dialog>;
 }

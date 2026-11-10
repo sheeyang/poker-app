@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession, type PresentationPhase, type TableSchedule } from '@poker/contracts';
-import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextHandCountdown, nextPresentationChange, payoutEnded, presentTable, recordClockSample } from '../src/presentation.js';
+import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, handInProgress, nextHandCountdown, nextPresentationChange, payoutEnded, presentTable, recordClockSample } from '../src/presentation.js';
 
 const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500 });
 const street = (name: 'flop' | 'turn' | 'river', startsAt: number): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
@@ -215,5 +215,19 @@ describe('the Next-Hand Countdown', () => {
     const paused = table({ ...completed, payouts: [{ participantId: 'you', amount: 30 }] }, { phases: [deal(0), payout(4_000), pause(6_000)], actionWindow: null });
     expect(presentTable(paused, 7_000)).toBe(paused);
     expect(nextPresentationChange(paused, 6_500)).toBe(9_000);
+  });
+});
+
+describe('a Hand in progress, as the table, the Current Table banner and the saved-tables ledger all say it', () => {
+  const completed = { status: 'completed-hand' as const, actorId: null, decisionId: null, legalActions: [] };
+  it('lasts while the Hand is played and until its payout phase ends', () => {
+    expect(handInProgress(table({}, { phases: [deal(0)], actionWindow: null }), 1_000)).toBe(true);
+    const paid = table(completed, { phases: [deal(0), payout(4_000)], actionWindow: null });
+    expect(handInProgress(paid, 5_999)).toBe(true);
+    expect(handInProgress(paid, 6_000)).toBe(false);
+  });
+  it('is over between Hands, and when the Hand ended under an earlier schedule', () => {
+    expect(handInProgress(table({ status: 'between-hands', handId: undefined, actorId: null, decisionId: null, legalActions: [] }, { phases: [], actionWindow: null }), 0)).toBe(false);
+    expect(handInProgress(table(completed, { phases: [], actionWindow: null }), 0)).toBe(false);
   });
 });

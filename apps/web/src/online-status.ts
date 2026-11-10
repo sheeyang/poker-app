@@ -104,7 +104,7 @@ export function waitingDetail(reason: WaitingReason, owner: boolean, canAddBot =
       const absent = state(reason.reconnecting, 'disconnected') + state(reason.sittingOut, 'sitting out');
       const invite = owner ? canAddBot ? ' Share the join link, or add a Bot.' : ' Manage participants directly from the table.' : '';
       // Someone seated could make up the numbers by coming back; otherwise a newcomer has to sit down.
-      return absent ? `${absent}Hands start once ${others} ${one ? 'is' : 'are'} ready.${invite}` : owner ? `Hands start once ${others} ${one ? 'is' : 'are'} seated.${invite}` : `Hands start once ${others} ${one ? 'takes' : 'take'} a seat.`;
+      return absent ? `${absent}Hands start once ${others} ${one ? 'is' : 'are'} ready.${invite}` : owner ? `Hands start once ${others} ${one ? 'is' : 'are'} seated.${invite}` : `Hands start once ${others} ${one ? 'takes' : 'take'} a seat. Share the join link to invite someone.`;
     }
   }
 }

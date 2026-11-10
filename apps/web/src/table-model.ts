@@ -3,6 +3,14 @@ import type { ConcreteAction, LegalAction, ObservableCashGameState, ObservableTa
 export const chips = (value: number) => new Intl.NumberFormat('en').format(value);
 export const actionLabel = (action: ConcreteAction) => action.type === 'bet' ? 'Bet-to ' + chips(action.betTo) : action.type === 'raise' ? 'Raise-to ' + chips(action.raiseTo) : action.type[0]!.toUpperCase() + action.type.slice(1);
 export const potTotal = (state: ObservableCashGameState) => state.status === 'active-hand' ? state.participants.reduce((total, p) => total + (p.contribution ?? 0), 0) : state.pots.reduce((total, p) => total + p.amount, 0);
+/** A table's format by its seat count, as players name it. */
+export const tableFormat = (seatCount: number) => seatCount === 2 ? 'Heads-up' : seatCount === 6 ? '6-max' : seatCount === 9 ? 'Full ring' : `${seatCount}-player`;
+/** The game a table plays by its format: "6-max Hold’em". */
+export const gameLabel = (seatCount: number) => `${tableFormat(seatCount)} Hold’em`;
+/** A table's blinds: "10 / 20". */
+export const blindsLabel = (smallBlind: number, bigBlind: number) => `${chips(smallBlind)} / ${chips(bigBlind)}`;
+/** A table by its format and stakes, "6-max Hold’em · 10 / 20": the one way the app names a table by what it plays. */
+export const formatAndStakes = (seatCount: number, smallBlind: number, bigBlind: number) => `${gameLabel(seatCount)} · ${blindsLabel(smallBlind, bigBlind)}`;
 export const modeLabel = (mode: TableMode) => mode === 'online' ? 'Online' : 'Practice';
 /** The viewer is "You"; everyone else appears under the name they joined with. */
 export const playerName = (table: ObservableTableSession, binding: ParticipantBinding) => binding.participantId === table.viewerParticipantId ? 'You' : binding.name;

@@ -123,6 +123,12 @@ export interface TableOptions {
   /** Whether Participants may use Live Analysis at this table. */
   readonly allowLiveAnalysis: boolean;
 }
+/** The table options as Participants see them: the options, and whether the table has a Table Password, never the password. */
+export interface ObservableTableOptions extends TableOptions {
+  readonly hasTablePassword?: true;
+}
+/** A Table Password's length in characters. It is case-sensitive and never trimmed. */
+export const tablePasswordLength = { minimum: 4, maximum: 64 } as const;
 /** Online defaults when creation names no option. */
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
 /**
@@ -130,14 +136,6 @@ export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
  * Table Owner's own place, which is held after they leave so that they can always return.
  */
 export const onlineTableCapacity = 20;
-/** A Guest cannot create a table while they own this many tables that each have a seated human. */
-export const seatedTableLimit = 10;
-/** What this server offers, read by clients before showing optional capabilities. */
-export interface ServerFeatures {
-  readonly ok: true;
-  /** Whether Online Tables can be created and joined. When off, creating or joining one is refused with `online-play-disabled`. */
-  readonly onlinePlay: boolean;
-}
 export interface CreateTableSessionRequest {
   readonly requestId: string;
   /** Fixed for the table's life. Defaults to a Practice Table. */
@@ -145,6 +143,8 @@ export interface CreateTableSessionRequest {
   readonly configuration?: Partial<ObservableGameConfiguration>;
   readonly options?: Partial<TableOptions>;
   readonly bots?: readonly { readonly name: string; readonly playingStrategy: StrategyDescriptor }[];
+  /** An Online Table's optional Table Password. It is never part of the creation's fingerprint or outcome. */
+  readonly tablePassword?: string;
 }
 export interface CreationAcknowledgement {
   readonly ok: true;
@@ -153,7 +153,11 @@ export interface CreationAcknowledgement {
 }
 export interface ApplicationRejection {
   readonly ok: false;
-  readonly rejection: { readonly code: string; readonly message: string; readonly field?: string };
+  readonly rejection: {
+    readonly code: string; readonly message: string; readonly field?: string;
+    /** With `current-table-elsewhere`: the Guest's Current Table, which they must leave first. */
+    readonly currentTableId?: TableSessionId;
+  };
 }
 export type CreationOutcome = CreationAcknowledgement | ApplicationRejection;
 export interface PokerMutationMetadata {
@@ -212,15 +216,28 @@ export interface MutationAcknowledgement {
   readonly afterHand?: true;
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
-/** Joining carries a request ID but no expected revision: the joiner has not seen the table. */
-export interface JoinTableRequest { readonly requestId: string }
+/**
+ * Joining carries a request ID but no expected revision: the joiner has not seen the table. A Guest who is not at a
+ * table with a Table Password gives it too; it is never remembered with the request.
+ */
+export interface JoinTableRequest { readonly requestId: string; readonly tablePassword?: string }
 /** The Guest's Participant at the table: the same one every time they join. */
 export interface JoinAcknowledgement extends MutationAcknowledgement { readonly participantId: ParticipantId }
 export type JoinOutcome = JoinAcknowledgement | ApplicationRejection;
-/** What a Join Link shows before joining. Only a holder of the link can read it. */
-export interface JoinLinkPreview {
+/**
+ * What an Online Table's Join Link, its own address, shows a Guest before they join. A table with a Table Password
+ * shows a Guest who is not at it only its owner's name (`ProtectedJoinLinkPreview`).
+ */
+export type JoinLinkPreview = OpenJoinLinkPreview | ProtectedJoinLinkPreview;
+export interface ProtectedJoinLinkPreview {
   readonly ok: true;
   readonly ownerName: string;
+  readonly passwordRequired: true;
+}
+export interface OpenJoinLinkPreview {
+  readonly ok: true;
+  readonly ownerName: string;
+  readonly passwordRequired?: undefined;
   readonly configuration: ObservableGameConfiguration;
   readonly options: TableOptions;
   /** How many of the table's `onlineTableCapacity` places are taken (see there). Joining is refused once all are. */
@@ -256,27 +273,19 @@ export interface InspectionCapabilities {
 /** Fixed when a Table Session is created. */
 export type TableMode = 'practice' | 'online';
 /**
- * One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left.
- * `left` marks an owned table the Guest has left; opening it rejoins them without the Join Link.
- * The table's size, stakes and play state are public facts, so even a Guest who left sees them. They are absent
- * only while the table cannot be restored.
+ * One entry of the saved-tables list: every table the Guest has a membership at, including those they left. It is built
+ * from stored rows (mode, format, blinds, membership) and never loads a table, so it says nothing of play: how a Hand
+ * stands and the Guest's stack come only from the Current Table's live copy. The size and stakes are absent only while
+ * the stored table cannot be read.
  */
 export interface SavedTable {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
   readonly left?: true;
+  /** A Closed Table: nobody can open, join or act at it. Its memberships have ended, so it is `left` too. */
+  readonly closed?: true;
   readonly seatCount?: number;
   readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
-  readonly playState?: SavedTablePlayState;
-}
-/** How play stands at a saved table, as everyone there sees it. */
-export interface SavedTablePlayState {
-  readonly status: ObservableCashGameState['status'];
-  /** The Hands completed at the table, whoever played them. */
-  readonly completedHands: number;
-  readonly seatedParticipants: number;
-  /** The Guest's own stack, while their Participant has a Seat. */
-  readonly viewerStack?: ChipAmount;
 }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
@@ -365,16 +374,16 @@ export interface TableSchedule {
   readonly actionWindow: ActionWindow | null;
   readonly nextHandCountdown?: NextHandCountdown;
 }
+/** Who becomes the Table Owner when the owner leaves, or that the table closes with no other human at it. */
+export type OwnerSuccession = { readonly successorParticipantId: ParticipantId } | { readonly closes: true };
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
-  readonly options: TableOptions;
+  readonly options: ObservableTableOptions;
   /** The Participant this view was projected for: the viewing Guest's own. */
   readonly viewerParticipantId: ParticipantId;
   /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another human. */
   readonly ownerParticipantId: ParticipantId;
-  /** The secret Join Link token of an Online Table, read by its Table Owner only. */
-  readonly joinToken?: string;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
@@ -399,6 +408,12 @@ export interface ObservableTableSession {
    * Removal of them.
    */
   readonly departedParticipantIds?: readonly ParticipantId[];
+  /**
+   * Only in the Table Owner's own view of an Online Table: what their Leave Table would do to ownership if they asked
+   * for it now. Ownership passes to the earliest-joined human still at the table (ADR-0034), or, with nobody to take it,
+   * the table closes. The server works out the join order, so the client only shows it.
+   */
+  readonly ownerSuccession?: OwnerSuccession;
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;
@@ -433,10 +448,16 @@ export type TableSubscriptionResult = {
   readonly tableSessionId: TableSessionId;
 } & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
 /**
- * The last message a Guest's subscription receives after their Participant leaves the table or is removed.
+ * The last message a Guest's subscription receives after their Participant leaves the table or is removed, or the
+ * table closes.
  * Their client returns to its saved tables.
  */
-export interface TableMembershipEnded { readonly type: 'table-membership-ended'; readonly tableSessionId: TableSessionId; readonly reason: 'left' | 'removed' }
+export interface TableMembershipEnded {
+  readonly type: 'table-membership-ended';
+  readonly tableSessionId: TableSessionId;
+  /** The table closed, which ended everyone's membership: it is a Closed Table now. */
+  readonly closed?: true;
+}
 /**
  * A change of who is connected at an Online Table, sent to everyone subscribed to it. Transient like
  * `table-status`: it advances no revision, and every complete view carries the same list.
@@ -489,10 +510,13 @@ export interface SetTableOptionsRequest {
   readonly expectedSessionRevision: Revision;
   readonly options: TableOptionChanges;
 }
-/** The Table Owner replaces an Online Table's Join Link: the old link stops working at once, and joined Participants stay. */
-export interface ReplaceJoinLinkRequest {
+/**
+ * The Table Owner sets, changes (`tablePassword`) or removes (`null`) an Online Table's Table Password, at any time,
+ * even during a Hand. There is no expected revision: the latest password wins, and nobody at the table is affected.
+ */
+export interface SetTablePasswordRequest {
   readonly requestId: string;
-  readonly expectedSessionRevision: Revision;
+  readonly tablePassword: string | null;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
 
