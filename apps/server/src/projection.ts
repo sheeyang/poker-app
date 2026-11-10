@@ -1,4 +1,4 @@
-import type { ConcreteAction, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
+import type { ConcreteAction, ObservableTableOptions, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
 import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
@@ -46,6 +46,10 @@ export function recordedConfiguration(record: TableSessionRecord): ObservableGam
 export function projectOptions(options: TableOptions): TableOptions {
   return { actionTimeLimitSeconds: options.actionTimeLimitSeconds, allowLiveAnalysis: options.allowLiveAnalysis };
 }
+/** The options Participants see: whether the table has a Table Password, and never its hash. */
+export function projectTableOptions(aggregate: PersistedTableSession): ObservableTableOptions {
+  return { ...projectOptions(aggregate.options), ...(aggregate.tablePasswordHash ? { hasTablePassword: true as const } : {}) };
+}
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {
     phases: schedule.phases.map(p => ({ kind: p.kind, handId: p.handId, street: p.street, startsAt: p.startsAt, endsAt: p.endsAt, durationMs: p.durationMs })),
@@ -74,7 +78,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   // Humans who left or were removed, and Bots the owner removed: public, so nobody is offered what no longer applies.
   const departed = aggregate.bindings.filter(binding => isHuman(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
   return {
-    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectOptions(aggregate.options), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectTableOptions(aggregate), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: { referenceStrategy: projectStrategy(viewer.trainerConfiguration.referenceStrategy), liveAnalysis: viewer.trainerConfiguration.liveAnalysis },

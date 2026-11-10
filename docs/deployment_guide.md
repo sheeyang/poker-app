@@ -517,8 +517,10 @@ after [setting your values on the VM](#set-your-values-on-the-vm).
 
 ### Client addresses and rate limits
 
-The server limits table creation and joining per client
-address, and only Caddy can tell it a client's address. `deploy/compose.yaml` therefore
+The server limits table creation, joining and Table Password attempts per client
+address (by default 10 tables, 30 joins and 10 password attempts in any 10 minutes; see
+the [server protocol](server-protocol.md#public-hosting-safeguards)), and only Caddy can
+tell it a client's address. `deploy/compose.yaml` therefore
 pins the Compose network to `172.29.77.0/24`, gives Caddy the fixed address
 `172.29.77.2`, and passes that same address to the app as `TRUSTED_PROXIES`. Docker
 gives the other containers addresses only from `172.29.77.128/25`, so a container that

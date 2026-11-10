@@ -32,6 +32,15 @@ describe('creating an Online Table', () => {
       bots: [{ name: 'Bot 1', playingStrategy: simpleHeuristicPlayingStrategy }, { name: 'Bot 2', playingStrategy: simpleHeuristicPlayingStrategy }],
     });
   });
+  it('sends a Table Password only when one is given, exactly as typed', () => {
+    expect(onlineCreationRequest({ ...defaultOnlineSetup, tablePassword: ' Sesame ' }, 'r')).toMatchObject({ tablePassword: ' Sesame ' });
+    expect(onlineCreationRequest({ ...defaultOnlineSetup, tablePassword: '' }, 'r')).not.toHaveProperty('tablePassword');
+  });
+  it('explains a Table Password that is too short or too long', () => {
+    expect(onlineSetupProblem({ ...defaultOnlineSetup, tablePassword: 'abc' })).toBe('A Table Password is 4 to 64 characters, or leave it empty.');
+    expect(onlineSetupProblem({ ...defaultOnlineSetup, tablePassword: 'x'.repeat(65) })).toBe('A Table Password is 4 to 64 characters, or leave it empty.');
+    expect(onlineSetupProblem({ ...defaultOnlineSetup, tablePassword: 'abcd' })).toBeUndefined();
+  });
   it.each([
     [{ seatCount: 1 }], [{ seatCount: 10 }], [{ bigBlind: 5 }], [{ smallBlind: 0 }], [{ ante: -1 }],
     [{ bots: 6 }], [{ bots: -1 }], [{ startingStackBB: 10 }], [{ startingStackBB: 500 }], [{ minimumBuyInBB: 0 }],

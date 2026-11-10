@@ -45,6 +45,10 @@ describe('what a table address shows its visitor', () => {
     const returning = { ...preview, returningAs: 'Ben' };
     expect(tableAddress('online', id, 'not-found', returning)).toEqual({ show: 'join-form', preview: returning });
   });
+  it('shows a password join form, with only the owner’s name, at an Online Table with a Table Password', () => {
+    const locked: JoinLinkPreview = { ok: true, ownerName: 'Sam', passwordRequired: true };
+    expect(tableAddress('online', id, 'not-found', locked)).toEqual({ show: 'password-join-form', preview: locked });
+  });
   it('tells a visitor that an Online address with no Online Table behind it doesn’t exist, a Practice Table’s ID included', () => {
     expect(tableAddress('online', id, 'not-found', 'not-found')).toEqual({ show: 'missing' });
   });

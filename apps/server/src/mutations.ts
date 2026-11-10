@@ -3,7 +3,7 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
@@ -23,7 +23,8 @@ import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, n
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
-import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
+import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, tablePasswordRequired, unavailableOnline, wrongTablePassword } from './rejections.js';
+import { hashTablePassword, tablePasswordMatches, tablePasswordProblem } from './table-password.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -985,28 +986,87 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       })) ?? notFound();
     }
     /**
+     * The Table Owner sets, changes or removes (`null`) an Online Table's Table Password, at any time, even during a
+     * Hand: it advances only the session revision, and nobody at the table is affected. Only newcomers need it. The
+     * password is hashed before the table's turn, since hashing is slow by design, and its fingerprint records only
+     * whether it sets or removes, so the password never reaches it.
+     */
+    async function setTablePassword(id: string, userId: string, request: SetTablePasswordRequest): Promise<MutationOutcome> {
+      return await asMember(id, userId, async () => {
+        const { requestId, ...contents } = request;
+        if (Object.keys(contents).some(key => key !== 'tablePassword') || !Object.hasOwn(contents, 'tablePassword')) return reject('invalid-table-password', 'Supply a requestId and the tablePassword, or null to remove it.');
+        const { tablePassword } = request;
+        const problem = tablePassword === null ? undefined : tablePasswordProblem(tablePassword);
+        if (problem) return problem;
+        const permitted = (session: CommittedSession | undefined) => {
+          if (!session || !memberBinding(session.aggregate, userId)) return notFound();
+          if (stopped) return reject('server-closing', 'The server is closing.');
+          if (session.aggregate.ownerUserId !== userId) return ownerRequired();
+          if (session.aggregate.mode !== 'online') return reject('unavailable-at-practice-tables', 'A Practice Table has no Join Link, so it has no Table Password.');
+        };
+        // Refused before hashing, and again in the table's turn, where ownership is decided.
+        const refused = permitted(tables.get(id));
+        if (refused) return refused;
+        const tablePasswordHash = tablePassword === null ? undefined : await hashTablePassword(tablePassword);
+        return enqueue(id, async (): Promise<MutationOutcome> => {
+          let session = tables.get(id);
+          const denial = permitted(session);
+          if (denial) return denial;
+          const fingerprint = createHash('sha256').update('table-password-v1:' + canonical({ userId, sets: tablePassword !== null })).digest('hex');
+          const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
+          session = tables.get(id)!;
+          const { tablePasswordHash: _previous, ...rest } = session.aggregate;
+          const aggregate: PersistedTableSession = { ...rest, sessionRevision: rest.sessionRevision + 1, ...(tablePasswordHash ? { tablePasswordHash } : {}) };
+          const { outcome, committed: next } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, (): TableDecision<MutationOutcome> => ({
+            outcome: { ok: true, tableSessionId: id, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision },
+            next: { aggregate, game: session.game },
+          }));
+          if (next) publishCommitted(id);
+          return outcome;
+        });
+      }) ?? notFound();
+    }
+    /**
      * Joins the Online Table that this Join Link, its own address, names, as the Guest's one Participant there
      * (ADR-0033). The link is the authorization, so there is no expected revision. A Guest who already joined gets
      * their Participant back, and one who left, the Table Owner included, returns as the same Participant under
      * their original name. An ID that names no Online Table is not found, and never loads anything: only a join to an
      * Online Table that exists does. A Guest at another Online Table, their Current Table, is refused: the join runs in
      * the Guest's turn (`guests`), which creation shares, so no other request of theirs can pass that check meanwhile.
+     *
+     * Anyone not at a table with a Table Password must give it, a Guest who left or was removed and a former owner
+     * included. It is checked against the stored table before loading it, and again if it changed meanwhile. A missing
+     * or wrong password is a definitive rejection that is never remembered under the request ID, and the password
+     * never reaches the fingerprint. `passwordAttempt` is asked before each check of a password, so that only a join
+     * that could otherwise succeed spends one: the Current Table refusal comes first.
      */
-    async function join(id: string, userId: string, request: JoinTableRequest): Promise<JoinOutcome> {
-      if (!await storedOnlineTable(db, id)) return notFound();
+    async function join(id: string, userId: string, request: JoinTableRequest, passwordAttempt?: () => ApplicationRejection | undefined): Promise<JoinOutcome> {
+      const stored = await storedOnlineTable(db, id);
+      if (!stored) return notFound();
+      const { requestId, tablePassword, ...contents } = request;
+      if (Object.keys(contents).length || tablePassword !== undefined && typeof tablePassword !== 'string') return reject('invalid-mutation-request', 'Joining carries only a requestId, and the Table Password when the table has one.');
       // The Guest's turn is taken before the table's handle and FIFO, never inside them.
-      return await guests.run(userId, () => holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
+      return await guests.run(userId, async (): Promise<JoinOutcome> => {
+        const upgraded = upgradeTableSession(stored);
+        // Checked again in the table's turn; this early answer only spares a password attempt.
+        const away = upgraded && memberBinding(upgraded, userId) ? undefined : await currentTable(db, userId);
+        if (away && away !== id) return currentTableElsewhere(away);
+        let checked = await passwordRefusal(upgraded, userId, tablePassword, undefined, passwordAttempt);
+        if (checked.refusal) return checked.refusal;
+        return await holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
         let session = tables.get(id);
         if (!session) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
-        const { requestId, ...contents } = request;
-        if (Object.keys(contents).length) return reject('invalid-mutation-request', 'Joining carries only a requestId.');
         const fingerprint = createHash('sha256').update('join-table-v1:' + canonical({ userId })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
         session = tables.get(id)!;
         // Not remembered under the request ID: once the Guest leaves their Current Table, the same request joins.
         const elsewhere = memberBinding(session.aggregate, userId) ? undefined : await currentTable(db, userId);
         if (elsewhere && elsewhere !== id) return currentTableElsewhere(elsewhere);
+        // The owner may have changed the password since it was checked. Neither refusal is remembered either.
+        checked = await passwordRefusal(session.aggregate, userId, tablePassword, checked.verified, passwordAttempt);
+        if (checked.refusal) return checked.refusal;
+        session = tables.get(id)!;
         let proposed: CommittedSession | undefined;
         let events: readonly CashGameEvent[] = [];
         const { outcome, committed: next } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, async (tx): Promise<TableDecision<JoinOutcome>> => {
@@ -1040,11 +1100,28 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         });
         if (next) publishCommitted(id, events);
         return outcome;
-      }))) ?? notFound();
+      })) ?? notFound();
+      });
+    }
+    /**
+     * Why a Guest cannot join this table with `password`: undefined `refusal` when they need none (no Table Password,
+     * or they are at the table) or give the right one. `verified` is the hash it last matched, so that a password
+     * already checked against an unchanged hash is not hashed again. `attempt` is asked first each time a password is
+     * actually checked, and may refuse it (the per-address limit on password attempts).
+     */
+    async function passwordRefusal(aggregate: PersistedTableSession | undefined, userId: string, password: string | undefined, verified: string | undefined, attempt?: () => ApplicationRejection | undefined): Promise<{ refusal?: ApplicationRejection; verified?: string }> {
+      const hash = aggregate?.tablePasswordHash;
+      if (!hash || memberBinding(aggregate, userId)) return { verified };
+      if (hash === verified) return { verified };
+      if (password === undefined || password === '') return { refusal: tablePasswordRequired() };
+      const limited = attempt?.();
+      if (limited) return { refusal: limited };
+      return await tablePasswordMatches(password, hash) ? { verified: hash } : { refusal: wrongTablePassword() };
     }
     /**
      * What an Online Table's Join Link shows before joining, for the Guest opening it: undefined, answered as not
-     * found, for an ID that names no Online Table. It is read from the stored
+     * found, for an ID that names no Online Table. A Guest not at a table with a Table Password learns only its
+     * owner's name and that the password is required. It is read from the stored
      * table, never loading it: the Guest opening the link is not at the table yet.
      */
     async function previewJoin(userId: string, id: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
@@ -1054,6 +1131,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (!aggregate) throw new TableSessionRestorationError();
       const humans = humanBindings(aggregate);
       const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
+      // Behind a Table Password, the table's details stay with the people at it.
+      if (aggregate.tablePasswordHash && !memberBinding(aggregate, userId)) return { ok: true, ownerName: owner.name, passwordRequired: true };
       const returning = humans.find(binding => binding.userId === userId && binding.membership === 'left');
       return { ok: true as const, ownerName: owner.name, configuration: projectConfiguration(recordedConfiguration(aggregate.pokerRecord)), options: projectOptions(aggregate.options),
         placesTaken: placesTaken(aggregate), alreadyJoined: !!memberBinding(aggregate, userId), ...(returning ? { returningAs: returning.name } : {}) };
@@ -1151,6 +1230,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     read,
     subscribe,
     configure,
+    setTablePassword,
     join,
     previewJoin,
     savedTables,

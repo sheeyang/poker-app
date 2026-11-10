@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ObservableTableSession, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
 import { recordOpened, type OpenedTimes } from './saved-tables.js';
 
@@ -19,6 +19,8 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'add-bot'; readonly body: AddBotRequest }
   /** The Table Owner changes an Online Table's options between Hands. */
   | { readonly kind: 'options'; readonly body: SetTableOptionsRequest }
+  /** The Table Owner sets, changes or removes an Online Table's Table Password, at any time. Held in memory only. */
+  | { readonly kind: 'password'; readonly body: SetTablePasswordRequest }
 );
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
@@ -67,6 +69,7 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
     case 'add-bot': return api.addBot(tableId, attempt.body);
     case 'options': return api.setTableOptions(tableId, attempt.body);
+    case 'password': return api.setTablePassword(tableId, attempt.body);
   }
 }
 
