@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession } from '@poker/contracts';
-import { botControls, hasDeparted, nextBotName, openSeats, optionChanges, optionControls, presentBindings } from '../src/owner-controls.js';
+import { botControls, hasDeparted, nextBotName, openSeats, optionChanges, optionControls, presentBindings, tablePasswordControl } from '../src/owner-controls.js';
 import { canRemove } from '../src/removal.js';
 
 const strategy = defaultTrainerConfiguration.referenceStrategy;
@@ -47,6 +47,22 @@ describe('the owner’s table option controls', () => {
     expect(optionChanges(t, same)).toBeUndefined();
     expect(optionChanges(t, { ...same, actionTimeLimitSeconds: 15 })).toEqual({ actionTimeLimitSeconds: 15 });
     expect(optionChanges(t, { ...same, allowSeatChanges: false, allowLiveAnalysis: false })).toEqual({ allowSeatChanges: false, allowLiveAnalysis: false });
+  });
+});
+
+describe('the Table Password', () => {
+  const locked = { options: { actionTimeLimitSeconds: 30 as const, allowLiveAnalysis: true, hasTablePassword: true as const } };
+  it('is the Online Table owner’s to set, change or remove at any time, even during a Hand', () => {
+    expect(tablePasswordControl(table('ann'))).toMatchObject({ shown: true, editable: true, set: false });
+    expect(tablePasswordControl(table('ann', locked))).toMatchObject({ shown: true, editable: true, set: true });
+    expect(tablePasswordControl(table('ben'))).toMatchObject({ shown: true, editable: false });
+  });
+  it('is shown to everyone at an Online Table as set or not, never as the password', () => {
+    expect(tablePasswordControl(table('ben')).summary).toBe('No Table Password');
+    expect(tablePasswordControl(table('ben', locked)).summary).toBe('Table Password set');
+  });
+  it('does not exist at a Practice Table', () => {
+    expect(tablePasswordControl(table('ann', {}, 'practice'))).toEqual({ shown: false, editable: false, set: false });
   });
 });
 

@@ -3,9 +3,10 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
 import { withMembershipEnded } from './current-table.js';
+import { recordOpened, type OpenedTimes } from './saved-tables.js';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -19,6 +20,8 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'add-bot'; readonly body: AddBotRequest }
   /** The Table Owner changes an Online Table's options between Hands. */
   | { readonly kind: 'options'; readonly body: SetTableOptionsRequest }
+  /** The Table Owner sets, changes or removes an Online Table's Table Password, at any time. Held in memory only. */
+  | { readonly kind: 'password'; readonly body: SetTablePasswordRequest }
 );
 export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: CreateTableSessionRequest };
 
@@ -26,6 +29,9 @@ interface SessionState {
   pending: Attempt | null;
   analysisOpen: boolean;
   animations: boolean;
+  /** When each table was last opened in this browser: the order of the saved lists. */
+  opened: OpenedTimes;
+  markOpened: (tableSessionId: string, at: number) => void;
   setup: { requestId: string; tableId?: string; paused?: string; afterHandId?: string | null } | null;
   setSetup: (setup: SessionState['setup']) => void;
   setPending: (pending: Attempt | null) => void;
@@ -34,19 +40,20 @@ interface SessionState {
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  pending: null, analysisOpen: true, animations: true, setup: null,
+  pending: null, analysisOpen: true, animations: true, opened: {}, setup: null,
+  markOpened: (tableSessionId, at) => set(state => ({ opened: recordOpened(state.opened, tableSessionId, at) })),
   setSetup: setup => set({ setup }),
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
   setAnimations: animations => set({ animations }),
 }), {
   name: 'poker-trainer-v1',
-  // Browser storage keeps only preferences. A request, and anything a Guest typed into one, lives in memory for the life of the page.
-  version: 1,
-  partialize: ({ analysisOpen, animations }) => ({ analysisOpen, animations }),
+  // Browser storage keeps only preferences and when each table was last opened. A request, and anything a Guest typed into one, lives in memory for the life of the page.
+  version: 2,
+  partialize: ({ analysisOpen, animations, opened }) => ({ analysisOpen, animations, opened }),
   migrate: stored => {
-    const { analysisOpen, animations } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations'>>;
-    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true } as SessionState;
+    const { analysisOpen, animations, opened } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations' | 'opened'>>;
+    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true, opened: opened && typeof opened === 'object' ? opened : {} } as SessionState;
   },
 }));
 
@@ -63,6 +70,7 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
     case 'add-bot': return api.addBot(tableId, attempt.body);
     case 'options': return api.setTableOptions(tableId, attempt.body);
+    case 'password': return api.setTablePassword(tableId, attempt.body);
   }
 }
 

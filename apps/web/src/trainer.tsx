@@ -56,6 +56,9 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   }));
   useEffect(() => () => consumeLive(null), [consumeLive]);
   useEffect(() => { window.scrollTo({ top: 0 }); }, []);
+  // Opening a table, one this Guest is at and can see, notes when in browser storage: it orders the saved lists.
+  const opened = outcome?.show === 'table';
+  useEffect(() => { if (opened) useSession.getState().markOpened(selected, Date.now()); }, [opened, selected]);
   usePageTitle(missing ? { page: 'missing-table' } : table.data ? { page: 'table', ...table.data.view.configuration } : undefined);
   /** Joined through the Join Link: the same address is now the Guest's table, read and followed live. */
   async function joined() {
@@ -100,7 +103,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
     useSession.setState({ analysisOpen: false });
     requestAnimationFrame(() => document.getElementById('play-controls')?.focus({ preventScroll: true }));
   }
-  if (outcome?.show === 'join-form') return <JoinTable tableSessionId={selected} preview={outcome.preview} joined={joined} />;
+  if (outcome?.show === 'join-form' || outcome?.show === 'password-join-form') return <JoinTable tableSessionId={selected} preview={outcome.preview} joined={joined} />;
   if (unread && !outcome && !preview.error) return <JoinTableSkeleton />;
   // The Join Link answered, but not with the table: say why, and keep a way to try again when trying could help.
   if (unread && !outcome && preview.error) return <main id="main-table" className="address-missing">

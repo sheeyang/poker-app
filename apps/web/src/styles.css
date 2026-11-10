@@ -759,6 +759,29 @@ meter::-moz-meter-bar { background: var(--probability-color); }
 .join-form > p { margin: 0; }
 .join-room { color: #e6cca0; font-size: .86rem; }
 .join-note { font-size: .86rem; line-height: 1.5; }
+/* Behind a Table Password the felt shows no seats and no stakes, only that a password is needed. */
+.felt-locked { display: inline-flex; align-items: center; gap: 7px; padding: 6px 15px 6px 13px; border: 1px solid #7fa48e; border-radius: 999px; background: #17402f; color: #e4efe6; font-size: .86rem; font-weight: 500; white-space: nowrap; }
+.felt-locked svg { color: var(--gold); }
+.join-protected { color: var(--muted); font-size: .86rem; line-height: 1.6; text-wrap: pretty; }
+
+/* Table Password fields: hidden as typed, with a Show control inside the field's right edge. */
+.password-row { display: grid; gap: 8px; min-width: 0; }
+.password-row > label { display: block; }
+.password-row > label .field-optional { margin-left: 6px; }
+.password-row > small { font-weight: 400; line-height: 1.5; }
+.password-field { position: relative; display: block; }
+.password-field input { padding-right: 68px; }
+.password-toggle { position: absolute; top: 50%; right: 5px; translate: 0 -50%; min-height: 32px; padding: 4px 10px; border-color: transparent; background: transparent; color: var(--gold); font-size: .8rem; font-weight: 600; }
+.password-toggle:hover { background: #22302a; border-color: transparent; color: var(--gold-hover); }
+.password-toggle:focus-visible { outline-offset: -2px; }
+.field-optional { color: var(--muted); font-size: .78rem; font-weight: 400; }
+.field-hint { color: var(--muted); font-weight: 400; line-height: 1.5; }
+.field-hint.is-short { color: #e6cca0; }
+/* A field the server turned down: a warm border, and the reason directly under it. */
+input[aria-invalid="true"] { border-color: #c48466; }
+.field-problem { color: #f0c8af; font-weight: 400; line-height: 1.5; }
+.rules-form .password-row { width: min(100%, 360px); }
+.table-password-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 /* Refused for the Guest's Current Table: the warm green of that table's ledger row, a brass-tinted rule, and the way to it. */
 .current-table-refusal { display: grid; gap: 4px; padding: 14px 16px 10px; background: #1f2c24; border: 1px solid #5c5a40; border-radius: 8px; color: #c3d4c7; font-size: .86rem; line-height: 1.5; }
 .current-table-refusal p { margin: 0; }
@@ -1009,6 +1032,8 @@ fieldset.composer-field { display: block; }
 .ledger-live { color: #c3d4c7; }
 .ledger-live b { color: var(--gold); font-weight: 600; }
 .ledger-ante { color: var(--muted); }
+.ledger-opened { color: var(--muted); white-space: nowrap; }
+.ledger-note { margin-top: 10px; padding-inline: 12px; color: var(--muted); font-size: .8rem; }
 .ledger-row > .ledger-action { text-align: right; color: var(--gold); font-size: .82rem; font-weight: 600; white-space: nowrap; }
 .ledger-action > span { margin-right: 6px; }
 .ledger-action svg { vertical-align: -3px; transition: transform 150ms; }
@@ -1058,9 +1083,10 @@ fieldset.composer-field { display: block; }
   .ledger-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 2px; padding: 12px 4px; }
   .ledger-row > * { padding: 0; }
   .ledger-row > th, .ledger-row > td { grid-column: 1; }
-  .ledger-row > td:nth-child(2), .ledger-row > td:nth-child(3) { padding-left: 54px; font-size: .82rem; }
+  .ledger-row > td:nth-child(2), .ledger-row > td:nth-child(3), .ledger-row > td:nth-child(4) { padding-left: 54px; font-size: .82rem; }
   .ledger-row > td:nth-child(2) { color: var(--muted); }
-  .ledger-row > .ledger-action { grid-column: 2; grid-row: 1 / span 3; align-self: center; }
+  .ledger-row > .ledger-opened::before { content: "Opened "; }
+  .ledger-row > .ledger-action { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
   .ledger-action > span { display: none; }
   .address-missing { padding-top: 56px; }
 }

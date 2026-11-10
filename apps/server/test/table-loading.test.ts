@@ -90,6 +90,20 @@ test('an idle Practice Table is not in memory until its owner opens it', async (
   expect(loaded(t.id)).toBe(true);
 });
 
+test('the saved-tables list is built from stored rows: it loads no table', async () => {
+  const t = await practiceTable();
+  const ann = await guest('Ann');
+  const online = (await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json()).tableSessionId as string;
+  clock.advance(minute);
+  await expect.poll(() => loaded(online)).toBe(false);
+  expect(loaded(t.id)).toBe(false);
+  const listed = await (await get('/api/table-sessions', t.cookie)).json();
+  expect(listed.tables).toEqual([{ tableSessionId: t.id, mode: 'practice', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 } }]);
+  expect((await (await get('/api/table-sessions', ann)).json()).tables).toEqual([{ tableSessionId: online, mode: 'online', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 } }]);
+  expect(loaded(t.id)).toBe(false);
+  expect(loaded(online)).toBe(false);
+});
+
 test('a table unloads one minute after its last subscriber leaves, and reloads as it was', async () => {
   const t = await practiceTable();
   const tab = await connectLive(base, t.cookie, t.id), other = await connectLive(base, t.cookie, t.id);

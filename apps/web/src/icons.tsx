@@ -11,6 +11,7 @@ const paths = {
   check: 'm5 12 4 4L19 6',
   plus: 'M12 5v14M5 12h14',
   exit: 'M9 4H4v16h5m5-13 5 5-5 5m-5-5h13',
+  lock: 'M6 11h12v9H6zm2.5 0V8a3.5 3.5 0 0 1 7 0v3',
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
 } as const;
 export function Icon({ name, size = 20 }: { name: keyof typeof paths; size?: number }) {

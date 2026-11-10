@@ -66,12 +66,12 @@ export async function membership(db: Database, tableSessionId: string, userId: s
 }
 /**
  * Every table the Guest has joined, with the Guest's Participant at each, however their membership ended (Leave Table
- * or Removal, which are the same). A table they have left is marked `left`: its Join Link returns them. The index has no
- * seating, so the caller adds each table's public stakes and play state.
+ * or Removal, which are the same). A table they have left is marked `left`: its Join Link returns them. Each carries
+ * its stored aggregate, so the caller can read the format and blinds from stored rows alone, loading nothing.
  */
-export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left'> & { participantId: string })[]> {
-  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, participantId: tableMemberships.participantId, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
+export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left'> & { stored: StoredTableSession })[]> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, stored: tableSessions.aggregate, status: tableMemberships.status, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
     .where(eq(tableMemberships.userId, userId));
-  return rows.map(row => ({ tableSessionId: row.tableSessionId, participantId: row.participantId, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
+  return rows.map(row => ({ tableSessionId: row.tableSessionId, stored: row.stored, mode: row.mode ?? legacyTableMode, ...(row.status === 'joined' ? {} : { left: true as const }) }));
 }
