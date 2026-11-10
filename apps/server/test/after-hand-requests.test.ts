@@ -267,7 +267,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   expect(await placesTaken()).toBe(2);
 });
 
-test('nobody manages another human, and an owner who leaves keeps their table, which keeps running without them', async () => {
+test('nobody manages another human, and an owner who leaves passes the table on, which keeps running without them', async () => {
   const { ann, ben, id, annId, benId, view, join, preview, as } = await onlineHand();
   // Both are seated in a Hand. Requests naming the other human are refused for the owner and everyone else.
   for (const [cookie, target] of [[ben, annId], [ann, benId]] as const) {
@@ -285,19 +285,17 @@ test('nobody manages another human, and an owner who leaves keeps their table, w
   expect((await as(ann, 'leave-table', { participantId: annId })).status).toBe(200);
   expect((await get('/api/table-sessions/' + id, ann)).status).toBe(404);
   expect(await (await get('/api/table-sessions', ann)).json()).toMatchObject({ tables: [{ tableSessionId: id, mode: 'online', left: true }] });
-  // The table keeps running, and ownership stays with her.
+  // The table keeps running, and ownership passed to Ben, the one human still at it.
   const running = await view(ben);
-  expect(running.ownerParticipantId).toBe(annId);
-  const ownerOnly = await as(ben, 'set-button', { seat: 2 });
-  expect({ status: ownerOnly.status, code: (await ownerOnly.json()).rejection?.code }).toEqual({ status: 403, code: 'table-owner-required' });
+  expect(running.ownerParticipantId).toBe(benId);
   expect((await as(ben, 'move-participant', { participantId: benId, seat: 3 })).status).toBe(200);
-  // She returns through the Join Link like anyone who left, as the same Participant.
+  // She returns through the Join Link like anyone who left, as the same Participant, and no longer its owner.
   expect(await preview(ann)).toMatchObject({ alreadyJoined: false, returningAs: 'Ann' });
   const returned = await join(ann);
   expect(await returned.json()).toMatchObject({ ok: true, participantId: annId });
-  const owner = await view(ann);
-  expect(owner).toMatchObject({ viewerParticipantId: annId, ownerParticipantId: annId });
-  expect(participant(owner, annId)).toMatchObject({ seat: null, stack: 0 });
+  const back = await view(ann);
+  expect(back).toMatchObject({ viewerParticipantId: annId, ownerParticipantId: benId });
+  expect(participant(back, annId)).toMatchObject({ seat: null, stack: 0 });
 });
 
 test('at a Practice Table a missed Action Deadline plays the Timeout Action without sitting the human out, and a sit-out asked for meanwhile applies after the Hand, before Deal', async () => {

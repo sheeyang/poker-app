@@ -210,7 +210,7 @@ test('a Guest who left returns through the same Join Link as the same Participan
   expect(back.bindings.filter(binding => binding.name === 'Ben')).toHaveLength(1);
 });
 
-test('an Online Table holds at most 20 Participants, Bots included, and keeps a place for its owner while they are away', async () => {
+test('an Online Table holds at most 20 Participants, Bots included, and holds no place for anyone who left, its former owner included', async () => {
   const table = await online(await guest('Owner'), { bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Tim', playingStrategy: baselinePlayingStrategy }] });
   const placesTaken = async (cookie: string) => (await (await preview(table.id, cookie)).json()).placesTaken;
   // The owner and the two Bots take three of the twenty places.
@@ -223,17 +223,17 @@ test('an Online Table holds at most 20 Participants, Bots included, and keeps a 
   expect(await refusal(await command(table, table.owner, 'add-bot', { name: 'Zed', playingStrategy: baselinePlayingStrategy }))).toEqual({ status: 409, code: 'table-full' });
   // Someone already at a full table still gets their own Participant back.
   expect((await join(table.id, table.owner)).status).toBe(200);
-  // The owner's place is held while they are away, so they can always return to manage their table.
-  expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
-  expect(await placesTaken(late)).toBe(20);
-  expect(await refusal(await join(table.id, late))).toEqual({ status: 409, code: 'table-full' });
-  // The owner returns through the Join Link like anyone else; there is no owner-only way back.
-  expect((await post('/api/table-sessions/' + table.id + '/rejoin-table', table.owner, { requestId: randomUUID() })).status).toBe(404);
-  expect(await (await join(table.id, table.owner)).json()).toMatchObject({ ok: true, participantId: table.ownerParticipant });
   // A Bot the owner removes frees its place.
   expect((await command(table, table.owner, 'remove-bot', { participantId: table.bindings[1]!.participantId })).status).toBe(200);
   expect(await placesTaken(late)).toBe(19);
+  // The owner who leaves frees theirs too: ownership has passed, and nobody holds a place to return to.
+  expect((await command(table, table.owner, 'leave-table', { participantId: table.ownerParticipant })).status).toBe(200);
+  expect(await placesTaken(late)).toBe(18);
   expect((await join(table.id, late)).status).toBe(200);
+  expect((await join(table.id, await guest('Later'))).status).toBe(200);
+  // The former owner returns through the Join Link like anyone else, and finds the table full; there is no owner-only way back.
+  expect((await post('/api/table-sessions/' + table.id + '/rejoin-table', table.owner, { requestId: randomUUID() })).status).toBe(404);
+  expect(await refusal(await join(table.id, table.owner))).toEqual({ status: 409, code: 'table-full' });
 });
 
 async function command(t: Table, cookie: string, kind: string, contents: object = {}) {

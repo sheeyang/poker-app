@@ -74,7 +74,7 @@ test('joining, and returning to a table, share a per-IP limit', async () => {
     expect(await rejection(refused)).toEqual({ status: 429, code: 'rate-limited', message: expect.stringContaining('60 seconds') });
     expect(refused.headers.get('retry-after')).toBe('60');
     expect((await view(ben)).bindings.map(binding => binding.name)).toEqual(['Ann', 'Ben']);
-    // The owner returns through the Join Link too, so it draws on the same allowance.
+    // A former owner returns through the Join Link too, so it draws on the same allowance.
     const left = await call(base, 'POST', '/api/table-sessions/' + id + '/leave-table', ann, { requestId: randomUUID(), expectedPokerRevision: (await view(ben)).pokerRevision, participantId: annId });
     expect(left.status).toBe(200);
     expect((await join(ann)).status).toBe(429);

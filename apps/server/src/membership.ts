@@ -20,14 +20,15 @@ export function hasScheduledWork(aggregate: PersistedTableSession): boolean {
 }
 /**
  * The only way to write a Persisted Table Session. In the caller's transaction it inserts (no `previous`)
- * or updates the aggregate, with its `loadAtStartup` (`hasScheduledWork`), whether it is closed, and `committedAt`
+ * or updates the aggregate, with its owner, its `loadAtStartup` (`hasScheduledWork`), whether it is closed, and `committedAt`
  * (server time) as its last committed change, and writes the membership index rows of every human binding whose
  * membership differs from `previous`. Joining, leaving, Removal and closing therefore only change bindings.
  */
 export async function writeTableSession(tx: Database, previous: PersistedTableSession | undefined, next: PersistedTableSession, committedAt: number) {
-  const row = { aggregate: next, loadAtStartup: hasScheduledWork(next), closed: !!next.closed, lastCommittedAt: committedAt };
+  // Ownership can pass when the owner leaves (`ownership.ts`), so the owner column follows the aggregate's.
+  const row = { aggregate: next, ownerUserId: next.ownerUserId, loadAtStartup: hasScheduledWork(next), closed: !!next.closed, lastCommittedAt: committedAt };
   if (previous) await tx.update(tableSessions).set(row).where(eq(tableSessions.id, next.tableSessionId));
-  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ownerUserId: next.ownerUserId, ...row });
+  else await tx.insert(tableSessions).values({ id: next.tableSessionId, ...row });
   const known = new Map(previous ? humanBindings(previous).map(binding => [binding.participantId, binding.membership]) : []);
   const changed = humanBindings(next).filter(binding => known.get(binding.participantId) !== binding.membership);
   if (changed.length) await tx.insert(tableMemberships)

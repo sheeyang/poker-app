@@ -50,7 +50,7 @@ M4 opens the hosted product to the public and establishes the shared lifecycle b
   - replace the Join Link;
   - remove a human. Removal takes effect after any current Hand; it is a Leave Table the owner imposes, and the Guest may join again.
 
-  The owner never acts for, manages, or sees private information of another human. Admin Mode is never available at an Online Table. Ownership never transfers, and the table continues if the owner leaves.
+  The owner never acts for, manages, or sees private information of another human. Admin Mode is never available at an Online Table. When the owner leaves, ownership passes to the earliest-joined human still at the table, watchers included, or the table closes if no other human is there ([ADR-0034](adr/0034-pass-online-table-ownership-to-the-earliest-joined-human.md)).
 - The saved-tables list shows owned Practice Tables and Online Tables the Guest has joined and not left, labeled by mode. Owned tables stay listed.
 - Chips are free play money within the buy-in limits. Never rebuy automatically.
 - Public hosting adds these safeguards:

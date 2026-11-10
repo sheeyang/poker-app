@@ -127,14 +127,11 @@ export const humanBindings = (aggregate: PersistedTableSession) => aggregate.bin
 export const memberBinding = (aggregate: PersistedTableSession, userId: string) => humanBindings(aggregate).find(binding => binding.userId === userId && binding.membership === 'joined');
 export const findBinding = (aggregate: PersistedTableSession, participantId: unknown) => aggregate.bindings.find(binding => binding.participantId === participantId);
 /**
- * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant, every Bot the
- * owner has not removed, and the Table Owner's own place after they leave, so that they can always return to
- * manage their table.
+ * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant and every Bot
+ * the owner has not removed. None is held for anyone who left, a former Table Owner included (ADR-0034).
  */
 export function placesTaken(aggregate: PersistedTableSession): number {
-  const humans = humanBindings(aggregate);
-  const joined = humans.filter(binding => binding.membership === 'joined').length;
+  const joined = humanBindings(aggregate).filter(binding => binding.membership === 'joined').length;
   const bots = aggregate.bindings.filter(binding => isBot(binding) && !binding.removed).length;
-  const ownerAway = humans.some(binding => binding.userId === aggregate.ownerUserId && binding.membership !== 'joined');
-  return joined + bots + (ownerAway ? 1 : 0);
+  return joined + bots;
 }

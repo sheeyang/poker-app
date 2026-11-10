@@ -1133,3 +1133,18 @@ fieldset.composer-field { display: block; }
   .live-strip-actions { width: 100%; margin-left: 0; justify-content: space-between; }
   .live-strip-actions > :only-child { margin-left: auto; }
 }
+
+/* The owner's leave confirmation: who takes the table over, or, with nobody to, that it closes. */
+.leave-warning { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); }
+.leave-warning > svg { grid-row: span 2; margin-top: 2px; color: var(--gold); }
+.leave-warning strong { font-size: 1rem; line-height: 1.4; text-wrap: balance; }
+.leave-warning p { margin: 0; color: var(--muted); font-size: .86rem; line-height: 1.55; }
+.leave-warning.is-closes { border-color: #805e4d; background: #322a22; }
+.leave-warning.is-closes > svg, .leave-warning.is-closes strong { color: #f0c8af; }
+.leave-warning.is-closes p { color: #f0c8af; }
+.dialog .leave-button.is-closing { border-color: #80694f; background: #46382a; color: #f0d2b4; }
+.dialog .leave-button.is-closing:hover:not(:disabled) { background: #54412f; }
+.dialog .leave-button.is-closing:disabled { border-color: var(--line); background: var(--raised); color: var(--muted); }
+/* Ownership passed: who manages the table now, until dismissed. */
+.table-notices > .ownership-notice { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 14px; border: 1px solid #6e7a54; border-radius: 8px; background: #2f3c2b; color: #dfe6cf; font-size: .84rem; line-height: 1.45; }
+.ownership-notice > svg { color: var(--gold); }
