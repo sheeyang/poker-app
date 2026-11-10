@@ -7,7 +7,8 @@ import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, ty
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { currentTable, membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { createGuestQueue, type GuestQueue } from './guest-queue.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
 import { CommitOutcomeUnknown } from './creation.js';
@@ -22,7 +23,7 @@ import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, n
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
-import { liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
+import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, unavailableOnline } from './rejections.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -129,7 +130,7 @@ export interface BotRuntimeOptions {
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
 }
-export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock) {
+export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock, guests: GuestQueue = createGuestQueue()) {
   /** The only way to reach a table in memory: each committed table, while something needs it (ADR-0035). */
   const tables = createTableRegistry<CommittedSession>({ clock, load: loadTable, loaded: tableLoaded, drain: drained, unloaded: tableUnloaded });
   /** One pending wake-up per table, at its schedule's next instant (`nextWakeAt`). */
@@ -988,11 +989,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * (ADR-0033). The link is the authorization, so there is no expected revision. A Guest who already joined gets
      * their Participant back, and one who left, the Table Owner included, returns as the same Participant under
      * their original name. An ID that names no Online Table is not found, and never loads anything: only a join to an
-     * Online Table that exists does.
+     * Online Table that exists does. A Guest at another Online Table, their Current Table, is refused: the join runs in
+     * the Guest's turn (`guests`), which creation shares, so no other request of theirs can pass that check meanwhile.
      */
     async function join(id: string, userId: string, request: JoinTableRequest): Promise<JoinOutcome> {
       if (!await storedOnlineTable(db, id)) return notFound();
-      return await holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
+      // The Guest's turn is taken before the table's handle and FIFO, never inside them.
+      return await guests.run(userId, () => holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
         let session = tables.get(id);
         if (!session) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
@@ -1001,6 +1004,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const fingerprint = createHash('sha256').update('join-table-v1:' + canonical({ userId })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
         session = tables.get(id)!;
+        // Not remembered under the request ID: once the Guest leaves their Current Table, the same request joins.
+        const elsewhere = memberBinding(session.aggregate, userId) ? undefined : await currentTable(db, userId);
+        if (elsewhere && elsewhere !== id) return currentTableElsewhere(elsewhere);
         let proposed: CommittedSession | undefined;
         let events: readonly CashGameEvent[] = [];
         const { outcome, committed: next } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, async (tx): Promise<TableDecision<JoinOutcome>> => {
@@ -1034,7 +1040,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         });
         if (next) publishCommitted(id, events);
         return outcome;
-      })) ?? notFound();
+      }))) ?? notFound();
     }
     /**
      * What an Online Table's Join Link shows before joining, for the Guest opening it: undefined, answered as not

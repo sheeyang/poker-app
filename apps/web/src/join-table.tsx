@@ -7,7 +7,8 @@ import { Icon } from './icons.js';
 import { FeltPreview, type SeatMark } from './felt.js';
 import { Skeleton } from './loading-skeleton.js';
 import { usePageTitle, useShell } from './app-shell.js';
-import { joinLink } from './table-address.js';
+import { currentTableRefusal, joinLink } from './table-address.js';
+import { CurrentTableRefusal } from './current-table-refusal.js';
 import { chips, tableFormat } from './table-model.js';
 
 /**
@@ -36,7 +37,8 @@ export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId:
     },
     onSuccess: joined,
   });
-  const failure = join.error instanceof RequestFailure ? join.error.message : join.error ? 'Couldn’t join this table. Check your connection and try again.' : undefined;
+  // At another Online Table already: what to do about it is shown on its own, with a way to that table.
+  const failure = currentTableRefusal(join.error, undefined) ? undefined : join.error instanceof RequestFailure ? join.error.message : join.error ? 'Couldn’t join this table. Check your connection and try again.' : undefined;
   const { configuration, options } = preview;
   const left = onlineTableCapacity - preview.placesTaken;
   // Places count everyone at the table, seated or watching, Bots included; only nearness to the limit matters to a newcomer.
@@ -68,6 +70,7 @@ export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId:
           : <p className="muted">{preview.alreadyJoined ? 'You keep your seat, stack and history.' : `You come back as ${returning}, with your history from before. Take a seat again when you’re ready.`}</p>}
         {room && <p className="join-room">{room}</p>}
         {failure && <p className="notice-error" role="alert">{failure}</p>}
+        <CurrentTableRefusal error={join.error} />
         <button className="primary start-practice" disabled={join.isPending}>{join.isPending ? 'Joining…' : preview.alreadyJoined ? 'Open table' : returning ? 'Return to table' : 'Join table'}<Icon name="arrow" size={19} /></button>
         {named && <p className="muted join-note">You’ll watch first, then take an open seat when you’re ready.</p>}
       </form>

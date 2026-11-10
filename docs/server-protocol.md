@@ -56,6 +56,16 @@ remembered per request ID, so retry with a new one after fixing the cause. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
 command, so it advances both revisions and the Participant observes from that point.
 
+A Guest is at no more than one open Online Table at a time, their Current Table, watching
+included; Practice Tables don't count. Creating an Online Table, and joining or returning to
+another one, answer 409 `current-table-elsewhere` while the Guest is joined at an Online Table,
+with that table's ID as `rejection.currentTableId`. Joining the Current Table itself is no
+refusal. Creation checks it once the request is otherwise valid, and joining before the table's
+own checks. Unlike other definitive rejections it is not remembered under the request ID: once
+the Guest leaves their Current Table, the same request succeeds. Each Guest's creations and
+joins run one at a time, whatever table they are for, so two requests from two browser tabs
+cannot both pass the check.
+
 All table paths below start with `/api/table-sessions`:
 
 | Method and path | Request and result |
