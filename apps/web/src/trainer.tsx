@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api, RequestFailure, retainNewestTable } from '@poker/client';
@@ -17,6 +17,7 @@ import { nextHandLabel } from './online-status.js';
 import { useTableInteractions } from './table-interactions.js';
 import { openSeats, presentBindings } from './owner-controls.js';
 import { participantActions } from './participant-actions.js';
+import { ownershipChange } from './ownership.js';
 import { useDecisionAnalysis } from './analysis.js';
 import { useHandSummary, useTableSessionSummary } from './summaries.js';
 import { AnalysisPanel, AnalysisPanelSkeleton } from './analysis-panel.js';
@@ -90,6 +91,19 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const online = current?.mode === 'online';
   const owner = !!current && current.viewerParticipantId === current.ownerParticipantId;
   const ownerName = current?.bindings.find(b => b.participantId === current.ownerParticipantId)?.name;
+  // When the owner leaves and ownership passes, everyone still here is told who manages the table now.
+  const [ownerNotice, setOwnerNotice] = useState<string>();
+  const seenOwner = useRef<string>(undefined);
+  const ownerId = current?.ownerParticipantId;
+  const ownerView = useRef(current);
+  ownerView.current = current;
+  useEffect(() => {
+    const view = ownerView.current;
+    if (!view || !ownerId) return;
+    const change = ownershipChange(seenOwner.current, view);
+    seenOwner.current = ownerId;
+    if (change) setOwnerNotice(change);
+  }, [ownerId]);
   const watching = current ? presentBindings(current).filter(binding => !current.view.state.participants.some(p => p.participantId === binding.participantId && p.seat !== null)) : [];
   const interactions = useTableInteractions(current, command, handOpen);
   const onlineActions = online ? { chooseSeat: () => interactions.chooseSeats(), rebuy: interactions.rebuy, openJoinLink: () => setJoinLinkOpen(true), ...(owner && current && openSeats(current).length > 0 ? { addBot: () => interactions.chooseSeats() } : {}) } : undefined;
@@ -141,6 +155,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
               ? <div className="notice-error" role="status"><strong>{current.bindings.find(b => b.participantId === runtime.participantId)?.name ?? 'A bot'}’s decision failed.</strong><p>{runtime.message}</p></div>
               : <div className="notice-error" role="alert"><strong>A bot’s decision is paused.</strong><p>{runtime.message}</p><button disabled={command.busy} onClick={() => command.submit({ tableId: current.tableSessionId, kind: 'retry-bot', body: { requestId: crypto.randomUUID(), expectedSessionRevision: current.sessionRevision, participantId: runtime.participantId! } })}>Retry bot decision</button></div>)}
           </>}
+          {ownerNotice && <div className="ownership-notice" role="status"><Icon name="info" size={18} /><span>{ownerNotice}</span><button type="button" className="text-button" onClick={() => setOwnerNotice(undefined)}>Dismiss</button></div>}
           {current && interactions.choosing && <div className="seat-selection-prompt"><span role="status">Choose an open seat{interactions.choosing === current.viewerParticipantId ? '.' : ` for ${current.bindings.find(b => b.participantId === interactions.choosing)?.name ?? 'the participant'}.`}</span><button className="text-button" onClick={interactions.cancelChoosing}>Cancel</button></div>}
         </div>
         <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}{online && !owner && ownerName ? ` · ${ownerName}’s table` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{online && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}<button className="quiet-button" aria-expanded={analysisOpen} aria-controls="analysis-panel" onClick={() => analysisOpen ? closeAnalysis() : review()}><Icon name="chart" size={18} /><span>{analysisOpen ? 'Return to play' : handDecisions.length ? 'Review decisions' : 'Analysis'}</span></button><button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings('all')}><Icon name="settings" /></button></div></div>

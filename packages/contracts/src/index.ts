@@ -374,6 +374,8 @@ export interface TableSchedule {
   readonly actionWindow: ActionWindow | null;
   readonly nextHandCountdown?: NextHandCountdown;
 }
+/** Who becomes the Table Owner when the owner leaves, or that the table closes with no other human at it. */
+export type OwnerSuccession = { readonly successorParticipantId: ParticipantId } | { readonly closes: true };
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
@@ -406,6 +408,12 @@ export interface ObservableTableSession {
    * Removal of them.
    */
   readonly departedParticipantIds?: readonly ParticipantId[];
+  /**
+   * Only in the Table Owner's own view of an Online Table: what their Leave Table would do to ownership if they asked
+   * for it now. Ownership passes to the earliest-joined human still at the table (ADR-0034), or, with nobody to take it,
+   * the table closes. The server works out the join order, so the client only shows it.
+   */
+  readonly ownerSuccession?: OwnerSuccession;
   /** Application feedback; never part of the game view or a Policy input. */
   readonly runtimeStatus?: TableRuntimeStatus['status'];
   readonly inspection: InspectionCapabilities;

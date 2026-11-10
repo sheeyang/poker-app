@@ -26,6 +26,7 @@ import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } fr
 import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableClosed, tableFull, tablePasswordRequired, unavailableOnline, wrongTablePassword } from './rejections.js';
 import { hashTablePassword, tablePasswordMatches, tablePasswordProblem } from './table-password.js';
 import { closedTableSession, idleTableCloseMs, idleTableSweepMs } from './closing.js';
+import { withOwnershipSettled } from './ownership.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
@@ -343,11 +344,12 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const { aggregate } = session;
       const working = session.game.fork();
       const applied = applyAfterHandRequests(working, aggregate.pendingChanges);
-      const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
+      // The owner's Leave Table or Removal passes ownership on, or closes the table, in this same transition.
+      const next: PersistedTableSession = withOwnershipSettled({ ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
         ...(applied.events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
         bindings: aggregate.bindings.map(binding => isHuman(binding) && applied.left.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
           : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
-          : isBot(binding) && applied.removed.includes(binding.participantId) ? { ...binding, removed: true as const } : binding) };
+          : isBot(binding) && applied.removed.includes(binding.participantId) ? { ...binding, removed: true as const } : binding) });
       return { requestId: 'after-hand:' + aggregate.sessionRevision, fingerprint: createHash('sha256').update('after-hand-v1:' + canonical({ changes: aggregate.pendingChanges })).digest('hex'),
         events: applied.events, next: { aggregate: next, game: working } };
     });
@@ -896,7 +898,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   ...(removedBot ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== removedBot),
                     bindings: session.aggregate.bindings.map(item => isBot(item) && item.participantId === removedBot ? { ...item, removed: true as const } : item) } : {}),
                   ...(ending ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== ending!.participantId), bindings: session.aggregate.bindings.map(item => isHuman(item) && item.participantId === ending!.participantId ? { ...item, membership: ending!.membership } : item) } : {}) };
-                proposed = { aggregate, game: working };
+                // An owner who leaves at once passes ownership on, or closes the table, in the same transition.
+                proposed = { aggregate: ending ? withOwnershipSettled(aggregate) : aggregate, game: working };
                 result = { ok: true, tableSessionId: id, pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision };
               }
             }
@@ -1034,8 +1037,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     /**
      * Joins the Online Table that this Join Link, its own address, names, as the Guest's one Participant there
      * (ADR-0033). The link is the authorization, so there is no expected revision. A Guest who already joined gets
-     * their Participant back, and one who left, the Table Owner included, returns as the same Participant under
-     * their original name. An ID that names no Online Table is not found, and never loads anything: only a join to an
+     * their Participant back, and one who left, a former Table Owner included, returns as the same Participant under
+     * their original name, and with no more rights than anyone else who joins (ADR-0034). An ID that names no Online Table is not found, and never loads anything: only a join to an
      * Online Table that exists does. A Guest at another Online Table, their Current Table, is refused: the join runs in
      * the Guest's turn (`guests`), which creation shares, so no other request of theirs can pass that check meanwhile.
      *
@@ -1083,8 +1086,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             let result: JoinOutcome | undefined;
             if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
             else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
-            // The owner's place is held after they leave, so only someone else can find the table full.
-            else if (binding?.userId !== aggregate.ownerUserId && placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
+            else if (placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
             else if (!binding && aggregate.bindings.some(candidate => nameKey(candidate.name) === nameKey(guest!))) result = reject('name-taken', 'Someone at this table already uses that name, ignoring case. Choose a different display name.');
             if (!result) {
               const participantId = binding?.participantId ?? randomUUID();
