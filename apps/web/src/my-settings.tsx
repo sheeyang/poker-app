@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons.js';
-import { DisplayNameForm, useDisplayName } from './display-name.js';
+import { browserBinding, DisplayNameForm, useDisplayName } from './display-name.js';
 import { useSession } from './session.js';
 
 const initialOf = (name: string | undefined) => name?.trim()[0]?.toUpperCase();
@@ -38,6 +38,7 @@ function ProfilePopover({ displayName, close }: { displayName: string | undefine
       <div><DisplayNameForm current={displayName} autoFocus /></div>
     </div>
     <p className="muted profile-note">Your name applies to tables you create or join from now on, not to tables you are already at.</p>
+    {!displayName && <p className="muted profile-note">{browserBinding}</p>}
     <section className="settings-section">
       <h3>Cards</h3>
       <div className="profile-preview">

@@ -8,6 +8,14 @@ DO $$ BEGIN
     ALTER TABLE local_users ADD COLUMN display_name text;
   END IF;
 END $$;
+-- When the Guest last made a request, by the server's clock (epoch ms), written at most once a day (ADR-0037). Guests
+-- from before it count as seen at the upgrade, so none is purged as idle at once. Check first, as for display_name.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'local_users' AND column_name = 'last_seen_at') THEN
+    ALTER TABLE local_users ADD COLUMN last_seen_at bigint NOT NULL DEFAULT (extract(epoch FROM now()) * 1000)::bigint;
+    ALTER TABLE local_users ALTER COLUMN last_seen_at SET DEFAULT 0;
+  END IF;
+END $$;
 CREATE TABLE IF NOT EXISTS table_sessions (
   id uuid PRIMARY KEY,
   owner_user_id uuid NOT NULL REFERENCES local_users(id),
@@ -94,6 +102,13 @@ DO $$ BEGIN
     UPDATE table_memberships SET status = 'left' WHERE status = 'removed';
     ALTER TABLE table_memberships DROP CONSTRAINT IF EXISTS table_memberships_status_check,
       ADD CONSTRAINT table_memberships_status CHECK (status IN ('joined', 'left'));
+  END IF;
+END $$;
+-- When the Guest last opened the table, by the server's clock (epoch ms); null until they have. The membership mirror
+-- never writes it. Check first, as for display_name.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'table_memberships' AND column_name = 'opened_at') THEN
+    ALTER TABLE table_memberships ADD COLUMN opened_at bigint;
   END IF;
 END $$;
 -- Version-1 aggregates predate the index. They are Practice Tables whose one human is joined.

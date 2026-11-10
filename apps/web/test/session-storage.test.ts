@@ -18,14 +18,14 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('browser storage keeps only preferences', () => {
+describe('browser storage keeps only device preferences', () => {
   it('writes the animations and analysis panel preferences and nothing else', async () => {
     const session = await loadSession();
     session.getState().setPending({ kind: 'create', body: { requestId: 'r1', mode: 'online' } as never });
     session.getState().setSetup({ requestId: 'r1', tableId: 't' });
     session.getState().setAnimations(false);
     session.getState().toggleAnalysis();
-    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations', 'opened']);
+    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations']);
     expect(JSON.parse(store.get(KEY)!).state).toMatchObject({ animations: false, analysisOpen: false });
   });
 
@@ -46,23 +46,24 @@ describe('browser storage keeps only preferences', () => {
     expect(session.getState()).toMatchObject({ pending: null, setup: null, analysisOpen: false, animations: false });
     // The table on screen comes from the address: nothing is selected in storage or in memory.
     expect(session.getState()).not.toHaveProperty('selectedId');
-    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations', 'opened']);
+    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations']);
   });
 });
 
 describe('last-opened times', () => {
-  it('writes the time a table was opened, keyed by table, and a reloaded page reads it back', async () => {
+  it('are not kept in the browser: the server keeps them, and a reloaded page reads none from storage', async () => {
     const session = await loadSession();
-    expect(session.getState().opened).toEqual({});
-    session.getState().markOpened('t1', 1000);
-    session.getState().markOpened('t2', 2000);
-    expect(JSON.parse(store.get(KEY)!).state.opened).toEqual({ t1: 1000, t2: 2000 });
-    expect((await loadSession()).getState().opened).toEqual({ t1: 1000, t2: 2000 });
+    expect(session.getState()).not.toHaveProperty('opened');
+    expect(session.getState()).not.toHaveProperty('markOpened');
+    session.getState().toggleAnalysis();
+    expect(JSON.parse(store.get(KEY)!).state).not.toHaveProperty('opened');
   });
 
-  it('keeps the preferences of an earlier version and starts with no times', async () => {
-    store.set(KEY, JSON.stringify({ version: 1, state: { analysisOpen: false, animations: false } }));
+  it('are removed from what an earlier version stored, keeping its preferences', async () => {
+    store.set(KEY, JSON.stringify({ version: 2, state: { analysisOpen: false, animations: false, opened: { t1: 1000 } } }));
     const session = await loadSession();
-    expect(session.getState()).toMatchObject({ analysisOpen: false, animations: false, opened: {} });
+    expect(session.getState()).toMatchObject({ analysisOpen: false, animations: false });
+    expect(session.getState()).not.toHaveProperty('opened');
+    expect(JSON.parse(store.get(KEY)!).state).toEqual({ analysisOpen: false, animations: false });
   });
 });

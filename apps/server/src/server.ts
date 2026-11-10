@@ -16,6 +16,8 @@ import { createTableSessionMutations, TableSessionRestorationError, type Mutatio
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 import { createGuestQueue } from './guest-queue.js';
 import { validateDisplayName } from './validation.js';
+import { recordOpened } from './membership.js';
+import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './guests.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
@@ -40,21 +42,37 @@ export async function createServer(options: ServerOptions) {
   await app.register(cookie);
   await app.register(websocket);
   const tokenHash = (token: string) => createHash('sha256').update(token).digest('hex');
-  async function authenticatedUser(token: string | undefined) {
+  const clock = options.clock ?? systemClock;
+  const identityCookie = { httpOnly: true, sameSite: 'strict', secure: options.secureCookies ?? false, path: '/', maxAge: guestCookieSeconds } as const;
+  // A Guest seen again after a day gets their cookie set again for a fresh year, so a regular player never lapses (ADR-0037).
+  const renewals = new WeakMap<FastifyRequest, string>();
+  app.addHook('onSend', async (request, reply) => { const token = renewals.get(request); if (token) reply.setCookie('poker_local', token, identityCookie); });
+  async function authenticatedUser(request: FastifyRequest) {
+    const token = request.cookies.poker_local;
     if (!token) return undefined;
     const rows = await db.select().from(localUsers).where(eq(localUsers.tokenHash, tokenHash(token)));
-    return rows[0]?.id;
+    const guest = rows[0];
+    const now = clock.now();
+    // A socket upgrade has no response for a cookie to ride on, so only a plain request counts as the day's visit.
+    if (guest && !request.headers.upgrade && now - guest.lastSeenAt >= guestSeenIntervalMs) {
+      // Housekeeping: a failed write never fails the request, and the Guest is counted at their next visit. No row
+      // written means the purge just deleted them, so the cookie names nobody.
+      const seen = await db.update(localUsers).set({ lastSeenAt: now }).where(eq(localUsers.id, guest.id)).returning({ id: localUsers.id }).catch(() => undefined);
+      if (seen && !seen.length) return undefined;
+      if (seen) renewals.set(request, token);
+    }
+    return guest?.id;
   }
   async function ensureIdentity(request: FastifyRequest, reply: FastifyReply): Promise<string> {
-    const known = await authenticatedUser(request.cookies.poker_local);
+    const known = await authenticatedUser(request);
     if (known) return known;
     const token = randomBytes(32).toString('base64url');
     const id = randomUUID();
-    await db.insert(localUsers).values({ id, tokenHash: tokenHash(token) });
-    reply.setCookie('poker_local', token, { httpOnly: true, sameSite: 'strict', secure: options.secureCookies ?? false, path: '/', maxAge: 31536000 });
+    await db.insert(localUsers).values({ id, tokenHash: tokenHash(token), lastSeenAt: clock.now() });
+    reply.setCookie('poker_local', token, identityCookie);
     return id;
   }
-  const limiter = createRateLimiter(options.rateLimits ?? {}, options.clock ?? systemClock);
+  const limiter = createRateLimiter(options.rateLimits ?? {}, clock);
   const limitMessages: Record<RateLimitKind, string> = {
     creation: 'Too many tables were created from your network recently.',
     joining: 'Too many join attempts were made from your network recently.',
@@ -93,7 +111,7 @@ export async function createServer(options: ServerOptions) {
   app.get('/api/live', {
     websocket: true,
     preValidation: async (request, reply) => {
-      const userId = await authenticatedUser(request.cookies.poker_local);
+      const userId = await authenticatedUser(request);
       if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
       socketOwners.set(request, userId);
     },
@@ -144,7 +162,7 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/live', {
     websocket: true,
     preValidation: async (request, reply) => {
-      const userId = await authenticatedUser(request.cookies.poker_local);
+      const userId = await authenticatedUser(request);
       if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
       try {
         if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !await mutations.read(request.params.id, userId))
@@ -173,7 +191,7 @@ export async function createServer(options: ServerOptions) {
     return displayName ? { ok: true, displayName } : { ok: true };
   });
   app.put<{ Body: { displayName?: unknown } }>('/api/display-name', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     const body = request.body as unknown;
     const checked = validateDisplayName(body && typeof body === 'object' && !Array.isArray(body) ? (body as { displayName?: unknown }).displayName : undefined);
@@ -197,15 +215,24 @@ export async function createServer(options: ServerOptions) {
     }
   });
   app.get('/api/table-sessions', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     try { return { tables: await mutations.savedTables(userId) }; }
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
   });
+  // The Trainer says a Guest opened a table: the time is the server's, kept with their membership, and orders their saved lists (ADR-0037).
+  app.post<{ Params: { id: string } }>('/api/table-sessions/:id/opened', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    try {
+      if (!await recordOpened(db, userId, request.params.id, clock.now())) return reply.code(404).send(notFound());
+      return { ok: true };
+    } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The table could not be marked as opened. Try again.' } }); }
+  });
   // The Join Link is the Online Table's own address (ADR-0033): its preview and joining live under the Table Session.
   // An ID that names no Online Table, malformed or a Practice Table's, gets the one answer a missing table gets.
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/join-preview', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     try {
       const preview = await mutations.previewJoin(userId, request.params.id);
@@ -217,7 +244,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string }; Body: JoinTableRequest }>('/api/table-sessions/:id/join-table', async (request, reply) => {
     const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
@@ -240,7 +267,7 @@ export async function createServer(options: ServerOptions) {
     }
   });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     try {
@@ -253,7 +280,7 @@ export async function createServer(options: ServerOptions) {
     }
   });
   for (const kind of ['seat-participant', 'start-hand', 'act', 'stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button', 'leave-table', 'remove-participant', 'add-bot', 'remove-bot'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
@@ -268,7 +295,7 @@ export async function createServer(options: ServerOptions) {
     }
   });
   for (const kind of ['set-playing-strategy', 'retry-bot', 'set-trainer-configuration', 'set-table-options'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | SetTableOptionsRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
@@ -282,7 +309,7 @@ export async function createServer(options: ServerOptions) {
     }
   });
   app.post<{ Params: { id: string }; Body: SetTablePasswordRequest }>('/api/table-sessions/:id/set-table-password', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send(notFound());
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
@@ -296,7 +323,7 @@ export async function createServer(options: ServerOptions) {
     }
   });
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/summaries/:requestId/retry', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     try {
@@ -307,7 +334,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be retried. Read its state before trying again.' } }); }
   });
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
@@ -316,7 +343,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string }; Body: Record<string, never> }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request.' } });
@@ -328,7 +355,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
   app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/hand-summaries', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply only the Hand ID.' } });
@@ -341,7 +368,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
   app.post<{ Params: { id: string }; Body: { decisionId: string; live?: true } }>('/api/table-sessions/:id/analysis', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || Object.keys(request.body).some(key => !['decisionId', 'live'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and an optional Live Analysis request.' } });
@@ -355,7 +382,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/analysis/:requestId/retry', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Retry uses the original analysis inputs. Supply an empty request.' } });
@@ -367,7 +394,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be retried. Try reading it again.' } }); }
   });
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/analysis/:requestId', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !/^[0-9a-f-]{36}$/.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
     try {
@@ -378,7 +405,7 @@ export async function createServer(options: ServerOptions) {
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/inspect-hand', async (request, reply) => {
-    const userId = await authenticatedUser(request.cookies.poker_local);
+    const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (options.adminMode === false) return reply.code(403).send({ ok: false, rejection: { code: 'admin-mode-disabled', message: 'Completed-Hand inspection is disabled on this server.' } });
@@ -406,6 +433,8 @@ export async function createServer(options: ServerOptions) {
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Hand could not be read. Try revealing it again.' } });
     }
   });
+  let guestSweep: ReturnType<typeof startGuestSweep> | undefined;
+  app.addHook('preClose', async () => { await guestSweep?.stop(); });
   try {
     // Hosted transports may bind with gated routes while waiting for authority.
     // No schema work, restoration, or Bot work is allowed before this gate.
@@ -414,6 +443,7 @@ export async function createServer(options: ServerOptions) {
     await mutations.startRecovery();
     await mutations.loadScheduledTables();
     mutations.startClosingIdleTables();
+    guestSweep = startGuestSweep(db, clock);
     return app;
   } catch (error) {
     await app.close().catch(() => {});

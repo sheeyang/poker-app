@@ -59,9 +59,9 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   }));
   useEffect(() => () => consumeLive(null), [consumeLive]);
   useEffect(() => { window.scrollTo({ top: 0 }); }, []);
-  // Opening a table, one this Guest is at and can see, notes when in browser storage: it orders the saved lists.
+  // Opening a table, one this Guest is at and can see, tells the server: it keeps when, and orders the saved lists by it.
   const opened = outcome?.show === 'table';
-  useEffect(() => { if (opened) useSession.getState().markOpened(selected, Date.now()); }, [opened, selected]);
+  useEffect(() => { if (opened) void api.markOpened(selected).then(() => queryClient.invalidateQueries({ queryKey: ['table-sessions'] }), () => {}); }, [opened, selected, queryClient]);
   usePageTitle(missing ? { page: 'missing-table' } : closed ? { page: 'closed-table' } : table.data ? { page: 'table', ...table.data.view.configuration } : undefined);
   /** Joined through the Join Link: the same address is now the Guest's table, read and followed live. */
   async function joined() {

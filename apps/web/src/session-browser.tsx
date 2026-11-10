@@ -7,7 +7,6 @@ import { StrategySelect } from './strategy-select.js';
 import { Icon } from './icons.js';
 import { chips, tableFormat } from './table-model.js';
 import { liveDetails, openedLabel, savedRows, type SavedRow } from './saved-tables.js';
-import { useSession } from './session.js';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem, tablePasswordProblem } from './online-setup.js';
 import { PasswordField } from './password-input.js';
 import type { Command } from './session.js';
@@ -33,8 +32,7 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
   const currentCopy = useQuery<ObservableTableSession>({ queryKey: ['table-session', currentId], enabled: false });
   // Its clock, so the row says a Hand is in progress until the payout ends, exactly as the banner does.
   const currentPresentation = usePresentation(currentCopy.data, currentCopy.data?.viewerParticipantId);
-  const opened = useSession(state => state.opened);
-  const tables = sessions.data && savedRows(sessions.data.tables, mode, opened, currentId && currentPresentation ? liveDetails(currentId, currentCopy.data, currentPresentation.serverNow) : undefined);
+  const tables = sessions.data && savedRows(sessions.data.tables, mode, currentId && currentPresentation ? liveDetails(currentId, currentCopy.data, currentPresentation.serverNow) : undefined);
   const { displayName } = useDisplayName(), [awaitingName, setAwaitingName] = useState<CreateTableSessionRequest | null>(null);
   // Until the Guest decides, the form is open exactly when there is nothing to pick up instead.
   const [composing, setComposing] = useState<boolean>();
@@ -59,7 +57,6 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
         <thead><tr><th scope="col">Table</th><th scope="col">Blinds</th><th scope="col">Status</th><th scope="col">Opened</th><th scope="col"><span className="visually-hidden">Action</span></th></tr></thead>
         <tbody>{tables.map(row => <LedgerRow key={row.tableSessionId} row={row} now={Date.now()} retry={() => void sessions.refetch()} />)}</tbody>
       </table>}
-      {!!tables?.length && <p className="ledger-note">Tables you haven’t opened in this browser are listed last.</p>}
     </section>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
   </main>;

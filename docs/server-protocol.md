@@ -18,9 +18,21 @@ on these transient failures. See
 
 `GET /api/identity` establishes an opaque server-issued `poker_local` cookie with
 HttpOnly, SameSite=Strict, and path `/`. Retaining that cookie retains local
-ownership after reload or server restart. Browser storage remembers the selected
-Table Session but does not establish permission. Clearing the cookie creates a
-different local user.
+ownership after reload or server restart. Browser storage holds only device
+preferences (card animations, the analysis panel) and never establishes
+permission. Clearing the cookie creates a different Guest, who cannot reach the
+old one's tables ([ADR-0037](adr/0037-keep-guests-browser-bound-with-their-data-on-the-server.md)).
+
+A Guest seen again at least a day after the server last saw them gets the cookie
+set again, for a fresh year, on that response; the server writes their last-seen
+time at most once a day. Every day the server purges Guests last seen over 90 days
+ago who have no display name and no table, creation request or membership.
+
+`POST /api/table-sessions/:id/opened` (empty body, 401 without an identity) records
+that the Guest opened a table they have a membership at, by the server's clock, and
+answers `{ ok: true }`; any other table answers 404 `not-found`. `GET /api/table-sessions`
+returns that time as `openedAt` on each entry, absent until the table is first
+opened. The Trainer orders saved lists by it, most recent first.
 
 `GET /api/identity` also returns the Guest's `displayName` once set. `PUT
 /api/display-name` with `{ displayName }` sets or edits it. Names are trimmed and
@@ -130,7 +142,7 @@ table-level Trainer configuration, and are rewritten at their next commit. Each 
 format: a version-2 row that lacks part of it fails restoration (503 `record-restoration-failed`)
 rather than receiving defaults ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)
 on ADR-0014). The
-`table_memberships` index (Guest, table, Participant, status) is written in the
+`table_memberships` index (Guest, table, Participant, status, last-opened time) is written in the
 same transaction as every aggregate write that changes a membership (see
 [`membership.ts`](../apps/server/src/membership.ts)). Startup backfills it for
 version-1 records. It serves the saved-tables list and the authorization of

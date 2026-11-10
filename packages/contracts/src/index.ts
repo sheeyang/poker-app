@@ -284,6 +284,8 @@ export interface SavedTable {
   readonly left?: true;
   /** A Closed Table: nobody can open, join or act at it. Its memberships have ended, so it is `left` too. */
   readonly closed?: true;
+  /** When the Guest last opened this table, by the server's clock in epoch milliseconds; absent until they have. */
+  readonly openedAt?: number;
   readonly seatCount?: number;
   readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
 }

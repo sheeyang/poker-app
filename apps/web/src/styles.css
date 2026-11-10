@@ -1059,7 +1059,6 @@ fieldset.composer-field { display: block; }
 .ledger-live b { color: var(--gold); font-weight: 600; }
 .ledger-ante { color: var(--muted); }
 .ledger-opened { color: var(--muted); white-space: nowrap; }
-.ledger-note { margin-top: 10px; padding-inline: 12px; color: var(--muted); font-size: .8rem; }
 .ledger-row > .ledger-action { text-align: right; color: var(--gold); font-size: .82rem; font-weight: 600; white-space: nowrap; }
 .ledger-action > span { margin-right: 6px; }
 .ledger-action svg { vertical-align: -3px; transition: transform 150ms; }
