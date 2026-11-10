@@ -942,9 +942,9 @@ button.seat-target:hover { background: #304238; }
   .brand strong { font-size: 1.1rem; }
   .app-header nav { margin-left: auto; height: var(--bar-h); gap: 0; }
   .app-header nav a { padding: 0 10px; font-size: .8rem; }
-  .identity-status { order: 3; flex-basis: 100%; margin: 0 0 6px; justify-content: flex-end; font-size: .68rem; }
+  .identity-status { order: 3; flex-basis: auto; margin: 0; justify-content: flex-end; font-size: .68rem; }
+  .identity-avatar { width: 32px; height: 32px; }
   .table-active .identity-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  .table-active .identity-status { margin: 0; flex-basis: auto; }
   .table-toolbar { padding-top: 8px; gap: 8px; }
   .table-title { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
   .table-title h1 { font-size: 1.1rem; }
@@ -1186,8 +1186,6 @@ fieldset.composer-field { display: block; }
 .play-workspace > .play-area { grid-column: 1; grid-row: 1; }
 .play-workspace > .analysis-panel { grid-column: 2; grid-row: 1; }
 
-.identity-button { min-height: 32px; padding: 4px 10px; font-size: .8rem; gap: 7px; max-width: 160px; }
-.identity-button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Table options and My settings: flat, labelled groups instead of collapsed sections. */
 .settings-section > h3 { font-size: .78rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
@@ -1198,7 +1196,6 @@ fieldset.composer-field { display: block; }
 
 .settings-summary { margin-bottom: 0; padding-bottom: 22px; border-bottom: 0; }
 .rules-form label.live-toggle { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
-.identity-initial { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--raised); border: 1px solid var(--control-line); color: var(--gold); font-size: .7rem; font-weight: 700; flex-shrink: 0; }
 .dialog-content > .settings-section:first-child { border-top: 0; padding-top: 0; }
 .settings-section > h3 + p { margin: 0 0 14px; }
 
@@ -1220,3 +1217,7 @@ fieldset.composer-field { display: block; }
 .profile-pop-heading { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 12px; margin-bottom: 14px; }
 .profile-pop-heading h2 { font-size: 1.15rem; }
 .profile-pop .settings-section:first-of-type { border-top: 1px solid var(--line); }
+
+/* The identity button: a lone avatar. Name and status are in its tooltip and the profile panel. */
+.identity-avatar { position: relative; width: 36px; height: 36px; min-height: 0; padding: 0; border-radius: 50%; background: var(--raised); border: 1px solid var(--control-line); color: var(--gold); font-weight: 700; font-size: .95rem; display: grid; place-items: center; }
+.identity-avatar:hover, .identity-avatar[aria-expanded="true"] { background: var(--control-hover); border-color: var(--gold); }

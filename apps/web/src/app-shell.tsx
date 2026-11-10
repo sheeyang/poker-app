@@ -82,7 +82,7 @@ export function AppShell() {
           <Link to="/practice" className={section === 'practice' ? 'nav-active' : undefined} aria-current={pathname === '/practice' ? 'page' : section === 'practice' ? 'location' : undefined}><Icon name="cards" size={18} /><span>Practice</span></Link>
           <Link to="/online" className={section === 'online' ? 'nav-active' : undefined} aria-current={pathname === '/online' ? 'page' : section === 'online' ? 'location' : undefined}><Icon name="tables" size={18} /><span>Online</span></Link>
         </nav>
-        <span className="identity-status"><span className="identity-text">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span>{identity.isSuccess && <MySettings />}</span>
+        <span className="identity-status">{!identity.isSuccess && <span className="identity-text">{identity.isError ? 'Connection unavailable' : 'Connecting…'}</span>}{identity.isSuccess && <MySettings />}</span>
       </header>
       {identity.isSuccess && currentTable && <CurrentTableBanner key={currentTable} tableSessionId={currentTable} command={command} />}
       {!atTable && <>

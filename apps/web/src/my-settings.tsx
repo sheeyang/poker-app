@@ -22,7 +22,7 @@ export function MySettings() {
     return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', onEscape); };
   }, [open]);
   return <span className="profile-anchor" ref={box}>
-    <button type="button" ref={trigger} className="quiet-button identity-button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}>{displayName && <span className="identity-initial" aria-hidden="true">{initialOf(displayName)}</span>}<span>{displayName || 'Profile'}</span></button>
+    <button type="button" ref={trigger} className="identity-avatar" aria-haspopup="dialog" aria-expanded={open} aria-label={`Profile, ${displayName ?? 'name not set'}. Progress saved automatically.`} title={`${displayName ?? 'Set your name'} · Progress saved automatically`} onClick={() => setOpen(!open)}>{initialOf(displayName) ?? '?'}</button>
     {open && <ProfilePopover displayName={displayName} close={() => { setOpen(false); trigger.current?.focus(); }} />}
   </span>;
 }
