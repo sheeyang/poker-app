@@ -7,7 +7,8 @@ import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, ty
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { currentTable, membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { createGuestQueue, type GuestQueue } from './guest-queue.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
 import { CommitOutcomeUnknown } from './creation.js';
@@ -22,7 +23,7 @@ import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, n
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
-import { liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, removedGuest, requestIdConflict, tableFull, tablePasswordRequired, unavailableOnline, wrongTablePassword } from './rejections.js';
+import { currentTableElsewhere, liveAnalysisDisallowed as liveAnalysisRefused, notFound, ownerRequired, reject, requestIdConflict, tableFull, tablePasswordRequired, unavailableOnline, wrongTablePassword } from './rejections.js';
 import { hashTablePassword, tablePasswordMatches, tablePasswordProblem } from './table-password.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
@@ -130,7 +131,7 @@ export interface BotRuntimeOptions {
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
 }
-export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock) {
+export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock, guests: GuestQueue = createGuestQueue()) {
   /** The only way to reach a table in memory: each committed table, while something needs it (ADR-0035). */
   const tables = createTableRegistry<CommittedSession>({ clock, load: loadTable, loaded: tableLoaded, drain: drained, unloaded: tableUnloaded });
   /** One pending wake-up per table, at its schedule's next instant (`nextWakeAt`). */
@@ -342,7 +343,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, pendingChanges: [],
         ...(applied.events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
         bindings: aggregate.bindings.map(binding => isHuman(binding) && applied.left.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
-          : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'removed' as const }
+          : isHuman(binding) && applied.removed.includes(binding.participantId) ? { ...binding, membership: 'left' as const }
           : isBot(binding) && applied.removed.includes(binding.participantId) ? { ...binding, removed: true as const } : binding) };
       return { requestId: 'after-hand:' + aggregate.sessionRevision, fingerprint: createHash('sha256').update('after-hand-v1:' + canonical({ changes: aggregate.pendingChanges })).digest('hex'),
         events: applied.events, next: { aggregate: next, game: working } };
@@ -577,8 +578,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const participantId = viewer(session, entry.userId);
       if (!participantId) {
         // A Guest whose membership ended is told once, so their client leaves the table; anyone else is dropped silently.
-        const ended = humanBindings(session.aggregate).find(binding => binding.userId === entry.userId && binding.membership !== 'joined')?.membership;
-        if (ended && ended !== 'joined') try { entry.publish({ type: 'table-membership-ended', tableSessionId: id, reason: ended }); } catch { /* The subscriber is gone. */ }
+        const ended = humanBindings(session.aggregate).some(binding => binding.userId === entry.userId && binding.membership === 'left');
+        if (ended) try { entry.publish({ type: 'table-membership-ended', tableSessionId: id }); } catch { /* The subscriber is gone. */ }
         drop(entry); continue;
       }
       // A delivery failure cannot change a confirmed mutation's outcome.
@@ -777,7 +778,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         let proposed: CommittedSession | undefined;
         let acceptedHumanDecision: string | undefined;
         let acceptedEvents: readonly CashGameEvent[] = [];
-        let ending: { participantId: string; membership: 'left' | 'removed' } | undefined;
+        let ending: { participantId: string; membership: 'left' } | undefined;
         let addedBot: PersistedBotBinding | undefined;
         let removedBot: string | undefined;
         try {
@@ -858,10 +859,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                     return left;
                   }
                   case 'leave-table': case 'remove-participant': {
-                    // Removal differs only in what it records: the Guest may not come back.
+                    // Removal is a Leave Table the owner imposes: nothing records the difference, and the Guest may join again.
                     const participantId = (request as LeaveTableRequest | RemoveParticipantRequest).participantId;
                     const left = standUpAndLeave(working, participantId);
-                    if (left.ok) ending = { participantId, membership: kind === 'remove-participant' ? 'removed' : 'left' };
+                    if (left.ok) ending = { participantId, membership: 'left' };
                     return left;
                   }
                 }
@@ -1030,31 +1031,41 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * (ADR-0033). The link is the authorization, so there is no expected revision. A Guest who already joined gets
      * their Participant back, and one who left, the Table Owner included, returns as the same Participant under
      * their original name. An ID that names no Online Table is not found, and never loads anything: only a join to an
-     * Online Table that exists does.
+     * Online Table that exists does. A Guest at another Online Table, their Current Table, is refused: the join runs in
+     * the Guest's turn (`guests`), which creation shares, so no other request of theirs can pass that check meanwhile.
      *
      * Anyone not at a table with a Table Password must give it, a Guest who left or was removed and a former owner
      * included. It is checked against the stored table before loading it, and again if it changed meanwhile. A missing
      * or wrong password is a definitive rejection that is never remembered under the request ID, and the password
-     * never reaches the fingerprint.
+     * never reaches the fingerprint. `passwordAttempt` is asked before each check of a password, so that only a join
+     * that could otherwise succeed spends one: the Current Table refusal comes first.
      */
-    async function join(id: string, userId: string, request: JoinTableRequest): Promise<JoinOutcome> {
+    async function join(id: string, userId: string, request: JoinTableRequest, passwordAttempt?: () => ApplicationRejection | undefined): Promise<JoinOutcome> {
       const stored = await storedOnlineTable(db, id);
       if (!stored) return notFound();
       const { requestId, tablePassword, ...contents } = request;
       if (Object.keys(contents).length || tablePassword !== undefined && typeof tablePassword !== 'string') return reject('invalid-mutation-request', 'Joining carries only a requestId, and the Table Password when the table has one.');
-      const upgraded = upgradeTableSession(stored);
-      let checked = await passwordRefusal(upgraded, userId, tablePassword, undefined);
-      if (checked.refusal) return checked.refusal;
-      return await holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
+      // The Guest's turn is taken before the table's handle and FIFO, never inside them.
+      return await guests.run(userId, async (): Promise<JoinOutcome> => {
+        const upgraded = upgradeTableSession(stored);
+        // Checked again in the table's turn; this early answer only spares a password attempt.
+        const away = upgraded && memberBinding(upgraded, userId) ? undefined : await currentTable(db, userId);
+        if (away && away !== id) return currentTableElsewhere(away);
+        let checked = await passwordRefusal(upgraded, userId, tablePassword, undefined, passwordAttempt);
+        if (checked.refusal) return checked.refusal;
+        return await holding(id, () => enqueue(id, async (): Promise<JoinOutcome> => {
         let session = tables.get(id);
         if (!session) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
-        // The owner may have changed the password since it was checked.
-        checked = await passwordRefusal(session.aggregate, userId, tablePassword, checked.verified);
-        if (checked.refusal) return checked.refusal;
-        session = tables.get(id)!;
         const fingerprint = createHash('sha256').update('join-table-v1:' + canonical({ userId })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing as JoinOutcome;
+        session = tables.get(id)!;
+        // Not remembered under the request ID: once the Guest leaves their Current Table, the same request joins.
+        const elsewhere = memberBinding(session.aggregate, userId) ? undefined : await currentTable(db, userId);
+        if (elsewhere && elsewhere !== id) return currentTableElsewhere(elsewhere);
+        // The owner may have changed the password since it was checked. Neither refusal is remembered either.
+        checked = await passwordRefusal(session.aggregate, userId, tablePassword, checked.verified, passwordAttempt);
+        if (checked.refusal) return checked.refusal;
         session = tables.get(id)!;
         let proposed: CommittedSession | undefined;
         let events: readonly CashGameEvent[] = [];
@@ -1064,8 +1075,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             const guest = (await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, userId)))[0]?.displayName;
             const acknowledged = (participantId: string, next = aggregate): JoinOutcome => ({ ok: true, tableSessionId: id, participantId, pokerRevision: next.pokerRevision, sessionRevision: next.sessionRevision });
             let result: JoinOutcome | undefined;
-            if (binding?.membership === 'removed') result = removedGuest();
-            else if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
+            if (binding?.membership === 'joined') result = acknowledged(binding.participantId);
             else if (!binding && !guest) result = reject('display-name-required', 'Choose a display name before joining a table.');
             // The owner's place is held after they leave, so only someone else can find the table full.
             else if (binding?.userId !== aggregate.ownerUserId && placesTaken(aggregate) >= onlineTableCapacity) result = tableFull('Ask the Table Owner to make room.');
@@ -1091,23 +1101,27 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (next) publishCommitted(id, events);
         return outcome;
       })) ?? notFound();
+      });
     }
     /**
      * Why a Guest cannot join this table with `password`: undefined `refusal` when they need none (no Table Password,
      * or they are at the table) or give the right one. `verified` is the hash it last matched, so that a password
-     * already checked against an unchanged hash is not hashed again.
+     * already checked against an unchanged hash is not hashed again. `attempt` is asked first each time a password is
+     * actually checked, and may refuse it (the per-address limit on password attempts).
      */
-    async function passwordRefusal(aggregate: PersistedTableSession | undefined, userId: string, password: string | undefined, verified: string | undefined): Promise<{ refusal?: ApplicationRejection; verified?: string }> {
+    async function passwordRefusal(aggregate: PersistedTableSession | undefined, userId: string, password: string | undefined, verified: string | undefined, attempt?: () => ApplicationRejection | undefined): Promise<{ refusal?: ApplicationRejection; verified?: string }> {
       const hash = aggregate?.tablePasswordHash;
       if (!hash || memberBinding(aggregate, userId)) return { verified };
       if (hash === verified) return { verified };
       if (password === undefined || password === '') return { refusal: tablePasswordRequired() };
+      const limited = attempt?.();
+      if (limited) return { refusal: limited };
       return await tablePasswordMatches(password, hash) ? { verified: hash } : { refusal: wrongTablePassword() };
     }
     /**
      * What an Online Table's Join Link shows before joining, for the Guest opening it: undefined, answered as not
-     * found, for an ID that names no Online Table. A removed Guest is told so instead, and a Guest not at a table with a
-     * Table Password learns only its owner's name and that the password is required. It is read from the stored
+     * found, for an ID that names no Online Table. A Guest not at a table with a Table Password learns only its
+     * owner's name and that the password is required. It is read from the stored
      * table, never loading it: the Guest opening the link is not at the table yet.
      */
     async function previewJoin(userId: string, id: string): Promise<JoinLinkPreview | ApplicationRejection | undefined> {
@@ -1116,7 +1130,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const aggregate = upgradeTableSession(stored);
       if (!aggregate) throw new TableSessionRestorationError();
       const humans = humanBindings(aggregate);
-      if (humans.some(binding => binding.userId === userId && binding.membership === 'removed')) return removedGuest();
       const owner = humans.find(binding => binding.userId === aggregate.ownerUserId)!;
       // Behind a Table Password, the table's details stay with the people at it.
       if (aggregate.tablePasswordHash && !memberBinding(aggregate, userId)) return { ok: true, ownerName: owner.name, passwordRequired: true };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, type JoinLinkPreview } from '@poker/contracts';
-import { analysisTabParam, joinLink, joinPreviewWanted, pageTitle, tableAddress, tableSearch } from '../src/table-address.js';
+import { defaultConfiguration, type JoinLinkPreview, type SavedTable } from '@poker/contracts';
+import { RequestFailure } from '@poker/client';
+import { analysisTabParam, currentTableRefusal, joinLink, joinPreviewWanted, pageTitle, tableAddress, tableSearch } from '../src/table-address.js';
 
 describe('the analysis tab kept in a table address', () => {
   it('accepts live, hand and session, and ignores anything else', () => {
@@ -77,5 +78,20 @@ describe('browser-tab titles', () => {
   });
   it('say when there is nothing at the address', () => {
     expect([pageTitle({ page: 'missing-table' }), pageTitle({ page: 'not-found' })]).toEqual(['Table not found · Poker Trainer', 'Page not found · Poker Trainer']);
+  });
+});
+
+describe('the refusal of a Guest who is already at another Online Table', () => {
+  const refusal = new RequestFailure('current-table-elsewhere', 'Leave it first.', true, { currentTableId: id });
+  it('links to their Current Table, described from their saved tables when it is listed there', () => {
+    const listed: SavedTable = { tableSessionId: id, mode: 'online', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 }, playState: { status: 'between-hands', completedHands: 3, seatedParticipants: 2 } };
+    expect(currentTableRefusal(refusal, [listed])).toEqual({ tableSessionId: id, table: '6-max Hold’em · 10 / 20' });
+    expect(currentTableRefusal(refusal, undefined)).toEqual({ tableSessionId: id });
+  });
+  it('is no other failure', () => {
+    expect(currentTableRefusal(new RequestFailure('table-full', 'Full.', true), [])).toBeUndefined();
+    expect(currentTableRefusal(new RequestFailure('current-table-elsewhere', 'Leave it first.', true), [])).toBeUndefined();
+    expect(currentTableRefusal(new Error('offline'), [])).toBeUndefined();
+    expect(currentTableRefusal(null, [])).toBeUndefined();
   });
 });

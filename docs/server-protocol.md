@@ -51,12 +51,22 @@ Join rejections: 404 `not-found`; 400 `display-name-required`; 409
 Participants included); 409 `table-full` (all 20 places are taken: by the joined humans, by
 the Bots the owner has not removed, and by the Table Owner, whose place is held after they
 leave so that they can always return); 403 `table-password-required` (the table has a Table Password and
-the request gave none) and 403 `wrong-table-password`; 403
-`guest-removed` (the Table Owner removed this Guest: it also answers the preview); 409 `request-id-conflict`; 429 `rate-limited` (see [Public hosting safeguards](#public-hosting-safeguards)). Like creation, definitive rejections are
+the request gave none) and 403 `wrong-table-password` (see [Table Password](#table-password));
+409 `request-id-conflict`; 429 `rate-limited` (see [Public hosting safeguards](#public-hosting-safeguards)). Like creation, definitive rejections are
 remembered per request ID, so retry with a new one after fixing the cause. The two password rejections are the
 exception: they are definitive but never remembered, so the same request ID can be tried again with the right password. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
 command, so it advances both revisions and the Participant observes from that point.
+
+A Guest is at no more than one open Online Table at a time, their Current Table, watching
+included; Practice Tables don't count. Creating an Online Table, and joining or returning to
+another one, answer 409 `current-table-elsewhere` while the Guest is joined at an Online Table,
+with that table's ID as `rejection.currentTableId`. Joining the Current Table itself is no
+refusal. Creation checks it once the request is otherwise valid, and joining before the table's
+own checks, the Table Password included. Unlike other definitive rejections it is not remembered under the request ID: once
+the Guest leaves their Current Table, the same request succeeds. Each Guest's creations and
+joins run one at a time, whatever table they are for, so two requests from two browser tabs
+cannot both pass the check.
 
 All table paths below start with `/api/table-sessions`:
 
@@ -66,9 +76,9 @@ All table paths below start with `/api/table-sessions`:
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
-| `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: the table leaves their saved list (unless they own it) and a place is freed. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
+| `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until its payout phase ends. They are never deferred. |
-| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left or been removed. Between Hands it applies at once: the Guest stands up (cashing out), leaves the table, and their membership becomes `removed`. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table or join it again, through any Join Link; it leaves their saved list. |
+| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list. |
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
 | `POST /:id/set-table-password` | Table Owner only, Online Tables only, at any time, even during a Hand. Requires `requestId` and `tablePassword`, a string to set or change the password or `null` to remove it; there is no expected revision. See [Table Password](#table-password). |
@@ -114,7 +124,7 @@ Hands never reach it. Responses carry no game view, cards, deck or master seed, 
 the derived evaluation and selection seeds that reproduce them.
 
 The Persisted Table Session is version 2. It records the table `mode`, and each
-human binding's Guest, `membership` (`joined`, `left` or `removed`) and Trainer
+human binding's Guest, `membership` (`joined` or `left`) and Trainer
 configuration, the table `options`, and the
 `pendingChanges` (after-Hand requests, empty by default). Version-1 records load as Practice Tables whose human takes the
 table-level Trainer configuration, and are rewritten at their next commit. Each version names one
@@ -277,11 +287,11 @@ Removal is the strongest pending change (`sit-out` < `stand-up` < `leave-table` 
 nothing, so nothing a Guest asks for undoes it. A Removal during a Hand waits for the
 Hand whether or not the Guest is seated, and survives a restart like any pending change.
 When it applies, the Guest stands up and leaves the table in the same commit as every
-other pending change, and their binding becomes `removed` (the membership index follows
+other pending change, and their binding becomes `left`, as for Leave Table (the membership index follows
 in that transaction).
 
 A Guest whose Participant leaves or is removed receives one `table-membership-ended` live
-message (`reason: 'left'` or `'removed'`) on their subscription, then no more updates for
+message on their subscription, then no more updates for
 that table.
 
 ### Owner controls: Bots and table options
@@ -453,11 +463,12 @@ address and 10 minutes:
 | --- | --- | --- |
 | `creation` | `POST /api/table-sessions` | 10 |
 | `joining` | `POST /:id/join-table` | 30 |
-| `table-password` | `POST /:id/join-table` with a non-empty `tablePassword`: each attempt at a Table Password, right or wrong | 10 |
+| `table-password` | `POST /:id/join-table`: each check of a Table Password, right or wrong. A join refused before the password is checked (`current-table-elsewhere`, for one) spends none | 10 |
 
 A refusal is HTTP 429 with a `Retry-After` header (seconds) and
 `{ ok: false, rejection: { code: 'rate-limited', message } }`; the message says how long
-to wait. The limit is checked before authentication and is never remembered with a request ID.
+to wait. The `creation` and `joining` limits are checked before authentication; `table-password` only when a password
+is about to be checked. No limit is ever remembered with a request ID.
 
 **Tables per Guest.** There is no cap: a Guest can own any number of tables, and Practice Tables are a permanent practice history.
 

@@ -7,7 +7,8 @@ import { Icon } from './icons.js';
 import { FeltPreview, type SeatMark } from './felt.js';
 import { Skeleton } from './loading-skeleton.js';
 import { usePageTitle, useShell } from './app-shell.js';
-import { joinLink } from './table-address.js';
+import { currentTableRefusal, joinLink } from './table-address.js';
+import { CurrentTableRefusal } from './current-table-refusal.js';
 import { chips, tableFormat } from './table-model.js';
 import { joinProblem, joinRequest, type JoinProblemField } from './join-form.js';
 import { PasswordField } from './password-input.js';
@@ -53,7 +54,8 @@ export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId:
       if (error.code === 'wrong-table-password') requestAnimationFrame(() => { passwordField.current?.focus(); passwordField.current?.select(); });
     },
   });
-  const problem = join.error ? joinProblem(join.error instanceof RequestFailure ? { code: join.error.code, message: join.error.message } : undefined, preview.ownerName) : undefined;
+  // At another Online Table already: what to do about it is shown on its own, with a way to that table.
+  const problem = join.error && !currentTableRefusal(join.error, undefined) ? joinProblem(join.error instanceof RequestFailure ? { code: join.error.code, message: join.error.message } : undefined, preview.ownerName) : undefined;
   const fieldProblem = (field: JoinProblemField) => problem?.field === field ? problem.message : undefined;
   const nameProblem = fieldProblem('displayName'), passwordProblem = fieldProblem('tablePassword'), formProblem = fieldProblem('form');
   const edited = () => { if (join.error) join.reset(); };
@@ -86,6 +88,7 @@ export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId:
           note={passwordProblem && <small id="join-password-problem" className="field-problem" role="alert">{passwordProblem}</small>} />}
         {!preview.passwordRequired && named && <RoomNote placesTaken={preview.placesTaken} />}
         {formProblem && <p className="notice-error" role="alert">{formProblem}</p>}
+        <CurrentTableRefusal error={join.error} />
         <button type="submit" className="primary start-practice" disabled={join.isPending}>{join.isPending ? 'Joining…' : alreadyJoined ? 'Open table' : returning ? 'Return to table' : 'Join table'}<Icon name="arrow" size={19} /></button>
         {named && <p className="muted join-note">You’ll watch first, then take an open seat when you’re ready.</p>}
       </form>

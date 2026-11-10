@@ -782,6 +782,16 @@ input[aria-invalid="true"] { border-color: #c48466; }
 .field-problem { color: #f0c8af; font-weight: 400; line-height: 1.5; }
 .rules-form .password-row { width: min(100%, 360px); }
 .table-password-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+/* Refused for the Guest's Current Table: the warm green of that table's ledger row, a brass-tinted rule, and the way to it. */
+.current-table-refusal { display: grid; gap: 4px; padding: 14px 16px 10px; background: #1f2c24; border: 1px solid #5c5a40; border-radius: 8px; color: #c3d4c7; font-size: .86rem; line-height: 1.5; }
+.current-table-refusal p { margin: 0; }
+.current-table-refusal .numeric { white-space: nowrap; }
+.current-table-refusal-title { color: var(--text); font-size: .92rem; font-weight: 600; }
+.current-table-refusal-title b { color: var(--gold); font-weight: 600; }
+a.current-table-refusal-link { display: inline-flex; align-items: center; gap: 6px; justify-self: start; font-weight: 600; text-decoration: none; }
+a.current-table-refusal-link svg { transition: transform 150ms; }
+a.current-table-refusal-link:hover svg { transform: translateX(3px); }
+@media (prefers-reduced-motion: reduce) { a.current-table-refusal-link svg { transition: none; } }
 .skeleton-join-address { width: 14rem; max-width: 100%; height: .9rem; }
 .skeleton-join-title { width: 11rem; height: 2rem; }
 .skeleton-join-heading { width: 9rem; height: 1.2rem; }

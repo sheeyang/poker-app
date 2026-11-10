@@ -1,4 +1,5 @@
-import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, TableMode } from '@poker/contracts';
+import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
+import { RequestFailure } from '@poker/client';
 import { chips, modeLabel, tableFormat } from './table-model.js';
 
 /** Each mode's list: the Practice screen and the Online screen. */
@@ -45,7 +46,19 @@ export function tableAddress(routeMode: TableMode, tableSessionId: string, read:
 /** Whether the address is an Online Table's Join Link to a visitor who is not at it: only then is its preview asked for. */
 export const joinPreviewWanted = (routeMode: TableMode, read: TableRead) => routeMode === 'online' && read === 'not-found';
 
-export type AnalysisTab = 'live' | 'hand' | 'session';
+/**
+ * Where a refusal to create, join or return to an Online Table sends a Guest who is already at another one: their
+ * Current Table, and its format and stakes when their saved tables list it. Undefined for any other failure.
+ */
+export function currentTableRefusal(error: unknown, saved: readonly SavedTable[] | undefined): { readonly tableSessionId: string; readonly table?: string } | undefined {
+  if (!(error instanceof RequestFailure) || error.code !== 'current-table-elsewhere' || !error.currentTableId) return undefined;
+  const tableSessionId = error.currentTableId;
+  const listed = saved?.find(table => table.tableSessionId === tableSessionId);
+  return listed?.seatCount !== undefined && listed.stakes
+    ? { tableSessionId, table: `${tableFormat(listed.seatCount)} Hold’em · ${chips(listed.stakes.smallBlind)} / ${chips(listed.stakes.bigBlind)}` } : { tableSessionId };
+}
+
+export type AnalysisTab ='live' | 'hand' | 'session';
 /** The analysis tab an address names; anything absent or invalid names none, and the current default applies. */
 export function analysisTabParam(value: unknown): AnalysisTab | undefined {
   return value === 'live' || value === 'hand' || value === 'session' ? value : undefined;

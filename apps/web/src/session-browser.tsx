@@ -13,6 +13,7 @@ import { DisplayNameForm, DisplayNamePrompt, useDisplayName } from './display-na
 import { Skeleton } from './loading-skeleton.js';
 import { FeltPreview, SeatGlyph, type SeatMark } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
+import { CurrentTableRefusal } from './current-table-refusal.js';
 
 const copy = {
   practice: { title: 'Practice tables', lead: 'Your practice history. Every table waits exactly where you left it.', create: 'New practice table', empty: 'No practice tables yet.', emptyHint: 'Start practice to play your first hand against Bots.' },
@@ -72,7 +73,7 @@ function LedgerRow({ saved, retry }: { saved: SavedTable; retry: () => void }) {
   const label = `${action}: ${name}, ${blinds} blinds`;
   const status = kind === 'practice' ? <span className="muted">Practice</span>
     : kind === 'away' ? <span className="muted">Not at this table</span>
-    : <span className="ledger-live"><b>At this table</b> · {playState.status === 'active-hand' ? 'Hand in progress' : 'Between hands'} · {playState.viewerStack !== undefined ? <span className="numeric">{chips(playState.viewerStack)} chips</span> : 'Watching'}</span>;
+    : <span className="ledger-live"><b>Current Table</b> · {playState.status === 'active-hand' ? 'Hand in progress' : 'Between hands'} · {playState.viewerStack !== undefined ? <span className="numeric">{chips(playState.viewerStack)} chips</span> : 'Watching'}</span>;
   const opener = saved.mode === 'online'
       ? <Link className="ledger-open" aria-label={label} to="/online/$tableSessionId" params={{ tableSessionId: saved.tableSessionId }}>{name}</Link>
       : <Link className="ledger-open" aria-label={label} to="/practice/$tableSessionId" params={{ tableSessionId: saved.tableSessionId }}>{name}</Link>;
@@ -182,6 +183,7 @@ function OnlineComposer({ id, command, ready, displayName, launch }: { id: strin
           <div className="form-pair"><label>Bots<select value={setup.bots} onChange={number('bots')}>{Array.from({ length: setup.seatCount }, (_, i) => <option key={i} value={i}>{i === 0 ? 'No bots' : i === 1 ? '1 bot' : `${i} bots`}</option>)}</select></label>{setup.bots > 0 && <label>Bot Playing Strategy<StrategySelect value={setup.botStrategy} onChange={botStrategy => setSetup({ ...setup, botStrategy })} /></label>}</div>
         </div></details>
         {problem && problem !== passwordProblem && <p className="notice-error" role="alert">{problem}</p>}
+        <CurrentTableRefusal error={command.error} />
         <button className="primary start-practice" type="submit" disabled={!!problem}>{command.busy ? 'Creating your table…' : 'Create online table'}<Icon name="arrow" size={19} /></button>
         <p className="composer-note"><Icon name="info" size={15} /><span>{displayName ? `You join first as ${displayName} and choose your seat.` : 'You join first and choose your seat.'} You’ll get a link to share.</span></p>
       </fieldset>

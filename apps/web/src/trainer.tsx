@@ -105,7 +105,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   // The Join Link answered, but not with the table: say why, and keep a way to try again when trying could help.
   if (unread && !outcome && preview.error) return <main id="main-table" className="address-missing">
     <Icon name="cards" size={34} />
-    <h1>{preview.error instanceof RequestFailure && preview.error.code === 'guest-removed' ? 'You can’t join this table.' : 'Couldn’t open this table.'}</h1>
+    <h1>{'Couldn’t open this table.'}</h1>
     <p>{preview.error.message}</p>
     <div className="button-row address-missing-link">{!(preview.error instanceof RequestFailure && preview.error.definitive) && <button onClick={() => void preview.refetch()}>Try again</button>}<Link className="button-link" to={listPath(mode)}>Go to Online tables</Link></div>
   </main>;

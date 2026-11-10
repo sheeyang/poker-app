@@ -103,6 +103,26 @@ test('Table Password attempts at joining are limited per IP, by default to 10 in
   });
 });
 
+test('a join refused for the Guest’s Current Table spends no Table Password attempt', async () => {
+  await withServer({ rateLimits: { 'table-password': { limit: 1, windowMs: minute } } }, async ({ base }) => {
+    const sam = await guest(base, 'Sam'), cy = await guest(base, 'Cy'), ben = await guest(base, 'Ben');
+    const locked = (await (await create(base, sam, { mode: 'online', tablePassword: 'right one' })).json()).tableSessionId as string;
+    const open = (await (await create(base, cy, { mode: 'online' })).json()).tableSessionId as string;
+    const join = (cookie: string, table: string, fields: object = {}) => call(base, 'POST', '/api/table-sessions/' + table + '/join-table', cookie, { requestId: randomUUID(), ...fields });
+    const benAtOpen = (await (await join(ben, open)).json()).participantId as string;
+    // Ben is at Cy's table, his Current Table: joining Sam's is refused before the password is looked at.
+    expect(await rejection(await join(ben, locked, { tablePassword: 'right one' }))).toMatchObject({ status: 409, code: 'current-table-elsewhere' });
+    expect(await rejection(await join(ben, locked, { tablePassword: 'wrong one' }))).toMatchObject({ status: 409, code: 'current-table-elsewhere' });
+    const openView = await (await call(base, 'GET', '/api/table-sessions/' + open, ben)).json();
+    expect((await call(base, 'POST', '/api/table-sessions/' + open + '/leave-table', ben, { requestId: randomUUID(), expectedPokerRevision: openView.pokerRevision, participantId: benAtOpen })).status).toBe(200);
+    // The one attempt allowed is still there.
+    expect((await join(ben, locked, { tablePassword: 'right one' })).status).toBe(200);
+    const refused = await join(await guest(base, 'Dee'), locked, { tablePassword: 'right one' });
+    expect(await rejection(refused)).toMatchObject({ status: 429, code: 'rate-limited' });
+    expect(refused.headers.get('retry-after')).toBe('60');
+  });
+});
+
 test('client addresses come from forwarding headers only when the connection is from the trusted reverse proxy', async () => {
   // Nothing is trusted: a forged forwarding header cannot buy a fresh allowance.
   await withServer({ rateLimits: { creation: { limit: 1, windowMs: minute } } }, async ({ base }) => {

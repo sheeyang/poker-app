@@ -23,6 +23,8 @@ export interface OnlineTrayActions {
 export function CommandFeedback({ command }: { command: Command }) {
   if (command.sending || !command.pending && !command.error) return null;
   const code = command.error instanceof RequestFailure ? command.error.code : undefined;
+  // A creation refused for the Guest's Current Table is explained in the creation form, beside what was refused.
+  if (code === 'current-table-elsewhere' && !command.pending) return null;
   const aborted = code === 'commit-not-applied';
   // A late action: the server played the Timeout Action instead, and its message says which.
   const late = code === 'action-deadline-passed';
