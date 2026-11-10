@@ -22,7 +22,7 @@ export function MySettings() {
     return () => { document.removeEventListener('mousedown', outside); document.removeEventListener('keydown', onEscape); };
   }, [open]);
   return <span className="profile-anchor" ref={box}>
-    <button type="button" ref={trigger} className="identity-avatar" aria-haspopup="dialog" aria-expanded={open} aria-label={`Profile, ${displayName ?? 'name not set'}. Progress saved automatically.`} title={`${displayName ?? 'Set your name'} · Progress saved automatically`} onClick={() => setOpen(!open)}>{initialOf(displayName) ?? '?'}</button>
+    <button type="button" ref={trigger} className="identity-avatar" aria-haspopup="dialog" aria-expanded={open} aria-label={`Profile, ${displayName ?? 'name not set'}`} title={displayName ?? 'Set your name'} onClick={() => setOpen(!open)}>{initialOf(displayName) ?? '?'}</button>
     {open && <ProfilePopover displayName={displayName} close={() => { setOpen(false); trigger.current?.focus(); }} />}
   </span>;
 }
@@ -45,6 +45,5 @@ function ProfilePopover({ displayName, close }: { displayName: string | undefine
         <label className="live-toggle"><span><strong>Card animations</strong><small>{animations ? 'Cards deal and flip. Click the card to preview.' : 'Cards appear at once.'}</small></span><input type="checkbox" role="switch" checked={animations} onChange={event => { setAnimations(event.target.checked); setPlays(plays + 1); }} /></label>
       </div>
     </section>
-    <p className="muted profile-foot">Progress is saved automatically on this device.</p>
   </div>;
 }
