@@ -273,10 +273,10 @@ export interface InspectionCapabilities {
 /** Fixed when a Table Session is created. */
 export type TableMode = 'practice' | 'online';
 /**
- * One entry of the saved-tables list: owned tables, and tables the Guest has joined and not left.
- * `left` marks an owned table the Guest has left; its Join Link returns them as the same Participant.
- * The table's size, stakes and play state are public facts, so even a Guest who left sees them. They are absent
- * only while the table cannot be restored.
+ * One entry of the saved-tables list: every table the Guest has a membership at, including those they left. It is built
+ * from stored rows (mode, format, blinds, membership) and never loads a table, so it says nothing of play: how a Hand
+ * stands and the Guest's stack come only from the Current Table's live copy. The size and stakes are absent only while
+ * the stored table cannot be read.
  */
 export interface SavedTable {
   readonly tableSessionId: TableSessionId;
@@ -284,16 +284,6 @@ export interface SavedTable {
   readonly left?: true;
   readonly seatCount?: number;
   readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
-  readonly playState?: SavedTablePlayState;
-}
-/** How play stands at a saved table, as everyone there sees it. */
-export interface SavedTablePlayState {
-  readonly status: ObservableCashGameState['status'];
-  /** The Hands completed at the table, whoever played them. */
-  readonly completedHands: number;
-  readonly seatedParticipants: number;
-  /** The Guest's own stack, while their Participant has a Seat. */
-  readonly viewerStack?: ChipAmount;
 }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**

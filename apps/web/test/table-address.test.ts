@@ -84,7 +84,7 @@ describe('browser-tab titles', () => {
 describe('the refusal of a Guest who is already at another Online Table', () => {
   const refusal = new RequestFailure('current-table-elsewhere', 'Leave it first.', true, { currentTableId: id });
   it('links to their Current Table, described from their saved tables when it is listed there', () => {
-    const listed: SavedTable = { tableSessionId: id, mode: 'online', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 }, playState: { status: 'between-hands', completedHands: 3, seatedParticipants: 2 } };
+    const listed: SavedTable = { tableSessionId: id, mode: 'online', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 } };
     expect(currentTableRefusal(refusal, [listed])).toEqual({ tableSessionId: id, table: '6-max Hold’em · 10 / 20' });
     expect(currentTableRefusal(refusal, undefined)).toEqual({ tableSessionId: id });
   });

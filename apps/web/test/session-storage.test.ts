@@ -25,7 +25,7 @@ describe('browser storage keeps only preferences', () => {
     session.getState().setSetup({ requestId: 'r1', tableId: 't' });
     session.getState().setAnimations(false);
     session.getState().toggleAnalysis();
-    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations']);
+    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations', 'opened']);
     expect(JSON.parse(store.get(KEY)!).state).toMatchObject({ animations: false, analysisOpen: false });
   });
 
@@ -46,6 +46,23 @@ describe('browser storage keeps only preferences', () => {
     expect(session.getState()).toMatchObject({ pending: null, setup: null, analysisOpen: false, animations: false });
     // The table on screen comes from the address: nothing is selected in storage or in memory.
     expect(session.getState()).not.toHaveProperty('selectedId');
-    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations']);
+    expect(Object.keys(JSON.parse(store.get(KEY)!).state).sort()).toEqual(['analysisOpen', 'animations', 'opened']);
+  });
+});
+
+describe('last-opened times', () => {
+  it('writes the time a table was opened, keyed by table, and a reloaded page reads it back', async () => {
+    const session = await loadSession();
+    expect(session.getState().opened).toEqual({});
+    session.getState().markOpened('t1', 1000);
+    session.getState().markOpened('t2', 2000);
+    expect(JSON.parse(store.get(KEY)!).state.opened).toEqual({ t1: 1000, t2: 2000 });
+    expect((await loadSession()).getState().opened).toEqual({ t1: 1000, t2: 2000 });
+  });
+
+  it('keeps the preferences of an earlier version and starts with no times', async () => {
+    store.set(KEY, JSON.stringify({ version: 1, state: { analysisOpen: false, animations: false } }));
+    const session = await loadSession();
+    expect(session.getState()).toMatchObject({ analysisOpen: false, animations: false, opened: {} });
   });
 });
