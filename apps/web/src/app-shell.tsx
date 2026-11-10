@@ -8,6 +8,7 @@ import { CommandFeedback } from './controls.js';
 import { useCommand, type Command } from './session.js';
 import { listPath, pageTitle, parseAddress, tablePath, type Page } from './table-address.js';
 import { currentTableId, withMembershipEnded } from './current-table.js';
+import { MySettings } from './my-settings.js';
 import { OverlayScroll } from './overlay-scroll.js';
 import { CurrentTableBanner } from './current-table-banner.js';
 
@@ -81,7 +82,7 @@ export function AppShell() {
           <Link to="/practice" className={section === 'practice' ? 'nav-active' : undefined} aria-current={pathname === '/practice' ? 'page' : section === 'practice' ? 'location' : undefined}><Icon name="cards" size={18} /><span>Practice</span></Link>
           <Link to="/online" className={section === 'online' ? 'nav-active' : undefined} aria-current={pathname === '/online' ? 'page' : section === 'online' ? 'location' : undefined}><Icon name="tables" size={18} /><span>Online</span></Link>
         </nav>
-        <span className="identity-status">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span>
+        <span className="identity-status"><span className="identity-text">{identity.isError ? 'Connection unavailable' : identity.isSuccess ? 'Progress saved automatically' : 'Connecting…'}</span>{identity.isSuccess && <MySettings />}</span>
       </header>
       {identity.isSuccess && currentTable && <CurrentTableBanner key={currentTable} tableSessionId={currentTable} command={command} />}
       {!atTable && <>
