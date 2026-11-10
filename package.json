@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter=./apps/* dev",
+    "dev:status": "node --import tsx scripts/dev-runs.ts status",
+    "dev:stop": "node --import tsx scripts/dev-runs.ts stop",
     "dev:trainer": "node --import tsx scripts/with-database.ts dev -- pnpm -r --parallel --filter @poker/server --filter @poker/web dev",
     "test": "node --import tsx scripts/with-database.ts test -- node node_modules/vitest/vitest.mjs run",
     "lint": "biome lint .",

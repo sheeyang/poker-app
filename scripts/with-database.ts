@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, open, readFile, rm, stat, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -7,6 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Client } from 'pg';
+import { removeRun, stopRequested, touchRecord, writeRecord, type RunRecord } from './dev-runs.js';
 import { cleanup, native } from './postgres-process.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -81,6 +83,19 @@ async function run() {
   let startAttempted = false;
   let pendingNative: number | undefined;
   let cleanupCompletion: Promise<void> | undefined;
+  // Development runs register where `dev:stop` and `dev:status` can find them, beat so a dead run is recognised, and watch for a stop request.
+  let record: RunRecord | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
+  let shutdownFailed = false;
+  const register = async (patch: Partial<RunRecord>) => {
+    if (mode !== 'dev') return;
+    record = { id: record?.id ?? randomUUID().slice(0, 8), pid: process.pid, startedAt: record?.startedAt ?? Date.now(), checkout: root, ...record, ...patch };
+    await writeRecord(record);
+    heartbeat ??= setInterval(() => {
+      void touchRecord(record!.id);
+      if (stopRequested(record!.id)) stopFromMarker();
+    }, 1000);
+  };
   function beginCleanup() {
     if (!cleanupCompletion && tools && directory) {
       const worker = spawn(process.execPath, ['--import', 'tsx', path.join(root, 'scripts/postgres-process.ts'), tools.pg_ctl, directory, 'temporary', String(process.pid), String(pendingNative ?? '')], {
@@ -109,6 +124,12 @@ async function run() {
     child?.unref();
     cancellation.resolve(received === 'SIGINT' ? 130 : 143);
   };
+  // The same shutdown as Ctrl+C, asked for by file. Windows children are not signalled, so the child tree is ended first.
+  const stopFromMarker = () => {
+    if (signal) return;
+    if (process.platform === 'win32' && child?.pid) spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    interrupted('SIGTERM');
+  };
   process.on('SIGINT', interrupted);
   process.on('SIGTERM', interrupted);
   try {
@@ -123,6 +144,7 @@ async function run() {
       try { lock = await open(path.join(directory, 'owner.lock'), 'wx'); }
       catch (error) { throw new Error(`Database directory is already owned: ${directory}. Finish its command, or follow docs/local-development.md after a crash.`, { cause: error }); }
       await lock.writeFile(JSON.stringify({ pid: process.pid }));
+      await register({ dataDir: path.join(directory, 'data'), pgCtl: tools.pg_ctl });
       if (signal) return 130;
       const data = path.join(directory, 'data');
       if (existsSync(path.join(data, 'postmaster.pid'))) {
@@ -174,7 +196,9 @@ async function run() {
       process.env.PORT ??= await free();
       process.env.POKER_WEB_PORT ??= await free();
       process.env.POKER_API_TARGET ??= `http://127.0.0.1:${process.env.PORT}`;
-      console.log(`[dev] Isolated run. Web: http://127.0.0.1:${process.env.POKER_WEB_PORT}/  API: http://127.0.0.1:${process.env.PORT}/`);
+      const webUrl = `http://127.0.0.1:${process.env.POKER_WEB_PORT}/`, apiUrl = `http://127.0.0.1:${process.env.PORT}/`;
+      await register({ webUrl, apiUrl });
+      console.log(`[dev] Isolated run ${record!.id}. Web: ${webUrl}  API: ${apiUrl}  Stop: pnpm dev:stop ${record!.id}`);
     }
     const program = args.shift()!;
     const manager = program === 'pnpm' ? process.env.npm_execpath : undefined;
@@ -188,6 +212,7 @@ async function run() {
     });
     return await Promise.race([exited, cancellation.promise]);
   } finally {
+    clearInterval(heartbeat);
     if (reserved) await releasePort(reserved);
     if (lock) await lock.close();
     if (tools && directory && lock && (startAttempted || cleanupCompletion)) {
@@ -196,6 +221,7 @@ async function run() {
         else await cleanup(tools.pg_ctl, directory, true, process.pid);
         console.log('[database] PostgreSQL shut down gracefully.');
       } catch (error) {
+        shutdownFailed = true;
         console.error(`[database] Shutdown failed; retain ${directory} and follow the manual cleanup instructions.`);
         process.exitCode = 1;
         console.error(error);
@@ -210,6 +236,8 @@ async function run() {
         await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
     }
+    // A run whose shutdown failed keeps its record, so `dev:stop` can finish the cleanup.
+    if (record && !shutdownFailed) await removeRun(record.id);
     process.off('SIGINT', interrupted);
     process.off('SIGTERM', interrupted);
   }

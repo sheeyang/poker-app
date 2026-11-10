@@ -17,7 +17,8 @@ throwaway database and its own free ports, so any number of runs can go at once
 without conflict. No `.env` file or manual database initialization is required.
 
 Keep the terminal running. Ctrl+C stops the development processes and removes
-the run's database, so each run starts empty.
+the run's database, so each run starts empty. From another terminal,
+`pnpm dev:status` lists the runs and `pnpm dev:stop` stops this checkout's runs.
 
 
 ## Checks

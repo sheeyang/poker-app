@@ -1,10 +1,11 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterEach, expect, test } from 'vitest';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -52,6 +53,8 @@ function launch(directory: string, args: string[], options: { packageScript?: bo
   const env = { ...process.env };
   delete env.DATABASE_URL;
   delete env.TEST_DATABASE_URL;
+  // The run registry is per fixture, so a test never sees or stops the runs of the person running it.
+  env.POKER_DEV_RUNS_DIR = path.join(directory, 'dev-runs');
   Object.assign(env, options.env);
   const manager = options.packageScript ? process.env.npm_execpath : undefined;
   if (options.packageScript && !manager) throw new Error('Run command-boundary tests through pnpm test.');
@@ -171,6 +174,53 @@ test('development runs are isolated by default: parallel runs get their own data
   expect(await first.done).toBe(0);
   expect(existsSync(temporaryData(first.output()))).toBe(false);
 }, allowanceMs);
+
+/** Runs `dev-runs.ts <command>` of a fixture checkout against that fixture's runs. */
+async function devRuns(directory: string, ...args: string[]) {
+  const env = { ...process.env, POKER_DEV_RUNS_DIR: path.join(directory, 'dev-runs') };
+  return promisify(execFile)(process.execPath, ['--import', 'tsx', path.join(directory, 'scripts/dev-runs.ts'), ...args], { cwd: directory, env, windowsHide: true }).then(
+    ({ stdout, stderr }) => ({ code: 0, output: stdout + stderr }),
+    (error: { code?: number; stdout?: string; stderr?: string }) => ({ code: error.code ?? 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` }),
+  );
+}
+const runId = (output: string) => output.match(/Isolated run (\w+)\./)![1]!;
+
+test('dev:stop ends a run gracefully by id, and by checkout, and removes its database', async () => {
+  const directory = await checkout();
+  const first = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1' } });
+  const second = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1' } });
+  await eventually(() => first.output().includes('PROBE:') && second.output().includes('PROBE:'), () => first.output() + second.output(), first);
+  const listed = JSON.parse((await devRuns(directory, 'status', '--json')).output) as Array<{ id: string; state: string }>;
+  expect(listed.map(run => run.state)).toEqual(['live', 'live']);
+  expect(listed.map(run => run.id).sort()).toEqual([runId(first.output()), runId(second.output())].sort());
+  const one = await devRuns(directory, 'stop', runId(first.output()));
+  expect(one.code).toBe(0);
+  await first.done;
+  expect(existsSync(temporaryData(first.output()))).toBe(false);
+  expect(existsSync(temporaryData(second.output()))).toBe(true);
+  const rest = await devRuns(directory, 'stop');
+  expect(rest.code).toBe(0);
+  await second.done;
+  expect(existsSync(temporaryData(second.output()))).toBe(false);
+  expect((await devRuns(directory, 'status')).output).toContain('No development runs.');
+}, allowanceMs * 2);
+
+test('dev:stop cleans up a run whose launcher died without shutting down', async () => {
+  const directory = await checkout();
+  const crashed = launch(directory, ['dev', '--', 'node', 'probe.mjs'], { env: { PROBE_HOLD: '1' } });
+  await eventually(() => crashed.output().includes('PROBE:'), crashed.output, crashed);
+  const data = temporaryData(crashed.output());
+  // Kill the launcher alone, so nothing shuts the database down: PostgreSQL and its directory are left behind.
+  process.kill(crashed.child.pid!, 'SIGKILL');
+  await crashed.done;
+  expect(existsSync(path.join(data, 'data/postmaster.pid'))).toBe(true);
+  const listed = JSON.parse((await devRuns(directory, 'status', '--json')).output) as Array<{ state: string }>;
+  expect(listed.map(run => run.state)).toEqual(['dead']);
+  const cleaned = await devRuns(directory, 'stop');
+  expect(cleaned.output).toContain('Cleaned up crashed run');
+  expect(existsSync(data)).toBe(false);
+  expect((await devRuns(directory, 'status')).output).toContain('No development runs.');
+}, allowanceMs * 2);
 
 test('an explicit test URL takes shell precedence, bypasses local startup, and is left running', async () => {
   const ownerDirectory = await checkout();

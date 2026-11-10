@@ -9,6 +9,8 @@ The pinned `embedded-postgres@18.4.0-beta.17` package supplies released PostgreS
 | Command | Default database lifecycle |
 | --- | --- |
 | `pnpm dev:trainer` / `pnpm dev` | Start a throwaway development database, the API and the Trainer on free ports, print their addresses, and remove the database when the command ends. |
+| `pnpm dev:status` | List the development runs on this machine with their id, state (`live`, `stalled` or `dead`), age and addresses. `-- --json` for scripts. |
+| `pnpm dev:stop [id]` | Stop this checkout's runs gracefully, or one run by id. `-- --all` stops every run on the machine. A crashed run is cleaned up: its PostgreSQL is stopped and its directory removed. |
 | `pnpm --filter @poker/server db:init` | Initialize the schema in the database named by `DATABASE_URL`. A managed development database needs none: the server initializes it at startup. |
 | `pnpm test [filters/options]` | Start a fresh test database on a separate port; stop and remove temporary data afterward. |
 | `pnpm lint` | Lint the repository with [Biome](https://biomejs.dev/linter/); configured in `biome.jsonc`. |
@@ -168,7 +170,7 @@ Production runs PostgreSQL 18 beside the server on one VM, as described in the [
 
 ## Troubleshooting
 
-- **Crash or forced terminal termination:** the run's database may keep running and its `poker-dev-postgres-…` (or `poker-test-postgres-…`) directory stays in the OS temporary directory. Check the recorded owner PID in `owner.lock` and PostgreSQL's `postmaster.pid` against running processes. If PostgreSQL is still running, use its bundled `pg_ctl` tool with the exact data directory and `-m fast -w stop` to shut it down gracefully first (the launcher prints the tool path), then remove the directory. Other runs are unaffected. There is no automatic crash cleanup.
+- **Crash or forced terminal termination:** run `pnpm dev:status`. A run shown as `dead` lost its launcher; `pnpm dev:stop` stops its PostgreSQL and removes its directory. Never end a run by killing its processes: on Windows that skips the launcher's shutdown and leaves PostgreSQL running. Use `pnpm dev:stop` or Ctrl+C. A run shown as `stalled` still has a process but has stopped beating (a paused machine, for example): `pnpm dev:stop` asks it to stop and reports if it does not.
 - **Initialization or startup failure:** inspect the printed error and the `server.log` in the run's temporary directory. Unsupported platforms, missing optional binary packages, or permission errors fail explicitly. Run dependency installation normally with its approved platform scripts; avoid elevated/root execution on Unix.
 
 Normal Ctrl+C and handled errors shut down owned databases gracefully and remove them. The previous task's `.scratch/m2-runtime/data` is separate and remains untouched. Existing pre-release schema initialization and record compatibility remain governed by [ADR-0014](adr/0014-allow-pre-release-record-breaking-changes.md).
