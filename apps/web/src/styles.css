@@ -86,7 +86,12 @@ body:has(.table-active) { overflow: hidden; }
 .table-active .play-area > * { flex-shrink: 0; }
 .table-active .play-area > .table-stage { flex: 1 1 auto; min-height: 0; max-height: 550px; }
 .table-active .play-controls, .table-active .below-table, .table-active .table-footer { width: 100%; }
-.table-active .analysis-panel { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; scrollbar-color: #607866 #1a2721; }
+.table-active .analysis-panel { min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.table-active .analysis-panel::-webkit-scrollbar { display: none; }
+/* The analysis panel's floating scrollbar: a zero-height rail that sticks to the top of the scroll area. */
+.panel-thumb-rail { position: sticky; top: 0; height: 0; z-index: 9; }
+.panel-thumb-rail .shell-thumb { right: calc(3px - var(--analysis-padding, 24px)); }
+.analysis-panel:hover .shell-thumb { opacity: .85; }
 .table-active .hand-activity[open] { max-height: 18dvh; overflow-y: auto; }
 .play-area { min-width: 0; padding: 26px 36px 16px; }
 .table-toolbar, .toolbar-actions, .hand-status, .table-footer, .section-heading, .below-table, .dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
@@ -967,8 +972,19 @@ button.seat-target:hover { background: #304238; }
    Addresses: the Practice and Online screens, the felt composer and the
    saved-tables ledger, and the pages for addresses with nothing at them.
    ========================================================================== */
-/* The page never shifts sideways when it grows past the viewport. */
-html { scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: #4d6455 var(--ground); }
+/* The page never shifts sideways when it grows: the header and live strip stay put, and the content scrolls under a
+   scrollbar that floats over it (OverlayScroll) instead of taking a column. */
+.app-shell:not(.table-active) { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.app-shell:not(.table-active) > :not(.shell-body) { flex-shrink: 0; }
+.shell-body { position: relative; flex: 1; min-height: 0; }
+.shell-scroller { height: 100%; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: none; }
+.shell-scroller::-webkit-scrollbar { display: none; }
+.shell-thumb { position: absolute; top: 0; right: 3px; width: 8px; border-radius: 4px; background: #607866; opacity: 0; transition: opacity 200ms, background-color 150ms; cursor: default; touch-action: none; }
+.shell-body:hover .shell-thumb, .shell-thumb[data-active] { opacity: .85; }
+.shell-thumb:hover, .shell-thumb[data-drag] { background: #7f987f; opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .shell-thumb { transition: none; } }
+.table-active .shell-body, .table-active .shell-scroller, .table-active .shell-content { display: contents; }
+.table-active .shell-thumb { display: none; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .numeric { font-variant-numeric: tabular-nums; }
 /* Links that act as buttons share the button's shape. */

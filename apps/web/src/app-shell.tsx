@@ -8,6 +8,7 @@ import { CommandFeedback } from './controls.js';
 import { useCommand, type Command } from './session.js';
 import { listPath, pageTitle, parseAddress, tablePath, type Page } from './table-address.js';
 import { currentTableId, withMembershipEnded } from './current-table.js';
+import { OverlayScroll } from './overlay-scroll.js';
 import { CurrentTableBanner } from './current-table-banner.js';
 
 type TableConsumers = Pick<LiveConsumers, 'onReady' | 'onAnalysisUpdate'>;
@@ -88,7 +89,7 @@ export function AppShell() {
         {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>Your tables are saved. Try again in a moment.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
         {notice && <div className="global-notice" role="status"><div><strong>{notice}</strong></div><button onClick={() => setNotice(null)}>Dismiss</button></div>}
       </>}
-      <Outlet />
+      <OverlayScroll><Outlet /></OverlayScroll>
     </div>
   </ShellContext.Provider>;
 }

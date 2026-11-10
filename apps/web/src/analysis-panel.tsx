@@ -1,3 +1,4 @@
+import { useOverlayScrollbar } from './overlay-scroll.js';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { hashKey } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
@@ -17,13 +18,14 @@ type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
 export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void }) {
-  const panel = useRef<HTMLElement>(null), viewTabs = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLElement>(null), panelThumb = useRef<HTMLDivElement>(null), viewTabs = useRef<HTMLDivElement>(null);
   // The Session summary tab is part of the address, so a refresh keeps it.
   const sessionTab = analysis.addressTab === 'session';
   // Opening the tab requests a fresh summary, and so does each Hand that completes while it stays open.
   const refreshKey = sessionSummaryRefreshKey(table, sessionTab), requestSession = useRef(sessionSummary.request);
   requestSession.current = sessionSummary.request;
   useEffect(() => { if (refreshKey !== null) requestSession.current(); }, [refreshKey]);
+  useOverlayScrollbar(panel, panelThumb);
   useLayoutEffect(() => {
     const root = panel.current, tabs = viewTabs.current;
     if (!root || !tabs) return;
@@ -77,6 +79,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     {!data && !loadingAnalysis && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{liveView ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{liveView ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
   </>;
   return <aside ref={panel} id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis">
+    <div className="panel-thumb-rail" aria-hidden="true"><div className="shell-thumb" ref={panelThumb} hidden /></div>
     <div className="panel-heading"><div><Icon name="chart" /><h2>{handNumber > 0 ? `Hand ${handNumber} analysis` : selected ? `Hand ${selected.handNumber} analysis` : 'Current hand'}</h2></div><div className="panel-actions"><button className="icon-button analysis-settings-trigger" aria-label="Analysis settings" title="Analysis settings" aria-haspopup="dialog" popoverTarget="analysis-settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Close analysis" onClick={close}><Icon name="close" size={18} /></button></div></div>
     <div className="analysis-meta"><span>Reference: <strong>{strategyName(reference)}</strong></span><span>Amounts in chips</span></div>
     <section id="analysis-settings" popover="auto" role="dialog" className="analysis-settings" onToggle={event => { if (event.newState === 'open') event.currentTarget.querySelector<HTMLButtonElement>('button')?.focus(); }} aria-labelledby="analysis-settings-title"><div className="analysis-settings-heading"><h3 id="analysis-settings-title">Analysis settings</h3><button className="icon-button" aria-label="Close analysis settings" popoverTarget="analysis-settings" popoverTargetAction="hide"><Icon name="close" size={18} /></button></div><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">Changing the reference recalculates your scores. Bot strategies stay the same.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy || !allowed} checked={liveOn} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label>{tableNote && <p className="muted">{tableNote}</p>}</section>
