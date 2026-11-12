@@ -823,8 +823,14 @@ a.current-table-refusal-link:hover svg { transform: translateX(3px); }
 .dialog-stack > .command-feedback { margin: 0; }
 .name-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 10px; }
 .name-form > label { grid-column: 1 / -1; }
-.name-form > p { grid-column: 1 / -1; margin: 0; }
-.name-form .primary { min-height: 42px; }
+.name-form > p { grid-column: 1 / -1; grid-row: 3; margin: 0; }
+.name-form > input { grid-column: 1; grid-row: 2; }
+.name-form .primary { grid-column: 2; grid-row: 2; min-height: 42px; }
+/* In a dialog the form is the whole task: input, hint, then the submit button underneath. */
+.dialog-stack .name-form { grid-template-columns: minmax(0, 1fr); }
+.dialog-stack .name-form > input, .dialog-stack .name-form .primary { grid-column: 1; grid-row: auto; }
+.dialog-stack .name-form > p { grid-row: auto; }
+.dialog-stack .name-form .primary { justify-self: stretch; margin-top: 4px; }
 .link-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; }
 .link-field input { font-size: .85rem; text-overflow: ellipsis; }
 .link-field .primary { min-height: 42px; }
