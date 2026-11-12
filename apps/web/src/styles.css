@@ -823,8 +823,14 @@ a.current-table-refusal-link:hover svg { transform: translateX(3px); }
 .dialog-stack > .command-feedback { margin: 0; }
 .name-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 10px; }
 .name-form > label { grid-column: 1 / -1; }
-.name-form > p { grid-column: 1 / -1; margin: 0; }
-.name-form .primary { min-height: 42px; }
+.name-form > p { grid-column: 1 / -1; grid-row: 3; margin: 0; }
+.name-form > input { grid-column: 1; grid-row: 2; }
+.name-form .primary { grid-column: 2; grid-row: 2; min-height: 42px; }
+/* In a dialog the form is the whole task: input, hint, then the submit button underneath. */
+.dialog-stack .name-form { grid-template-columns: minmax(0, 1fr); }
+.dialog-stack .name-form > input, .dialog-stack .name-form .primary { grid-column: 1; grid-row: auto; }
+.dialog-stack .name-form > p { grid-row: auto; }
+.dialog-stack .name-form .primary { justify-self: stretch; margin-top: 4px; }
 .link-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; }
 .link-field input { font-size: .85rem; text-overflow: ellipsis; }
 .link-field .primary { min-height: 42px; }
@@ -1059,7 +1065,6 @@ fieldset.composer-field { display: block; }
 .ledger-live b { color: var(--gold); font-weight: 600; }
 .ledger-ante { color: var(--muted); }
 .ledger-opened { color: var(--muted); white-space: nowrap; }
-.ledger-note { margin-top: 10px; padding-inline: 12px; color: var(--muted); font-size: .8rem; }
 .ledger-row > .ledger-action { text-align: right; color: var(--gold); font-size: .82rem; font-weight: 600; white-space: nowrap; }
 .ledger-action > span { margin-right: 6px; }
 .ledger-action svg { vertical-align: -3px; transition: transform 150ms; }
@@ -1204,7 +1209,6 @@ fieldset.composer-field { display: block; }
 .profile-card.is-animated { animation: profile-deal 520ms cubic-bezier(.2, .8, .2, 1); }
 @keyframes profile-deal { 0% { transform: translateY(-14px) rotateY(90deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .profile-card.is-animated { animation: none; } }
-.profile-foot { margin: 20px 0 0; font-size: .8rem; }
 .profile-anchor { position: relative; display: inline-flex; }
 .profile-pop { color: var(--text); position: absolute; z-index: 40; top: calc(100% + 10px); right: 0; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - var(--bar-h, 52px) - 24px); overflow: auto; padding: 0 22px 20px; background: #1a2721; border: 1px solid var(--control-line); border-radius: 12px; box-shadow: 0 18px 44px rgb(0 0 0 / .55); font-size: 1rem; text-align: left; }
 .profile-pop-heading { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 12px; margin-bottom: 14px; }

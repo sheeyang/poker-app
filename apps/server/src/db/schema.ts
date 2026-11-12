@@ -5,6 +5,8 @@ export const localUsers = pgTable('local_users', {
   id: uuid('id').primaryKey(),
   tokenHash: text('token_hash').notNull().unique(),
   displayName: text('display_name'),
+  /** When the Guest last made a request, by the server's clock; written at most once a day. */
+  lastSeenAt: bigint('last_seen_at', { mode: 'number' }).notNull(),
 });
 export const tableSessions = pgTable('table_sessions', {
   id: uuid('id').primaryKey(),
@@ -24,6 +26,8 @@ export const tableMemberships = pgTable('table_memberships', {
   tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
   participantId: text('participant_id').notNull(),
   status: text('status').$type<MembershipStatus>().notNull(),
+  /** When the Guest last opened the table, by the server's clock; null until they have. */
+  openedAt: bigint('opened_at', { mode: 'number' }),
 }, table => [primaryKey({ columns: [table.userId, table.tableSessionId] }), unique().on(table.tableSessionId, table.participantId)]);
 
 export const creationRequests = pgTable('creation_requests', {

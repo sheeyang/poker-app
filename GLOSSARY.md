@@ -101,7 +101,7 @@ The application user who controls a human Participant's decisions and observes t
 _Avoid_: Player, owner, seat holder
 
 **Guest**:
-An application user who has not logged in, identified only by their browser and a display name they choose.
+An application user who has not logged in, identified only by their browser and a display name they choose. Clearing the browser's site data, or using another browser, makes them a new Guest, who cannot reach the old one's tables.
 _Avoid_: Anonymous user, account
 
 **Seat**:

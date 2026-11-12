@@ -6,7 +6,6 @@ import { api, RequestFailure } from '@poker/client';
 import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
 import { withMembershipEnded } from './current-table.js';
-import { recordOpened, type OpenedTimes } from './saved-tables.js';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -29,9 +28,6 @@ interface SessionState {
   pending: Attempt | null;
   analysisOpen: boolean;
   animations: boolean;
-  /** When each table was last opened in this browser: the order of the saved lists. */
-  opened: OpenedTimes;
-  markOpened: (tableSessionId: string, at: number) => void;
   setup: { requestId: string; tableId?: string; paused?: string; afterHandId?: string | null } | null;
   setSetup: (setup: SessionState['setup']) => void;
   setPending: (pending: Attempt | null) => void;
@@ -40,20 +36,19 @@ interface SessionState {
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  pending: null, analysisOpen: true, animations: true, opened: {}, setup: null,
-  markOpened: (tableSessionId, at) => set(state => ({ opened: recordOpened(state.opened, tableSessionId, at) })),
+  pending: null, analysisOpen: true, animations: true, setup: null,
   setSetup: setup => set({ setup }),
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
   setAnimations: animations => set({ animations }),
 }), {
   name: 'poker-trainer-v1',
-  // Browser storage keeps only preferences and when each table was last opened. A request, and anything a Guest typed into one, lives in memory for the life of the page.
-  version: 2,
-  partialize: ({ analysisOpen, animations, opened }) => ({ analysisOpen, animations, opened }),
+  // Browser storage keeps only device preferences; what belongs to the Guest, such as when each table was last opened, is on the server (ADR-0037). A request, and anything a Guest typed into one, lives in memory for the life of the page.
+  version: 3,
+  partialize: ({ analysisOpen, animations }) => ({ analysisOpen, animations }),
   migrate: stored => {
-    const { analysisOpen, animations, opened } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations' | 'opened'>>;
-    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true, opened: opened && typeof opened === 'object' ? opened : {} } as SessionState;
+    const { analysisOpen, animations } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations'>>;
+    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true } as SessionState;
   },
 }));
 

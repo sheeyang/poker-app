@@ -81,10 +81,17 @@ export async function membership(db: Database, tableSessionId: string, userId: s
  * returns them. A Closed Table is marked `closed` as well, its memberships all ended. Each carries its stored aggregate,
  * so the caller can read the format and blinds from stored rows alone, loading nothing.
  */
-export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left' | 'closed'> & { stored: StoredTableSession })[]> {
-  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, stored: tableSessions.aggregate, status: tableMemberships.status, closed: tableSessions.closed, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
+export async function savedTableEntries(db: Database, userId: string): Promise<(Pick<SavedTable, 'tableSessionId' | 'mode' | 'left' | 'closed' | 'openedAt'> & { stored: StoredTableSession })[]> {
+  const rows = await db.select({ tableSessionId: tableMemberships.tableSessionId, stored: tableSessions.aggregate, status: tableMemberships.status, closed: tableSessions.closed, openedAt: tableMemberships.openedAt, mode: sql<TableMode | null>`${tableSessions.aggregate}->>'mode'` })
     .from(tableMemberships).innerJoin(tableSessions, eq(tableSessions.id, tableMemberships.tableSessionId))
     .where(eq(tableMemberships.userId, userId));
   return rows.map(row => ({ tableSessionId: row.tableSessionId, stored: row.stored, mode: row.mode ?? legacyTableMode,
-    ...(row.status === 'joined' ? {} : { left: true as const }), ...(row.closed ? { closed: true as const } : {}) }));
+    ...(row.status === 'joined' ? {} : { left: true as const }), ...(row.closed ? { closed: true as const } : {}), ...(row.openedAt !== null ? { openedAt: row.openedAt } : {}) }));
+}
+/** Notes that the Guest opened a table they have a membership at: its time is the server's `at`. False when they have none. */
+export async function recordOpened(db: Database, userId: string, tableSessionId: string, at: number): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/.test(tableSessionId)) return false;
+  const rows = await db.update(tableMemberships).set({ openedAt: at })
+    .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId))).returning({ id: tableMemberships.tableSessionId });
+  return rows.length > 0;
 }

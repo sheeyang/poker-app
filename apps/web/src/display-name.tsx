@@ -21,6 +21,8 @@ function useSaveDisplayName(onSaved?: (name: string) => void) {
 }
 
 const hint = 'Up to 20 letters, digits, spaces or basic punctuation.';
+/** Said where a Guest first sets a name: a Guest is their browser, so their tables are not reachable from elsewhere (ADR-0037). */
+export const browserBinding = 'Your tables stay with this browser. If you clear its site data or use another browser, you’ll start as a new Guest and won’t see them.';
 
 /** `autoFocus`: the form is the point of the dialog it sits in, so the name field takes focus when it opens. */
 export function DisplayNameForm({ current, submitLabel = 'Save name', onSaved, autoFocus = false }: { current?: string; submitLabel?: string; onSaved?: (name: string) => void; autoFocus?: boolean }) {
@@ -31,8 +33,8 @@ export function DisplayNameForm({ current, submitLabel = 'Save name', onSaved, a
   return <form className="name-form" onSubmit={e => { e.preventDefault(); save.mutate(value); }}>
     <label htmlFor={`${id}-name`}>Display name</label>
     <input id={`${id}-name`} name="displayName" value={value} maxLength={40} autoComplete="nickname" required aria-describedby={`${id}-hint`} aria-invalid={!!reason} data-autofocus={autoFocus || undefined} onChange={e => { setValue(e.target.value); if (save.error) save.reset(); }} />
-    <button className="primary" disabled={save.isPending || !value.trim()}>{save.isPending ? 'Saving…' : submitLabel}</button>
     <p id={`${id}-hint`} className={reason ? 'notice-error' : 'muted'} role={reason ? 'alert' : undefined}>{reason ?? hint}</p>
+    <button className="primary" disabled={save.isPending || !value.trim()}>{save.isPending ? 'Saving…' : submitLabel}</button>
   </form>;
 }
 
@@ -40,7 +42,7 @@ export function DisplayNameForm({ current, submitLabel = 'Save name', onSaved, a
 export function DisplayNamePrompt({ onSaved, close }: { onSaved: (name: string) => void; close: () => void }) {
   return <Dialog title="What should we call you?" close={close}>
     <div className="dialog-stack">
-      <p className="muted">Everyone at your tables sees this name. You can change it later for future tables.</p>
+      <p className="muted">Everyone at your tables sees this name. Your tables stay with this browser.</p>
       <DisplayNameForm submitLabel="Save and start" onSaved={onSaved} autoFocus />
     </div>
   </Dialog>;
