@@ -54,6 +54,7 @@ export function projectTableOptions(aggregate: PersistedTableSession): Observabl
 }
 /** A phase's kind and what it presents, field by field. */
 function projectPresented(phase: PresentedPhase): PresentedPhase {
+  if (phase.kind === 'payout') return { kind: phase.kind, inputs: { awards: phase.inputs.awards.map(a => ({ participantId: a.participantId, won: a.won, returned: a.returned })) } };
   if (phase.kind !== 'deal') return { kind: phase.kind };
   const { dealt, blinds, refills } = phase.inputs;
   return { kind: phase.kind, inputs: { dealt: dealt.map(d => ({ participantId: d.participantId, cardCount: d.cardCount })), blinds: [...blinds], refills: refills.map(r => ({ participantId: r.participantId, amount: r.amount })) } };

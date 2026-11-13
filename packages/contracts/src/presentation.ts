@@ -14,17 +14,22 @@ import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseK
  */
 export interface PresentationPhaseInputs {
   readonly deal: DealInputs;
+  readonly payout: PayoutInputs;
 }
 
 /** The fixed length of each presenting Presentation Phase whose kind has no beats of its own yet. */
-export const presentationPhaseDurations: Readonly<Record<Exclude<PresentingPhaseKind, keyof PresentationPhaseInputs>, number>> = Object.freeze({ street: 1000, showdown: 2000, payout: 2000 });
+export const presentationPhaseDurations: Readonly<Record<Exclude<PresentingPhaseKind, keyof PresentationPhaseInputs>, number>> = Object.freeze({ street: 1000, showdown: 2000 });
 
 /** A phase's kind and what it presents: all the server needs for its length, and a Trainer for its beats. */
 export type PresentedPhase = { readonly [K in PresentationPhaseKind]: { readonly kind: K } & (K extends keyof PresentationPhaseInputs ? { readonly inputs: PresentationPhaseInputs[K] } : unknown) }[PresentationPhaseKind];
 
 /** How long a presenting Presentation Phase lasts: the total of its beats, or its kind's fixed length. */
 export function presentationPhaseLength(phase: PresentedPhase & { readonly kind: PresentingPhaseKind }): number {
-  return 'inputs' in phase ? dealBeats(phase.inputs).totalMs : presentationPhaseDurations[phase.kind];
+  switch (phase.kind) {
+    case 'deal': return dealBeats(phase.inputs).totalMs;
+    case 'payout': return payoutBeats(phase.inputs).totalMs;
+    default: return presentationPhaseDurations[phase.kind];
+  }
 }
 
 /** Something that moves, from `startsAt` until `endsAt`, in milliseconds from its phase's start. */
@@ -169,18 +174,56 @@ export const showdownMotion = Object.freeze({
   turnsAfterSweep: 150, cardStagger: 120, turn: 380,
 });
 
-/** The payout: the pot pushed onto each winner's stack in turn. */
+/**
+ * The payout: the pot pushed onto each winner's stack in turn. The payout phase lasts as long as these beats
+ * (`payoutBeats`).
+ */
 export const payoutMotion = Object.freeze({
   /** The pot dimming and brightening as it is pushed. */
-  potAt: 150, potPulse: 700,
-  /** When the first award lands on its winner's stack, and the gap to each next award. */
-  firstLands: 710, stagger: 60,
+  potAt: 225, potPulse: 1050,
+  /**
+   * When the first award lands on its winner's stack, and the gap to each next landing: wide enough that each winner's
+   * figure is seen to change on its own, while the next push is already on its way.
+   */
+  firstLands: 1065, stagger: 300,
   /** Each award's push from the pot, ending as it lands. */
-  push: 560,
+  push: 840,
   /** The pushed chips fading into the stack once they land. */
-  landFade: 160,
+  landFade: 240,
   /** The winner's caption appearing, from just before the chips land. */
-  captionBeforeLanding: 20, caption: 160,
+  captionBeforeLanding: 30, caption: 240,
+});
+
+/** What the payout presents. Every field is public in the view once the Hand is complete: its payouts and returns. */
+export interface PayoutInputs {
+  /**
+   * Each Participant the payout pushes chips to, in seat order: what they won from the pots, and what came back to
+   * them uncalled. A Participant appears once, however many pots they won.
+   */
+  readonly awards: readonly { readonly participantId: ParticipantId; readonly won: ChipAmount; readonly returned: ChipAmount }[];
+}
+
+export interface PayoutBeats extends PhaseBeats {
+  /** The pot dimming and brightening as it is pushed. */
+  readonly pot: Beat;
+  /**
+   * Each award, in turn: its chips (`amount`, won and returned together) leave the pot at `startsAt` and land on the
+   * winner's stack at `endsAt`, when the stack figure takes its new value; they then fade into the stack (`fade`), and
+   * the winner's caption shows (`caption`).
+   */
+  readonly awards: readonly (Beat & { readonly participantId: ParticipantId; readonly amount: ChipAmount; readonly fade: Beat; readonly caption: Beat })[];
+}
+
+/** The payout's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
+export const payoutBeats = beatFunction((inputs: PayoutInputs, at): PayoutBeats => {
+  const P = payoutMotion;
+  const pot = { startsAt: at(P.potAt), endsAt: at(P.potAt + P.potPulse) };
+  const awards = inputs.awards.map(({ participantId, won, returned }, i) => {
+    const lands = P.firstLands + i * P.stagger, caption = lands - P.captionBeforeLanding;
+    return { participantId, amount: won + returned, startsAt: at(lands - P.push), endsAt: at(lands), fade: { startsAt: at(lands), endsAt: at(lands + P.landFade) }, caption: { startsAt: at(caption), endsAt: at(caption + P.caption) } };
+  });
+  const totalMs = Math.max(pot.endsAt, ...awards.flatMap(a => [a.endsAt, a.fade.endsAt, a.caption.endsAt]));
+  return { totalMs, pot, awards };
 });
 
 /**

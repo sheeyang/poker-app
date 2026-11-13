@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, dealBeats, presentationPhaseDurations, settleAfter, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, dealBeats, payoutBeats, presentationPhaseDurations, settleAfter, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage, type StrategyDescriptor } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import { createStrategy, HighestProbabilitySelector, isSupportedStrategy, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../src/server.js';
@@ -56,8 +56,8 @@ async function headsUp() {
   return { t, human, bot };
 }
 
-/** Each phase's shared length at a Practice Table (a heads-up deal), and the Settle that follows it. */
-const deal = dealMs(2), street = presentationPhaseDurations.street, showdown = presentationPhaseDurations.showdown, payout = presentationPhaseDurations.payout;
+/** Each phase's shared length at a Practice Table (a heads-up deal), and the Settle that follows it. A payout's depends on its awards. */
+const deal = dealMs(2), street = presentationPhaseDurations.street, showdown = presentationPhaseDurations.showdown;
 const settled = { deal: settleAfter('deal', 'practice'), street: settleAfter('street', 'practice'), showdown: settleAfter('showdown', 'practice'), payout: settleAfter('payout', 'practice') };
 
 test('a deal carries what it presents, lasts as long as its beats, and is followed by its Settle; the first Action Window opens when the Settle ends', async () => {
@@ -288,12 +288,15 @@ test('an all-in runout schedules the showdown, its remaining streets and the pay
   expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
   expect(done.view.state.board).toHaveLength(5);
   // The complete result is already in the view; it is presented step by step at these server times, each phase
-  // starting when the one before it ends, from the deal to the Settle after the payout.
+  // starting when the one before it ends, from the deal to the Settle after the payout. The pot may be split.
+  const paid = done.schedule.phases.find(phase => phase.kind === 'payout');
+  if (paid?.kind !== 'payout') throw new Error('The Hand has no payout phase.');
+  const payout = payoutBeats(paid.inputs).totalMs;
   const phases = backToBack(dealt, [['deal', 'preflop', deal], ['settle', 'preflop', settled.deal], ['showdown', 'preflop', showdown], ['settle', 'preflop', settled.showdown],
     ['street', 'flop', street], ['settle', 'flop', settled.street], ['street', 'turn', street], ['settle', 'turn', settled.street], ['street', 'river', street], ['settle', 'river', settled.street],
     ['payout', 'river', payout], ['settle', 'river', settled.payout]]);
   expect(done.schedule).toEqual({
-    phases: phases.map(phase => ({ ...phase, handId: 'hand-1', ...(phase.kind === 'deal' ? { inputs: expect.any(Object) } : {}) })),
+    phases: phases.map(phase => ({ ...phase, handId: 'hand-1', ...(phase.kind === 'deal' || phase.kind === 'payout' ? { inputs: expect.any(Object) } : {}) })),
     actionWindow: null,
   });
 });

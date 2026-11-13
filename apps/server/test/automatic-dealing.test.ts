@@ -134,7 +134,7 @@ test('after each Hand the payout phase and its Settle pass before the next count
   expect(finished.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
   const ends = paidAt + lengthOf('payout') + settleOf('payout', 'online');
   expect(finished.schedule.phases.slice(-2)).toEqual([
-    { kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: paidAt, endsAt: paidAt + lengthOf('payout'), durationMs: lengthOf('payout') },
+    { kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: paidAt, endsAt: paidAt + lengthOf('payout'), durationMs: lengthOf('payout'), inputs: { awards: [expect.objectContaining({ won: expect.any(Number), returned: expect.any(Number) })] } },
     { kind: 'settle', handId: 'hand-1', street: 'preflop', startsAt: paidAt + lengthOf('payout'), endsAt: ends, durationMs: settleOf('payout', 'online') },
   ]);
   expect(chipsAtTable(finished)).toBe(2000);

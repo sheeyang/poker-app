@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, payoutBeats, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
@@ -52,6 +52,17 @@ async function headsUp() {
   await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
   return { t, human, bot };
 }
+/**
+ * What the view's payout presents, and so how long it lasts: a showdown may split the pot, and each winner's award
+ * takes its own beat.
+ */
+function paidFor(view: ObservableTableSession) {
+  const payout = view.schedule.phases.find(phase => phase.kind === 'payout');
+  if (payout?.kind !== 'payout') throw new Error('The Hand has no payout phase.');
+  expect(payout.inputs.awards.length).toBeGreaterThan(0);
+  return { durationMs: payoutBeats(payout.inputs).totalMs, inputs: payout.inputs };
+}
+
 /** Deals and checks every street down: the Hand ends at showdown on the river. */
 async function checkDown(t: Table, human: string, bot: string) {
   await command(t, 'start-hand'); clock.advanceTo(windowOpensAt(await read(t)));
@@ -73,11 +84,11 @@ test('a river showdown turns the hands up, then pays out, each followed by its S
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
   expect(done.view.state.participants.every(p => p.holeCards?.length === 2)).toBe(true);
-  const shown = at + lengthOf('showdown'), turned = shown + settleOf('showdown'), paid = turned + lengthOf('payout');
+  const payout = paidFor(done), shown = at + lengthOf('showdown'), turned = shown + settleOf('showdown'), paid = turned + payout.durationMs;
   expect(done.schedule.phases.slice(-4)).toEqual([
     { kind: 'showdown', handId: 'hand-1', street: 'river', startsAt: at, endsAt: shown, durationMs: lengthOf('showdown') },
     { kind: 'settle', handId: 'hand-1', street: 'river', startsAt: shown, endsAt: turned, durationMs: settleOf('showdown') },
-    { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: turned, endsAt: paid, durationMs: lengthOf('payout') },
+    { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: turned, endsAt: paid, ...payout },
     { kind: 'settle', handId: 'hand-1', street: 'river', startsAt: paid, endsAt: paid + settleOf('payout'), durationMs: settleOf('payout') },
   ]);
   expect(done.schedule.actionWindow).toBeNull();
@@ -86,7 +97,7 @@ test('a river showdown turns the hands up, then pays out, each followed by its S
 test('Deal is rejected with its own code until the Settle after the payout ends, and accepted at that moment', async () => {
   const { t, human, bot } = await headsUp();
   await checkDown(t, human, bot);
-  const ends = clock.now() + presentedFor('showdown') + presentedFor('payout');
+  const ends = clock.now() + presentedFor('showdown') + paidFor(await read(t)).durationMs + settleOf('payout');
   clock.advanceTo(ends - 1);
   const before = await read(t);
   const early = await submit(t, 'start-hand', {});
@@ -147,7 +158,7 @@ test('a three-way all-in with side pots schedules one showdown, the remaining st
     ['street', 'flop', lengthOf('street')], ['settle', 'flop', settleOf('street')],
     ['street', 'turn', lengthOf('street')], ['settle', 'turn', settleOf('street')],
     ['street', 'river', lengthOf('street')], ['settle', 'river', settleOf('street')],
-    ['payout', 'river', lengthOf('payout')], ['settle', 'river', settleOf('payout')],
+    ['payout', 'river', paidFor(done).durationMs], ['settle', 'river', settleOf('payout')],
   ]));
   expect(done.schedule.actionWindow).toBeNull();
 });
@@ -172,6 +183,16 @@ test('a Hand won by folds has a payout phase and its Settle but no showdown, and
   expect((await submit(t, 'start-hand', {})).status).toBe(409);
   clock.advanceTo(ends);
   await command(t, 'start-hand');
+});
+
+test('a payout carries what each winner won and what came back uncalled, and lasts as long as its beats', async () => {
+  const { t, human, bot } = await headsUp();
+  // The human's raise to 60 is called by no one: 40 of it comes back, and the blinds' 40 are won.
+  await foldOut(t, human, bot);
+  const payout = (await read(t)).schedule.phases.find(phase => phase.kind === 'payout');
+  const inputs = { awards: [{ participantId: human, won: 40, returned: 40 }] };
+  expect(payout).toMatchObject({ kind: 'payout', inputs, durationMs: payoutBeats(inputs).totalMs });
+  expect(payout!.endsAt - payout!.startsAt).toBe(payout!.durationMs);
 });
 
 test('a restart keeps the payout phase and its Settle, so Deal still waits for them; a Deal after them needs no wait', async () => {

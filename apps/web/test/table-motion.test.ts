@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, type DealInputs, type ObservableCashGameState, type ObservableParticipantState, type ObservableTableSession, type PresentationPhase } from '@poker/contracts';
+import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, payoutBeats, type DealInputs, type PayoutInputs, type ObservableCashGameState, type ObservableParticipantState, type ObservableTableSession, type PresentationPhase } from '@poker/contracts';
 import { heldStacks, planMotion, sceneOf, type Cue } from '../src/table-motion.js';
 
-const phase = (kind: Exclude<PresentationPhase['kind'], 'deal'>, startsAt: number, street: PresentationPhase['street'] = 'preflop', handId = 'hand-1'): PresentationPhase => ({ kind, handId, street, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
+const phase = (kind: Exclude<PresentationPhase['kind'], 'deal' | 'payout'>, startsAt: number, street: PresentationPhase['street'] = 'preflop', handId = 'hand-1'): PresentationPhase => ({ kind, handId, street, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
 /** The three-handed table's deal (button seat 3): you, then ada, then cy; you and ada post the blinds. */
 const dealt: DealInputs = { dealt: ['you', 'ada', 'cy'].map(participantId => ({ participantId, cardCount: 2 })), blinds: ['you', 'ada'], refills: [] };
 /** A deal phase as the server schedules it: as long as its beats, unless `durationMs` says otherwise. */
 const deal = (startsAt: number, inputs: DealInputs = dealt, durationMs = dealBeats(inputs).totalMs): PresentationPhase => ({ kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt, endsAt: startsAt + durationMs, durationMs, inputs });
+/** A payout phase as the server schedules it: as long as its beats, unless `durationMs` says otherwise. */
+const payout = (startsAt: number, inputs: PayoutInputs, durationMs = payoutBeats(inputs).totalMs, street: PresentationPhase['street'] = 'river'): PresentationPhase => ({ kind: 'payout', handId: 'hand-1', street, startsAt, endsAt: startsAt + durationMs, durationMs, inputs });
+/** Ada wins 790 alone. */
+const adaWins: PayoutInputs = { awards: [{ participantId: 'ada', won: 790, returned: 0 }] };
 const seat = (participantId: string, seatNumber: number, extra: Partial<ObservableParticipantState> = {}): ObservableParticipantState => ({ participantId, seat: seatNumber, stack: 1000, sittingOut: false, inHand: true, cardCount: 2, contribution: 0, ...extra });
 type Decision = readonly [participantId: string, type: string];
 
@@ -118,14 +122,48 @@ describe('a Hand is dealt and played', () => {
     const river = sceneOf(table({ state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } }));
     const shown = table({ phases: [phase('showdown', 30_000, 'river')], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'] }), seat('cy', 3, { folded: true })] } });
     expect(planMotion(river, shown)).toEqual([{ kind: 'showdown', participantIds: ['ada'], swept: 0, at: 30_000 }]);
-    const paid = table({ phases: [phase('showdown', 30_000, 'river'), phase('payout', 32_000, 'river')], state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
-    expect(planMotion(sceneOf(shown), paid)).toEqual([{ kind: 'payout', awards: [{ participantId: 'ada', amount: 790 }], at: 32_000 }]);
+    const paid = table({ phases: [phase('showdown', 30_000, 'river'), payout(32_000, adaWins)], state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
+    expect(planMotion(sceneOf(shown), paid)).toEqual([{ kind: 'payout', beats: payoutBeats(adaWins), at: 32_000 }]);
+  });
+  describe('the payout', () => {
+    // A split pot: ada and cy each win 400, and 60 of cy's bet came back uncalled.
+    const split: PayoutInputs = { awards: [{ participantId: 'ada', won: 400, returned: 0 }, { participantId: 'cy', won: 400, returned: 60 }] };
+    const river = sceneOf(table({ state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'], folded: true }), seat('ada', 2), seat('cy', 3)] } }));
+    const paid = (phases: PresentationPhase[], serverTime = 32_500) => table({ serverTime, phases, state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 400 }, { participantId: 'cy', amount: 400 }], returns: [{ participantId: 'cy', amount: 60 }],
+      participants: [seat('you', 1, { holeCards: ['As', 'Kd'], folded: true }), seat('ada', 2, { stack: 1400 }), seat('cy', 3, { stack: 1460 })] } });
+    it('pushes each award in turn, from the payout phase’s own beats', () => {
+      const cues = planMotion(river, paid([payout(32_000, split)]));
+      expect(cues).toEqual([{ kind: 'payout', at: 32_000, beats: payoutBeats(split) }]);
+    });
+    it('gives a viewer with no earlier view the identical payout, joined part-way', () => {
+      const now = paid([payout(32_000, split)]);
+      expect(planMotion(undefined, now)).toEqual(planMotion(river, now));
+    });
+    it('fits the beats to the phase when its length differs from theirs', () => {
+      const natural = payoutBeats(split).totalMs;
+      const [cue] = planMotion(undefined, paid([payout(32_000, split, natural / 2)]));
+      if (cue?.kind !== 'payout') throw new Error('No payout cue.');
+      expect(cue.beats).toEqual(payoutBeats(split, natural / 2));
+      expect(cue.beats.totalMs).toBe(natural / 2);
+    });
+    it('holds each winner’s stack figure at its old value until their award lands, then shows the new total', () => {
+      const table = paid([payout(32_000, split)]), [ada, cy] = payoutBeats(split).awards;
+      // Ada's chips land first; cy's, with the 60 that came back, after them.
+      expect(heldStacks(table, 32_000 + ada!.endsAt - 1)).toEqual(new Map([['ada', { value: 1000, until: 32_000 + ada!.endsAt }], ['cy', { value: 1000, until: 32_000 + cy!.endsAt }]]));
+      expect(heldStacks(table, 32_000 + ada!.endsAt)).toEqual(new Map([['cy', { value: 1000, until: 32_000 + cy!.endsAt }]]));
+      expect(heldStacks(table, 32_000 + cy!.endsAt).size).toBe(0);
+      expect(cy!.endsAt).toBeLessThan(payoutBeats(split).totalMs);
+    });
+    it('releases each held stack at its landing beat fitted to the phase', () => {
+      const natural = payoutBeats(split).totalMs, [, cy] = payoutBeats(split, natural * 2).awards;
+      expect(heldStacks(paid([payout(32_000, split, natural * 2)]), 32_000).get('cy')).toEqual({ value: 1000, until: 32_000 + cy!.endsAt });
+    });
   });
   it('plays nothing during a Settle: each motion starts with the phase that presents it, and the stillness after it has none', () => {
     const flop = sceneOf(table({ state: { board: ['2c', '7d', 'Jh'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } }));
     // An all-in runout: the showdown, the turn, the river and the payout, each followed by its Settle.
     const phases = [phase('showdown', 30_000, 'flop'), phase('settle', 31_000, 'flop'), phase('street', 32_000, 'turn'), phase('settle', 33_000, 'turn'),
-      phase('street', 34_000, 'river'), phase('settle', 35_000, 'river'), phase('payout', 36_000, 'river'), phase('settle', 37_000, 'river')];
+      phase('street', 34_000, 'river'), phase('settle', 35_000, 'river'), payout(36_000, adaWins), phase('settle', 37_000, 'river')];
     const done = table({ phases, state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
     const cues = planMotion(flop, done);
     expect(cues.map(cue => [cue.kind, cue.at]).sort((a, b) => Number(a[1]) - Number(b[1]))).toEqual([['showdown', 30_000], ['board', 32_000], ['board', 34_000], ['payout', 36_000]]);
@@ -144,19 +182,9 @@ describe('who is at the table', () => {
   it('brings chips added between Hands in with the amount, but not a payout’s', () => {
     expect(planMotion(sceneOf(between(three)), between([seat('you', 1), seat('ada', 2, { stack: 3000 }), seat('cy', 3)]))).toEqual([{ kind: 'chips', participantId: 'ada', amount: 2000, from: 1000, at: 10_000 }]);
     const river = sceneOf(table({ state: { participants: three } }));
-    expect(kinds(planMotion(river, table({ phases: [phase('payout', 9_000)], state: { status: 'completed-hand', payouts: [{ participantId: 'ada', amount: 500 }], participants: [seat('you', 1), seat('ada', 2, { stack: 1500 }), seat('cy', 3)] } })))).toEqual(['payout']);
+    expect(kinds(planMotion(river, table({ phases: [payout(9_000, { awards: [{ participantId: 'ada', won: 500, returned: 0 }] }, undefined, 'preflop')], state: { status: 'completed-hand', payouts: [{ participantId: 'ada', amount: 500 }], participants: [seat('you', 1), seat('ada', 2, { stack: 1500 }), seat('cy', 3)] } })))).toEqual(['payout']);
   });
   it('rewords a seat that sits out', () => {
     expect(planMotion(sceneOf(between(three)), between([seat('you', 1), seat('ada', 2, { sittingOut: true }), seat('cy', 3)]))).toEqual([{ kind: 'status', participantId: 'ada', at: 10_000 }]);
-  });
-});
-
-describe('a winner’s stack figure during the payout', () => {
-  const paid = table({ phases: [phase('payout', 32_000, 'river')], state: { status: 'completed-hand', payouts: [{ participantId: 'ada', amount: 500 }, { participantId: 'cy', amount: 300 }], participants: [seat('you', 1), seat('ada', 2, { stack: 1500 }), seat('cy', 3, { stack: 1300 })] } });
-  it('keeps the old stack until the pushed chips land, each winner a little after the last', () => {
-    expect(heldStacks(paid, 32_100)).toEqual(new Map([['ada', { value: 1000, until: 32_710 }], ['cy', { value: 1000, until: 32_770 }]]));
-    expect(heldStacks(paid, 32_720)).toEqual(new Map([['cy', { value: 1000, until: 32_770 }]]));
-    // Arriving after the chips landed shows the new totals at once.
-    expect(heldStacks(paid, 40_000).size).toBe(0);
   });
 });

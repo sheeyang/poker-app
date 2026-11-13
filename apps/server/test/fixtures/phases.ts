@@ -1,13 +1,16 @@
 import { presentationPhaseDurations, settleAfter, type ObservableTableSession, type PresentationPhaseKind, type PresentingPhaseKind, type Street, type TableMode } from '@poker/contracts';
-import { dealMs } from './presentation.js';
+import { dealMs, payoutMs } from './presentation.js';
 
 /**
  * Presentation Phase lengths for server tests, from the shared presentation timing, so that tests follow it instead
  * of repeating its numbers.
  */
 
-/** The shared length of a presenting phase of `kind`: for the deal, of `players` dealt in (heads-up unless given). */
-export const lengthOf = (kind: PresentingPhaseKind, players = 2): number => kind === 'deal' ? dealMs(players) : presentationPhaseDurations[kind];
+/**
+ * The shared length of a presenting phase of `kind`: for the deal, of `players` dealt in (heads-up unless given); for the
+ * payout, to one winner.
+ */
+export const lengthOf = (kind: PresentingPhaseKind, players = 2): number => kind === 'deal' ? dealMs(players) : kind === 'payout' ? payoutMs() : presentationPhaseDurations[kind];
 
 /** The length of the Settle after a phase of `kind` at a table of `mode` (Practice unless given). */
 export const settleOf = (kind: PresentingPhaseKind, mode: TableMode = 'practice'): number => settleAfter(kind, mode);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dealBeats, type DealInputs } from '../src/index.js';
+import { dealBeats, payoutBeats, presentationPhaseLength, type DealInputs, type PayoutInputs } from '../src/index.js';
 
 /** `players` dealt in clockwise, two cards each, the first two posting the blinds. */
 const deal = (players: number, refills: DealInputs['refills'] = []): DealInputs => {
@@ -59,5 +59,48 @@ describe('the deal’s beats', () => {
       expect(card.turn.endsAt).toBeCloseTo(natural.cards[i]!.turn.endsAt / 2, 0);
     });
     expect(dealBeats(deal(6), natural.totalMs)).toEqual(natural);
+  });
+});
+
+/** A payout of 500 to each of `winners`, in seat order. */
+const payout = (...winners: string[]): PayoutInputs => ({ awards: winners.map(participantId => ({ participantId, won: 500, returned: 0 })) });
+
+describe('the payout’s beats', () => {
+  it('lands each award on its stack after its push from the pot starts', () => {
+    for (const award of payoutBeats(payout('p1', 'p2', 'p3')).awards) expect(award.endsAt).toBeGreaterThan(award.startsAt);
+  });
+
+  it('lands the awards in turn, in seat order, far enough apart to see each', () => {
+    const { awards } = payoutBeats(payout('p1', 'p2', 'p3'));
+    expect(awards.map(a => a.participantId)).toEqual(['p1', 'p2', 'p3']);
+    awards.slice(1).forEach((award, i) => { expect(award.endsAt - awards[i]!.endsAt).toBeGreaterThanOrEqual(250); });
+  });
+
+  it('pushes what each Participant won and what came back to them uncalled', () => {
+    const { awards } = payoutBeats({ awards: [{ participantId: 'p1', won: 300, returned: 0 }, { participantId: 'p2', won: 0, returned: 40 }, { participantId: 'p3', won: 300, returned: 120 }] });
+    expect(awards.map(a => [a.participantId, a.amount])).toEqual([['p1', 300], ['p2', 40], ['p3', 420]]);
+  });
+
+  it('ends no beat after the total', () => {
+    for (const inputs of [payout('p1'), payout('p1', 'p2'), payout('p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9')]) {
+      const beats = payoutBeats(inputs);
+      const ends = [beats.pot.endsAt, ...beats.awards.flatMap(a => [a.endsAt, a.fade.endsAt, a.caption.endsAt])];
+      expect(Math.max(...ends)).toBe(beats.totalMs);
+    }
+  });
+
+  it('takes longer with more awards', () => {
+    expect(payoutBeats(payout('p1', 'p2')).totalMs).toBeGreaterThan(payoutBeats(payout('p1')).totalMs);
+    expect(payoutBeats(payout('p1', 'p2', 'p3')).totalMs).toBeGreaterThan(payoutBeats(payout('p1', 'p2')).totalMs);
+  });
+
+  it('fits every beat to a phase of another length, keeping their order', () => {
+    const natural = payoutBeats(payout('p1', 'p2')), fitted = payoutBeats(payout('p1', 'p2'), natural.totalMs * 2);
+    expect(fitted.totalMs).toBe(natural.totalMs * 2);
+    fitted.awards.forEach((award, i) => { expect(award.endsAt).toBeCloseTo(natural.awards[i]!.endsAt * 2, 0); });
+  });
+
+  it('is the payout phase’s length', () => {
+    expect(presentationPhaseLength({ kind: 'payout', inputs: payout('p1', 'p2') })).toBe(payoutBeats(payout('p1', 'p2')).totalMs);
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { payoutMotion as P, showdownMotion as SD, streetMotion as ST, tableMotion as T, wagerMotion as W, type Beat, type ObservableTableSession } from '@poker/contracts';
+import { showdownMotion as SD, streetMotion as ST, tableMotion as T, wagerMotion as W, type Beat, type ObservableTableSession } from '@poker/contracts';
 import { at, box, flipUp, fly, play, q, reveal, snapshot, stay, type Box, type MotionContext, type Snapshot } from './motion.js';
 import { planMotion, sceneOf, type Cue, type TableScene } from './table-motion.js';
 import { chips } from './table-model.js';
@@ -20,8 +20,12 @@ const S = {
   board: (i: number) => `[data-board="${i}"]`, deck: '[data-motion="deck"]', burn: '[data-motion="burn"]', pot: '[data-motion="pot"]', center: '[data-motion="center"]', button: '[data-motion="button"]',
 };
 const SNAPSHOT = ['data-card', 'data-board', 'data-wager', 'data-wager-chip', 'data-button-anchor', 'data-seat-body', 'data-table-seat', 'data-stack'];
-/** Motion more than this far behind the clock is over: the view shows its end state. */
+/**
+ * Motion more than this far behind the clock is over: the view shows its end state. A phase's motion lasts as long as
+ * its beats, which a full table's deal or payout may stretch past this.
+ */
 const LONGEST = 4000;
+const over = (cue: Cue, serverNow: number) => serverNow - cue.at >= ('beats' in cue ? Math.max(LONGEST, cue.beats.totalMs) : LONGEST);
 const tilt = (k: number, cards: number) => (k === 0 ? -7 : k === cards - 1 ? 7 : 0);
 
 /** The chip icon of a wager now: where a bet's chip lands. */
@@ -75,10 +79,12 @@ function chipsIn(ctx: MotionContext, id: string, amount: number, flight: { delay
 }
 
 function perform(cue: Cue, ctx: MotionContext, el: number) {
+  // A phase's beat as an animation's timing, `el` after the phase started.
+  const span = (beat: Beat) => ({ delay: beat.startsAt, duration: beat.endsAt - beat.startsAt, elapsed: el });
   switch (cue.kind) {
     case 'deal': {
       // Every timing is the deal phase's own beat, already fitted to the phase (dealBeats).
-      const { beats } = cue, span = (beat: Beat) => ({ delay: beat.startsAt, duration: beat.endsAt - beat.startsAt, elapsed: el });
+      const { beats } = cue;
       // The last Hand's cards go back to the deck, and the button moves on.
       const returning = Array.from(ctx.last.keys()).filter(k => k.startsWith('[data-card=') || k.startsWith('[data-board='));
       returning.forEach((key, n) => { fly(ctx, key.startsWith('[data-board') ? 'back' : 'small-back', ctx.last.get(key)?.box, at(ctx, S.deck), { ...span(beats.cardsReturn), delay: beats.cardsReturn.startsAt + n * beats.returnStagger, fadeOut: true }); });
@@ -150,14 +156,16 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       break;
     }
     case 'payout': {
-      play(ctx, q(ctx, S.pot), [{ opacity: 1 }, { opacity: .45, offset: .3 }, { opacity: 1 }], { duration: P.potPulse, delay: P.potAt, elapsed: el, easing: 'linear' });
-      cue.awards.forEach(({ participantId }, i) => {
+      // Every timing is the payout phase's own beat, already fitted to the phase (payoutBeats).
+      const { beats } = cue;
+      play(ctx, q(ctx, S.pot), [{ opacity: 1 }, { opacity: .45, offset: .3 }, { opacity: 1 }], { ...span(beats.pot), easing: 'linear' });
+      for (const award of beats.awards) {
         // Pushed onto the winner's stack figure, which keeps its old value until the chips land (heldStacks).
-        const dest = at(ctx, S.stack(participantId)), lands = P.firstLands + i * P.stagger;
-        fly(ctx, 'stack', at(ctx, S.pot), dest, { duration: P.push, delay: lands - P.push, elapsed: el, arc: 30 });
-        stay(ctx, 'stack', dest, [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '.7' }], { duration: P.landFade, delay: lands, elapsed: el, easing: 'linear' });
-        reveal(ctx, q(ctx, S.caption(participantId)), { delay: lands - P.captionBeforeLanding, elapsed: el, duration: P.caption });
-      });
+        const dest = at(ctx, S.stack(award.participantId));
+        fly(ctx, 'stack', at(ctx, S.pot), dest, { ...span(award), arc: 30 });
+        stay(ctx, 'stack', dest, [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '.7' }], { ...span(award.fade), easing: 'linear' });
+        reveal(ctx, q(ctx, S.caption(award.participantId)), span(award.caption));
+      }
       break;
     }
     case 'sit':
@@ -212,7 +220,7 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number)
   const stage = useRef<HTMLElement>(null);
   const kept = remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
   const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>());
-  const cues = planMotion(scene.current, table).filter(cue => serverNow - cue.at < LONGEST);
+  const cues = planMotion(scene.current, table).filter(cue => !over(cue, serverNow));
   useLayoutEffect(() => {
     const node = stage.current, fx = node?.querySelector<HTMLElement>('[data-motion-layer="over"]'), under = node?.querySelector<HTMLElement>('[data-motion-layer="under"]');
     scene.current = sceneOf(table);

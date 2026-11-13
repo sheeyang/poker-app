@@ -1,4 +1,4 @@
-import type { DealInputs, HandId } from '@poker/contracts';
+import type { DealInputs, HandId, PayoutInputs } from '@poker/contracts';
 import type { CashGame, CashGameEvent } from '@poker/engine';
 import type { PhaseInputs } from './schedule.js';
 
@@ -7,7 +7,7 @@ import type { PhaseInputs } from './schedule.js';
  * transition's events. Only what the view already makes public goes in: never a hole card.
  */
 export function phaseInputs(after: CashGame, events: readonly CashGameEvent[]): PhaseInputs {
-  return { deal: handId => dealInputs(after, events, handId) };
+  return { deal: handId => dealInputs(after, events, handId), payout: handId => payoutInputs(after, handId) };
 }
 
 /**
@@ -36,4 +36,18 @@ function refills(game: CashGame, sequence: number, dealt: readonly string[]): De
   const rebought = new Map<string, number>();
   for (const command of commands.slice(since + 1)) if (command.type === 'top-up-to') rebought.set(command.participantId, command.targetStack);
   return dealt.flatMap(participantId => busted.has(participantId) && rebought.has(participantId) ? [{ participantId, amount: rebought.get(participantId)! }] : []);
+}
+
+/**
+ * The payout of `handId`: each Participant it pushes chips to, in seat order, with what they won from every pot and
+ * what came back to them uncalled. Both are public in the view once the Hand is complete.
+ */
+function payoutInputs(game: CashGame, handId: HandId): PayoutInputs {
+  const hand = game.getHand(handId);
+  if (!hand) throw new Error('A paid-out Hand has no facts.');
+  const sum = (transfers: readonly { readonly participantId: string; readonly amount: number }[], id: string) => transfers.reduce((total, t) => total + (t.participantId === id ? t.amount : 0), 0);
+  return { awards: [...hand.participants].sort((a, b) => a.seat - b.seat).flatMap(({ participantId }) => {
+    const won = sum(hand.payouts, participantId), returned = sum(hand.returns, participantId);
+    return won + returned > 0 ? [{ participantId, won, returned }] : [];
+  }) };
 }
