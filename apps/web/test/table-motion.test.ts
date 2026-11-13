@@ -22,11 +22,15 @@ function table({ state = {}, phases = [], serverTime = 10_000, decisions = [] }:
 const kinds = (cues: Cue[]) => cues.map(c => c.kind);
 
 describe('motion is planned only for changes this viewer saw happen', () => {
-  it('moves nothing on a first view, or when the viewer changed seat and the whole table turned', () => {
+  it('moves nothing on a first view, or when the viewer sits down or stands up', () => {
     expect(planMotion(undefined, table())).toEqual([]);
-    const before = sceneOf(table());
+    const watching = table({ state: { participants: [seat('ada', 2, { wager: 20 }), seat('cy', 3)] } });
+    expect(planMotion(sceneOf(watching), table())).toEqual([]);
+    expect(planMotion(sceneOf(table()), watching)).toEqual([]);
+  });
+  it('turns the table, and nothing else, when the viewer changed seat', () => {
     const moved = table({ state: { participants: [seat('you', 2, { holeCards: ['As', 'Kd'], wager: 10 }), seat('ada', 1, { wager: 20 }), seat('cy', 3)] } });
-    expect(planMotion(before, moved)).toEqual([]);
+    expect(planMotion(sceneOf(table()), moved)).toEqual([{ kind: 'turn', seat: 2, at: 10_000 }]);
   });
   it('moves nothing when the view is unchanged', () => {
     expect(planMotion(sceneOf(table()), table())).toEqual([]);
@@ -34,14 +38,22 @@ describe('motion is planned only for changes this viewer saw happen', () => {
 });
 
 describe('a Hand is dealt and played', () => {
-  const waiting = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0 }), seat('ada', 2, { cardCount: 0 }), seat('cy', 3, { cardCount: 0 })] } });
+  // Stacks before the blinds: the next Hand's blinds come out of them.
+  const waiting = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0, stack: 1010 }), seat('ada', 2, { cardCount: 0, stack: 1020 }), seat('cy', 3, { cardCount: 0 })] } });
   it('deals from the deal phase’s start, clockwise from left of the button, after the blinds go in', () => {
     const cues = planMotion(sceneOf(waiting), table({ phases: [phase('deal', 9_000)] }));
     expect(kinds(cues)).toEqual(['new-hand', 'deal']);
     expect(cues[0]).toMatchObject({ at: 9_000, fromButton: 2 });
-    expect(cues[1]).toEqual({ kind: 'deal', at: 9_000, blinds: ['you', 'ada'], order: [
+    expect(cues[1]).toEqual({ kind: 'deal', at: 9_000, blinds: ['you', 'ada'], afterRefill: false, order: [
       { participantId: 'you', cards: 2, viewer: true }, { participantId: 'ada', cards: 2, viewer: false }, { participantId: 'cy', cards: 2, viewer: false },
     ] });
+  });
+  it('lands a refill that came with the deal first, from the deal phase’s start (Rebuy & deal)', () => {
+    const busted = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0, stack: 0 }), seat('ada', 2, { cardCount: 0, stack: 1020 }), seat('cy', 3, { cardCount: 0 })] } });
+    const cues = planMotion(sceneOf(busted), table({ phases: [phase('deal', 9_000)], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10, stack: 990 }), seat('ada', 2, { wager: 20 }), seat('cy', 3)] } }));
+    expect(cues).toContainEqual({ kind: 'chips', participantId: 'you', amount: 1000, from: 0, beforeDeal: true, at: 9_000 });
+    expect(cues.filter(c => c.kind === 'chips')).toHaveLength(1);
+    expect(cues).toContainEqual(expect.objectContaining({ kind: 'deal', afterRefill: true }));
   });
   it('deals when the deal phase reveals cards a view already carried', () => {
     const hidden = table({ state: { participants: [seat('you', 1, { cardCount: 0, wager: 10 }), seat('ada', 2, { cardCount: 0, wager: 20 }), seat('cy', 3, { cardCount: 0 })] } });
@@ -100,7 +112,7 @@ describe('who is at the table', () => {
     expect(planMotion(two, between([seat('you', 1), seat('ada', 3)]))).toEqual([{ kind: 'move', fromSeat: 2, seat: 3, at: 10_000 }]);
   });
   it('brings chips added between Hands in with the amount, but not a payout’s', () => {
-    expect(planMotion(sceneOf(between(three)), between([seat('you', 1), seat('ada', 2, { stack: 3000 }), seat('cy', 3)]))).toEqual([{ kind: 'chips', participantId: 'ada', amount: 2000, at: 10_000 }]);
+    expect(planMotion(sceneOf(between(three)), between([seat('you', 1), seat('ada', 2, { stack: 3000 }), seat('cy', 3)]))).toEqual([{ kind: 'chips', participantId: 'ada', amount: 2000, from: 1000, beforeDeal: false, at: 10_000 }]);
     const river = sceneOf(table({ state: { participants: three } }));
     expect(kinds(planMotion(river, table({ phases: [phase('payout', 9_000)], state: { status: 'completed-hand', payouts: [{ participantId: 'ada', amount: 500 }], participants: [seat('you', 1), seat('ada', 2, { stack: 1500 }), seat('cy', 3)] } })))).toEqual(['payout']);
   });

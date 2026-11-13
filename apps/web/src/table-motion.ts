@@ -41,8 +41,11 @@ export interface TableScene {
 export type Cue = { readonly at: number } & (
   /** A new Hand: the last one's cards go back to the deck, and the button moves on. */
   | { readonly kind: 'new-hand'; readonly fromButton: number | null }
-  /** Hole cards are dealt one at a time, clockwise from left of the button; the blinds go in first. */
-  | { readonly kind: 'deal'; readonly order: readonly { readonly participantId: string; readonly cards: number; readonly viewer: boolean }[]; readonly blinds: readonly string[] }
+  /**
+   * Hole cards are dealt one at a time, clockwise from left of the button; the blinds go in first. `afterRefill`: stacks
+   * were refilled with this deal (Practice's Rebuy & deal), so the refill lands first and the deal starts from it.
+   */
+  | { readonly kind: 'deal'; readonly order: readonly { readonly participantId: string; readonly cards: number; readonly viewer: boolean }[]; readonly blinds: readonly string[]; readonly afterRefill: boolean }
   /** Chips go in: to the betting line, or, when the bet closed the street, straight into the pot. */
   | { readonly kind: 'bet'; readonly participantId: string; readonly toPot: boolean }
   /** A fold: an opponent's cards are mucked; your own stay, dimmed. */
@@ -59,8 +62,13 @@ export type Cue = { readonly at: number } & (
   | { readonly kind: 'sit'; readonly seat: number }
   | { readonly kind: 'stand'; readonly seat: number }
   | { readonly kind: 'move'; readonly fromSeat: number; readonly seat: number }
-  /** Chips added to a stack between Hands: a rebuy or a top-up. */
-  | { readonly kind: 'chips'; readonly participantId: string; readonly amount: number }
+  /**
+   * Chips added to a stack between Hands: a rebuy or a top-up. `from`: the stack before them. `beforeDeal`: they came
+   * with a new Hand's deal, and land before it starts.
+   */
+  | { readonly kind: 'chips'; readonly participantId: string; readonly amount: number; readonly from: number; readonly beforeDeal: boolean }
+  /** The viewer moved to `seat`: the table is drawn turned, so every seat is in a new place. */
+  | { readonly kind: 'turn'; readonly seat: number }
   /** Sitting out, returning, disconnecting or reconnecting: the seat's words change. */
   | { readonly kind: 'status'; readonly participantId: string }
 );
@@ -109,13 +117,15 @@ function dealingOrder<T extends { readonly seat: number }>(seats: readonly T[], 
 }
 
 /**
- * The cues for going from `prev` to the presented `table`. Nothing moves on a first view, or when the viewer's own
- * seat changed (the whole table turns so they stay at the bottom, and every seat would seem to move).
+ * The cues for going from `prev` to the presented `table`. Nothing moves on a first view, or when the viewer sits down
+ * or stands up. When the viewer moves seats, the table is drawn turned so they stay at the bottom and every seat is in a
+ * new place: that is one cue, a turn, and nothing else moves with it.
  */
 export function planMotion(prev: TableScene | undefined, table: ObservableTableSession): Cue[] {
   const next = sceneOf(table);
-  if (!prev || prev.tableSessionId !== next.tableSessionId || prev.viewerSeat !== next.viewerSeat) return [];
+  if (!prev || prev.tableSessionId !== next.tableSessionId) return [];
   const viewAt = table.serverTime, cues: Cue[] = [];
+  if (prev.viewerSeat !== next.viewerSeat) return prev.viewerSeat !== null && next.viewerSeat !== null ? [{ kind: 'turn', seat: next.viewerSeat, at: viewAt }] : [];
   const before = new Map(prev.seats.map(s => [s.participantId, s]));
   const after = new Map(next.seats.map(s => [s.participantId, s]));
 
@@ -135,8 +145,11 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
     if (!was || was.seat !== s.seat) continue;
     if (was.sittingOut !== s.sittingOut || was.offline !== s.offline) cues.push({ kind: 'status', participantId: s.participantId, at: viewAt });
     // Stacks only grow inside a Hand when it settles; any other growth in place is a rebuy or a top-up.
-    if (s.stack > was.stack && !settling && prev.handId === next.handId) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack - was.stack, at: viewAt });
+    if (s.stack > was.stack && !settling && prev.handId === next.handId) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack - was.stack, from: was.stack, beforeDeal: false, at: viewAt });
+    // A refill that came with the next Hand (Practice's Rebuy & deal): what the stack held before its blind went in grew.
+    else if (newHand && (prev.settled || !prev.handId) && s.stack + s.wager > was.stack) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack + s.wager - was.stack, from: was.stack, beforeDeal: true, at: phaseStart(table, 'deal') ?? viewAt });
   }
+  const afterRefill = cues.some(cue => cue.kind === 'chips' && cue.beforeDeal);
   if (!next.handId) return cues;
 
   // Dealt: everyone holding cards in a new Hand, or, in the same Hand, those whose cards the deal phase has just shown.
@@ -145,7 +158,7 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
   // The blinds go in as the deal starts.
   const blinds = dealt.length ? next.blinds.filter(id => (after.get(id)?.wager ?? 0) > 0) : [];
   if (dealt.length) cues.push({
-    kind: 'deal', at: phaseStart(table, 'deal') ?? viewAt, blinds,
+    kind: 'deal', at: phaseStart(table, 'deal') ?? viewAt, blinds, afterRefill,
     order: dealingOrder(dealt, next.buttonSeat, next.seatCount).map(s => ({ participantId: s.participantId, cards: s.cards, viewer: s.participantId === next.viewerId })),
   });
   if (!sameHand) return cues;

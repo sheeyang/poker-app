@@ -26,6 +26,7 @@ import { SeatGlyph } from './felt.js';
 import { actionLabel, chips, modeLabel, playerName } from './table-model.js';
 import { usePresentation } from './use-presentation.js';
 import { EASE, EASE_IN } from './motion.js';
+import { foldRemovedNotices } from './overlay-motion.js';
 
 /**
  * A table's own page, `/practice/<id>` or `/online/<id>`: the table named by the address, shown to its Participants.
@@ -37,6 +38,8 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const analysisOpen = useSession(s => s.analysisOpen);
   const [settings, setSettings] = useState<false | 'all'>(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
   const { identity, command, live, consumeLive } = useShell();
+  // Notices the app removes fold away, so the ones below slide up instead of jumping.
+  const foldNotices = useCallback((node: HTMLDivElement) => foldRemovedNotices(node), []);
   const navigate = useNavigate(), queryClient = useQueryClient();
   const read = useQuery({ queryKey: ['table-session', selected], queryFn: ({ signal }) => api.readSession(selected, signal), enabled: identity.isSuccess, structuralSharing: retainNewestTable });
   const unread = read.error instanceof RequestFailure && read.error.code === 'not-found';
@@ -161,7 +164,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   return <>
     <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
       <div className="play-area">
-        <div className="table-notices">
+        <div className="table-notices" ref={foldNotices}>
           <CommandFeedback command={command} />
           {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>This table is still saved.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
           {current && <>

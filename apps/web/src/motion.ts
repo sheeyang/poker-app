@@ -103,14 +103,15 @@ function disposeWith(g: HTMLElement, animation: Animation | undefined) {
  * A ghost travels from `from` to `to`. It sits at its destination and is animated back from the source, so its last
  * frame is exactly where the real thing appears.
  */
-export function fly(ctx: MotionContext, kind: GhostKind, from: Box | undefined, to: Box | undefined, t: Timing & { readonly fadeOut?: boolean; readonly spin?: readonly [number, number]; readonly text?: string; readonly scaleFrom?: number; readonly arc?: number }) {
+export function fly(ctx: MotionContext, kind: GhostKind, from: Box | undefined, to: Box | undefined, t: Timing & { readonly fadeOut?: boolean; readonly spin?: readonly [number, number]; readonly text?: string; readonly scaleFrom?: number; readonly arc?: number; /** Unseen until it sets off: a chip waiting out a delay would sit on its seat. */ readonly hideBefore?: boolean }) {
   if (!from || !to || over(t)) return;
   const g = ghost(ctx, kind, to, { text: t.text });
   const s = t.scaleFrom ?? (kind === 'back' || kind === 'small-back' ? from.w / to.w : 1);
   const dx = from.x - to.x, dy = from.y - to.y;
   const [r0, r1] = t.spin ?? [0, 0];
   const mid: Keyframe[] = t.arc ? [{ offset: .5, translate: `${dx / 2}px ${dy / 2 - t.arc}px`, scale: String((s + 1) / 2), rotate: `${(r0 + r1) / 2}deg` }] : [];
-  const frames: Keyframe[] = [{ translate: `${dx}px ${dy}px`, scale: String(s), rotate: `${r0}deg`, opacity: 1 }, ...mid, { translate: '0px 0px', scale: '1', rotate: `${r1}deg`, opacity: t.fadeOut ? 0 : 1 }];
+  const start: Keyframe = { translate: `${dx}px ${dy}px`, scale: String(s), rotate: `${r0}deg`, opacity: 1 };
+  const frames: Keyframe[] = [...(t.hideBefore ? [{ ...start, opacity: 0 }, { ...start, offset: .01 }] : [start]), ...mid, { translate: '0px 0px', scale: '1', rotate: `${r1}deg`, opacity: t.fadeOut ? 0 : 1 }];
   disposeWith(g, play(ctx, g, frames, { fill: 'both', ...t }));
 }
 
