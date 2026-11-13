@@ -1,4 +1,4 @@
-import type { ConcreteAction, ObservableTableOptions, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, PresentedPhase, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
+import { presentingPhase, readPhaseInputs, type ConcreteAction, type ObservableTableOptions, type ObservableCashGameState, type ObservableGameConfiguration, type ObservablePresentationEvent, type ObservableTableSession, type ObservableTableUpdate, type ParticipantBinding, type PresentedPhase, type StrategyDescriptor, type TableOptions, type TableSchedule } from '@poker/contracts';
 import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 import { handInProgress } from './after-hand.js';
@@ -52,18 +52,12 @@ export function projectOptions(options: TableOptions): TableOptions {
 export function projectTableOptions(aggregate: PersistedTableSession): ObservableTableOptions {
   return { ...projectOptions(aggregate.options), ...(aggregate.tablePasswordHash ? { hasTablePassword: true as const } : {}) };
 }
-/** A phase's kind and what it presents, field by field. */
+/** A phase's kind and what it presents, its Phase Inputs read field by field. */
 function projectPresented(phase: PresentedPhase): PresentedPhase {
-  switch (phase.kind) {
-    case 'deal': {
-      const { dealt, blinds, refills } = phase.inputs;
-      return { kind: phase.kind, inputs: { dealt: dealt.map(d => ({ participantId: d.participantId, cardCount: d.cardCount })), blinds: [...blinds], refills: refills.map(r => ({ participantId: r.participantId, amount: r.amount })) } };
-    }
-    case 'street': return { kind: phase.kind, inputs: { swept: [...phase.inputs.swept], cardCount: phase.inputs.cardCount } };
-    case 'showdown': return { kind: phase.kind, inputs: { swept: [...phase.inputs.swept], shown: phase.inputs.shown.map(s => ({ participantId: s.participantId, cardCount: s.cardCount })) } };
-    case 'payout': return { kind: phase.kind, inputs: { awards: phase.inputs.awards.map(a => ({ participantId: a.participantId, won: a.won, returned: a.returned })) } };
-    default: return { kind: phase.kind };
-  }
+  if (phase.kind === 'settle') return { kind: phase.kind };
+  const inputs = readPhaseInputs(phase.kind, phase.inputs);
+  if (!inputs) throw new Error('A scheduled phase carries Phase Inputs of the wrong shape.');
+  return presentingPhase(phase.kind, inputs);
 }
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {

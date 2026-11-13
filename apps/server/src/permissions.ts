@@ -1,4 +1,4 @@
-import type { MutationOutcome, PokerMutationRequest } from '@poker/contracts';
+import type { MutationOutcome, PokerMutationRequest, Refill, StartHandRequest } from '@poker/contracts';
 import { findBinding, isBot, isHuman, type PersistedHumanBinding, type PersistedTableSession } from './aggregate.js';
 import { ownerRequired, reject, unavailableOnline } from './rejections.js';
 
@@ -32,7 +32,13 @@ export function humanMutationDenial(aggregate: PersistedTableSession, requester:
   // Automatic Dealing deals each Hand at an Online Table and moves the button.
   if (kind === 'start-hand' && owner && aggregate.mode === 'online') return unavailableOnline('Hands at an Online Table are dealt automatically.');
   if (kind === 'set-button' && owner && aggregate.mode === 'online') return unavailableOnline('At an Online Table the dealer button moves with Automatic Dealing.');
-  if (kind === 'start-hand' || kind === 'set-button' || kind === 'add-bot') return owner ? undefined : ownerRequired();
+  if (kind === 'start-hand' || kind === 'set-button' || kind === 'add-bot') {
+    if (!owner) return ownerRequired();
+    // Rebuy & deal refills only the owner's own Participant and their Bots.
+    const refills: unknown = kind === 'start-hand' ? (request as StartHandRequest).refills : undefined;
+    const refilled = refillList(refills) ? refills.map(refill => findBinding(aggregate, refill.participantId)) : [];
+    return refilled.some(binding => isHuman(binding) && binding.participantId !== requester.participantId) ? notYours() : undefined;
+  }
   if (isHuman(target) && target.participantId !== requester.participantId) return notYours();
   // A Practice Table is never left: its human keeps it in their practice history.
   if (kind === 'leave-table' && aggregate.mode !== 'online') return reject('unavailable-at-practice-tables', 'A Practice Table is never left. Stand Up or sit out instead.');
@@ -41,13 +47,16 @@ export function humanMutationDenial(aggregate: PersistedTableSession, requester:
 }
 
 const commandFields: Readonly<Record<PokerMutationKind, readonly string[]>> = {
-  'seat-participant': ['participantId', 'seat', 'buyIn'], 'start-hand': [], act: ['participantId', 'action'],
+  'seat-participant': ['participantId', 'seat', 'buyIn'], 'start-hand': ['refills'], act: ['participantId', 'action'],
   'stand-up-participant': ['participantId'], 'move-participant': ['participantId', 'seat'], 'set-sitting-out': ['participantId', 'sittingOut'], 'top-up-to': ['participantId', 'targetStack'], 'set-button': ['seat'], 'leave-table': ['participantId'], 'remove-participant': ['participantId'],
   'add-bot': ['name', 'playingStrategy', 'seat', 'buyIn'], 'remove-bot': ['participantId'],
 };
+/** Whether `refills` is a list of Refills, each with only a `participantId` and a `targetStack`. */
+const refillList = (refills: unknown): refills is readonly Refill[] => Array.isArray(refills) && refills.every(refill => typeof refill === 'object' && refill !== null && Object.keys(refill).every(key => key === 'participantId' || key === 'targetStack') && typeof refill.participantId === 'string');
 /** A request with fields its kind does not take, or without a nonnegative integer `expectedPokerRevision`. */
 export function malformedPokerRequest(kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
   const fields = ['requestId', 'expectedPokerRevision', ...commandFields[kind]];
-  if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0)
+  if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedPokerRevision) || request.expectedPokerRevision < 0
+    || (kind === 'start-hand' && 'refills' in request && !refillList(request.refills)))
     return reject('invalid-mutation-request', 'Supply supported mutation fields and a nonnegative expectedPokerRevision.');
 }

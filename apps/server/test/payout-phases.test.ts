@@ -105,7 +105,7 @@ test('Deal is rejected with its own code until the Settle after the payout ends,
   const before = await read(t);
   const early = await submit(t, 'start-hand', {});
   expect(early.status).toBe(409);
-  expect(await early.json()).toMatchObject({ ok: false, rejection: { code: 'payout-phase-not-ended' } });
+  expect(await early.json()).toMatchObject({ ok: false, rejection: { code: 'hand-not-ended' } });
   expect(await read(t)).toEqual(before);
   clock.advanceTo(ends);
   await command(t, 'start-hand');
@@ -181,7 +181,7 @@ test('a Hand won by folds has a payout phase and its Settle but no showdown, and
     { kind: 'settle', street: 'preflop', startsAt: paid, endsAt: ends },
   ]);
   clock.advanceTo(paid);
-  expect(await (await submit(t, 'start-hand', {})).json()).toMatchObject({ ok: false, rejection: { code: 'payout-phase-not-ended' } });
+  expect(await (await submit(t, 'start-hand', {})).json()).toMatchObject({ ok: false, rejection: { code: 'hand-not-ended' } });
   clock.advanceTo(ends - 1);
   expect((await submit(t, 'start-hand', {})).status).toBe(409);
   clock.advanceTo(ends);

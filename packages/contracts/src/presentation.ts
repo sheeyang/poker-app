@@ -9,10 +9,11 @@ import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseK
  */
 
 /**
- * What a Presentation Phase presents, by kind, for each kind whose length comes from its beats. The phase carries
- * them as `inputs`. They hold only what the view already makes public, so every viewer computes the same beats.
+ * A Presentation Phase's Phase Inputs, by kind, for each kind whose length comes from its beats: what it presents. The
+ * phase carries them as `inputs`. They hold only what the view already makes public, so every viewer computes the
+ * same beats.
  */
-export interface PresentationPhaseInputs {
+export interface PhaseInputs {
   readonly deal: DealInputs;
   readonly street: StreetInputs;
   readonly showdown: ShowdownInputs;
@@ -20,17 +21,21 @@ export interface PresentationPhaseInputs {
 }
 
 /** A phase's kind and what it presents: all the server needs for its length, and a Trainer for its beats. */
-export type PresentedPhase = { readonly [K in PresentationPhaseKind]: { readonly kind: K } & (K extends keyof PresentationPhaseInputs ? { readonly inputs: PresentationPhaseInputs[K] } : unknown) }[PresentationPhaseKind];
+export type PresentedPhase = { readonly [K in PresentationPhaseKind]: { readonly kind: K } & (K extends keyof PhaseInputs ? { readonly inputs: PhaseInputs[K] } : unknown) }[PresentationPhaseKind];
+/** A presenting phase's kind and its Phase Inputs. */
+export type PresentingPhase<K extends PresentingPhaseKind = PresentingPhaseKind> = { readonly [P in K]: { readonly kind: P; readonly inputs: PhaseInputs[P] } }[K];
 
-/** How long a presenting Presentation Phase lasts: the total of its beats for what it presents. */
-export function presentationPhaseLength(phase: PresentedPhase & { readonly kind: PresentingPhaseKind }): number {
-  switch (phase.kind) {
-    case 'deal': return dealBeats(phase.inputs).totalMs;
-    case 'street': return streetBeats(phase.inputs).totalMs;
-    case 'showdown': return showdownBeats(phase.inputs).totalMs;
-    case 'payout': return payoutBeats(phase.inputs).totalMs;
-  }
-}
+/** A presenting phase of `kind` that presents `inputs`. */
+export const presentingPhase = <K extends PresentingPhaseKind>(kind: K, inputs: PhaseInputs[K]): PresentingPhase => ({ kind, inputs }) as PresentingPhase;
+
+/** How long a presenting Presentation Phase lasts: the total of its beats for its Phase Inputs. */
+export const presentationPhaseLength = (phase: PresentingPhase): number => beatsOf(phase.kind, phase.inputs).totalMs;
+
+/**
+ * The Phase Inputs of a phase of `kind`, read field by field from `value`: nothing a field added elsewhere carries, and
+ * `undefined` when `value` is not Phase Inputs of that kind (as from a server of another version, during a deploy).
+ */
+export const readPhaseInputs = <K extends PresentingPhaseKind>(kind: K, value: unknown): PhaseInputs[K] | undefined => byKind[kind].read(value);
 
 /** Something that moves, from `startsAt` until `endsAt`, in milliseconds from its phase's start. */
 export interface Beat { readonly startsAt: number; readonly endsAt: number }
@@ -61,9 +66,10 @@ export interface SettleLengths {
 }
 
 /**
- * The Settle lengths: a moment to take in the deal or a street before acting, time to read the turned hands before the
- * pot is pushed, and a moment to see the result before the next Hand can start. Each may be 0: a Settle of 0 is not
- * scheduled, and what follows starts when the phase before it ends.
+ * The Settle lengths: a moment to take in the deal or a street before acting; after the showdown, the time to read the
+ * turned hands before the pot is pushed (the showdown's own beats end once the last hand is face up); and a moment to
+ * see the result before the next Hand can start. Each may be 0: a Settle of 0 is not scheduled, and what follows
+ * starts when the phase before it ends.
  */
 export const settleLengths: SettleLengths = Object.freeze({ deal: 300, street: 300, showdown: 1200, payout: Object.freeze({ practice: 600, online: 3000 }) });
 
@@ -72,6 +78,13 @@ export const settleAfter = (kind: PresentingPhaseKind, mode: TableMode, lengths:
 
 /** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
 export const nextHandCountdownMs = 5000;
+
+/** Seats in the order the engine deals them: clockwise from left of the button, or heads-up the button first. */
+export function dealingOrder<S extends { readonly seat: number }>(seats: readonly S[], buttonSeat: number): S[] {
+  const pastButton = (seat: number) => (seat > buttonSeat ? 0 : 1);
+  const clockwise = [...seats].sort((a, b) => pastButton(a.seat) - pastButton(b.seat) || a.seat - b.seat);
+  return seats.length === 2 ? clockwise.reverse() : clockwise;
+}
 
 /**
  * The betting line swept into the pot: each swept wager's chip flies to the pot, one after another, its amount fading as
@@ -82,13 +95,17 @@ export interface SweepBeats {
   readonly pot?: Beat;
 }
 
-/** The sweep of `swept`, in the order given, at `tableMotion`'s sweep timings, and when its last chip reaches the pot (0 with none). */
-function sweepPlan(swept: readonly ParticipantId[], at: (ms: number) => number): { readonly beats: SweepBeats; readonly lands: number } {
-  const T = tableMotion, leaves = (n: number) => T.sweepAt + n * T.sweepStagger;
-  const wagers = swept.map((participantId, n) => ({ participantId, startsAt: at(leaves(n)), endsAt: at(leaves(n) + T.sweepFlight), amountFades: { startsAt: at(leaves(n)), endsAt: at(leaves(n) + T.sweepAmountFade) } }));
-  if (!swept.length) return { beats: { wagers }, lands: 0 };
-  const potAt = T.sweepAt + T.potAfterSweep + swept.length * T.sweepStagger;
-  return { beats: { wagers, pot: { startsAt: at(potAt), endsAt: at(potAt + T.potBrightens) } }, lands: leaves(swept.length - 1) + T.sweepFlight };
+/**
+ * The sweep of `swept`, in the order given, at `tableMotion`'s sweep timings; when its last chip reaches the pot
+ * (`lands`), and when its last beat ends (`endsAt`), both 0 with nothing swept.
+ */
+function sweepPlan(swept: readonly ParticipantId[], at: (ms: number) => number): { readonly beats: SweepBeats; readonly lands: number; readonly endsAt: number } {
+  const leaves = (n: number) => tableMotion.sweepAt + n * tableMotion.sweepStagger;
+  const wagers = swept.map((participantId, n) => ({ participantId, startsAt: at(leaves(n)), endsAt: at(leaves(n) + tableMotion.sweepFlight), amountFades: { startsAt: at(leaves(n)), endsAt: at(leaves(n) + tableMotion.sweepAmountFade) } }));
+  if (!swept.length) return { beats: { wagers }, lands: 0, endsAt: 0 };
+  const potAt = tableMotion.sweepAt + tableMotion.potAfterSweep + swept.length * tableMotion.sweepStagger;
+  const pot = { startsAt: at(potAt), endsAt: at(potAt + tableMotion.potBrightens) };
+  return { beats: { wagers, pot }, lands: leaves(swept.length - 1) + tableMotion.sweepFlight, endsAt: Math.max(pot.endsAt, ...wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt])) };
 }
 
 /**
@@ -102,8 +119,11 @@ export const sweepBeats = (swept: readonly ParticipantId[]): SweepBeats => sweep
  * dealing order. The deal phase lasts as long as these beats (`dealBeats`).
  */
 export const dealMotion = Object.freeze({
-  /** Each of the last Hand's cards returning to the deck, one after another. */
-  returnFlight: 540, returnStagger: 27,
+  /**
+   * Each of the last Hand's cards returning to the deck, one after another; and the most time from the first setting
+   * off to the last, so the gap between them tightens when many return.
+   */
+  returnFlight: 540, returnStagger: 27, returnRoom: 240,
   buttonMoves: 780,
   /** A refill that came with the deal (Practice's Rebuy & deal): its chips fly in, and the blinds follow once they land. */
   refillLands: 720, blindsAfterRefill: 30,
@@ -120,20 +140,24 @@ export const dealMotion = Object.freeze({
 
 /** What the deal presents. Every field is public in the view: who holds cards, the blinds' wagers, and stacks. */
 export interface DealInputs {
-  /** Who is dealt in, in the order the engine deals (clockwise from left of the button; heads-up, the button first), and how many cards each (`cardCount`). */
+  /** Who is dealt in, in the order the engine deals (`dealingOrder`), and how many cards each (`cardCount`). */
   readonly dealt: readonly { readonly participantId: ParticipantId; readonly cardCount: number }[];
   /** The blinds, in the order they go in. */
   readonly blinds: readonly ParticipantId[];
-  /** Who was refilled between Hands from an empty stack (a rebuy, as Practice's Rebuy & deal makes), and by how much. */
+  /** Who was refilled with the deal from an empty stack (Practice's Rebuy & deal), and by how much. */
   readonly refills: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
 }
 
 export interface DealBeats extends PhaseBeats {
-  /** The first of the last Hand's cards flying back to the deck; each next one sets off `returnStagger` later. */
-  readonly cardsReturn: Beat; readonly returnStagger: number;
+  /**
+   * The last Hand's cards flying back to the deck: however many a Trainer shows, every one sets off and lands within
+   * this beat, each `flight` long and the next up to `stagger` later (`returnBeat`). Their count is no Phase Input:
+   * only the cards a viewer saw can return.
+   */
+  readonly cardsReturn: Beat & { readonly flight: number; readonly stagger: number };
   readonly buttonMoves: Beat;
-  /** Each refill's chips flying in, landing before the blinds go in. */
-  readonly refills: readonly (Beat & { readonly participantId: ParticipantId })[];
+  /** Each refill's chips (`amount`) flying in, landing before the blinds go in. */
+  readonly refills: readonly (Beat & { readonly participantId: ParticipantId; readonly amount: ChipAmount })[];
   /** Each blind's chip flying to the betting line; its amount appears at `appearsAt`. */
   readonly blinds: readonly (Beat & { readonly participantId: ParticipantId; readonly appearsAt: number })[];
   /**
@@ -143,29 +167,37 @@ export interface DealBeats extends PhaseBeats {
   readonly cards: readonly (Beat & { readonly participantId: ParticipantId; readonly card: number; readonly appearsAt: number; readonly turn: Beat })[];
 }
 
+/** The `n`th of `count` returning cards' flight back to the deck: within the deal's `cardsReturn`, so within the deal. */
+export function returnBeat(cardsReturn: DealBeats['cardsReturn'], n: number, count: number): Beat {
+  const room = cardsReturn.endsAt - cardsReturn.startsAt - cardsReturn.flight;
+  const gap = count > 1 ? Math.min(cardsReturn.stagger, room / (count - 1)) : 0, startsAt = cardsReturn.startsAt + Math.min(n, count - 1) * gap;
+  return { startsAt, endsAt: startsAt + cardsReturn.flight };
+}
+
 /**
  * The deal's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. Cards go
  * one at a time to each Participant in dealing order, then round again: the more there are, the closer together.
  */
 export const dealBeats = beatFunction((inputs: DealInputs, at): DealBeats => {
-  const D = dealMotion;
-  const blindsAt = inputs.refills.length ? D.refillLands + D.blindsAfterRefill : 0;
-  const refills = inputs.refills.map(({ participantId }) => ({ participantId, startsAt: at(0), endsAt: at(D.refillLands) }));
+  const motion = dealMotion;
+  const blindsAt = inputs.refills.length ? motion.refillLands + motion.blindsAfterRefill : 0;
+  const refills = inputs.refills.map(({ participantId, amount }) => ({ participantId, amount, startsAt: at(0), endsAt: at(motion.refillLands) }));
   const blinds = inputs.blinds.map((participantId, n) => {
-    const leaves = blindsAt + n * D.blindStagger, lands = leaves + D.blindFlight;
-    return { participantId, startsAt: at(leaves), endsAt: at(lands), appearsAt: at(lands - D.blindAppearsBefore) };
+    const leaves = blindsAt + n * motion.blindStagger, lands = leaves + motion.blindFlight;
+    return { participantId, startsAt: at(leaves), endsAt: at(lands), appearsAt: at(lands - motion.blindAppearsBefore) };
   });
   const count = inputs.dealt.reduce((sum, s) => sum + s.cardCount, 0), rounds = Math.max(0, ...inputs.dealt.map(s => s.cardCount));
-  const gap = Math.min(D.cardGap, Math.floor(D.cardsRoom / Math.max(1, count)));
+  const gap = Math.min(motion.cardGap, Math.floor(motion.cardsRoom / Math.max(1, count)));
   const cards: DealBeats['cards'][number][] = [];
   for (let card = 0; card < rounds; card++) for (const { participantId, cardCount: held } of inputs.dealt) {
     if (card >= held) continue;
-    const leaves = blindsAt + D.cardsAfterBlinds + cards.length * gap, lands = leaves + D.cardFlight, turns = lands + D.turnAfterLanding;
-    cards.push({ participantId, card, startsAt: at(leaves), endsAt: at(lands), appearsAt: at(lands - D.cardAppearsBefore), turn: { startsAt: at(turns), endsAt: at(turns + D.turn) } });
+    const leaves = blindsAt + motion.cardsAfterBlinds + cards.length * gap, lands = leaves + motion.cardFlight, turns = lands + motion.turnAfterLanding;
+    cards.push({ participantId, card, startsAt: at(leaves), endsAt: at(lands), appearsAt: at(lands - motion.cardAppearsBefore), turn: { startsAt: at(turns), endsAt: at(turns + motion.turn) } });
   }
-  const cardsReturn = { startsAt: at(0), endsAt: at(D.returnFlight) }, buttonMoves = { startsAt: at(0), endsAt: at(D.buttonMoves) };
+  const cardsReturn = { startsAt: at(0), endsAt: at(motion.returnRoom + motion.returnFlight), flight: at(motion.returnFlight) - at(0), stagger: at(motion.returnStagger) - at(0) };
+  const buttonMoves = { startsAt: at(0), endsAt: at(motion.buttonMoves) };
   const totalMs = Math.max(cardsReturn.endsAt, buttonMoves.endsAt, ...refills.map(b => b.endsAt), ...blinds.map(b => b.endsAt), ...cards.map(c => c.turn.endsAt));
-  return { totalMs, cardsReturn, returnStagger: at(D.returnStagger) - at(0), buttonMoves, refills, blinds, cards };
+  return { totalMs, cardsReturn, buttonMoves, refills, blinds, cards };
 });
 
 /**
@@ -209,22 +241,22 @@ export interface StreetBeats extends PhaseBeats {
 
 /** A street reveal's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
 export const streetBeats = beatFunction((inputs: StreetInputs, at): StreetBeats => {
-  const ST = streetMotion, sweep = sweepPlan(inputs.swept, at);
-  const burnAt = Math.max(ST.burnEarliest, sweep.lands), boardAt = burnAt + ST.boardAfterBurn, flop = inputs.cardCount > 1;
-  const burn = { startsAt: at(burnAt), endsAt: at(burnAt + ST.burnFlight), appearsAt: at(burnAt + ST.burnFlight - ST.appearsBefore) };
-  const lands = boardAt + (flop ? ST.flopFlight : ST.cardFlight);
+  const motion = streetMotion, sweep = sweepPlan(inputs.swept, at);
+  const burnAt = Math.max(motion.burnEarliest, sweep.lands), boardAt = burnAt + motion.boardAfterBurn, flop = inputs.cardCount > 1;
+  const burn = { startsAt: at(burnAt), endsAt: at(burnAt + motion.burnFlight), appearsAt: at(burnAt + motion.burnFlight - motion.appearsBefore) };
+  const lands = boardAt + (flop ? motion.flopFlight : motion.cardFlight);
   const cards = Array.from({ length: inputs.cardCount }, (_, card) => {
-    const turns = flop ? lands + ST.flopTurnsAfterLanding + card * ST.flopTurnStagger : lands + ST.cardTurnsAfterLanding, turn = flop ? ST.flopTurn : ST.cardTurn;
-    return { card, startsAt: at(boardAt), endsAt: at(lands), appearsAt: at(lands - ST.appearsBefore), ...(flop ? { spread: { startsAt: at(lands), endsAt: at(lands + ST.flopSpread) } } : {}), turn: { startsAt: at(turns), endsAt: at(turns + turn) } };
+    const turns = flop ? lands + motion.flopTurnsAfterLanding + card * motion.flopTurnStagger : lands + motion.cardTurnsAfterLanding, turn = flop ? motion.flopTurn : motion.cardTurn;
+    return { card, startsAt: at(boardAt), endsAt: at(lands), appearsAt: at(lands - motion.appearsBefore), ...(flop ? { spread: { startsAt: at(lands), endsAt: at(lands + motion.flopSpread) } } : {}), turn: { startsAt: at(turns), endsAt: at(turns + turn) } };
   });
-  const totalMs = Math.max(burn.endsAt, ...sweep.beats.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), sweep.beats.pot?.endsAt ?? 0, ...cards.flatMap(c => [c.turn.endsAt, c.spread?.endsAt ?? 0]));
+  const totalMs = Math.max(burn.endsAt, sweep.endsAt, ...cards.flatMap(c => [c.turn.endsAt, c.spread?.endsAt ?? 0]));
   return { totalMs, sweep: sweep.beats, burn, cards };
 });
 
 /**
  * The showdown: the line swept (`tableMotion`'s sweep), then each hand turned up in turn, card by card, once the last
- * swept chip reaches the pot. The showdown lasts as long as these beats (`showdownBeats`); the Settle after it is the
- * time to read the hands.
+ * swept chip reaches the pot. The showdown lasts as long as these beats (`showdownBeats`); the time to read the hands
+ * is the Settle after it (`settleLengths.showdown`).
  */
 export const showdownMotion = Object.freeze({
   /** When the first card turns, after the sweep; the gap to the next hand, and to a hand's next card; and each turn. */
@@ -247,12 +279,12 @@ export interface ShowdownBeats extends PhaseBeats {
 
 /** The showdown's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
 export const showdownBeats = beatFunction((inputs: ShowdownInputs, at): ShowdownBeats => {
-  const SD = showdownMotion, sweep = sweepPlan(inputs.swept, at), first = sweep.lands + SD.turnsAfterSweep;
+  const motion = showdownMotion, sweep = sweepPlan(inputs.swept, at), first = sweep.lands + motion.turnsAfterSweep;
   const hands = inputs.shown.map(({ participantId, cardCount }, h) => ({ participantId, cards: Array.from({ length: cardCount }, (_, card) => {
-    const turns = first + h * SD.handStagger + card * SD.cardStagger;
-    return { card, turn: { startsAt: at(turns), endsAt: at(turns + SD.turn) } };
+    const turns = first + h * motion.handStagger + card * motion.cardStagger;
+    return { card, turn: { startsAt: at(turns), endsAt: at(turns + motion.turn) } };
   }) }));
-  const totalMs = Math.max(0, ...sweep.beats.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), sweep.beats.pot?.endsAt ?? 0, ...hands.flatMap(h => h.cards.map(c => c.turn.endsAt)));
+  const totalMs = Math.max(sweep.endsAt, ...hands.flatMap(h => h.cards.map(c => c.turn.endsAt)));
   return { totalMs, sweep: sweep.beats, hands };
 });
 
@@ -298,11 +330,11 @@ export interface PayoutBeats extends PhaseBeats {
 
 /** The payout's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
 export const payoutBeats = beatFunction((inputs: PayoutInputs, at): PayoutBeats => {
-  const P = payoutMotion;
-  const pot = { startsAt: at(P.potAt), endsAt: at(P.potAt + P.potPulse) };
+  const motion = payoutMotion;
+  const pot = { startsAt: at(motion.potAt), endsAt: at(motion.potAt + motion.potPulse) };
   const awards = inputs.awards.map(({ participantId, won, returned }, i) => {
-    const lands = P.firstLands + i * P.stagger, caption = lands - P.captionBeforeLanding;
-    return { participantId, amount: won + returned, startsAt: at(lands - P.push), endsAt: at(lands), fade: { startsAt: at(lands), endsAt: at(lands + P.landFade) }, caption: { startsAt: at(caption), endsAt: at(caption + P.caption) } };
+    const lands = motion.firstLands + i * motion.stagger, caption = lands - motion.captionBeforeLanding;
+    return { participantId, amount: won + returned, startsAt: at(lands - motion.push), endsAt: at(lands), fade: { startsAt: at(lands), endsAt: at(lands + motion.landFade) }, caption: { startsAt: at(caption), endsAt: at(caption + motion.caption) } };
   });
   const totalMs = Math.max(pot.endsAt, ...awards.flatMap(a => [a.endsAt, a.fade.endsAt, a.caption.endsAt]));
   return { totalMs, pot, awards };
@@ -343,3 +375,36 @@ export const tableMotion = Object.freeze({
   /** A seat's status changing: its caption and connection label. */
   status: 270,
 });
+
+/** Reading Phase Inputs field by field: each reader returns `undefined` for a value of the wrong shape. */
+const record = (value: unknown): Record<string, unknown> | undefined => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
+const count = (value: unknown): number | undefined => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined);
+const participant = (value: unknown): ParticipantId | undefined => (typeof value === 'string' ? value : undefined);
+/** Each item of a list read by `item`, or `undefined` unless every one reads. */
+function list<T>(value: unknown, item: (value: unknown) => T | undefined): T[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.map(item);
+  return items.every(read => read !== undefined) ? items as T[] : undefined;
+}
+/** A list of objects, each read from its fields by `fields`. */
+const listOf = <T>(value: unknown, fields: (item: Record<string, unknown>) => T | undefined) => list(value, item => { const r = record(item); return r && fields(r); });
+/** Participants paired with a count, as `{ participantId, [key]: count }`. */
+const counted = <K extends string>(value: unknown, key: K) => listOf(value, item => {
+  const participantId = participant(item.participantId), n = count(item[key]);
+  return participantId === undefined || n === undefined ? undefined : { participantId, [key]: n } as { readonly participantId: ParticipantId } & { readonly [P in K]: number };
+});
+/** `fields`, unless one of them failed to read. */
+const whole = <T extends object>(fields: { readonly [P in keyof T]: T[P] | undefined }): T | undefined => (Object.values(fields).every(field => field !== undefined) ? fields as T : undefined);
+
+/** Each presenting phase kind's beat function and its Phase Inputs reader. */
+const byKind: { readonly [K in PresentingPhaseKind]: { readonly beats: (inputs: PhaseInputs[K], durationMs?: number) => PhaseBeats; readonly read: (value: unknown) => PhaseInputs[K] | undefined } } = {
+  deal: { beats: dealBeats, read: value => { const r = record(value); return r && whole<DealInputs>({ dealt: counted(r.dealt, 'cardCount'), blinds: list(r.blinds, participant), refills: counted(r.refills, 'amount') }); } },
+  street: { beats: streetBeats, read: value => { const r = record(value); return r && whole<StreetInputs>({ swept: list(r.swept, participant), cardCount: count(r.cardCount) }); } },
+  showdown: { beats: showdownBeats, read: value => { const r = record(value); return r && whole<ShowdownInputs>({ swept: list(r.swept, participant), shown: counted(r.shown, 'cardCount') }); } },
+  payout: { beats: payoutBeats, read: value => { const r = record(value); return r && whole<PayoutInputs>({ awards: listOf(r.awards, item => whole({ participantId: participant(item.participantId), won: count(item.won), returned: count(item.returned) })) }); } },
+};
+
+/** The beats of a phase of `kind` presenting `inputs`; with `durationMs`, fitted to that length. */
+function beatsOf<K extends PresentingPhaseKind>(kind: K, inputs: PhaseInputs[K], durationMs?: number): PhaseBeats {
+  return byKind[kind].beats(inputs, durationMs);
+}

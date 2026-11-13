@@ -55,7 +55,7 @@ describe('a Hand is dealt and played', () => {
   const waiting = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0, stack: 1010 }), seat('ada', 2, { cardCount: 0, stack: 1020 }), seat('cy', 3, { cardCount: 0 })] } });
   it('deals from the deal phase’s start, playing the beats of what the phase presents, after the button moves on', () => {
     const cues = planMotion(sceneOf(waiting), table({ phases: [deal(9_000)] }));
-    expect(cues).toEqual([{ kind: 'deal', at: 9_000, beats: dealBeats(dealt), viewerId: 'you', fromButton: 2, refills: [] }]);
+    expect(cues).toEqual([{ kind: 'deal', at: 9_000, beats: dealBeats(dealt), viewerId: 'you', fromButton: 2 }]);
   });
   it('plays the deal the phase presents, not the cards the view holds', () => {
     // The phase is the record: seat 3 dealt first, one card each.
@@ -75,15 +75,15 @@ describe('a Hand is dealt and played', () => {
     expect(cue.beats.totalMs).toBe(natural * 2);
     expect(Math.max(...cue.beats.cards.map(c => c.turn.endsAt))).toBeCloseTo(natural * 2);
   });
-  it('lands a refill that came with the deal first, unless this viewer already saw it land (Rebuy & deal)', () => {
+  it('lands a refill that came with the deal first, for a viewer who joins late too (Rebuy & deal)', () => {
     const inputs: DealInputs = { ...dealt, refills: [{ participantId: 'you', amount: 1000 }] };
     const rebought = table({ phases: [deal(9_000, inputs)], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10, stack: 990 }), seat('ada', 2, { wager: 20 }), seat('cy', 3)] } });
     const busted = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0, stack: 0 }), seat('ada', 2, { cardCount: 0, stack: 1020 }), seat('cy', 3, { cardCount: 0 })] } });
-    expect(planMotion(sceneOf(busted), rebought)).toEqual([{ kind: 'deal', at: 9_000, beats: dealBeats(inputs), viewerId: 'you', fromButton: 2, refills: [{ participantId: 'you', amount: 1000 }] }]);
-    expect(planMotion(undefined, rebought)).toContainEqual(expect.objectContaining({ kind: 'deal', refills: [{ participantId: 'you', amount: 1000 }] }));
-    // The rebuy came in a view of its own: its chips landed then, and the deal keeps its timing without them.
-    const shown = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0, stack: 1000 }), seat('ada', 2, { cardCount: 0, stack: 1020 }), seat('cy', 3, { cardCount: 0 })] } });
-    expect(planMotion(sceneOf(shown), rebought)).toEqual([{ kind: 'deal', at: 9_000, beats: dealBeats(inputs), viewerId: 'you', fromButton: 2, refills: [] }]);
+    const [cue] = planMotion(sceneOf(busted), rebought);
+    expect(cue).toEqual({ kind: 'deal', at: 9_000, beats: dealBeats(inputs), viewerId: 'you', fromButton: 2 });
+    if (cue?.kind !== 'deal') throw new Error('No deal cue.');
+    expect(cue.beats.refills).toEqual([expect.objectContaining({ participantId: 'you', amount: 1000 })]);
+    expect(planMotion(undefined, rebought)).toEqual([{ ...cue, fromButton: null }]);
   });
   it('deals when the deal phase reveals cards a view already carried', () => {
     const hidden = table({ state: { participants: [seat('you', 1, { cardCount: 0, wager: 10 }), seat('ada', 2, { cardCount: 0, wager: 20 }), seat('cy', 3, { cardCount: 0 })] } });
@@ -197,6 +197,31 @@ describe('a Hand is dealt and played', () => {
     const done = table({ phases, state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
     const cues = planMotion(flop, done);
     expect(cues.map(cue => [cue.kind, cue.at]).sort((a, b) => Number(a[1]) - Number(b[1]))).toEqual([['showdown', 30_000], ['board', 32_000], ['board', 34_000], ['payout', 36_000]]);
+  });
+});
+
+describe('a phase whose Phase Inputs this Trainer cannot read (a server of another version, during a deploy)', () => {
+  /** `phase` carrying `inputs` of another shape, or none. */
+  const unreadable = (phase: PresentationPhase, inputs?: unknown) => ({ ...phase, inputs }) as unknown as PresentationPhase;
+  it('deals what the view shows, in dealing order, fitted to the phase', () => {
+    const waiting = table({ state: { status: 'completed-hand', handId: 'hand-0', buttonSeat: 2, participants: [seat('you', 1, { cardCount: 0 }), seat('ada', 2, { cardCount: 0 }), seat('cy', 3, { cardCount: 0 })] } });
+    const shown: DealInputs = { dealt: heads('you', 'ada', 'cy'), blinds: [], refills: [] };
+    expect(planMotion(sceneOf(waiting), table({ phases: [unreadable(deal(9_000, dealt, 2000))] }))).toEqual([{ kind: 'deal', at: 9_000, beats: dealBeats(shown, 2000), viewerId: 'you', fromButton: 2 }]);
+    expect(planMotion(undefined, table({ phases: [unreadable(deal(9_000, dealt, 2000), { dealt: 'you' })] }))).toEqual([{ kind: 'deal', at: 9_000, beats: dealBeats(shown, 2000), viewerId: 'you', fromButton: null }]);
+  });
+  it('reveals the street the phase presents, fitted to it, and sweeps the line from the view that carried it', () => {
+    const before = sceneOf(table({ serverTime: 13_000, state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 20 }), seat('ada', 2, { wager: 20 }), seat('cy', 3, { folded: true })] } }));
+    const flop = table({ serverTime: 14_000, phases: [unreadable(street(14_000, 'flop', { swept: ['you', 'ada'], cardCount: 3 }, 1500), { swept: 'you', cardCount: 3 })], state: { board: ['2c', '7d', 'Jh'], street: 'flop', participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } });
+    expect(planMotion(before, flop)).toEqual([{ kind: 'sweep', participantIds: ['you', 'ada'], at: 14_000 }, { kind: 'board', from: 0, to: 3, beats: streetBeats({ swept: [], cardCount: 3 }, 1500), at: 14_000 }]);
+  });
+  it('turns up the hands the view shows, fitted to the phase', () => {
+    const called = table({ serverTime: 30_000, phases: [unreadable(showdown(30_000, { swept: [], shown: heads('you', 'ada') }, 'river', 2000), null)], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'] }), seat('cy', 3, { folded: true })] } });
+    expect(planMotion(undefined, called)).toEqual([{ kind: 'showdown', beats: showdownBeats({ swept: [], shown: heads('you', 'ada') }, 2000), viewerId: 'you', at: 30_000 }]);
+  });
+  it('pushes the pot for the length of the phase, holding no stack figure back', () => {
+    const paid = table({ serverTime: 32_500, phases: [unreadable(payout(32_000, adaWins, 1800), { awards: [{ participantId: 'ada' }] })], state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { stack: 1790 }), seat('cy', 3, { folded: true })] } });
+    expect(planMotion(undefined, paid)).toEqual([{ kind: 'payout', at: 32_000, beats: payoutBeats({ awards: [] }, 1800) }]);
+    expect(heldStacks(paid, 32_500).size).toBe(0);
   });
 });
 

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { sweepBeats, tableMotion as T, type Beat, type ObservableTableSession, type SweepBeats } from '@poker/contracts';
+import { returnBeat, sweepBeats, tableMotion as T, type Beat, type ObservableTableSession, type SweepBeats } from '@poker/contracts';
 import { at, box, flipUp, fly, play, q, reveal, snapshot, stay, type Box, type MotionContext, type Snapshot } from './motion.js';
 import { planMotion, sceneOf, type Cue, type TableScene } from './table-motion.js';
 import { chips } from './table-model.js';
@@ -34,12 +34,14 @@ function middleFor(ctx: MotionContext, card: Box | undefined): Box | undefined {
   return c && card ? { x: c.x, y: c.y, w: card.w, h: card.h } : undefined;
 }
 
-/** A bet's chip sliding to the betting line, its amount appearing at `appears`. The deal plays the blinds' own beats. */
-function chipIn(ctx: MotionContext, id: string, delay: number, el: number, flight: number, appears: number) {
-  fly(ctx, 'chip', at(ctx, S.body(id)), chipAt(ctx, id), { duration: flight, delay, elapsed: el, hideBefore: true });
+/** A bet's chip sliding to the betting line over `flight`, its amount appearing at `appearsAt`: a bet's, or a blind's beat. */
+function chipIn(ctx: MotionContext, id: string, flight: Beat & { readonly appearsAt: number }, el: number) {
+  fly(ctx, 'chip', at(ctx, S.body(id)), chipAt(ctx, id), { ...span(flight, el), hideBefore: true });
   // Appears whole just before the chip lands on it, so the hand-off cannot be seen.
-  reveal(ctx, q(ctx, S.wager(id)), { delay: delay + appears, elapsed: el, duration: 1 });
+  reveal(ctx, q(ctx, S.wager(id)), { delay: flight.appearsAt, elapsed: el, duration: 1 });
 }
+/** A bet's chip flight, from the view that carried it. */
+const betFlight = { startsAt: 0, endsAt: T.betFlight, appearsAt: T.betAmountAppears };
 
 /** Sweeps the betting line into the pot, at the sweep's own beats: a street reveal's or showdown's, or its own. */
 function sweep(ctx: MotionContext, beats: SweepBeats, el: number) {
@@ -69,31 +71,27 @@ const arrive = (ctx: MotionContext, seat: number, delay: number, el: number) => 
  * Chips added to a stack: in from the table's edge over `flight`, while the amount floats up off the stack and the
  * figure rolls to its new total (StackFigure).
  */
-function chipsIn(ctx: MotionContext, id: string, amount: number, flight: { delay: number; duration: number; elapsed: number }, el: number) {
+function chipsIn(ctx: MotionContext, id: string, amount: number, flight: Beat, el: number) {
   const s = at(ctx, S.stack(id));
-  fly(ctx, 'stack', s && { x: ctx.stage.clientWidth + 10, y: ctx.stage.clientHeight - 20, w: 0, h: 0 }, s, { ...flight, arc: 40, fadeOut: true });
-  if (s) stay(ctx, 'label', { ...s, y: s.y - 14 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px -4px', offset: .25 }, { opacity: 1, translate: '0px -8px', offset: .7 }, { opacity: 0, translate: '0px -14px' }], { duration: T.chipsLabel, delay: flight.delay, elapsed: el, easing: 'linear', text: `+${chips(amount)} chips` });
+  fly(ctx, 'stack', s && { x: ctx.stage.clientWidth + 10, y: ctx.stage.clientHeight - 20, w: 0, h: 0 }, s, { ...span(flight, el), arc: 40, fadeOut: true });
+  if (s) stay(ctx, 'label', { ...s, y: s.y - 14 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px -4px', offset: .25 }, { opacity: 1, translate: '0px -8px', offset: .7 }, { opacity: 0, translate: '0px -14px' }], { duration: T.chipsLabel, delay: flight.startsAt, elapsed: el, easing: 'linear', text: `+${chips(amount)} chips` });
 }
+/** Chips added to a stack between Hands, from the view that carried them. */
+const chipsFlight = { startsAt: 0, endsAt: T.chipsFlight };
 
 function perform(cue: Cue, ctx: MotionContext, el: number) {
   switch (cue.kind) {
     case 'deal': {
       // Every timing is the deal phase's own beat, already fitted to the phase (dealBeats).
       const { beats } = cue, spanned = (beat: Beat) => span(beat, el);
-      // The last Hand's cards go back to the deck, and the button moves on.
+      // The last Hand's cards go back to the deck, however many this viewer saw, within the deal's return beat; and the button moves on.
       const returning = Array.from(ctx.last.keys()).filter(k => k.startsWith('[data-card=') || k.startsWith('[data-board='));
-      returning.forEach((key, n) => { fly(ctx, key.startsWith('[data-board') ? 'back' : 'small-back', ctx.last.get(key)?.box, at(ctx, S.deck), { ...spanned(beats.cardsReturn), delay: beats.cardsReturn.startsAt + n * beats.returnStagger, fadeOut: true }); });
+      returning.forEach((key, n) => { fly(ctx, key.startsWith('[data-board') ? 'back' : 'small-back', ctx.last.get(key)?.box, at(ctx, S.deck), { ...spanned(returnBeat(beats.cardsReturn, n, returning.length)), fadeOut: true }); });
       const from = cue.fromButton === null ? undefined : ctx.last.get(S.buttonAnchor(cue.fromButton))?.box, button = q(ctx, S.button), to = box(ctx, button);
       if (from && to) play(ctx, button, [{ translate: `${from.x - to.x}px ${from.y - to.y}px` }, { translate: '0px 0px' }], spanned(beats.buttonMoves));
       // A refill's chips land on the stack before the blinds go in.
-      for (const refill of cue.refills) {
-        const beat = beats.refills.find(b => b.participantId === refill.participantId);
-        if (beat) chipsIn(ctx, refill.participantId, refill.amount, spanned(beat), el);
-      }
-      for (const blind of beats.blinds) {
-        fly(ctx, 'chip', at(ctx, S.body(blind.participantId)), chipAt(ctx, blind.participantId), { ...spanned(blind), hideBefore: true });
-        reveal(ctx, q(ctx, S.wager(blind.participantId)), { delay: blind.appearsAt, elapsed: el, duration: 1 });
-      }
+      for (const refill of beats.refills) chipsIn(ctx, refill.participantId, refill.amount, refill, el);
+      for (const blind of beats.blinds) chipIn(ctx, blind.participantId, blind, el);
       const held = new Map<string, number>();
       for (const c of beats.cards) held.set(c.participantId, (held.get(c.participantId) ?? 0) + 1);
       for (const c of beats.cards) {
@@ -106,7 +104,7 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
     }
     case 'bet':
       if (cue.toPot) fly(ctx, 'chip', at(ctx, S.body(cue.participantId)), at(ctx, S.pot), { duration: T.betToPot, elapsed: el, fadeOut: true });
-      else chipIn(ctx, cue.participantId, 0, el, T.betFlight, T.betAmountAppears);
+      else chipIn(ctx, cue.participantId, betFlight, el);
       reveal(ctx, q(ctx, S.caption(cue.participantId)), { duration: T.caption, elapsed: el });
       break;
     case 'fold':
@@ -174,7 +172,7 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       arrive(ctx, cue.fromSeat, T.moveVacatedArrivesAt, el);
       break;
     case 'chips':
-      chipsIn(ctx, cue.participantId, cue.amount, { delay: 0, duration: T.chipsFlight, elapsed: el }, el);
+      chipsIn(ctx, cue.participantId, cue.amount, chipsFlight, el);
       break;
     case 'turn': {
       // Every seat is in a new place: the ring dissolves into it while the felt, board and pot stay, and a label at the
@@ -238,7 +236,7 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number)
     if (stack !== undefined) rolls.set(cue.participantId, { from: cue.from, id: `${cue.participantId}@${cue.at}` });
   } else if (cue.kind === 'deal') {
     // A refill is a rebuy: the stack rolls up from empty.
-    for (const refill of cue.refills) rolls.set(refill.participantId, { from: 0, id: `${refill.participantId}@${cue.at}` });
+    for (const refill of cue.beats.refills) rolls.set(refill.participantId, { from: 0, id: `${refill.participantId}@${cue.at}` });
   }
   return { stage, rolls };
 }

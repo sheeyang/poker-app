@@ -48,7 +48,7 @@ export function ActionTray({ table, actionOpen, countdown, dealOpen, nextHand, c
     command.submit(action === 'start' ? { tableId: table.tableSessionId, kind: 'start', body: metadata } : { tableId: table.tableSessionId, kind: 'act', body: { ...metadata, participantId: humanId, action } });
   };
   const sized = state.legalActions.find((a): a is SizedAction => 'minimum' in a);
-  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} nextHand={nextHand} busy={blocked} settled={dealOpen} command={command} openSettings={openSettings} review={review} online={online} /> : <NextHand table={table} busy={blocked || !dealOpen} openSettings={openSettings} review={review} />;
+  if (state.status !== 'active-hand') return table.mode === 'online' ? <OnlineBetweenHands table={table} nextHand={nextHand} busy={blocked} handEnded={dealOpen} command={command} openSettings={openSettings} review={review} online={online} /> : <NextHand table={table} busy={blocked || !dealOpen} openSettings={openSettings} review={review} />;
   // A Timeout Action at an Online Table queues the human's sit-out, so they learn it while the Hand plays on.
   const pending = afterHandRequestOf(table, humanId);
   const watching = participant?.seat == null;
@@ -69,7 +69,7 @@ export function ActionTray({ table, actionOpen, countdown, dealOpen, nextHand, c
  * Online Tables deal Hands themselves, so between Hands a Participant follows the Next-Hand Countdown, chooses a
  * seat, returns from sitting out (always their own explicit choice), or reviews.
  */
-function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSettings, review, online }: { table: ObservableTableSession; nextHand?: NextHandStatus; busy: boolean; settled: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void; online?: OnlineTrayActions }) {
+function OnlineBetweenHands({ table, nextHand, busy, handEnded, command, openSettings, review, online }: { table: ObservableTableSession; nextHand?: NextHandStatus; busy: boolean; handEnded: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void; online?: OnlineTrayActions }) {
   const state = table.view.state;
   const you = state.participants.find(p => p.participantId === table.viewerParticipantId);
   const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === table.viewerParticipantId) ?? [];
@@ -89,7 +89,7 @@ function OnlineBetweenHands({ table, nextHand, busy, settled, command, openSetti
       {needsPlayers && online?.openJoinLink && <button className="primary" onClick={online.openJoinLink}><Icon name="link" size={18} />Share join link</button>}
       {/* A stack shows its winnings once the payout is presented, so an empty stack waits for it before offering a rebuy. */}
       {seated && !pending && (you.stack === 0
-        ? settled && <button className="primary" disabled={busy} onClick={online?.rebuy ?? openSettings}>Rebuy <Icon name="arrow" /></button>
+        ? handEnded && <button className="primary" disabled={busy} onClick={online?.rebuy ?? openSettings}>Rebuy <Icon name="arrow" /></button>
         : sittingOut && <button className="primary" disabled={busy} onClick={resume}>Return to play <Icon name="arrow" /></button>)}
     </div>
   </div>;

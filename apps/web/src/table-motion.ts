@@ -1,4 +1,4 @@
-import { dealBeats, payoutBeats, showdownBeats, streetBeats, type BoardStreet, type DealBeats, type ObservableTableSession, type PayoutBeats, type PresentationPhaseKind, type ShowdownBeats, type Street, type StreetBeats } from '@poker/contracts';
+import { dealBeats, dealingOrder, payoutBeats, readPhaseInputs, showdownBeats, streetBeats, type BoardStreet, type DealBeats, type ObservableTableSession, type PayoutBeats, type PhaseInputs, type PresentationPhase, type PresentationPhaseKind, type PresentingPhaseKind, type ShowdownBeats, type Street, type StreetBeats } from '@poker/contracts';
 import { connectionOf } from './online-status.js';
 
 /**
@@ -25,7 +25,8 @@ export interface SeatScene {
 export interface TableScene {
   readonly tableSessionId: string;
   readonly handId?: string;
-  readonly settled: boolean;
+  /** The Hand is complete: its result is in the view. */
+  readonly complete: boolean;
   readonly board: readonly string[];
   readonly buttonSeat: number | null;
   readonly viewerId: string;
@@ -39,10 +40,10 @@ export interface TableScene {
 export type Cue = { readonly at: number } & (
   /**
    * The deal phase, played from its own beats (ADR-0039): the last Hand's cards go back to the deck and the button moves
-   * on from `fromButton` (when this viewer saw the last Hand), any refill lands, the blinds go in, and the cards are
-   * dealt; the viewer's own turn face up. `refills`: the refills to show, those this viewer has not already seen land.
+   * on from `fromButton` (when this viewer saw the last Hand), any refill that came with the deal lands, the blinds go
+   * in, and the cards are dealt; the viewer's own turn face up.
    */
-  | { readonly kind: 'deal'; readonly beats: DealBeats; readonly viewerId: string; readonly fromButton: number | null; readonly refills: readonly { readonly participantId: string; readonly amount: number }[] }
+  | { readonly kind: 'deal'; readonly beats: DealBeats; readonly viewerId: string; readonly fromButton: number | null }
   /** Chips go in: to the betting line, or, when the bet closed the street, straight into the pot. */
   | { readonly kind: 'bet'; readonly participantId: string; readonly toPot: boolean }
   /** A fold: an opponent's cards are mucked; your own stay, dimmed. */
@@ -88,7 +89,7 @@ export function sceneOf(table: ObservableTableSession): TableScene {
   return {
     tableSessionId: table.tableSessionId,
     ...(state.handId ? { handId: state.handId } : {}),
-    settled: state.status === 'completed-hand',
+    complete: state.status === 'completed-hand',
     board: state.board,
     buttonSeat: state.buttonSeat ?? null,
     viewerId: table.viewerParticipantId,
@@ -102,14 +103,33 @@ export function sceneOf(table: ObservableTableSession): TableScene {
   };
 }
 
-/** When the current Hand's phase of `kind` (for a street reveal, of `street`) started, if the schedule has one. */
-export function phaseStart(table: ObservableTableSession, kind: PresentationPhaseKind, street?: Street): number | undefined {
-  return table.schedule.phases.find(p => p.handId === table.view.state.handId && p.kind === kind && (street === undefined || p.street === street))?.startsAt;
+/** `handId`'s phase of `kind`, if the schedule has one. */
+function handPhase<K extends PresentationPhaseKind>(table: ObservableTableSession, handId: string | undefined, kind: K): Extract<PresentationPhase, { readonly kind: K }> | undefined {
+  return table.schedule.phases.find((p): p is Extract<PresentationPhase, { readonly kind: K }> => p.handId === handId && p.kind === kind);
 }
 
 /** How many board cards are out before each street reveal. */
 const boardBefore: Readonly<Record<BoardStreet, number>> = { flop: 0, turn: 3, river: 4 };
-const fitted = (phase: { readonly startsAt: number; readonly endsAt: number }) => phase.endsAt - phase.startsAt;
+
+/**
+ * What the view shows a phase of each kind presents: the Phase Inputs a Trainer plays when the phase carries none it
+ * can read, so its motion still fits the phase (story 24). The view cannot say who was refilled, the blinds' order,
+ * whose wagers a phase swept (the line is swept from the view instead) or the awards.
+ */
+const viewedInputs: { readonly [K in PresentingPhaseKind]: (scene: TableScene, street: Street) => PhaseInputs[K] } = {
+  deal: scene => ({ dealt: dealingOrder(scene.seats.filter(s => s.cards > 0), scene.buttonSeat ?? 0).map(s => ({ participantId: s.participantId, cardCount: s.cards })), blinds: [], refills: [] }),
+  street: (_, street) => ({ swept: [], cardCount: street === 'flop' ? 3 : 1 }),
+  showdown: scene => ({ swept: [], shown: scene.seats.filter(s => s.shown).map(s => ({ participantId: s.participantId, cardCount: s.cards })) }),
+  payout: () => ({ awards: [] }),
+};
+
+/**
+ * What `phase` presents: its Phase Inputs, or what the view shows of them when it carries none this Trainer can read (a
+ * server of another version, during a deploy).
+ */
+function inputsOf<K extends PresentingPhaseKind>(phase: { readonly kind: K; readonly street: Street; readonly inputs?: unknown }, scene: TableScene): PhaseInputs[K] {
+  return readPhaseInputs(phase.kind, phase.inputs) ?? viewedInputs[phase.kind](scene, phase.street);
+}
 
 /**
  * The street reveals and the showdown this view is the first to show, each planned from its own phase's inputs and
@@ -122,13 +142,13 @@ function revealCues(prev: TableScene | undefined, next: TableScene, table: Obser
   for (const phase of table.schedule.phases) {
     if (phase.handId !== next.handId) continue;
     if (phase.kind === 'street' && phase.street !== 'preflop') {
-      const from = boardBefore[phase.street], to = from + phase.inputs.cardCount;
-      if (next.board.length >= to && seen < to) cues.push({ kind: 'board', from, to, beats: streetBeats(phase.inputs, fitted(phase)), at: phase.startsAt });
+      const inputs = inputsOf(phase, next), from = boardBefore[phase.street], to = from + inputs.cardCount;
+      if (next.board.length >= to && seen < to) cues.push({ kind: 'board', from, to, beats: streetBeats(inputs, phase.durationMs), at: phase.startsAt });
     }
     if (phase.kind === 'showdown') {
       // The showdown has been presented once an opponent's hand is face up.
       const shown = (scene: TableScene) => scene.seats.some(s => s.shown && s.participantId !== scene.viewerId);
-      if (shown(next) && !(sameHand && shown(prev))) cues.push({ kind: 'showdown', beats: showdownBeats(phase.inputs, fitted(phase)), viewerId: next.viewerId, at: phase.startsAt });
+      if (shown(next) && !(sameHand && shown(prev))) cues.push({ kind: 'showdown', beats: showdownBeats(inputsOf(phase, next), phase.durationMs), viewerId: next.viewerId, at: phase.startsAt });
     }
   }
   return cues;
@@ -140,21 +160,18 @@ function revealCues(prev: TableScene | undefined, next: TableScene, table: Obser
  * no earlier view (`prev` undefined) gets the identical deal, without the last Hand's cards or button to move.
  */
 function dealCue(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'deal' }> | undefined {
-  const phase = table.schedule.phases.find(p => p.handId === next.handId && p.kind === 'deal');
-  if (phase?.kind !== 'deal' || !phase.inputs || !next.seats.some(s => s.cards > 0)) return undefined;
+  const phase = handPhase(table, next.handId, 'deal');
+  if (!phase || !next.seats.some(s => s.cards > 0)) return undefined;
   // The view before this Hand, when this viewer saw it.
   const last = prev && prev.handId !== next.handId ? prev : undefined;
   if (prev && !last && prev.seats.some(s => s.cards > 0)) return undefined;
-  // A rebuy this viewer saw arrive between Hands has landed already; the deal keeps its timing without it.
-  const landed = (id: string) => (last?.seats.find(s => s.participantId === id)?.stack ?? 0) > 0;
-  return { kind: 'deal', at: phase.startsAt, beats: dealBeats(phase.inputs, fitted(phase)), viewerId: next.viewerId,
-    fromButton: last?.handId ? last.buttonSeat : null, refills: phase.inputs.refills.filter(r => !landed(r.participantId)).map(r => ({ participantId: r.participantId, amount: r.amount })) };
+  return { kind: 'deal', at: phase.startsAt, beats: dealBeats(inputsOf(phase, next), phase.durationMs), viewerId: next.viewerId, fromButton: last?.handId ? last.buttonSeat : null };
 }
 
-/** The current Hand's payout phase, when it has one. */
-function payoutPhase(table: ObservableTableSession) {
-  const phase = table.schedule.phases.find(p => p.handId === table.view.state.handId && p.kind === 'payout');
-  return phase?.kind === 'payout' ? phase : undefined;
+/** The payout's beats, fitted to its phase, when the current Hand has a payout phase: and that phase's start. */
+function payoutOf(table: ObservableTableSession, scene: TableScene): { readonly beats: PayoutBeats; readonly at: number } | undefined {
+  const phase = handPhase(table, table.view.state.handId, 'payout');
+  return phase && { beats: payoutBeats(inputsOf(phase, scene), phase.durationMs), at: phase.startsAt };
 }
 
 /**
@@ -162,9 +179,9 @@ function payoutPhase(table: ObservableTableSession) {
  * fitted to its length, so a viewer with no earlier view (`prev` undefined) gets the identical payout, joined part-way.
  */
 function payoutCue(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'payout' }> | undefined {
-  const phase = payoutPhase(table);
-  if (!phase || !next.settled || (prev?.handId === next.handId && prev?.settled)) return undefined;
-  return { kind: 'payout', at: phase.startsAt, beats: payoutBeats(phase.inputs, fitted(phase)) };
+  const payout = payoutOf(table, next);
+  if (!payout || !next.complete || (prev?.handId === next.handId && prev?.complete)) return undefined;
+  return { kind: 'payout', ...payout };
 }
 
 /**
@@ -189,14 +206,14 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
   for (const s of prev.seats) if (!after.has(s.participantId)) cues.push({ kind: 'stand', seat: s.seat, at: viewAt });
 
   const sameHand = !!next.handId && prev.handId === next.handId;
-  const settling = sameHand && !prev.settled && next.settled;
+  const completing = sameHand && !prev.complete && next.complete;
   for (const s of next.seats) {
     const was = before.get(s.participantId);
     if (!was || was.seat !== s.seat) continue;
     if (was.sittingOut !== s.sittingOut || was.offline !== s.offline) cues.push({ kind: 'status', participantId: s.participantId, at: viewAt });
-    // Stacks only grow inside a Hand when it settles; any other growth in place is a rebuy or a top-up.
+    // Stacks only grow inside a Hand as it completes; any other growth in place is a rebuy or a top-up.
     // A refill that came with the next Hand (Practice's Rebuy & deal) lands with the deal, from the deal phase's beats.
-    if (s.stack > was.stack && !settling && prev.handId === next.handId) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack - was.stack, from: was.stack, at: viewAt });
+    if (s.stack > was.stack && !completing && prev.handId === next.handId) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack - was.stack, from: was.stack, at: viewAt });
   }
   if (!next.handId) return cues;
 
@@ -222,7 +239,7 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
   // A street reveal or showdown sweeps the line as its first beat, so the burn and the hands wait for it; the sweep is
   // played here only when no such phase presents it, already or still to come (a Hand won by folds).
   const reveals = revealCues(prev, next, table);
-  const presented = new Set(table.schedule.phases.flatMap(p => p.handId === next.handId && (p.kind === 'street' || p.kind === 'showdown') && (p.startsAt > viewAt || reveals.some(c => c.at === p.startsAt)) ? p.inputs.swept : []));
+  const presented = new Set(table.schedule.phases.flatMap(p => p.handId === next.handId && (p.kind === 'street' || p.kind === 'showdown') && (p.startsAt > viewAt || reveals.some(c => c.at === p.startsAt)) ? inputsOf(p, next).swept : []));
   const swept = prev.seats.filter(s => s.wager > 0 && (after.get(s.participantId)?.wager ?? 0) === 0 && !presented.has(s.participantId)).map(s => s.participantId);
   if (swept.length) cues.push({ kind: 'sweep', participantIds: swept, at: viewAt });
   cues.push(...reveals);
@@ -238,10 +255,10 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
  */
 export function heldStacks(table: ObservableTableSession, serverNow: number): Map<string, { readonly value: number; readonly until: number }> {
   const held = new Map<string, { value: number; until: number }>();
-  const phase = payoutPhase(table);
-  if (!phase || table.view.state.status !== 'completed-hand') return held;
-  for (const award of payoutBeats(phase.inputs, fitted(phase)).awards) {
-    const until = phase.startsAt + award.endsAt, stack = table.view.state.participants.find(p => p.participantId === award.participantId)?.stack;
+  const payout = payoutOf(table, sceneOf(table));
+  if (!payout || table.view.state.status !== 'completed-hand') return held;
+  for (const award of payout.beats.awards) {
+    const until = payout.at + award.endsAt, stack = table.view.state.participants.find(p => p.participantId === award.participantId)?.stack;
     if (serverNow < until && stack !== undefined) held.set(award.participantId, { value: stack - award.amount, until });
   }
   return held;

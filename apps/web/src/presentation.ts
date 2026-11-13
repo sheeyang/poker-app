@@ -1,4 +1,4 @@
-import type { BoardStreet, ObservableTableSession } from '@poker/contracts';
+import { handEndsAt, type BoardStreet, type ObservableTableSession } from '@poker/contracts';
 
 /**
  * Presentation of the server's schedule. Pure: the Trainer shows already-received facts at their server
@@ -22,14 +22,14 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
   const undealt = upcoming.some(phase => phase.kind === 'deal');
   const unrevealed = upcoming.some(phase => phase.kind === 'showdown');
   const boardCount = Math.min(state.board.length, ...upcoming.flatMap(phase => phase.kind === 'street' && phase.street !== 'preflop' ? [boardBefore[phase.street]] : []));
-  const settling = state.status === 'completed-hand' && upcoming.some(phase => phase.kind === 'payout');
-  if (!undealt && !unrevealed && boardCount === state.board.length && !settling) return table;
+  const unpaid = state.status === 'completed-hand' && upcoming.some(phase => phase.kind === 'payout');
+  if (!undealt && !unrevealed && boardCount === state.board.length && !unpaid) return table;
   const received = (participantId: string, transfers: typeof state.payouts) => (transfers ?? []).filter(t => t.participantId === participantId).reduce((total, t) => total + t.amount, 0);
   return { ...table, view: { ...table.view, state: {
     ...state,
     board: state.board.slice(0, boardCount),
     participants: state.participants.map(p => {
-      const shown = settling ? { ...p, stack: p.stack - received(p.participantId, state.payouts) - received(p.participantId, state.returns) } : p;
+      const shown = unpaid ? { ...p, stack: p.stack - received(p.participantId, state.payouts) - received(p.participantId, state.returns) } : p;
       if (undealt && p.inHand) {
         const { holeCards: _hidden, ...rest } = shown;
         return { ...rest, cardCount: 0 };
@@ -41,7 +41,7 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
       }
       return shown;
     }),
-    ...(settling ? { status: 'active-hand' as const, payouts: [], returns: [] } : {}),
+    ...(unpaid ? { status: 'active-hand' as const, payouts: [], returns: [] } : {}),
   } } };
 }
 
@@ -50,8 +50,8 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
  * no Hand has been paid out under a schedule. Until then the Hand is still in progress for management.
  */
 export function handEnded(table: ObservableTableSession, serverNow: number): boolean {
-  const phases = phasesOf(table);
-  return !phases.some(phase => phase.kind === 'payout') || phases.every(phase => serverNow >= phase.endsAt);
+  const endsAt = handEndsAt(phasesOf(table));
+  return endsAt === undefined || serverNow >= endsAt;
 }
 
 /**

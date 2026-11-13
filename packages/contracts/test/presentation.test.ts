@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dealBeats, payoutBeats, presentationPhaseLength, showdownBeats, streetBeats, type DealInputs, type PayoutInputs, type ShowdownBeats, type StreetBeats } from '../src/index.js';
+import { dealBeats, payoutBeats, presentationPhaseLength, presentingPhase, readPhaseInputs, returnBeat, showdownBeats, streetBeats, type DealInputs, type PayoutInputs, type ShowdownBeats, type StreetBeats, type SweepBeats } from '../src/index.js';
 
 /** `players` dealt in clockwise, two cards each, the first two posting the blinds. */
 const deal = (players: number, refills: DealInputs['refills'] = []): DealInputs => {
@@ -38,6 +38,20 @@ describe('the deal’s beats', () => {
       const ends = [beats.cardsReturn.endsAt, beats.buttonMoves.endsAt, ...beats.refills.map(b => b.endsAt), ...beats.blinds.map(b => b.endsAt), ...beats.cards.flatMap(c => [c.endsAt, c.turn.endsAt])];
       expect(Math.max(...ends)).toBe(beats.totalMs);
     }
+  });
+
+  it('returns however many of the last Hand’s cards a Trainer shows within the total, closer together the more there are', () => {
+    for (const beats of [dealBeats(deal(2)), dealBeats(deal(9)), dealBeats(deal(2), dealBeats(deal(2)).totalMs / 3)]) {
+      for (const count of [1, 4, 23, 80]) {
+        const first = returnBeat(beats.cardsReturn, 0, count), last = returnBeat(beats.cardsReturn, count - 1, count);
+        expect(first.startsAt).toBe(beats.cardsReturn.startsAt);
+        expect(last.startsAt).toBeGreaterThanOrEqual(first.startsAt);
+        expect(last.endsAt).toBeLessThanOrEqual(beats.totalMs);
+      }
+    }
+    const gap = (count: number) => { const { cardsReturn } = dealBeats(deal(2)); return returnBeat(cardsReturn, 1, count).startsAt - returnBeat(cardsReturn, 0, count).startsAt; };
+    expect(gap(4)).toBeGreaterThan(0);
+    expect(gap(40)).toBeLessThan(gap(4));
   });
 
   it('takes longer with more cards dealt, and with a refill', () => {
@@ -104,10 +118,11 @@ describe('the payout’s beats', () => {
 const swept = (count: number) => Array.from({ length: count }, (_, i) => `p${i + 1}`);
 const shown = (count: number) => Array.from({ length: count }, (_, i) => ({ participantId: `p${i + 1}`, cardCount: 2 }));
 /** Where every beat of a street reveal ends. */
-const streetEnds = (beats: StreetBeats) => [beats.burn.endsAt, ...beats.sweep.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), ...(beats.sweep.pot ? [beats.sweep.pot.endsAt] : []),
-  ...beats.cards.flatMap(c => [c.endsAt, c.turn.endsAt, ...(c.spread ? [c.spread.endsAt] : [])])];
+const streetEnds = (beats: StreetBeats) => [beats.burn.endsAt, ...sweepEnds(beats.sweep), ...beats.cards.flatMap(c => [c.endsAt, c.turn.endsAt, ...(c.spread ? [c.spread.endsAt] : [])])];
 /** Where every beat of a showdown ends. */
-const showdownEnds = (beats: ShowdownBeats) => [...beats.sweep.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), ...(beats.sweep.pot ? [beats.sweep.pot.endsAt] : []), ...beats.hands.flatMap(h => h.cards.map(c => c.turn.endsAt))];
+const showdownEnds = (beats: ShowdownBeats) => [...sweepEnds(beats.sweep), ...beats.hands.flatMap(h => h.cards.map(c => c.turn.endsAt))];
+/** Where every beat of a sweep ends. */
+const sweepEnds = (sweep: SweepBeats) => [...sweep.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), ...(sweep.pot ? [sweep.pot.endsAt] : [])];
 
 describe('a street reveal’s beats', () => {
   it('starts the burn only once the last swept chip has reached the pot', () => {
@@ -210,10 +225,29 @@ describe('a showdown’s beats', () => {
 });
 
 describe('a phase’s length', () => {
-  it('is the total of its beats for what it presents', () => {
-    const street = { swept: swept(2), cardCount: 3 }, showdown = { swept: [], shown: shown(2) };
-    expect(presentationPhaseLength({ kind: 'street', inputs: street })).toBe(streetBeats(street).totalMs);
-    expect(presentationPhaseLength({ kind: 'showdown', inputs: showdown })).toBe(showdownBeats(showdown).totalMs);
-    expect(presentationPhaseLength({ kind: 'payout', inputs: payout('p1', 'p2') })).toBe(payoutBeats(payout('p1', 'p2')).totalMs);
+  it.each([
+    ['deal', presentingPhase('deal', deal(6, [{ participantId: 'p3', amount: 1000 }])), dealBeats(deal(6, [{ participantId: 'p3', amount: 1000 }])).totalMs],
+    ['street reveal', presentingPhase('street', { swept: swept(2), cardCount: 3 }), streetBeats({ swept: swept(2), cardCount: 3 }).totalMs],
+    ['showdown', presentingPhase('showdown', { swept: [], shown: shown(2) }), showdownBeats({ swept: [], shown: shown(2) }).totalMs],
+    ['payout', presentingPhase('payout', payout('p1', 'p2')), payoutBeats(payout('p1', 'p2')).totalMs],
+  ])('of a %s is the total of its beats for what it presents', (_, phase, total) => {
+    expect(presentationPhaseLength(phase)).toBe(total);
+  });
+});
+
+describe('reading Phase Inputs', () => {
+  it('reads each kind field by field, leaving out anything else a phase carries', () => {
+    const extra = { secret: 'As' };
+    expect(readPhaseInputs('deal', { ...deal(2, [{ participantId: 'p1', amount: 500 }]), ...extra, dealt: [{ participantId: 'p1', cardCount: 2, ...extra }, { participantId: 'p2', cardCount: 2 }] })).toEqual(deal(2, [{ participantId: 'p1', amount: 500 }]));
+    expect(readPhaseInputs('street', { swept: ['p1'], cardCount: 1, ...extra })).toEqual({ swept: ['p1'], cardCount: 1 });
+    expect(readPhaseInputs('showdown', { swept: [], shown: shown(2), ...extra })).toEqual({ swept: [], shown: shown(2) });
+    expect(readPhaseInputs('payout', { awards: [{ participantId: 'p1', won: 300, returned: 20, ...extra }] })).toEqual({ awards: [{ participantId: 'p1', won: 300, returned: 20 }] });
+  });
+
+  it('reads nothing from inputs of another shape, such as a server of another version sends', () => {
+    for (const value of [undefined, null, [], 'deal', {}, { dealt: [], blinds: [] }, { ...deal(2), blinds: [1, 2] }, { ...deal(2), dealt: [{ participantId: 'p1' }] }]) expect(readPhaseInputs('deal', value)).toBeUndefined();
+    for (const value of [undefined, { swept: [] }, { swept: 'p1', cardCount: 3 }, { swept: [], cardCount: -1 }, { swept: [], cardCount: 1.5 }]) expect(readPhaseInputs('street', value)).toBeUndefined();
+    expect(readPhaseInputs('showdown', { swept: [], shown: [{ participantId: 'p1', cardCount: '2' }] })).toBeUndefined();
+    expect(readPhaseInputs('payout', { awards: [{ participantId: 'p1', won: 300 }] })).toBeUndefined();
   });
 });

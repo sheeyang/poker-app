@@ -98,11 +98,9 @@ test('a full table’s deal is dealt clockwise from left of the button and lasts
   expect(full!.endsAt - full!.startsAt).toBe(full!.durationMs);
 });
 
-test('Rebuy & deal schedules a longer deal that lands the refill first', async () => {
-  const { t } = await headsUp();
-  // Both go all-in until one of them is left with no chips.
-  let busted: string | undefined;
-  while (!busted) {
+/** Heads-up, both go all-in Hand after Hand until one of them is left with no chips: theirs is returned. */
+async function bustOne(t: Table): Promise<string> {
+  for (;;) {
     await command(t, 'start-hand');
     clock.advanceTo((await read(t)).schedule.actionWindow!.opensAt);
     const preflop = await read(t), actor = preflop.view.state.actorId!, other = t.ids.find(id => id !== actor)!;
@@ -110,11 +108,19 @@ test('Rebuy & deal schedules a longer deal that lands the refill first', async (
     await accepted(t, actor, { type: 'raise', raiseTo: all(actor) });
     await accepted(t, other, { type: 'call' });
     clock.advance(60_000);
-    busted = (await read(t)).view.state.participants.find(p => p.stack === 0)?.participantId;
+    const busted = (await read(t)).view.state.participants.find(p => p.stack === 0)?.participantId;
+    if (busted) return busted;
   }
-  await command(t, 'top-up-to', { participantId: busted, targetStack: 1000 });
-  await command(t, 'start-hand');
-  const [rebought] = (await read(t)).schedule.phases;
+}
+
+test('Rebuy & deal refills the empty stack in the commit that deals, and schedules a longer deal that lands the refill first', async () => {
+  const { t } = await headsUp();
+  const busted = await bustOne(t);
+  await command(t, 'start-hand', { refills: [{ participantId: busted, targetStack: 1000 }] });
+  const { schedule, view } = await read(t);
+  const refilled = view.state.participants.find(p => p.participantId === busted)!;
+  expect(refilled.stack + (refilled.wager ?? 0)).toBe(1000);
+  const [rebought] = schedule.phases;
   if (rebought?.kind !== 'deal') throw new Error('The Hand has no deal phase.');
   expect(rebought.inputs.refills).toEqual([{ participantId: busted, amount: 1000 }]);
   expect(rebought.durationMs).toBe(dealBeats(rebought.inputs).totalMs);
@@ -125,6 +131,22 @@ test('Rebuy & deal schedules a longer deal that lands the refill first', async (
   clock.advance(60_000);
   await command(t, 'start-hand');
   expect((await read(t)).schedule.phases[0]).toMatchObject({ kind: 'deal', inputs: { refills: [] }, durationMs: deal });
+});
+
+test('a rebuy made on its own between Hands has landed before the next deal, which comes with no refill', async () => {
+  const { t } = await headsUp();
+  const busted = await bustOne(t);
+  await command(t, 'top-up-to', { participantId: busted, targetStack: 1000 });
+  await command(t, 'start-hand');
+  expect((await read(t)).schedule.phases[0]).toMatchObject({ kind: 'deal', inputs: { refills: [] }, durationMs: deal });
+});
+
+test('Rebuy & deal refuses a refill of a stack that still has chips, and deals nothing', async () => {
+  const { t, human } = await headsUp();
+  const refused = await submit(t, 'start-hand', { refills: [{ participantId: human, targetStack: 1500 }] });
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ ok: false, rejection: { code: 'refill-not-empty' } });
+  expect((await read(t)).view.state.handId).toBeUndefined();
 });
 
 test('each completed betting round reveals its street, followed by its Settle, and exposes nothing of later streets', async () => {

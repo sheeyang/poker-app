@@ -170,7 +170,13 @@ export interface SeatParticipantRequest extends PokerMutationMetadata {
   readonly seat: number;
   readonly buyIn?: ChipAmount;
 }
-export interface StartHandRequest extends PokerMutationMetadata {}
+/**
+ * Deal. `refills`: Practice's Rebuy & deal, each a Participant with no chips rebought to `targetStack` in the commit
+ * that deals, so the refill is presented with the deal.
+ */
+export interface StartHandRequest extends PokerMutationMetadata { readonly refills?: readonly Refill[] }
+/** A rebuy of a Participant with no chips, made with the deal. */
+export interface Refill { readonly participantId: ParticipantId; readonly targetStack: ChipAmount }
 /** Stand Up: leave the Seat and cash out while remaining at the table. */
 export interface StandUpParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
 export interface MoveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId; readonly seat: number }
@@ -382,6 +388,14 @@ export interface TableSchedule {
   readonly phases: readonly PresentationPhase[];
   readonly actionWindow: ActionWindow | null;
   readonly nextHandCountdown?: NextHandCountdown;
+}
+/**
+ * When the Hand of `phases` ends, or `undefined` when it has not been paid out: when its last phase, the Settle after
+ * its payout, ends. The server accepts Deal and applies After-Hand Requests from this instant, and Automatic Dealing
+ * announces the next Next-Hand Countdown from it; a Trainer shows the Hand as ended from it.
+ */
+export function handEndsAt(phases: readonly PresentationPhase[]): ServerTime | undefined {
+  return phases.some(phase => phase.kind === 'payout') ? Math.max(...phases.map(phase => phase.endsAt)) : undefined;
 }
 /** Who becomes the Table Owner when the owner leaves, or that the table closes with no other human at it. */
 export type OwnerSuccession = { readonly successorParticipantId: ParticipantId } | { readonly closes: true };

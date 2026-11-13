@@ -1,4 +1,4 @@
-import { nextHandCountdownMs, presentationPhaseLength, settleAfter, settleLengths, type ActionWindow, type DealInputs, type DecisionId, type PayoutInputs, type HandId, type ParticipantId, type PresentationPhase, type PresentedPhase, type PresentingPhaseKind, type ServerTime, type SettleLengths, type ShowdownInputs, type Street, type StreetInputs, type TableMode, type TableSchedule } from '@poker/contracts';
+import { handEndsAt, nextHandCountdownMs, presentationPhaseLength, presentingPhase, settleAfter, settleLengths, type ActionWindow, type DecisionId, type HandId, type ParticipantId, type PhaseInputs, type PresentationPhase, type PresentingPhaseKind, type ServerTime, type SettleLengths, type Street, type TableMode, type TableSchedule } from '@poker/contracts';
 import type { CashGameEvent } from '@poker/engine';
 
 /**
@@ -17,13 +17,11 @@ export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freez
  */
 export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId; readonly actionTimeLimitMs?: number; readonly liveAnalysisDisallowed?: true } | null;
 
-/** What a transition's phases present, by kind, for each kind whose length comes from its beats (phase-inputs.ts). */
-export interface PhaseInputs {
-  readonly deal: (handId: HandId) => DealInputs;
-  readonly street: (handId: HandId, street: Street) => StreetInputs;
-  readonly showdown: (handId: HandId) => ShowdownInputs;
-  readonly payout: (handId: HandId) => PayoutInputs;
-}
+/**
+ * Reads the Phase Inputs of each phase a transition schedules, by kind, from the transition (phase-inputs.ts): for the
+ * phase of `handId` that presents `street`.
+ */
+export type PhaseInputsReader = { readonly [K in PresentingPhaseKind]: (handId: HandId, street: Street) => PhaseInputs[K] };
 
 const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
 
@@ -34,7 +32,7 @@ export interface ScheduleOptions {
   /** The Settle lengths: the shared ones unless given. */
   readonly settleLengths?: SettleLengths;
   /** What the transition's phases present. */
-  readonly inputs: PhaseInputs;
+  readonly inputs: PhaseInputsReader;
 }
 
 /**
@@ -61,16 +59,8 @@ export function scheduleTransition(previous: TableSchedule, events: readonly Cas
     cursor += durationMs;
   };
   // A phase carries what it presents, and lasts as long as its beats take for it (ADR-0039).
-  const presented = (kind: PresentingPhaseKind, handId: string): PresentedPhase & { readonly kind: PresentingPhaseKind } => {
-    switch (kind) {
-      case 'deal': return { kind, inputs: options.inputs.deal(handId) };
-      case 'street': return { kind, inputs: options.inputs.street(handId, street) };
-      case 'showdown': return { kind, inputs: options.inputs.showdown(handId) };
-      case 'payout': return { kind, inputs: options.inputs.payout(handId) };
-    }
-  };
-  const add = (kind: PresentingPhaseKind, handId: string) => {
-    const phase = presented(kind, handId), durationMs = presentationPhaseLength(phase);
+  const add = <K extends PresentingPhaseKind>(kind: K, handId: string) => {
+    const phase = presentingPhase(kind, options.inputs[kind](handId, street)), durationMs = presentationPhaseLength(phase);
     phases.push({ ...phase, handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
     cursor += durationMs;
     settle(kind, handId);
@@ -106,18 +96,9 @@ export function pastActionDeadline(window: Pick<ActionWindow, 'participantId' | 
 /** The first server time past the window's Action Deadline, from which its Timeout Action is due. */
 const timeoutDueAt = (window: ActionWindow | null) => window?.deadlineAt === undefined ? undefined : window.deadlineAt + 1;
 
-/**
- * When the latest Hand ends, or `undefined` when no Hand has been paid out: when its last phase, the Settle after its
- * payout, ends. Deal is accepted from this instant, after-Hand requests are applied at it, and Automatic Dealing
- * announces the next Next-Hand Countdown from it.
- */
-export function handEndsAt(schedule: TableSchedule): ServerTime | undefined {
-  return schedule.phases.some(phase => phase.kind === 'payout') ? phaseEnd(schedule.phases) : undefined;
-}
-
-/** Whether a Deal at server time `at` arrives before the latest Hand has ended. */
+/** Whether a Deal at server time `at` arrives before the latest Hand has ended (`handEndsAt`). */
 export function beforeHandEnd(schedule: TableSchedule, at: ServerTime): boolean {
-  const endsAt = handEndsAt(schedule);
+  const endsAt = handEndsAt(schedule.phases);
   return endsAt !== undefined && at < endsAt;
 }
 
@@ -136,7 +117,7 @@ export function withoutNextHand(schedule: TableSchedule): TableSchedule {
  * Deadline has passed, the end of the Hand, or the expiry of its Next-Hand Countdown.
  */
 export function nextWakeAt(schedule: TableSchedule, now: ServerTime): ServerTime | undefined {
-  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), handEndsAt(schedule), schedule.nextHandCountdown?.endsAt]
+  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), handEndsAt(schedule.phases), schedule.nextHandCountdown?.endsAt]
     .filter((at): at is ServerTime => at !== undefined && at > now);
   return instants.length ? Math.min(...instants) : undefined;
 }

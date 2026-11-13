@@ -97,7 +97,7 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
-| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand has ended, with the Settle after its payout (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
+| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand has ended, with the Settle after its payout (409 `hand-not-ended` before), see [Play timing](#play-timing). Rebuy & deal sends optional `refills`, each a `participantId` with no chips (the requester's own, or a Bot's) and a `targetStack`, rebought in the commit that deals so the deal presents them; a Participant who still has chips is 400 `refill-not-empty`, and a target outside the buy-in limits is 400 `invalid-top-up`. |
 | `POST /:id/retry-bot` | Table Owner only, at Practice Tables only: an Online Table retries a failed Bot decision itself, so the owner receives 403 `unavailable-at-online-tables` there. |
 | `GET /:id/live` | Earlier table-specific WebSocket endpoint, retained for existing transport consumers. |
 
@@ -211,8 +211,8 @@ payout, `street` is the street the Hand had reached, and a Settle's is that of t
 previous one ends, or at the commit. The deal's length is not fixed: it carries
 what it presents as `inputs` (`dealt`, who is dealt in, in the engine's dealing
 order, with each one's `cardCount`; `blinds`, in the order they go in; and
-`refills`, each Participant the previous Hand left with no chips who rebought
-since, with the `amount`), and lasts as long as the shared deal beats take for
+`refills`, each Participant refilled with the deal by Rebuy & deal, with the
+`amount`; a rebuy made on its own between Hands is not one), and lasts as long as the shared deal beats take for
 them (`dealBeats` in [`presentation.ts`](../packages/contracts/src/presentation.ts),
 [ADR-0039](adr/0039-derive-presentation-phase-lengths-from-shared-choreography.md)):
 longer with more cards dealt and with a refill. A street reveal and the showdown
@@ -222,7 +222,7 @@ it lasts as long as `streetBeats` take: the sweep, then the burn once the last
 swept chip reaches the pot, then the board cards. A `showdown` phase's `inputs`
 are `swept` and `shown`, whose hands are turned up, in the order shown, with each
 one's `cardCount`; it lasts as long as `showdownBeats` take: the sweep, then each
-hand turning. The line is swept by the first street reveal or showdown of the
+hand turning; the Settle after it is the time to read the turned hands. The line is swept by the first street reveal or showdown of the
 transition that ends the betting, so in an all-in runout the showdown sweeps it
 and the streets after it sweep nothing. The payout is timed the same way: its
 `inputs` hold `awards`, each Participant it pushes chips to, in seat order, with
@@ -243,10 +243,11 @@ the complete result; the schedule says when each step of it is presented.
 An `act` for the window's Participant received before `opensAt` is rejected with
 409 `action-window-not-open`; a human request is judged by the time the server
 received it. A `start-hand` (Deal) received before the latest Hand has ended
-is rejected with 409 `payout-phase-not-ended`, and accepted from that
+is rejected with 409 `hand-not-ended`, and accepted from that
 instant. At a Practice Table Deal also ends the dealing human's voluntary
-sit-out, as `set-sitting-out` then `start-hand` in one commit (one revision
-step); if the Hand cannot start, neither takes effect. A Bot's decision is
+sit-out, and makes Rebuy & deal's `refills`, as `set-sitting-out`, each
+`top-up-to`, then `start-hand` in one commit (one revision step); if the Hand
+cannot start, none of them takes effect. A Bot's decision is
 requested only once its window opens: the server wakes the table at `opensAt`
 and at the end of the Hand, including after a restart, which restores
 the persisted schedule unchanged. A table written before scheduled play restores

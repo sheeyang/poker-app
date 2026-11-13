@@ -1,8 +1,8 @@
 import { expect, test } from 'vitest';
-import { defaultConfiguration, settleLengths, type SettleLengths, type TableSchedule } from '@poker/contracts';
+import { defaultConfiguration, handEndsAt, settleLengths, type SettleLengths, type TableSchedule } from '@poker/contracts';
 import { CashGame, type CashGameResult } from '@poker/engine';
-import { handEndsAt, scheduleTransition, emptySchedule, type CurrentDecision, type ScheduleOptions } from '../src/schedule.js';
-import { phaseInputs } from '../src/phase-inputs.js';
+import { scheduleTransition, emptySchedule, type CurrentDecision, type ScheduleOptions } from '../src/schedule.js';
+import { phaseInputsReader } from '../src/phase-inputs.js';
 import { lengthOf } from './fixtures/phases.js';
 
 /**
@@ -27,7 +27,7 @@ const decision = (game: CashGame): CurrentDecision => {
 const step = (game: CashGame, previous: TableSchedule, result: CashGameResult, at: number, options: Omit<ScheduleOptions, 'inputs'>) => {
   const events = eventsOf(result);
   // The game is played in place, so the table before the transition is gone; no test here reads what a phase sweeps.
-  return scheduleTransition(previous, events, decision(game), at, { ...options, inputs: phaseInputs(game, game, events) });
+  return scheduleTransition(previous, events, decision(game), at, { ...options, inputs: phaseInputsReader(game, game, events) });
 };
 
 test('a Settle set to 0 schedules no stillness: the next phase or Action Window starts when the previous phase ends', () => {
@@ -43,7 +43,7 @@ test('a Settle set to 0 schedules no stillness: the next phase or Action Window 
   expect(done.phases.map(phase => phase.kind)).toEqual(['deal', 'showdown', 'street', 'street', 'street', 'payout']);
   for (const [previous, next] of done.phases.slice(0, -1).map((phase, index) => [phase, done.phases[index + 1]!] as const)) expect(next.startsAt).toBe(previous.endsAt);
   // The Hand ends when its payout does.
-  expect(handEndsAt(done)).toBe(done.phases.at(-1)!.endsAt);
+  expect(handEndsAt(done.phases)).toBe(done.phases.at(-1)!.endsAt);
   expect(done.phases.at(-1)).toMatchObject({ kind: 'payout' });
 });
 

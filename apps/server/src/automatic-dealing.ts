@@ -1,5 +1,5 @@
 import { canDealNextHand, type EligibilityFacts, type ObservableCashGameState, type ParticipantId, type ServerTime, type TableSchedule } from '@poker/contracts';
-import { handEndsAt } from './schedule.js';
+import { handEndsAt } from '@poker/contracts';
 
 /**
  * Automatic Dealing at Online Tables (ADR-0032). Pure: the caller supplies the committed table's public state,
@@ -33,7 +33,7 @@ export function dealingStep(table: { readonly status: ObservableCashGameState['s
   if (table.status === 'active-hand') return undefined;
   const countdown = table.schedule.nextHandCountdown;
   if (countdown) return now >= countdown.endsAt ? 'expire' : undefined;
-  const presented = handEndsAt(table.schedule);
-  if (presented !== undefined && now < presented || table.pendingChanges > 0) return undefined;
+  const handEnds = handEndsAt(table.schedule.phases);
+  if (handEnds !== undefined && now < handEnds || table.pendingChanges > 0) return undefined;
   return canDeal(table.participants) ? 'announce' : undefined;
 }
