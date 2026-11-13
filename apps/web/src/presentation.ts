@@ -72,7 +72,7 @@ export function dealOpen(table: ObservableTableSession, serverNow: number): bool
 }
 
 /** The Action Window of the current decision, if the schedule has one. */
-function currentWindow(table: ObservableTableSession) {
+export function currentWindow(table: ObservableTableSession) {
   const state = table.view.state, window = table.schedule.actionWindow;
   return state.status === 'active-hand' && window && window.participantId === state.actorId && window.decisionId === state.decisionId ? window : undefined;
 }
@@ -95,12 +95,6 @@ export function deadlineCountdown(table: ObservableTableSession, serverNow: numb
   const window = currentWindow(table);
   if (window?.deadlineAt === undefined) return undefined;
   return Math.max(0, Math.ceil((window.deadlineAt - Math.max(serverNow, window.opensAt)) / 1000));
-}
-
-/** The whole seconds the current decision's Action Window lasts, from opening to its Action Deadline; `undefined` without one. */
-export function deadlineLength(table: ObservableTableSession): number | undefined {
-  const window = currentWindow(table);
-  return window?.deadlineAt === undefined ? undefined : Math.max(1, Math.round((window.deadlineAt - window.opensAt) / 1000));
 }
 
 /**

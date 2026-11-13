@@ -7,11 +7,6 @@ import { useSession, type Command } from './session.js';
 import { nextHandLabel, waitingDetail, waitingReason, type NextHandStatus } from './online-status.js';
 import { afterHandRequestOf, afterHandRequestLabel } from './self-service.js';
 
-/** How much of an Action Window is left, `seconds` of `length`. Presentation only: the server alone closes the window. */
-export function DeadlineBar({ seconds, length }: { seconds: number; length: number }) {
-  return <span className={`deadline-bar${seconds <= 5 ? ' deadline-near' : ''}`} aria-hidden="true"><i style={{ transform: `scaleX(${Math.min(1, Math.max(0, seconds / length))})` }} /></span>;
-}
-
 /** Ways out of the tray at an Online Table: sitting down, sharing the Join Link (owner only) and adding a Bot (owner only). */
 export interface OnlineTrayActions {
   readonly chooseSeat: () => void;
@@ -41,7 +36,7 @@ export function CommandFeedback({ command }: { command: Command }) {
  * `dealOpen`: the last Hand's payout phase has ended and its After-Hand Requests are applied, so Deal (and Rebuy & deal) is available.
  * `nextHand`: between Hands at an Online Table, the Next-Hand Countdown or why there is none.
  */
-export function ActionTray({ table, actionOpen, countdown, countdownLength, dealOpen, nextHand, command, openSettings, review, online }: { table: ObservableTableSession; actionOpen: boolean; countdown?: number; countdownLength?: number; dealOpen: boolean; nextHand?: NextHandStatus; command: Command; openSettings: () => void; review?: (decisionId?: string) => void; online?: OnlineTrayActions }) {
+export function ActionTray({ table, actionOpen, countdown, dealOpen, nextHand, command, openSettings, review, online }: { table: ObservableTableSession; actionOpen: boolean; countdown?: number; dealOpen: boolean; nextHand?: NextHandStatus; command: Command; openSettings: () => void; review?: (decisionId?: string) => void; online?: OnlineTrayActions }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const participant = state.participants.find(p => p.participantId === humanId);
@@ -63,8 +58,7 @@ export function ActionTray({ table, actionOpen, countdown, countdownLength, deal
   return <div className="action-tray">
     {countdown !== undefined && <p className={`action-deadline${countdown <= 5 ? ' deadline-near' : ''}`} role="timer">{countdown > 0
       ? <><strong>{countdown}s</strong> to act</>
-      : <><strong>Time’s up.</strong> {state.legalActions.some(a => a.type === 'check') ? 'Checking' : 'Folding'} for you…</>}
-      {countdownLength !== undefined && <DeadlineBar seconds={countdown} length={countdownLength} />}</p>}
+      : <><strong>Time’s up.</strong> {state.legalActions.some(a => a.type === 'check') ? 'Checking' : 'Folding'} for you…</>}</p>}
     <div className="action-context"><span>Stack {chips(participant?.stack ?? 0)} chips</span></div>
     <div className="quick-actions">{state.legalActions.filter(a => !('minimum' in a)).map(a => <button className={`action-button action-${a.type}`} key={a.type} disabled={busy} onClick={() => submit({ type: a.type } as ConcreteAction)}><span>{actionLabel({ type: a.type } as ConcreteAction)}</span>{a.type === 'call' && <strong>{chips(state.amountToCall ?? 0)}</strong>}</button>)}</div>
     {sized && <Sizing key={`${state.decisionId}-${sized.type}`} action={sized} table={table} disabled={busy} submit={submit} />}

@@ -138,7 +138,7 @@ This system belongs to the participant-facing Trainer in `apps/web`, in the clas
 - Dark green tonal surfaces with warm brass interaction accents.
 - Ivory playing cards with conventional serif indices and suit colors.
 - Compact system typography, clear borders and tabular numerical data.
-- Shallow material depth and brief, optional presentation motion.
+- Shallow material depth and brief presentation motion timed by the server's clock.
 
 ## Colors
 
@@ -185,7 +185,7 @@ On phones the table takes the remaining viewport height with a felt inset, and b
 
 Most surfaces use tonal layering and one-pixel borders. Shadows express physical separation for the felt rail and playing cards, and elevation for modal dialogs. Do not apply them to every container.
 
-Card dealing lasts 360ms and face-down burn presentation 500ms, sharing the easing curve `cubic-bezier(.16,1,.3,1)`. Control color changes and the analysis switch use 150ms transitions. Reduced-motion preference removes gameplay animations and transitions. Score values appear immediately, without rolling or crossfade. Loading uses static tonal skeletons shaped like the content they replace; there is no shimmer or pulse.
+Table motion follows ADR-0038: cards leave the deck one at a time in dealing order (340ms each, 75ms apart) and turn face up about their own axis; chips slide to the betting line, are swept into the pot, and the pot is pushed onto the winner's stack; opponents' folded hands are mucked. Each motion is timed from the server time of what it presents, so a late viewer joins it part-way, and nothing waits for it. The acting seat's brass edge clears clockwise to its Action Deadline, warming in the last five seconds. Seats settle in place; chips added to a stack come in from the table's edge while the amount floats up and the stack figure rolls to its new total in one piece. Overlays enter from their source (the analysis panel from the right, menus from their trigger, dialogs rising, notices dropping) and leave faster than they came. Everything that settles shares `cubic-bezier(.16,1,.3,1)`; control color changes and the analysis switch use 150ms transitions. There is no motion preference. Score values appear immediately, without rolling or crossfade; only stack figures roll. Loading uses static tonal skeletons shaped like the content they replace; there is no shimmer or pulse.
 ## Shapes
 
 Use compact rounded rectangles: tags and small cards, card stock, fields, controls, containers and dialogs follow their radius tokens. Seat bodies and action containers share gently curved corners. Dialogs reduce to the container radius on small screens. Circles belong to avatars, dealer markers and chips. The felt keeps its elliptical silhouette and dark structural rail; do not extend that silhouette to ordinary panels.
@@ -214,7 +214,7 @@ Use compact rounded rectangles: tags and small cards, card stock, fields, contro
 - **Do** keep cards brighter than the surrounding shell and felt.
 - **Do** use brass consistently for primary operations, active state and keyboard focus.
 - **Do** preserve tabular numerals and clear labels for probabilities, totals and scores.
-- **Do** preserve reduced-motion behavior and keep presentation independent of gameplay.
+- **Do** time motion from the server's clock and keep presentation independent of gameplay: no animation gates a turn, deadline or deal.
 
 ### Don't:
 

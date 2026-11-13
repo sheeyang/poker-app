@@ -1,12 +1,12 @@
 import { useEffect, useReducer, useRef } from 'react';
 import type { ObservableTableSession } from '@poker/contracts';
-import { actionWindowOpen, dealOpen, deadlineCountdown, deadlineLength, estimateClockOffset, nextPresentationChange, payoutEnded, presentTable, recordClockSample, type ClockSample } from './presentation.js';
+import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, nextPresentationChange, payoutEnded, presentTable, recordClockSample, type ClockSample } from './presentation.js';
 import { nextHandStatus } from './online-status.js';
 
 /**
  * Shows a committed table at the server's pace. Each received view's server time refines the clock
  * estimate; the table re-renders when its next step is due. Presentation only reads time: it never
- * sends, delays or retries anything, whatever the animation or motion preferences.
+ * sends, delays or retries anything, and no animation waits on it or holds it back (ADR-0038).
  */
 export function usePresentation(table: ObservableTableSession | undefined, viewerId: string | undefined) {
   const samples = useRef<readonly ClockSample[]>([]);
@@ -36,8 +36,6 @@ export function usePresentation(table: ObservableTableSession | undefined, viewe
     actionOpen: actionWindowOpen(table, viewerId, serverNow),
     /** Whole seconds left before the acting Participant's Action Deadline, or `undefined` without one. */
     countdown: deadlineCountdown(table, serverNow),
-    /** The whole seconds the acting Participant's Action Window lasts, for showing how much of it is left. */
-    countdownLength: deadlineLength(table),
     /** The current actor's window is open, whoever acts. */
     actorWindowOpen: actionWindowOpen(table, table.view.state.actorId ?? undefined, serverNow),
     /** The last Hand has been paid out, so it is no longer in progress for management. */
