@@ -14,21 +14,21 @@ import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseK
  */
 export interface PresentationPhaseInputs {
   readonly deal: DealInputs;
+  readonly street: StreetInputs;
+  readonly showdown: ShowdownInputs;
   readonly payout: PayoutInputs;
 }
-
-/** The fixed length of each presenting Presentation Phase whose kind has no beats of its own yet. */
-export const presentationPhaseDurations: Readonly<Record<Exclude<PresentingPhaseKind, keyof PresentationPhaseInputs>, number>> = Object.freeze({ street: 1000, showdown: 2000 });
 
 /** A phase's kind and what it presents: all the server needs for its length, and a Trainer for its beats. */
 export type PresentedPhase = { readonly [K in PresentationPhaseKind]: { readonly kind: K } & (K extends keyof PresentationPhaseInputs ? { readonly inputs: PresentationPhaseInputs[K] } : unknown) }[PresentationPhaseKind];
 
-/** How long a presenting Presentation Phase lasts: the total of its beats, or its kind's fixed length. */
+/** How long a presenting Presentation Phase lasts: the total of its beats for what it presents. */
 export function presentationPhaseLength(phase: PresentedPhase & { readonly kind: PresentingPhaseKind }): number {
   switch (phase.kind) {
     case 'deal': return dealBeats(phase.inputs).totalMs;
+    case 'street': return streetBeats(phase.inputs).totalMs;
+    case 'showdown': return showdownBeats(phase.inputs).totalMs;
     case 'payout': return payoutBeats(phase.inputs).totalMs;
-    default: return presentationPhaseDurations[phase.kind];
   }
 }
 
@@ -74,13 +74,28 @@ export const settleAfter = (kind: PresentingPhaseKind, mode: TableMode, lengths:
 export const nextHandCountdownMs = 5000;
 
 /**
- * Chips on the betting line inside a Presentation Phase: the room a street reveal or showdown leaves for the line to be
- * swept. The blinds go in with the deal (`dealMotion`); a bet and the sweep itself are motion with no phase (`tableMotion`).
+ * The betting line swept into the pot: each swept wager's chip flies to the pot, one after another, its amount fading as
+ * it leaves (`amountFades`), and the pot brightens once the chips reach it (absent with nothing swept).
  */
-export const wagerMotion = Object.freeze({
-  /** The room a sweep of n wagers takes before what follows it: `sweptBase + n × sweepStagger`, or 0 with none. */
-  sweptBase: 320, sweepStagger: 40,
-});
+export interface SweepBeats {
+  readonly wagers: readonly (Beat & { readonly participantId: ParticipantId; readonly amountFades: Beat })[];
+  readonly pot?: Beat;
+}
+
+/** The sweep of `swept`, in the order given, at `tableMotion`'s sweep timings, and when its last chip reaches the pot (0 with none). */
+function sweepPlan(swept: readonly ParticipantId[], at: (ms: number) => number): { readonly beats: SweepBeats; readonly lands: number } {
+  const T = tableMotion, leaves = (n: number) => T.sweepAt + n * T.sweepStagger;
+  const wagers = swept.map((participantId, n) => ({ participantId, startsAt: at(leaves(n)), endsAt: at(leaves(n) + T.sweepFlight), amountFades: { startsAt: at(leaves(n)), endsAt: at(leaves(n) + T.sweepAmountFade) } }));
+  if (!swept.length) return { beats: { wagers }, lands: 0 };
+  const potAt = T.sweepAt + T.potAfterSweep + swept.length * T.sweepStagger;
+  return { beats: { wagers, pot: { startsAt: at(potAt), endsAt: at(potAt + T.potBrightens) } }, lands: leaves(swept.length - 1) + T.sweepFlight };
+}
+
+/**
+ * The line swept with no Presentation Phase to present it (a Hand won by folds): the same beats a street reveal or a
+ * showdown plays first, from the view that carried it.
+ */
+export const sweepBeats = (swept: readonly ParticipantId[]): SweepBeats => sweepPlan(swept, ms => ms).beats;
 
 /**
  * The deal: the last Hand's cards back to the deck, the button on, any refill and the blinds in, and the cards out in
@@ -153,25 +168,92 @@ export const dealBeats = beatFunction((inputs: DealInputs, at): DealBeats => {
   return { totalMs, cardsReturn, returnStagger: at(D.returnStagger) - at(0), buttonMoves, refills, blinds, cards };
 });
 
-/** A street reveal: the line swept, the burn, then the board cards (the flop as one stack that spreads). */
+/**
+ * A street reveal: the line swept (`tableMotion`'s sweep), the burn once the last swept chip reaches the pot, then the
+ * board cards: the flop leaves the deck as one stack and spreads, the turn and the river one card each, and each card
+ * turns face up once it lands. The street reveal lasts as long as these beats (`streetBeats`), 1.5× the M5 timings.
+ */
 export const streetMotion = Object.freeze({
-  /** The burn's earliest start, and how far it may overlap the end of a sweep. */
-  burnEarliest: 160, burnOverlapsSweep: 40,
-  burnFlight: 200,
-  /** When the burn pile's first card appears, after its burn sets off. */
-  burnPileAppears: 190,
+  /** When the burn sets off with nothing swept; with a sweep, it sets off as the last chip reaches the pot. */
+  burnEarliest: 240,
+  burnFlight: 300,
+  /** A card (the burn, or a board card) appearing in place, just before it lands. */
+  appearsBefore: 15,
   /** When the board cards leave the deck, after the burn sets off. */
-  boardAfterBurn: 200,
-  /** The flop: its stack's flight, when its cards appear, their spread, and their turns one after another. */
-  flopFlight: 220, flopAppears: 215, flopSpreadsAt: 220, flopSpread: 180, flopTurnsAt: 240, flopTurnStagger: 40, flopTurn: 240,
-  /** The turn and the river: the card's flight, when it appears, and its turn. */
-  cardFlight: 260, cardAppears: 255, cardTurnsAt: 270, cardTurn: 260,
+  boardAfterBurn: 300,
+  /** The flop: its stack's flight, its spread once it lands, and its cards turning one after another. */
+  flopFlight: 330, flopSpread: 270, flopTurnsAfterLanding: 30, flopTurnStagger: 60, flopTurn: 360,
+  /** The turn and the river: the card's flight, and its turn once it lands. */
+  cardFlight: 390, cardTurnsAfterLanding: 15, cardTurn: 390,
 });
 
-/** The showdown: the line swept, then each hand turned up, card by card. */
+/** What a street reveal presents. Every field is public in the view: whose wagers left the line, and the board. */
+export interface StreetInputs {
+  /** Whose wagers the street reveal sweeps into the pot, in seat order: none for a runout's later streets. */
+  readonly swept: readonly ParticipantId[];
+  /** How many board cards it reveals: 3 for the flop, 1 for the turn and the river. */
+  readonly cardCount: number;
+}
+
+export interface StreetBeats extends PhaseBeats {
+  readonly sweep: SweepBeats;
+  /** The burn card's flight to the burn pile; it appears there at `appearsAt`. */
+  readonly burn: Beat & { readonly appearsAt: number };
+  /**
+   * Each board card the street reveals (`card` counts from the street's first): it leaves the deck at `startsAt` and
+   * lands at `endsAt`, appearing in place at `appearsAt`; a flop card then spreads to its place (`spread`); it turns
+   * face up (`turn`).
+   */
+  readonly cards: readonly (Beat & { readonly card: number; readonly appearsAt: number; readonly spread?: Beat; readonly turn: Beat })[];
+}
+
+/** A street reveal's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
+export const streetBeats = beatFunction((inputs: StreetInputs, at): StreetBeats => {
+  const ST = streetMotion, sweep = sweepPlan(inputs.swept, at);
+  const burnAt = Math.max(ST.burnEarliest, sweep.lands), boardAt = burnAt + ST.boardAfterBurn, flop = inputs.cardCount > 1;
+  const burn = { startsAt: at(burnAt), endsAt: at(burnAt + ST.burnFlight), appearsAt: at(burnAt + ST.burnFlight - ST.appearsBefore) };
+  const lands = boardAt + (flop ? ST.flopFlight : ST.cardFlight);
+  const cards = Array.from({ length: inputs.cardCount }, (_, card) => {
+    const turns = flop ? lands + ST.flopTurnsAfterLanding + card * ST.flopTurnStagger : lands + ST.cardTurnsAfterLanding, turn = flop ? ST.flopTurn : ST.cardTurn;
+    return { card, startsAt: at(boardAt), endsAt: at(lands), appearsAt: at(lands - ST.appearsBefore), ...(flop ? { spread: { startsAt: at(lands), endsAt: at(lands + ST.flopSpread) } } : {}), turn: { startsAt: at(turns), endsAt: at(turns + turn) } };
+  });
+  const totalMs = Math.max(burn.endsAt, ...sweep.beats.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), sweep.beats.pot?.endsAt ?? 0, ...cards.flatMap(c => [c.turn.endsAt, c.spread?.endsAt ?? 0]));
+  return { totalMs, sweep: sweep.beats, burn, cards };
+});
+
+/**
+ * The showdown: the line swept (`tableMotion`'s sweep), then each hand turned up in turn, card by card, once the last
+ * swept chip reaches the pot. The showdown lasts as long as these beats (`showdownBeats`); the Settle after it is the
+ * time to read the hands.
+ */
 export const showdownMotion = Object.freeze({
-  /** When the first card turns, after the sweep's room; the gap to the second card; and each turn. */
-  turnsAfterSweep: 150, cardStagger: 120, turn: 380,
+  /** When the first card turns, after the sweep; the gap to the next hand, and to a hand's next card; and each turn. */
+  turnsAfterSweep: 225, handStagger: 300, cardStagger: 180, turn: 570,
+});
+
+/** What the showdown presents. Every field is public in the view: whose wagers left the line, and whose hands are face up. */
+export interface ShowdownInputs {
+  /** Whose wagers the showdown sweeps into the pot, in seat order. In an all-in runout the showdown comes first, so it sweeps the line. */
+  readonly swept: readonly ParticipantId[];
+  /** Whose hands are turned up, in the order they are shown, and how many cards each. */
+  readonly shown: readonly { readonly participantId: ParticipantId; readonly cardCount: number }[];
+}
+
+export interface ShowdownBeats extends PhaseBeats {
+  readonly sweep: SweepBeats;
+  /** Each hand turned up, in the order shown: each of its cards turning face up (`turn`). */
+  readonly hands: readonly { readonly participantId: ParticipantId; readonly cards: readonly { readonly card: number; readonly turn: Beat }[] }[];
+}
+
+/** The showdown's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
+export const showdownBeats = beatFunction((inputs: ShowdownInputs, at): ShowdownBeats => {
+  const SD = showdownMotion, sweep = sweepPlan(inputs.swept, at), first = sweep.lands + SD.turnsAfterSweep;
+  const hands = inputs.shown.map(({ participantId, cardCount }, h) => ({ participantId, cards: Array.from({ length: cardCount }, (_, card) => {
+    const turns = first + h * SD.handStagger + card * SD.cardStagger;
+    return { card, turn: { startsAt: at(turns), endsAt: at(turns + SD.turn) } };
+  }) }));
+  const totalMs = Math.max(0, ...sweep.beats.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), sweep.beats.pot?.endsAt ?? 0, ...hands.flatMap(h => h.cards.map(c => c.turn.endsAt)));
+  return { totalMs, sweep: sweep.beats, hands };
 });
 
 /**

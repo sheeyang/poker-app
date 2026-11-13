@@ -196,8 +196,8 @@ Tests substitute a manually advanced clock.
 
 Each accepted transition schedules its Presentation Phases
 ([`schedule.ts`](../apps/server/src/schedule.ts)), in the order of the
-transition's events: a `deal` phase when a Hand starts, a 2 s `showdown`
-phase when the remaining hands are turned up, a 1 s `street` phase for each
+transition's events: a `deal` phase when a Hand starts, a `showdown`
+phase when the remaining hands are turned up, a `street` phase for each
 street dealt, and a `payout` phase when the Hand completes. Each of these is
 followed by a `settle` phase, the Settle, in which nothing moves and nobody may act:
 0.3 s after the deal and after each street, 1.2 s after the showdown, and after the
@@ -215,15 +215,24 @@ order, with each one's `cardCount`; `blinds`, in the order they go in; and
 since, with the `amount`), and lasts as long as the shared deal beats take for
 them (`dealBeats` in [`presentation.ts`](../packages/contracts/src/presentation.ts),
 [ADR-0039](adr/0039-derive-presentation-phase-lengths-from-shared-choreography.md)):
-longer with more cards dealt and with a refill. Nor is the payout's: its `inputs`
-hold `awards`, each Participant it pushes chips to, in seat order, with what they
-`won` from every pot and what was `returned` to them uncalled, and it lasts as long
-as the shared payout beats (`payoutBeats`) take to land each award in turn: longer
-with more winners. The inputs are public in the view.
+longer with more cards dealt and with a refill. A street reveal and the showdown
+are timed the same way. A `street` phase's `inputs` are `swept`, whose wagers it
+sweeps into the pot, in seat order, and `cardCount`, the board cards it reveals;
+it lasts as long as `streetBeats` take: the sweep, then the burn once the last
+swept chip reaches the pot, then the board cards. A `showdown` phase's `inputs`
+are `swept` and `shown`, whose hands are turned up, in the order shown, with each
+one's `cardCount`; it lasts as long as `showdownBeats` take: the sweep, then each
+hand turning. The line is swept by the first street reveal or showdown of the
+transition that ends the betting, so in an all-in runout the showdown sweeps it
+and the streets after it sweep nothing. The payout is timed the same way: its
+`inputs` hold `awards`, each Participant it pushes chips to, in seat order, with
+what they `won` from every pot and what was `returned` to them uncalled, and it
+lasts as long as `payoutBeats` take to land each award in turn: longer with more
+winners. The inputs are public in the view.
 The schedule is persisted in the Persisted
 Table Session in the same transaction as that commit; phases are never poker
 commands. It holds the current Hand's phases (`kind`, `handId`, `street`,
-`startsAt`, `endsAt`, `durationMs`, and the deal's and the payout's `inputs`) and the current decision's `actionWindow`
+`startsAt`, `endsAt`, `durationMs`, and each presenting phase's `inputs`) and the current decision's `actionWindow`
 (`participantId`, `decisionId`, `opensAt`), which opens when the last phase, a Settle, ends.
 A Hand ends when its last phase, the Settle after its payout, ends.
 Every complete view and `table-update` carries this `schedule` and the

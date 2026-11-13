@@ -418,7 +418,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const dealt = canDeal(participants) ? working.startHand() : undefined;
       const started = dealt?.ok ? dealt.events.find(event => event.type === 'hand-started') : undefined;
       if (dealt?.ok) events.push(...dealt.events);
-      const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { mode: 'online', inputs: phaseInputs(working, events) }) : withoutNextHand(aggregate.schedule);
+      const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { mode: 'online', inputs: phaseInputs(session.game, working, events) }) : withoutNextHand(aggregate.schedule);
       const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule, ...(events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}) };
       return { requestId: started && 'handId' in started ? 'deal:' + started.handId : 'no-deal:' + aggregate.sessionRevision, fingerprint: fingerprint({ step, sittingOut: disconnected, deal: !!started }), events, next: { aggregate: next, game: working } };
     });
@@ -899,7 +899,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   return { ...identity, commandIndex: pokerRecord.commands.length - 1 };
                 })() : undefined;
                 // The schedule commits with the transition that produced it; the table's mode chooses the Settle after the payout.
-                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { mode: session.aggregate.mode, inputs: phaseInputs(working, accepted.events) });
+                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { mode: session.aggregate.mode, inputs: phaseInputs(session.game, working, accepted.events) });
                 // At an Online Table a Timeout Action, a human's or a failed Bot's, also sits its Participant out after the Hand.
                 const sitsOutAfterHand = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,

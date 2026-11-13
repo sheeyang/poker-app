@@ -6,7 +6,7 @@ import { createStrategy, HighestProbabilitySelector, type Strategy } from '@poke
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { handEndsAt, presentedFor } from './fixtures/phases.js';
+import { handEndsAt, presentedFor, windowOpensAt } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -142,7 +142,7 @@ test('analysis never delays or fails a Bot decision, even when it fills all the 
     expect((await post('/api/table-sessions/' + t.id + '/analysis', t.ann, { decisionId, live: true })).status).toBe(200);
     await expect.poll(() => heldAnalyses.length).toBe(1);
     expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'check' } })).status).toBe(200);
-    clock.advance(presentedFor('street', 'online'));
+    clock.advanceTo(windowOpensAt(await t.view()));
     expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'check' } })).status).toBe(200);
     // Rex's decision runs at once and plays what its Strategy chose: no failure, no Timeout Action, no sit-out.
     await expect.poll(async () => (await t.view()).view.history[0]!.decisions.at(-1)!.action).toEqual({ participantId: t.rex, action: { type: 'bet', betTo: 60 } });

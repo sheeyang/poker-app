@@ -306,7 +306,8 @@ export type PresentationPhaseKind = PresentingPhaseKind | 'settle';
  * `startsAt`; the next phase, or the Action Window, begins at `endsAt`. Phases are never poker commands.
  * Each presenting phase is followed by its Settle, unless that Settle's length is 0. A Hand's last phase is the
  * Settle after its payout: the Hand ends, and Deal is accepted, when that phase ends. A phase whose length comes from
- * its beats (the deal, the payout) carries what it presents as `inputs` (ADR-0039).
+ * its beats (each presenting phase: the deal, a street reveal, the showdown, the payout) carries what it presents as
+ * `inputs` (ADR-0039).
  */
 export type PresentationPhase = PresentationPhaseTiming & PresentedPhase;
 interface PresentationPhaseTiming {
@@ -315,7 +316,7 @@ interface PresentationPhaseTiming {
   readonly street: Street;
   readonly startsAt: ServerTime;
   readonly endsAt: ServerTime;
-  /** The phase's length: the total of its beats for its inputs, or its kind's fixed length. */
+  /** The phase's length: the total of its beats for its inputs. */
   readonly durationMs: number;
 }
 /** The interval in which the current decision's Participant may act. It opens when the preceding phase, a Settle, ends. */

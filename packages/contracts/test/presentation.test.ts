@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dealBeats, payoutBeats, presentationPhaseLength, type DealInputs, type PayoutInputs } from '../src/index.js';
+import { dealBeats, payoutBeats, presentationPhaseLength, showdownBeats, streetBeats, type DealInputs, type PayoutInputs, type ShowdownBeats, type StreetBeats } from '../src/index.js';
 
 /** `players` dealt in clockwise, two cards each, the first two posting the blinds. */
 const deal = (players: number, refills: DealInputs['refills'] = []): DealInputs => {
@@ -99,8 +99,121 @@ describe('the payout’s beats', () => {
     expect(fitted.totalMs).toBe(natural.totalMs * 2);
     fitted.awards.forEach((award, i) => { expect(award.endsAt).toBeCloseTo(natural.awards[i]!.endsAt * 2, 0); });
   });
+});
 
-  it('is the payout phase’s length', () => {
+const swept = (count: number) => Array.from({ length: count }, (_, i) => `p${i + 1}`);
+const shown = (count: number) => Array.from({ length: count }, (_, i) => ({ participantId: `p${i + 1}`, cardCount: 2 }));
+/** Where every beat of a street reveal ends. */
+const streetEnds = (beats: StreetBeats) => [beats.burn.endsAt, ...beats.sweep.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), ...(beats.sweep.pot ? [beats.sweep.pot.endsAt] : []),
+  ...beats.cards.flatMap(c => [c.endsAt, c.turn.endsAt, ...(c.spread ? [c.spread.endsAt] : [])])];
+/** Where every beat of a showdown ends. */
+const showdownEnds = (beats: ShowdownBeats) => [...beats.sweep.wagers.flatMap(w => [w.endsAt, w.amountFades.endsAt]), ...(beats.sweep.pot ? [beats.sweep.pot.endsAt] : []), ...beats.hands.flatMap(h => h.cards.map(c => c.turn.endsAt))];
+
+describe('a street reveal’s beats', () => {
+  it('starts the burn only once the last swept chip has reached the pot', () => {
+    for (const count of [0, 1, 2, 6]) {
+      const beats = streetBeats({ swept: swept(count), cardCount: 3 });
+      expect(beats.sweep.wagers).toHaveLength(count);
+      for (const wager of beats.sweep.wagers) expect(beats.burn.startsAt).toBeGreaterThanOrEqual(wager.endsAt);
+      expect(beats.burn.endsAt).toBeGreaterThan(beats.burn.startsAt);
+    }
+  });
+
+  it('sweeps the wagers one after another', () => {
+    const { wagers } = streetBeats({ swept: swept(3), cardCount: 1 }).sweep;
+    expect(wagers.map(w => w.participantId)).toEqual(['p1', 'p2', 'p3']);
+    wagers.slice(1).forEach((wager, i) => { expect(wager.startsAt).toBeGreaterThan(wagers[i]!.startsAt); });
+  });
+
+  it('deals the flop after the burn as one stack that lands, then spreads and turns its cards one by one', () => {
+    const beats = streetBeats({ swept: [], cardCount: 3 });
+    expect(beats.cards.map(c => c.card)).toEqual([0, 1, 2]);
+    for (const card of beats.cards) {
+      expect(card.startsAt).toBeGreaterThanOrEqual(beats.burn.startsAt);
+      expect(card.startsAt).toBe(beats.cards[0]!.startsAt);
+      expect(card.endsAt).toBeGreaterThan(card.startsAt);
+      expect(card.spread!.startsAt).toBeGreaterThanOrEqual(card.endsAt);
+      expect(card.turn.startsAt).toBeGreaterThanOrEqual(card.endsAt);
+    }
+    beats.cards.slice(1).forEach((card, i) => { expect(card.turn.startsAt).toBeGreaterThan(beats.cards[i]!.turn.startsAt); });
+  });
+
+  it('deals the turn or the river as one card that lands, then turns', () => {
+    const { cards, burn } = streetBeats({ swept: swept(2), cardCount: 1 });
+    expect(cards).toHaveLength(1);
+    const [card] = cards;
+    expect(card!.spread).toBeUndefined();
+    expect(card!.startsAt).toBeGreaterThanOrEqual(burn.startsAt);
+    expect(card!.endsAt).toBeGreaterThan(card!.startsAt);
+    expect(card!.turn.startsAt).toBeGreaterThanOrEqual(card!.endsAt);
+  });
+
+  it('ends no beat after the total', () => {
+    for (const inputs of [{ swept: [], cardCount: 3 }, { swept: swept(2), cardCount: 3 }, { swept: swept(9), cardCount: 1 }]) {
+      const beats = streetBeats(inputs);
+      expect(Math.max(...streetEnds(beats))).toBe(beats.totalMs);
+    }
+  });
+
+  it('takes longer with more wagers swept, and for the flop than for one card', () => {
+    expect(streetBeats({ swept: swept(1), cardCount: 3 }).totalMs).toBeGreaterThan(streetBeats({ swept: [], cardCount: 3 }).totalMs);
+    expect(streetBeats({ swept: swept(4), cardCount: 3 }).totalMs).toBeGreaterThan(streetBeats({ swept: swept(2), cardCount: 3 }).totalMs);
+    expect(streetBeats({ swept: [], cardCount: 3 }).totalMs).toBeGreaterThan(streetBeats({ swept: [], cardCount: 1 }).totalMs);
+  });
+
+  it('plays at 1.5× the M5 street reveal: a flop with nothing swept took 920 ms', () => {
+    expect(streetBeats({ swept: [], cardCount: 3 }).totalMs).toBe(1380);
+  });
+
+  it('fits every beat to a phase of another length', () => {
+    const inputs = { swept: swept(2), cardCount: 3 }, natural = streetBeats(inputs), fitted = streetBeats(inputs, natural.totalMs * 2);
+    expect(fitted.totalMs).toBe(natural.totalMs * 2);
+    expect(fitted.burn.startsAt).toBeCloseTo(natural.burn.startsAt * 2);
+    expect(Math.max(...streetEnds(fitted))).toBeCloseTo(natural.totalMs * 2);
+  });
+});
+
+describe('a showdown’s beats', () => {
+  it('turns the hands up only once the last swept chip has reached the pot', () => {
+    const beats = showdownBeats({ swept: swept(3), shown: shown(2) });
+    const lastLands = Math.max(...beats.sweep.wagers.map(w => w.endsAt));
+    for (const hand of beats.hands) for (const card of hand.cards) expect(card.turn.startsAt).toBeGreaterThanOrEqual(lastLands);
+  });
+
+  it('turns each hand in the order shown, card by card', () => {
+    const { hands } = showdownBeats({ swept: [], shown: shown(3) });
+    expect(hands.map(h => h.participantId)).toEqual(['p1', 'p2', 'p3']);
+    for (const hand of hands) {
+      expect(hand.cards.map(c => c.card)).toEqual([0, 1]);
+      expect(hand.cards[1]!.turn.startsAt).toBeGreaterThan(hand.cards[0]!.turn.startsAt);
+    }
+    hands.slice(1).forEach((hand, i) => { expect(hand.cards[0]!.turn.startsAt).toBeGreaterThan(hands[i]!.cards[0]!.turn.startsAt); });
+  });
+
+  it('ends no beat after the total', () => {
+    for (const [sweeps, hands] of [[0, 2], [2, 2], [6, 6]] as const) {
+      const beats = showdownBeats({ swept: swept(sweeps), shown: shown(hands) });
+      expect(Math.max(...showdownEnds(beats))).toBe(beats.totalMs);
+    }
+  });
+
+  it('takes longer with more wagers swept and more hands turned up', () => {
+    expect(showdownBeats({ swept: swept(2), shown: shown(2) }).totalMs).toBeGreaterThan(showdownBeats({ swept: [], shown: shown(2) }).totalMs);
+    expect(showdownBeats({ swept: [], shown: shown(3) }).totalMs).toBeGreaterThan(showdownBeats({ swept: [], shown: shown(2) }).totalMs);
+  });
+
+  it('fits every beat to a phase of another length', () => {
+    const inputs = { swept: swept(2), shown: shown(2) }, natural = showdownBeats(inputs), fitted = showdownBeats(inputs, natural.totalMs / 2);
+    expect(fitted.totalMs).toBe(natural.totalMs / 2);
+    expect(Math.max(...showdownEnds(fitted))).toBeCloseTo(natural.totalMs / 2);
+  });
+});
+
+describe('a phase’s length', () => {
+  it('is the total of its beats for what it presents', () => {
+    const street = { swept: swept(2), cardCount: 3 }, showdown = { swept: [], shown: shown(2) };
+    expect(presentationPhaseLength({ kind: 'street', inputs: street })).toBe(streetBeats(street).totalMs);
+    expect(presentationPhaseLength({ kind: 'showdown', inputs: showdown })).toBe(showdownBeats(showdown).totalMs);
     expect(presentationPhaseLength({ kind: 'payout', inputs: payout('p1', 'p2') })).toBe(payoutBeats(payout('p1', 'p2')).totalMs);
   });
 });

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, payoutBeats, type DealInputs, type PayoutInputs, type ObservableCashGameState, type ObservableParticipantState, type ObservableTableSession, type PresentationPhase } from '@poker/contracts';
+import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, payoutBeats, showdownBeats, streetBeats, type DealInputs, type ObservableCashGameState, type ObservableParticipantState, type ObservableTableSession, type PayoutInputs, type PresentationPhase, type ShowdownInputs, type StreetInputs } from '@poker/contracts';
 import { heldStacks, planMotion, sceneOf, type Cue } from '../src/table-motion.js';
 
-const phase = (kind: Exclude<PresentationPhase['kind'], 'deal' | 'payout'>, startsAt: number, street: PresentationPhase['street'] = 'preflop', handId = 'hand-1'): PresentationPhase => ({ kind, handId, street, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
+const phase = (kind: 'settle', startsAt: number, street: PresentationPhase['street'] = 'preflop', handId = 'hand-1'): PresentationPhase => ({ kind, handId, street, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
 /** The three-handed table's deal (button seat 3): you, then ada, then cy; you and ada post the blinds. */
 const dealt: DealInputs = { dealt: ['you', 'ada', 'cy'].map(participantId => ({ participantId, cardCount: 2 })), blinds: ['you', 'ada'], refills: [] };
 /** A deal phase as the server schedules it: as long as its beats, unless `durationMs` says otherwise. */
@@ -11,6 +11,11 @@ const deal = (startsAt: number, inputs: DealInputs = dealt, durationMs = dealBea
 const payout = (startsAt: number, inputs: PayoutInputs, durationMs = payoutBeats(inputs).totalMs, street: PresentationPhase['street'] = 'river'): PresentationPhase => ({ kind: 'payout', handId: 'hand-1', street, startsAt, endsAt: startsAt + durationMs, durationMs, inputs });
 /** Ada wins 790 alone. */
 const adaWins: PayoutInputs = { awards: [{ participantId: 'ada', won: 790, returned: 0 }] };
+/** A street reveal as the server schedules it: as long as its beats, unless `durationMs` says otherwise. */
+const street = (startsAt: number, name: 'flop' | 'turn' | 'river', inputs: StreetInputs, durationMs = streetBeats(inputs).totalMs): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + durationMs, durationMs, inputs });
+/** A showdown as the server schedules it: as long as its beats, unless `durationMs` says otherwise. */
+const showdown = (startsAt: number, inputs: ShowdownInputs, name: PresentationPhase['street'] = 'river', durationMs = showdownBeats(inputs).totalMs): PresentationPhase => ({ kind: 'showdown', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + durationMs, durationMs, inputs });
+const heads = (...ids: string[]) => ids.map(participantId => ({ participantId, cardCount: 2 }));
 const seat = (participantId: string, seatNumber: number, extra: Partial<ObservableParticipantState> = {}): ObservableParticipantState => ({ participantId, seat: seatNumber, stack: 1000, sittingOut: false, inHand: true, cardCount: 2, contribution: 0, ...extra });
 type Decision = readonly [participantId: string, type: string];
 
@@ -91,38 +96,62 @@ describe('a Hand is dealt and played', () => {
     const yours = planMotion(before, table({ decisions: [['you', 'fold']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10, folded: true }), seat('ada', 2, { wager: 20 }), seat('cy', 3)] } }));
     expect(yours).toContainEqual(expect.objectContaining({ kind: 'fold', participantId: 'you', muck: false }));
   });
-  it('sweeps the line and deals the flop from its street phase; a call that closed the street goes straight to the pot', () => {
+  it('sweeps the line and deals the flop from its street phase’s own beats; a call that closed the street goes straight to the pot', () => {
     const before = sceneOf(table({ decisions: [['you', 'call']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 20 }), seat('ada', 2, { wager: 20 }), seat('cy', 3, { folded: true })] } }));
-    const flop = table({ serverTime: 14_000, phases: [deal(0), phase('street', 14_050, 'flop')], decisions: [['you', 'call'], ['ada', 'check']], state: { board: ['2c', '7d', 'Jh'], street: 'flop', participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } });
+    const inputs = { swept: ['you', 'ada'], cardCount: 3 };
+    const flop = table({ serverTime: 14_000, phases: [deal(0), street(14_050, 'flop', inputs)], decisions: [['you', 'call'], ['ada', 'check']], state: { board: ['2c', '7d', 'Jh'], street: 'flop', participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } });
+    // The sweep is the street reveal's first beat, so the burn waits for it: there is no sweep of its own.
     expect(planMotion(before, flop)).toEqual([
       { kind: 'check', participantId: 'ada', at: 14_000 },
-      { kind: 'sweep', participantIds: ['you', 'ada'], at: 14_000 },
-      { kind: 'board', from: 0, to: 3, swept: 2, at: 14_050 },
+      { kind: 'board', from: 0, to: 3, beats: streetBeats(inputs), at: 14_050 },
     ]);
     const closing = sceneOf(table({ decisions: [['you', 'call']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 20 }), seat('ada', 2, { wager: 40 }), seat('cy', 3, { folded: true })] } }));
     expect(planMotion(closing, table({ decisions: [['you', 'call'], ['ada', 'call']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } })))
       .toContainEqual(expect.objectContaining({ kind: 'bet', participantId: 'ada', toPot: true }));
   });
+  it('gives a viewer with no earlier view the identical street reveal, and fits its beats to the phase when its length differs', () => {
+    const inputs = { swept: ['you', 'ada'], cardCount: 3 }, natural = streetBeats(inputs).totalMs;
+    const state = { board: ['2c', '7d', 'Jh'], street: 'flop' as const, participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] };
+    const before = sceneOf(table({ state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 20 }), seat('ada', 2, { wager: 20 }), seat('cy', 3, { folded: true })] } }));
+    const flop = table({ serverTime: 14_500, phases: [street(14_000, 'flop', inputs)], state });
+    expect(planMotion(undefined, flop)).toEqual(planMotion(before, flop).filter(c => c.kind === 'board'));
+    expect(planMotion(undefined, flop)).toHaveLength(1);
+    const [cue] = planMotion(undefined, table({ phases: [street(14_000, 'flop', inputs, natural * 1.5)], state }));
+    if (cue?.kind !== 'board') throw new Error('No board cue.');
+    expect(cue.beats).toEqual(streetBeats(inputs, natural * 1.5));
+    expect(cue.beats.totalMs).toBe(natural * 1.5);
+  });
+  it('sweeps the line from the view that carried it when no phase presents the sweep: a Hand won by folds', () => {
+    const before = sceneOf(table({ state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10 }), seat('ada', 2, { wager: 60 }), seat('cy', 3, { folded: true })] } }));
+    const won = table({ serverTime: 15_000, decisions: [['you', 'fold']], phases: [payout(15_000, { awards: [{ participantId: 'ada', won: 70, returned: 0 }] }, undefined, 'preflop')], state: { status: 'completed-hand', payouts: [{ participantId: 'ada', amount: 70 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'], folded: true, stack: 990 }), seat('ada', 2, { stack: 1070 }), seat('cy', 3, { folded: true })] } });
+    expect(planMotion(before, won)).toContainEqual({ kind: 'sweep', participantIds: ['you', 'ada'], at: 15_000 });
+  });
   it('sweeps the last street’s bets once betting is over, before the hands are turned up', () => {
     const river = sceneOf(table({ decisions: [['you', 'bet']], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 100 }), seat('ada', 2), seat('cy', 3, { folded: true })] } }));
     // The view keeps the wagers; the showdown phase says the betting is over.
-    const called = table({ serverTime: 30_000, phases: [phase('showdown', 30_000, 'river')], decisions: [['you', 'bet'], ['ada', 'call']], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 100 }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], wager: 100 }), seat('cy', 3, { folded: true })] } });
+    const inputs = { swept: ['you'], shown: heads('you', 'ada') };
+    const called = table({ serverTime: 30_000, phases: [showdown(30_000, inputs)], decisions: [['you', 'bet'], ['ada', 'call']], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 100 }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], wager: 100 }), seat('cy', 3, { folded: true })] } });
     expect(planMotion(river, called)).toEqual([
       { kind: 'bet', participantId: 'ada', toPot: true, at: 30_000 },
-      { kind: 'sweep', participantIds: ['you'], at: 30_000 },
-      { kind: 'showdown', participantIds: ['ada'], swept: 1, at: 30_000 },
+      { kind: 'showdown', beats: showdownBeats(inputs), viewerId: 'you', at: 30_000 },
     ]);
+    // A viewer with no earlier view plans the identical showdown, fitted to the phase when its length differs.
+    expect(planMotion(undefined, called)).toEqual([{ kind: 'showdown', beats: showdownBeats(inputs), viewerId: 'you', at: 30_000 }]);
+    const longer = table({ phases: [showdown(30_000, inputs, 'river', 3000)], state: called.view.state });
+    expect(planMotion(undefined, longer)).toEqual([{ kind: 'showdown', beats: showdownBeats(inputs, 3000), viewerId: 'you', at: 30_000 }]);
   });
   it('presents each street of a runout from its own phase', () => {
     const flop = sceneOf(table({ state: { board: ['2c', '7d', 'Jh'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3)] } }));
-    const river = table({ phases: [phase('street', 20_000, 'turn'), phase('street', 21_000, 'river')], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3)] } });
-    expect(planMotion(flop, river).filter(c => c.kind === 'board')).toEqual([{ kind: 'board', from: 3, to: 4, swept: 0, at: 20_000 }, { kind: 'board', from: 4, to: 5, swept: 0, at: 21_000 }]);
+    const card = { swept: [], cardCount: 1 };
+    const river = table({ phases: [street(20_000, 'turn', card), street(21_000, 'river', card, 1200)], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3)] } });
+    expect(planMotion(flop, river).filter(c => c.kind === 'board')).toEqual([{ kind: 'board', from: 3, to: 4, beats: streetBeats(card), at: 20_000 }, { kind: 'board', from: 4, to: 5, beats: streetBeats(card, 1200), at: 21_000 }]);
   });
   it('turns hands up from the showdown phase, then pushes the pot to the winner from the payout phase', () => {
     const river = sceneOf(table({ state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } }));
-    const shown = table({ phases: [phase('showdown', 30_000, 'river')], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'] }), seat('cy', 3, { folded: true })] } });
-    expect(planMotion(river, shown)).toEqual([{ kind: 'showdown', participantIds: ['ada'], swept: 0, at: 30_000 }]);
-    const paid = table({ phases: [phase('showdown', 30_000, 'river'), payout(32_000, adaWins)], state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
+    const inputs = { swept: [], shown: heads('you', 'ada') };
+    const shown = table({ phases: [showdown(30_000, inputs)], state: { board: ['2c', '7d', 'Jh', '9s', 'Qs'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'] }), seat('cy', 3, { folded: true })] } });
+    expect(planMotion(river, shown)).toEqual([{ kind: 'showdown', beats: showdownBeats(inputs), viewerId: 'you', at: 30_000 }]);
+    const paid = table({ phases: [showdown(30_000, inputs), payout(32_000, adaWins)], state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
     expect(planMotion(sceneOf(shown), paid)).toEqual([{ kind: 'payout', beats: payoutBeats(adaWins), at: 32_000 }]);
   });
   describe('the payout', () => {
@@ -162,8 +191,9 @@ describe('a Hand is dealt and played', () => {
   it('plays nothing during a Settle: each motion starts with the phase that presents it, and the stillness after it has none', () => {
     const flop = sceneOf(table({ state: { board: ['2c', '7d', 'Jh'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } }));
     // An all-in runout: the showdown, the turn, the river and the payout, each followed by its Settle.
-    const phases = [phase('showdown', 30_000, 'flop'), phase('settle', 31_000, 'flop'), phase('street', 32_000, 'turn'), phase('settle', 33_000, 'turn'),
-      phase('street', 34_000, 'river'), phase('settle', 35_000, 'river'), payout(36_000, adaWins), phase('settle', 37_000, 'river')];
+    const card = { swept: [], cardCount: 1 };
+    const phases = [showdown(30_000, { swept: [], shown: heads('you', 'ada') }, 'flop', 1000), phase('settle', 31_000, 'flop'), street(32_000, 'turn', card, 1000), phase('settle', 33_000, 'turn'),
+      street(34_000, 'river', card, 1000), phase('settle', 35_000, 'river'), payout(36_000, adaWins), phase('settle', 37_000, 'river')];
     const done = table({ phases, state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
     const cues = planMotion(flop, done);
     expect(cues.map(cue => [cue.kind, cue.at]).sort((a, b) => Number(a[1]) - Number(b[1]))).toEqual([['showdown', 30_000], ['board', 32_000], ['board', 34_000], ['payout', 36_000]]);

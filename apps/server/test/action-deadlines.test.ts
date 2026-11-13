@@ -7,7 +7,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { lengthOf, presentedFor, settleOf } from './fixtures/phases.js';
+import { lengthOf, presentedFor, presentedStreetFor, settleOf } from './fixtures/phases.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -82,7 +82,7 @@ test('under an Action Time Limit each human Action Window opens when the Settle 
   await accepted(t, bot, { type: 'check' });
   // The flop's window opens when the Settle after its street reveal ends.
   const flopAt = clock.now();
-  expect((await read(t)).schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-3', opensAt: flopAt + lengthOf('street') + settleOf('street') });
+  expect((await read(t)).schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-3', opensAt: flopAt + presentedStreetFor(2) });
 
   const untimed = await headsUp(null);
   await command(untimed.t, 'start-hand');
@@ -129,7 +129,8 @@ test('every later decision the human misses in the Hand times out too, Check whe
   await accepted(t, bot, { type: 'check' });
   // On each street the Bot checks first, then the human lets the deadline pass.
   for (const street of ['flop', 'turn', 'river']) {
-    clock.advance(presentedFor('street'));
+    // The flop sweeps both preflop wagers: no street reveal takes longer here.
+    clock.advance(presentedStreetFor(2));
     await accepted(t, bot, { type: 'check' });
     const waiting = await read(t);
     expect(waiting.view.state).toMatchObject({ street, actorId: human });
@@ -153,7 +154,7 @@ test('an Action Deadline that expired during an outage resolves after restart as
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   await accepted(t, human, { type: 'call' });
   await accepted(t, bot, { type: 'check' });
-  clock.advance(presentedFor('street'));
+  clock.advance(presentedStreetFor(2));
   await accepted(t, bot, { type: 'check' });
   const waiting = await read(t);
   expect(waiting.view.state).toMatchObject({ street: 'flop', actorId: human });

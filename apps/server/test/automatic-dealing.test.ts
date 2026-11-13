@@ -6,7 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { handEndsAt, lengthOf, presentedFor, settleOf } from './fixtures/phases.js';
+import { handEndsAt, lengthOf, presentedFor, settleOf, windowOpensAt } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -271,7 +271,7 @@ test('every Online Table enforces its Action Time Limit: a missed deadline plays
   expect({ status: late.status, code: (await late.json()).rejection?.code }).toEqual({ status: 409, code: 'action-deadline-passed' });
   // On every later street Ben acts first and times out again, and Ann checks behind.
   for (const street of ['flop', 'turn', 'river']) {
-    clock.advance(presentedFor('street', 'online'));
+    clock.advanceTo(windowOpensAt(await t.view()));
     const next = await t.view();
     expect(next.view.state).toMatchObject({ street, actorId: ben.participantId });
     clock.advanceTo(next.schedule.actionWindow!.deadlineAt! + 1);
@@ -321,7 +321,7 @@ test('a human who disconnects mid-Hand stays in it under a running deadline, rec
   // Rex, the big blind, checks; the Hand runs to a showdown without Ben, and the next Hand deals all four.
   await act(t, cookieOf, { type: 'check' });
   for (let street = 0; street < 3; street++) {
-    clock.advance(presentedFor('street', 'online'));
+    clock.advanceTo(windowOpensAt(await t.view()));
     await act(t, cookieOf, { type: 'check' });
     await act(t, cookieOf, { type: 'check' });
   }
