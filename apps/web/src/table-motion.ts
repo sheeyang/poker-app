@@ -1,4 +1,4 @@
-import type { ObservableTableSession, PresentationPhaseKind, Street } from '@poker/contracts';
+import { payoutMotion, type ObservableTableSession, type PresentationPhaseKind, type Street } from '@poker/contracts';
 import { connectionOf } from './online-status.js';
 
 /**
@@ -198,9 +198,6 @@ function awardsOf(table: ObservableTableSession) {
   return [...total].filter(([, amount]) => amount > 0).sort(([a], [b]) => seatOf(a) - seatOf(b)).map(([participantId, amount]) => ({ participantId, amount }));
 }
 
-/** How long after the payout phase starts each award's chips land on the winner's stack: the first, then a stagger. */
-export const PAYOUT_LANDS = 710, PAYOUT_STAGGER = 60;
-
 /**
  * The stack figures a payout has not reached yet at server time `serverNow`: each winner keeps showing their old stack
  * until the chips pushed to them land, then the new total at once. Keyed by Participant.
@@ -210,7 +207,7 @@ export function heldStacks(table: ObservableTableSession, serverNow: number): Ma
   const start = phaseStart(table, 'payout');
   if (start === undefined || table.view.state.status !== 'completed-hand') return held;
   awardsOf(table).forEach(({ participantId, amount }, i) => {
-    const until = start + PAYOUT_LANDS + i * PAYOUT_STAGGER;
+    const until = start + payoutMotion.firstLands + i * payoutMotion.stagger;
     const stack = table.view.state.participants.find(p => p.participantId === participantId)?.stack;
     if (serverNow < until && stack !== undefined) held.set(participantId, { value: stack - amount, until });
   });

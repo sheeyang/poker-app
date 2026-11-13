@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: accepted (the client-written motion lengths are superseded by ADR-0039)
 ---
 
 # Time Table Motion from the Server Clock, with No Motion Preference
+
+**Note:** The Trainer no longer writes its own motion lengths. They come from the shared presentation timing, and Presentation Phase lengths are derived from the same choreography: see [ADR-0039](0039-derive-presentation-phase-lengths-from-shared-choreography.md) (spec #68). The other decisions here stand.
 
 M4 reveals each step of a Hand at its Presentation Phase's start, without motion, and the Trainer played its few animations (dealing, the burn) when a live update arrived. That breaks for all-in runouts and reconnects: a settled runout arrives in one update, and a viewer who reconnects would replay whatever the update carries. M5 adds card, chip, reveal and payout motion on top of M4's shared phase contract and participant-safe views. The motion was chosen from a prototype of four groups with three or more variants each.
 

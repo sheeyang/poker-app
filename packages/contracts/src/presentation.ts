@@ -1,0 +1,115 @@
+import type { PresentationPhaseKind } from './index.js';
+
+/**
+ * Presentation timing, shared by the server and the Trainer (ADR-0039). The server schedules Presentation Phases and
+ * the Next-Hand Countdown from it; the Trainer times the table's motion from it. Every value is in milliseconds.
+ * Overlays (menus, dialogs, notices, the analysis panel) are not table events and keep their own timings in the web app.
+ *
+ * Motion offsets are from the moment the motion presents: a phase's start, or the view that carried it.
+ */
+
+/** Each Presentation Phase's length, by kind. */
+export const presentationPhaseDurations: Readonly<Record<PresentationPhaseKind, number>> = Object.freeze({ deal: 1500, street: 1000, showdown: 2000, payout: 2000, pause: 3000 });
+
+/** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
+export const nextHandCountdownMs = 5000;
+
+/** Chips on the betting line: a wager going in, and the line swept to the pot. */
+export const wagerMotion = Object.freeze({
+  /** A chip's flight from the seat to the betting line. */
+  chipFlight: 300,
+  /** When the wager's amount appears, just before its chip lands. */
+  amountAppears: 290,
+  /** A swept chip's flight to the pot, and the gap between one wager's chip and the next. */
+  sweepFlight: 280, sweepStagger: 40,
+  /** A swept wager's amount fading as its chip leaves. */
+  sweepAmountFade: 140,
+  /** The pot brightening once the chips reach it, after the sweep starts (plus one stagger per wager). */
+  potAfterSweep: 260, potBrightens: 160,
+  /** The room a sweep of n wagers takes before what follows it: `sweptBase + n × sweepStagger`, or 0 with none. */
+  sweptBase: 320,
+});
+
+const refillLands = 480;
+
+/** The deal: the last Hand's cards back to the deck, the button on, the blinds in, and the cards out in dealing order. */
+export const dealMotion = Object.freeze({
+  /** Each of the last Hand's cards returning to the deck, one after another. */
+  returnFlight: 360, returnStagger: 18,
+  buttonMoves: 520,
+  /** The gap between one blind going in and the next. */
+  blindStagger: 80,
+  /** When a card's real face appears, before its flight ends. */
+  cardAppearsBefore: 10,
+  /** Your own cards turning face up, after landing. */
+  turnAfterLanding: 20, turn: 260,
+  /**
+   * When the blinds and the first card go in; the room the cards share, and the most between two of them, so the
+   * spacing tightens past twelve cards; and each card's flight.
+   */
+  plain: Object.freeze({ blinds: 0, cards: 220, room: 900, most: 75, flight: 340 }),
+  /** The same after a refill that came with the deal: the chips land first, and the Hand is dealt a little faster. */
+  afterRefill: Object.freeze({ blinds: refillLands + 20, cards: refillLands + 160, room: 520, most: 55, flight: 300 }),
+  /** When a refill that came with the deal lands, before the blinds go in: the refill's chips fly in for this long. */
+  refillLands,
+});
+
+/** A street reveal: the line swept, the burn, then the board cards (the flop as one stack that spreads). */
+export const streetMotion = Object.freeze({
+  /** The burn's earliest start, and how far it may overlap the end of a sweep. */
+  burnEarliest: 160, burnOverlapsSweep: 40,
+  burnFlight: 200,
+  /** When the burn pile's first card appears, after its burn sets off. */
+  burnPileAppears: 190,
+  /** When the board cards leave the deck, after the burn sets off. */
+  boardAfterBurn: 200,
+  /** The flop: its stack's flight, when its cards appear, their spread, and their turns one after another. */
+  flopFlight: 220, flopAppears: 215, flopSpreadsAt: 220, flopSpread: 180, flopTurnsAt: 240, flopTurnStagger: 40, flopTurn: 240,
+  /** The turn and the river: the card's flight, when it appears, and its turn. */
+  cardFlight: 260, cardAppears: 255, cardTurnsAt: 270, cardTurn: 260,
+});
+
+/** The showdown: the line swept, then each hand turned up, card by card. */
+export const showdownMotion = Object.freeze({
+  /** When the first card turns, after the sweep's room; the gap to the second card; and each turn. */
+  turnsAfterSweep: 150, cardStagger: 120, turn: 380,
+});
+
+/** The payout: the pot pushed onto each winner's stack in turn. */
+export const payoutMotion = Object.freeze({
+  /** The pot dimming and brightening as it is pushed. */
+  potAt: 150, potPulse: 700,
+  /** When the first award lands on its winner's stack, and the gap to each next award. */
+  firstLands: 710, stagger: 60,
+  /** Each award's push from the pot, ending as it lands. */
+  push: 560,
+  /** The pushed chips fading into the stack once they land. */
+  landFade: 160,
+  /** The winner's caption appearing, from just before the chips land. */
+  captionBeforeLanding: 20, caption: 160,
+});
+
+/** Table motion with no Presentation Phase: it is timed from the view that carried it and never gates play. */
+export const tableMotion = Object.freeze({
+  /** A bet straight into the pot (when there is no betting line to land on). */
+  betToPot: 340,
+  /** An acting seat's caption appearing. */
+  caption: 150,
+  /** A folded hand mucked to the middle of the table, card after card. */
+  muckFlight: 340, muckStagger: 40,
+  check: 240,
+  /** When the line is swept outside a street reveal or a showdown. */
+  sweepAt: 120,
+  /** A seat settling in place. */
+  seatArrives: 240,
+  /** A Participant sitting down: the empty seat fading, then the seat arriving. */
+  sitFade: 140, sitArrivesAt: 80,
+  /** A Participant standing up or moving: the seat they left fading and shrinking, then the seats arriving. */
+  leaveFade: 200, leaveArrivesAt: 140, moveVacatedArrivesAt: 200,
+  /** Chips added to a stack: their flight in from the table's edge, the floating amount, and the figure's roll. */
+  chipsFlight: 560, chipsLabel: 1100, stackRoll: 700,
+  /** The viewer's own seat change: the old seats fading, the new ones arriving, and the label naming the seat. */
+  seatChangeFade: 160, seatChangeArrivesAt: 120, seatChangeArrives: 220, seatChangeLabel: 1600,
+  /** A seat's status changing: its caption and connection label. */
+  status: 180,
+});

@@ -1,15 +1,12 @@
-import type { ActionWindow, DecisionId, ParticipantId, PresentationPhase, PresentationPhaseKind, ServerTime, Street, TableSchedule } from '@poker/contracts';
+import { nextHandCountdownMs, presentationPhaseDurations, type ActionWindow, type DecisionId, type ParticipantId, type PresentationPhase, type PresentationPhaseKind, type ServerTime, type Street, type TableSchedule } from '@poker/contracts';
 import type { CashGameEvent } from '@poker/engine';
 
 /**
  * Server-owned play timing (ADR-0032). Pure: callers supply the transition's events, the decision
  * current after it, and the time from the injected clock. The resulting schedule is persisted with
- * the commit that produced it; nothing here is a poker command.
+ * the commit that produced it; nothing here is a poker command. Phase and countdown lengths come from the shared
+ * presentation timing (ADR-0039).
  */
-export const presentationDurations: Readonly<Record<PresentationPhaseKind, number>> = Object.freeze({ deal: 1500, street: 1000, showdown: 2000, payout: 2000, pause: 3000 });
-
-/** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
-export const nextHandCountdownMs = 5000;
 
 export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freeze([]), actionWindow: null });
 
@@ -40,7 +37,7 @@ export function scheduleTransition(previous: TableSchedule, events: readonly Cas
   // The Hand is on the street of its latest phase; a showdown and a payout present the street the Hand reached.
   let street: Street = phases.at(-1)?.street ?? 'preflop';
   const add = (kind: PresentationPhaseKind, handId: string) => {
-    const durationMs = presentationDurations[kind];
+    const durationMs = presentationPhaseDurations[kind];
     phases.push({ kind, handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
     cursor += durationMs;
   };

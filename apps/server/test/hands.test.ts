@@ -2,9 +2,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy } from '@poker/contracts';
+import { baselinePlayingStrategy, presentationPhaseDurations } from '@poker/contracts';
 import { createServer } from '../src/server.js';
-import { presentationDurations } from '../src/schedule.js';
 import { InstantClock } from './fixtures/clock.js';
 
 // Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
@@ -95,7 +94,7 @@ test('Start Hand and Fold withhold every consequence until COMMIT and use the sa
   await entered.promise;
   // Let the held Deal's presentation end by the clock, so the Fold is inside its Action Window whenever the server
   // stamps its arrival and only the FIFO decides its fate. presentation-phases.test.ts covers acting too early.
-  clock.advance(presentationDurations.deal);
+  clock.advance(presentationPhaseDurations.deal);
   let folding: Promise<Response>;
   try {
     const waiting = await read(t);

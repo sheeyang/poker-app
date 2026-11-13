@@ -579,3 +579,5 @@ export type HandScoreSummary = ScoreSummary & { readonly scope: 'hand'; readonly
 export type TableSessionScoreSummary = ScoreSummary & { readonly scope: 'table-session' };
 
 export interface ScoreAverages { readonly decisionScore: number; readonly actionRankScore: number }
+
+export * from './presentation.js';
