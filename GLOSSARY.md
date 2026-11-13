@@ -125,7 +125,7 @@ A Leave Table imposed by the Table Owner. The Guest may join again like any othe
 _Avoid_: Ban, kick
 
 **After-Hand Request**:
-A change to a Participant asked for during a Hand (a human's Sitting Out, Stand Up, Leave Table or Removal, or the Table Owner's Sitting Out or removal of a Bot) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
+A change to a Participant asked for during a Hand (a human's Sitting Out, Stand Up, Leave Table or Removal, or the Table Owner's Sitting Out or removal of a Bot) that is recorded and applied for everyone together when the Hand ends, with the Settle after its payout. Everyone at the table can see it pending.
 _Avoid_: Queued action, deferred command
 
 **Sitting Out**:
@@ -139,8 +139,12 @@ _Avoid_: Active player, ready participant
 ## Play Timing
 
 **Presentation Phase**:
-A server-timed interval in which no Participant may act, such as the deal, a street reveal, showdown, payout, or the pause between Hands. It ends by server time, never by animation completion.
+A server-timed interval in which no Participant may act: the deal, a street reveal, the showdown or the payout, each followed by its Settle. It ends by server time, never by animation completion.
 _Avoid_: Animation, presentation window
+
+**Settle**:
+The Presentation Phase after every deal, street reveal, showdown and payout, in which the table is still: nothing moves and nobody may act. Its length is a shared constant chosen by the phase it follows and, after the payout, by table mode; it may be 0. A Hand ends when the Settle after its payout ends.
+_Avoid_: Pause, pause between Hands, delay, cooldown
 
 **Action Window**:
 The server-opened interval in which exactly one Participant may act on their current decision. It opens only after any preceding Presentation Phase ends.

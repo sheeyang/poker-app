@@ -88,8 +88,8 @@ All table paths below start with `/api/table-sessions`:
 | `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. When the Table Owner's Leave Table takes effect, ownership passes or the table closes in the same transition, see [Ownership](#ownership). Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
-| `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until its payout phase ends. They are never deferred. |
-| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the payout phase ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list. |
+| `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until the Settle after its payout ends. They are never deferred. |
+| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the Hand ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list. |
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
 | `POST /:id/set-table-password` | Table Owner only, Online Tables only, at any time, even during a Hand. Requires `requestId` and `tablePassword`, a string to set or change the password or `null` to remove it; there is no expected revision. See [Table Password](#table-password). |
@@ -97,7 +97,7 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
-| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand's payout phase has ended (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
+| `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand has ended, with the Settle after its payout (409 `payout-phase-not-ended` before), see [Play timing](#play-timing). |
 | `POST /:id/retry-bot` | Table Owner only, at Practice Tables only: an Online Table retries a failed Bot decision itself, so the owner receives 403 `unavailable-at-online-tables` there. |
 | `GET /:id/live` | Earlier table-specific WebSocket endpoint, retained for existing transport consumers. |
 
@@ -198,18 +198,22 @@ Each accepted transition schedules its Presentation Phases
 ([`schedule.ts`](../apps/server/src/schedule.ts)), in the order of the
 transition's events: a 1.5 s `deal` phase when a Hand starts, a 2 s `showdown`
 phase when the remaining hands are turned up, a 1 s `street` phase for each
-street dealt, and a 2 s `payout` phase when the Hand completes. At an Online
-Table a 3 s `pause` phase, the pause between Hands of Automatic Dealing, follows
-the payout. An all-in runout
+street dealt, and a 2 s `payout` phase when the Hand completes. Each of these is
+followed by a `settle` phase, the Settle, in which nothing moves and nobody may act:
+0.3 s after the deal and after each street, 1.2 s after the showdown, and after the
+payout 0.6 s at a Practice Table and 3 s at an Online Table. The lengths are shared
+constants (`settleLengths` in contracts' presentation module), and a Settle of 0 is
+not scheduled. An all-in runout
 is one accepted action, so it schedules the showdown, then every remaining
-street, then the payout (and, online, the pause); a river showdown schedules the
+street, then the payout, each with its Settle; a river showdown schedules the
 showdown and the payout; a Hand won by folds has only the payout. For the showdown and the
-payout, `street` is the street the Hand had reached. Each phase starts when the
+payout, `street` is the street the Hand had reached, and a Settle's is that of the phase it follows. Each phase starts when the
 previous one ends, or at the commit. The schedule is persisted in the Persisted
 Table Session in the same transaction as that commit; phases are never poker
 commands. It holds the current Hand's phases (`kind`, `handId`, `street`,
 `startsAt`, `endsAt`, `durationMs`) and the current decision's `actionWindow`
-(`participantId`, `decisionId`, `opensAt`), which opens when the last phase ends.
+(`participantId`, `decisionId`, `opensAt`), which opens when the last phase, a Settle, ends.
+A Hand ends when its last phase, the Settle after its payout, ends.
 Every complete view and `table-update` carries this `schedule` and the
 `serverTime` at which it was produced, in milliseconds since the Unix epoch.
 Once no betting decision remains, the view and update that arrive already hold
@@ -217,20 +221,20 @@ the complete result; the schedule says when each step of it is presented.
 
 An `act` for the window's Participant received before `opensAt` is rejected with
 409 `action-window-not-open`; a human request is judged by the time the server
-received it. A `start-hand` (Deal) received before the latest Hand's payout phase
-ends is rejected with 409 `payout-phase-not-ended`, and accepted from that
+received it. A `start-hand` (Deal) received before the latest Hand has ended
+is rejected with 409 `payout-phase-not-ended`, and accepted from that
 instant. At a Practice Table Deal also ends the dealing human's voluntary
 sit-out, as `set-sitting-out` then `start-hand` in one commit (one revision
 step); if the Hand cannot start, neither takes effect. A Bot's decision is
 requested only once its window opens: the server wakes the table at `opensAt`
-and at the end of the payout phase, including after a restart, which restores
+and at the end of the Hand, including after a restart, which restores
 the persisted schedule unchanged. A table written before scheduled play restores
 its current decision with a window open since time 0, and has no payout phase to
 wait for.
 
 Under the table's Action Time Limit (optional at a Practice Table, always present
 at an Online Table), each human Action Window also carries its Action Deadline,
-`deadlineAt` = `opensAt` plus the limit. Bot windows never have one. A human `act` that the
+`deadlineAt` = `opensAt` plus the limit, so it is measured from the end of the Settle. Bot windows never have one. A human `act` that the
 server receives after `deadlineAt` is rejected with 409 `action-deadline-passed`,
 both while the Timeout Action is still due and after it has applied (a late act
 that expected the timed-out decision's revision); one received at `deadlineAt` is
@@ -247,7 +251,7 @@ decisions the human misses in that Hand time out too. At a Practice Table the
 human is never sat out, and the next Hand waits for their Deal. At an Online
 Table the commit of each server-played Timeout Action also records a `sit-out`
 after-Hand request for its Participant (see below), so they are sat out once
-the Hand's payout phase ends, connected or not; resuming is their own
+the Hand ends, connected or not; resuming is their own
 `set-sitting-out` to `false`. A deadline that expired while the server was down
 plays its Timeout Action at startup, before any request is served: a table with an
 Action Deadline is always loaded at startup, and resolves it exactly once.
@@ -267,7 +271,7 @@ Table keeps the option it was created with (on unless the creation request turne
 
 ### After-Hand requests
 
-A Hand lasts until its payout phase ends, not until its last decision. During it
+A Hand lasts until the Settle after its payout ends, not until its last decision. During it
 ([`after-hand.ts`](../apps/server/src/after-hand.ts)), a human's own `set-sitting-out`
 (to `true`), `stand-up-participant` and `leave-table` (when seated) are not applied:
 they are recorded in the Persisted Table Session as `pendingChanges`, one
@@ -284,18 +288,18 @@ is deferred the same way for two requests: `set-sitting-out` (to `true`) and
 Every other management during a Hand is refused (`active-hand`), and so are moves,
 top-ups, Stand Up and resuming.
 
-When the latest Hand's payout phase ends, the server applies every pending change in
+When the latest Hand ends, the server applies every pending change in
 one committed transition: all the engine commands (Stand Up, sitting out, Leave Table)
 and the cleared list commit together, as one poker revision step and one session
 revision step, and a Leave Table also marks the binding `left`, which the membership
 index follows in the same transaction. The step runs from the table's wake-up at the
-end of the payout phase (including after a restart, for a Hand that ended during the
+end of the Hand (including after a restart, for a Hand that ended during the
 outage) and at the start of every human request, so a Deal can never be accepted
 ahead of it. A Deal that arrives before the wake-up still finds the changes applied,
 and names a poker revision they have made stale (409 `stale-poker-revision`). The
 transition's request ID is derived from the session revision (`after-hand:<n>`), so
-it applies once however often it is retried. The pause between Hands of Automatic
-Dealing begins after this transition.
+it applies once however often it is retried. At an Online Table Automatic Dealing
+announces the next Next-Hand Countdown after this transition.
 
 Removal is the strongest pending change (`sit-out` < `stand-up` < `leave-table` <
 `remove`): a Guest's own later request to leave or stand up is acknowledged and changes
@@ -367,7 +371,7 @@ mode. None of this gives the owner any control over, or sight of, another human.
   `allowLiveAnalysis` and `allowSeatChanges` (booleans). Anything else is 400
   `invalid-table-options`. Owner only (403 `table-owner-required`); 403
   `unavailable-at-practice-tables` at a Practice Table, which keeps the options it was
-  created with; 400 `active-hand` while a Hand is played or its payout phase shown. An option
+  created with; 400 `active-hand` while a Hand is played or its payout and the Settle after it shown. An option
   set to its current value is acknowledged without a commit. `allowSeatChanges` is the one
   option CashGame owns: it runs the `set-seat-changes` command in the same transaction (one
   poker revision step, `seat-changes-changed` in the live update's `presentationEvents`), so the
@@ -432,12 +436,12 @@ Participant is seated with chips, not sitting out, and either a Bot or a connect
 human. The table can deal while at least two Eligible Participants remain, at least
 one of them human.
 
-- **Announcing.** Between Hands, once the last Hand's payout phase and pause have
-  ended and its after-Hand requests are applied, the server announces a Next-Hand
+- **Announcing.** Between Hands, once the last Hand has ended (its payout and the
+  3 s Settle after it) and its after-Hand requests are applied, the server announces a Next-Hand
   Countdown if the table can deal: `schedule.nextHandCountdown` =
   `{ startsAt, endsAt, durationMs }`, 5 s. It is a committed schedule change (a
   session revision step, delivered as a complete `table-update`). Before the first
-  Hand there is no pause, so the countdown is announced as soon as the table can
+  Hand there is no Hand to end, so the countdown is announced as soon as the table can
   deal. Otherwise none is announced, and any later commit or connection change that
   lets the table deal announces one.
 - **Expiry.** When the countdown ends, eligibility is rechecked in one committed
@@ -477,8 +481,8 @@ Practice Tables keep explicit Retry and Playing Strategy recovery.
 
 The Trainer estimates the server clock from `serverTime` (the least-delayed of
 recent views), shows hole cards, each street, the opponents' hands at showdown
-and the result from their phase's start, enables Deal when the payout phase
-ends, and enables action controls only inside its own Action Window and before
+and the result from their phase's start, plays nothing during a Settle, enables
+Deal when the Hand ends, and enables action controls only inside its own Action Window and before
 its Action Deadline, whose countdown it shows to everyone. At an Online Table it
 also shows the Next-Hand Countdown (or why none is running), who is disconnected,
 pending sit-outs, a Return to play control and Bot failures. Elapsed phases are

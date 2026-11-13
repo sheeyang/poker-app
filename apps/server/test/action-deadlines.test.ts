@@ -7,6 +7,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { lengthOf, presentedFor, settleOf } from './fixtures/phases.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -68,18 +69,24 @@ async function headsUp(limit: ActionTimeLimitSeconds | null) {
   return { t, human, bot };
 }
 
-test('under an Action Time Limit each human Action Window carries an exact Action Deadline, and Bot windows have none', async () => {
+test('under an Action Time Limit each human Action Window opens when the Settle ends and carries an exact Action Deadline measured from then, and Bot windows have none', async () => {
   const { t, human, bot } = await headsUp(30);
-  const dealt = clock.now();
+  const dealt = clock.now(), settled = dealt + lengthOf('deal') + settleOf('deal');
   await command(t, 'start-hand');
-  expect((await read(t)).schedule.actionWindow).toEqual({ participantId: human, decisionId: 'hand-1/decision-1', opensAt: dealt + 1500, deadlineAt: dealt + 1500 + 30_000 });
-  clock.advance(1500);
+  const view = await read(t);
+  expect(view.schedule.phases.at(-1)).toMatchObject({ kind: 'settle', endsAt: settled });
+  expect(view.schedule.actionWindow).toEqual({ participantId: human, decisionId: 'hand-1/decision-1', opensAt: settled, deadlineAt: settled + 30_000 });
+  clock.advanceTo(settled);
   await accepted(t, human, { type: 'call' });
-  expect((await read(t)).schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-2', opensAt: dealt + 1500 });
+  expect((await read(t)).schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-2', opensAt: settled });
+  await accepted(t, bot, { type: 'check' });
+  // The flop's window opens when the Settle after its street reveal ends.
+  const flopAt = clock.now();
+  expect((await read(t)).schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-3', opensAt: flopAt + lengthOf('street') + settleOf('street') });
 
   const untimed = await headsUp(null);
   await command(untimed.t, 'start-hand');
-  expect((await read(untimed.t)).schedule.actionWindow).toEqual({ participantId: untimed.human, decisionId: 'hand-1/decision-1', opensAt: clock.now() + 1500 });
+  expect((await read(untimed.t)).schedule.actionWindow).toEqual({ participantId: untimed.human, decisionId: 'hand-1/decision-1', opensAt: clock.now() + presentedFor('deal') });
 });
 
 test('a Practice Table offers an Action Time Limit of 15, 30 or 60 seconds, or none', async () => {
@@ -117,12 +124,12 @@ test('an action the server receives at its Action Deadline is accepted and never
 
 test('every later decision the human misses in the Hand times out too, Check when legal; the human is not sat out and the table waits for Deal', async () => {
   const { t, human, bot } = await headsUp(15);
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   await accepted(t, human, { type: 'call' });
   await accepted(t, bot, { type: 'check' });
   // On each street the Bot checks first, then the human lets the deadline pass.
   for (const street of ['flop', 'turn', 'river']) {
-    clock.advance(1000);
+    clock.advance(presentedFor('street'));
     await accepted(t, bot, { type: 'check' });
     const waiting = await read(t);
     expect(waiting.view.state).toMatchObject({ street, actorId: human });
@@ -143,10 +150,10 @@ test('every later decision the human misses in the Hand times out too, Check whe
 
 test('an Action Deadline that expired during an outage resolves after restart as exactly one Timeout Action, before any further action', async () => {
   const { t, human, bot } = await headsUp(15);
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   await accepted(t, human, { type: 'call' });
   await accepted(t, bot, { type: 'check' });
-  clock.advance(1000);
+  clock.advance(presentedFor('street'));
   await accepted(t, bot, { type: 'check' });
   const waiting = await read(t);
   expect(waiting.view.state).toMatchObject({ street: 'flop', actorId: human });
@@ -251,7 +258,7 @@ test('an untimed Practice Hand left unattended waits for the human, and no later
 
 test('a timed Practice Hand with nobody connected finishes by Timeout Actions, and nothing more is dealt', async () => {
   const { t, human } = await headsUp(15);
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   const dealt = await read(t);
   // Nobody is connected: only time passes, and the server plays each missed decision for the human.
   for (let step = 0; step < 12 && (await read(t)).view.state.status === 'active-hand'; step++) {

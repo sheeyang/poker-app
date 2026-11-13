@@ -90,7 +90,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const presentation = usePresentation(current, humanId);
   const shown = presentation?.table;
   const handDecisions = analysis.acceptedDecisions.filter(d => d.handId === current?.view.state.handId);
-  const handOpen = current?.view.state.status === 'active-hand' || presentation?.payoutEnded === false;
+  const handOpen = current?.view.state.status === 'active-hand' || presentation?.handEnded === false;
   // At an Online Table: whose table it is, who is watching, and the ways in for a Guest without a Seat.
   const online = current?.mode === 'online';
   const owner = !!current && current.viewerParticipantId === current.ownerParticipantId;

@@ -1,4 +1,4 @@
-import type { PresentationPhaseKind } from './index.js';
+import type { PresentingPhaseKind, TableMode } from './index.js';
 
 /**
  * Presentation timing, shared by the server and the Trainer (ADR-0039). The server schedules Presentation Phases and
@@ -8,8 +8,26 @@ import type { PresentationPhaseKind } from './index.js';
  * Motion offsets are from the moment the motion presents: a phase's start, or the view that carried it.
  */
 
-/** Each Presentation Phase's length, by kind. */
-export const presentationPhaseDurations: Readonly<Record<PresentationPhaseKind, number>> = Object.freeze({ deal: 1500, street: 1000, showdown: 2000, payout: 2000, pause: 3000 });
+/** Each presenting Presentation Phase's length, by kind. */
+export const presentationPhaseDurations: Readonly<Record<PresentingPhaseKind, number>> = Object.freeze({ deal: 1500, street: 1000, showdown: 2000, payout: 2000 });
+
+/** The length of the Settle after each presenting phase, by the phase it follows; after the payout, by table mode too. */
+export interface SettleLengths {
+  readonly deal: number;
+  readonly street: number;
+  readonly showdown: number;
+  readonly payout: Readonly<Record<TableMode, number>>;
+}
+
+/**
+ * The Settle lengths: a moment to take in the deal or a street before acting, time to read the turned hands before the
+ * pot is pushed, and a moment to see the result before the next Hand can start. Each may be 0: a Settle of 0 is not
+ * scheduled, and what follows starts when the phase before it ends.
+ */
+export const settleLengths: SettleLengths = Object.freeze({ deal: 300, street: 300, showdown: 1200, payout: Object.freeze({ practice: 600, online: 3000 }) });
+
+/** The length of the Settle after a phase of `kind` at a table of `mode`. */
+export const settleAfter = (kind: PresentingPhaseKind, mode: TableMode, lengths: SettleLengths = settleLengths): number => kind === 'payout' ? lengths.payout[mode] : lengths[kind];
 
 /** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
 export const nextHandCountdownMs = 5000;

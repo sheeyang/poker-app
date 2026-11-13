@@ -60,7 +60,7 @@ export interface PersistedTableSession {
   /**
    * After-Hand requests: changes to a human Participant asked for during a Hand (`after-hand.ts`). At most one
    * per Participant, in the order first asked. The server applies them all in one committed transition when
-   * the Hand's payout phase ends, and clears them in the same transaction.
+   * the Hand ends (the Settle after its payout), and clears them in the same transaction.
    */
   readonly pendingChanges: readonly AfterHandRequest[];
   /**

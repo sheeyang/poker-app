@@ -6,6 +6,7 @@ import { createStrategy, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it.
@@ -103,14 +104,14 @@ async function dealt(t: Table, handId: string) {
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe(handId);
-  clock.advance(1500);
+  clock.advance(presentedFor('deal', 'online'));
   return t.view();
 }
-/** The acting human folds; then the payout phase and the pause between Hands pass, and the next countdown is announced. */
+/** The acting human folds; then the payout phase and its Settle pass, and the next countdown is announced. */
 async function foldHand(t: Table, cookieOf: (participantId: string) => string) {
   const actor = (await t.view()).view.state.actorId!;
   expect((await t.as(cookieOf(actor), 'act', { participantId: actor, action: { type: 'fold' } })).status).toBe(200);
-  clock.advance(5000);
+  clock.advance(presentedFor('payout', 'online'));
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
 }
 const updates = (connection: LiveConnection) => connection.messages.filter((message): message is ObservableTableUpdate => message.type === 'table-update');
@@ -142,18 +143,20 @@ test('Allow Live Analysis is an Online Table option, on by default and visible t
   expect(await (await t.options({ allowLiveAnalysis: false })).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: unchanged.pokerRevision, sessionRevision: unchanged.sessionRevision });
   expect(await t.view()).toEqual(unchanged);
 
-  // Not during a Hand, until its payout phase ends.
+  // Not during a Hand, until the Settle after its payout ends.
   await t.connect();
   expect((await t.as(t.ann, 'seat-participant', { participantId: t.annId, seat: 1 })).status).toBe(200);
   expect((await t.as(ben.cookie, 'seat-participant', { participantId: ben.participantId, seat: 2 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.status).toBe('active-hand');
   expect(await refusal(await t.options({ allowLiveAnalysis: true }))).toEqual({ status: 400, code: 'active-hand' });
-  clock.advance(1500);
+  clock.advance(presentedFor('deal', 'online'));
   const actor = (await t.view()).view.state.actorId!;
   expect((await t.as(actor === t.annId ? t.ann : ben.cookie, 'act', { participantId: actor, action: { type: 'fold' } })).status).toBe(200);
   expect(await refusal(await t.options({ allowLiveAnalysis: true }))).toEqual({ status: 400, code: 'active-hand' });
-  clock.advance(2000);
+  clock.advance(presentedFor('payout', 'online'));
+  // The Hand has ended, and the next Hand's countdown is announced at once.
+  await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
   expect((await t.options({ allowLiveAnalysis: true })).status).toBe(200);
   expect((await t.view(ben.cookie)).options.allowLiveAnalysis).toBe(true);
 
@@ -212,7 +215,7 @@ test('an Online Timeout Action is scored as the humanâ€™s own decision, in 
   expect(scored).toMatchObject({ participantId: actor, decisionId, scoredDecision: { acceptedAction: { type: 'fold' } } });
   await expect.poll(async () => (await t.result(cookieOf(actor), scored.requestId)).status).toBe('complete');
   expect(await t.result(cookieOf(actor), scored.requestId)).toMatchObject({ scores: { decisionScore: expect.any(Number), actionRankScore: expect.any(Number) } });
-  clock.advance(2000);
+  clock.advance(presentedFor('payout', 'online'));
   for (const [path, body] of [['hand-summaries', { handId: 'hand-1' }], ['session-summaries', {}]] as const) {
     const summary = await t.summary(cookieOf(actor), path, body);
     expect(summary).toMatchObject({ decisionIds: [decisionId], decisionCount: 1 });
@@ -245,8 +248,8 @@ test('held analysis never delays an action, an Action Deadline or the next deal'
   clock.advance(1);
   await expect.poll(async () => (await t.view()).view.state.status).toBe('completed-hand');
   expect((await t.view()).view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: first, action: { type: 'fold' } }, { participantId: second, action: { type: 'fold' } }]);
-  // The next Hand is announced after the payout and the pause, and dealt when its countdown runs out.
-  clock.advance(5000);
+  // The next Hand is announced after the payout and its Settle, and dealt when its countdown runs out.
+  clock.advance(presentedFor('payout', 'online'));
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
@@ -281,7 +284,7 @@ test('two humans in one Hand study privately, from what each observed at the dec
   // The showdown has since revealed each human's cards to the other, and a later Hand has been dealt.
   const shown = (await t.view(ben.cookie)).view.history[0]!.result!.participants.find(participant => participant.participantId === t.annId)!;
   expect(shown.holeCards).toHaveLength(2);
-  clock.advance(7000);
+  clock.advance(presentedFor('showdown', 'online') + presentedFor('payout', 'online'));
   await dealt(t, 'hand-2');
   const later = await t.view();
   expect((await t.as(cookieOf(later.view.state.actorId!), 'act', { participantId: later.view.state.actorId!, action: { type: 'fold' } })).status).toBe(200);

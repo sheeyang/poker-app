@@ -6,6 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 import { announcedCountdown, connectLive } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -60,7 +61,7 @@ async function practiceHand(actionTimeLimitSeconds: ActionTimeLimitSeconds | nul
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
   await command(t, 'start-hand');
-  clock.advance(1500);
+  clock.advance(presentedFor('deal'));
   return t;
 }
 /** An Online Table in play: its owner, connected, and the Bot are dealt a Hand, and the owner is to act. Then everyone disconnects. */
@@ -71,7 +72,7 @@ async function onlineHand() {
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
   clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(presentedFor('deal', 'online'));
   await live.close();
   return t;
 }
@@ -98,7 +99,7 @@ test('pending After-Hand Requests are not scheduled work at an untimed Practice 
   expect(loaded()).not.toContain(t.id);
   // The request waits in the record, and applies once the human finishes the Hand.
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
-  clock.advance(2000);
+  clock.advance(presentedFor('payout'));
   await expect.poll(async () => (await stored(t)).pendingChanges).toEqual([]);
 });
 
@@ -110,7 +111,7 @@ test('a Bot decision is scheduled work: an untimed Practice Hand loads at startu
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await stored(t)).pokerRevision, participantId: t.bot, action: { type: 'check' } })).toMatchObject({ ok: true });
   // Heads-up, the Bot in the big blind acts first after the flop too.
   expect((await read(t)).view.state).toMatchObject({ street: 'flop', actorId: t.bot });
-  clock.advance(1000);
+  clock.advance(presentedFor('street'));
   await restart();
   expect(loaded()).toContain(t.id);
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await stored(t)).pokerRevision, participantId: t.bot, action: { type: 'check' } })).toMatchObject({ ok: true });

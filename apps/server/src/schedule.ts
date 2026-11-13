@@ -1,4 +1,4 @@
-import { nextHandCountdownMs, presentationPhaseDurations, type ActionWindow, type DecisionId, type ParticipantId, type PresentationPhase, type PresentationPhaseKind, type ServerTime, type Street, type TableSchedule } from '@poker/contracts';
+import { nextHandCountdownMs, presentationPhaseDurations, settleAfter, settleLengths, type ActionWindow, type DecisionId, type ParticipantId, type PresentationPhase, type PresentingPhaseKind, type ServerTime, type SettleLengths, type Street, type TableMode, type TableSchedule } from '@poker/contracts';
 import type { CashGameEvent } from '@poker/engine';
 
 /**
@@ -19,6 +19,14 @@ export type CurrentDecision = { readonly participantId: ParticipantId; readonly 
 
 const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
 
+/** How a table's transitions are scheduled. */
+export interface ScheduleOptions {
+  /** The table's mode, which chooses the Settle after the payout; a Practice Table's when absent. */
+  readonly mode?: TableMode;
+  /** The Settle lengths: the shared ones unless given. */
+  readonly settleLengths?: SettleLengths;
+}
+
 /**
  * The schedule after an accepted transition. Each phase starts when the previous one ends (or now),
  * a new Hand replaces the previous Hand's phases, and the Action Window of a new decision opens when the
@@ -26,26 +34,33 @@ const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, p
  *
  * Phases follow the transition's events in order, so an all-in runout schedules the hole-card reveals
  * (showdown), then each remaining street, then the payout, all from one accepted action. A Hand won by
- * folds has no showdown. The payout phase is a Hand's last, except under Automatic Dealing
- * (`pauseBetweenHands`), where the pause between Hands follows it. A transition with Hand events always
- * ends any Next-Hand Countdown: the Hand it announced has started.
+ * folds has no showdown. Each presenting phase is followed by its Settle, whose length that phase and, after the
+ * payout, the table's mode choose; a Settle of 0 is not scheduled. The Settle after the payout is a Hand's last
+ * phase. A transition with Hand events always ends any Next-Hand Countdown: the Hand it announced has started.
  */
-export function scheduleTransition(previous: TableSchedule, events: readonly CashGameEvent[], decision: CurrentDecision, now: ServerTime, options: { readonly pauseBetweenHands?: boolean } = {}): TableSchedule {
+export function scheduleTransition(previous: TableSchedule, events: readonly CashGameEvent[], decision: CurrentDecision, now: ServerTime, options: ScheduleOptions = {}): TableSchedule {
   if (!events.some(event => 'handId' in event)) return previous;
   let phases = [...previous.phases];
   let cursor = Math.max(now, phaseEnd(phases));
   // The Hand is on the street of its latest phase; a showdown and a payout present the street the Hand reached.
   let street: Street = phases.at(-1)?.street ?? 'preflop';
-  const add = (kind: PresentationPhaseKind, handId: string) => {
+  const settle = (after: PresentingPhaseKind, handId: string) => {
+    const durationMs = settleAfter(after, options.mode ?? 'practice', options.settleLengths ?? settleLengths);
+    if (durationMs <= 0) return;
+    phases.push({ kind: 'settle', handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
+    cursor += durationMs;
+  };
+  const add = (kind: PresentingPhaseKind, handId: string) => {
     const durationMs = presentationPhaseDurations[kind];
     phases.push({ kind, handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
     cursor += durationMs;
+    settle(kind, handId);
   };
   for (const event of events) {
     if (event.type === 'hand-started') { phases = []; street = 'preflop'; add('deal', event.handId); }
     if (event.type === 'hole-cards-revealed' && !phases.some(phase => phase.kind === 'showdown' && phase.handId === event.handId)) add('showdown', event.handId);
     if (event.type === 'board-dealt') { street = event.street; add('street', event.handId); }
-    if (event.type === 'hand-completed') { add('payout', event.handId); if (options.pauseBetweenHands) add('pause', event.handId); }
+    if (event.type === 'hand-completed') add('payout', event.handId);
   }
   // A decision that stays current keeps its window, and so its Action Deadline and captured Allow Live Analysis.
   const kept = previous.actionWindow && decision && previous.actionWindow.decisionId === decision.decisionId ? previous.actionWindow : undefined;
@@ -73,26 +88,18 @@ export function pastActionDeadline(window: Pick<ActionWindow, 'participantId' | 
 const timeoutDueAt = (window: ActionWindow | null) => window?.deadlineAt === undefined ? undefined : window.deadlineAt + 1;
 
 /**
- * When the latest Hand's payout phase ends, or `undefined` when no Hand has been paid out. This instant
- * is the end of a Hand's presentation: Deal is accepted from it, and after-Hand work (requests applied
- * between Hands, the pause and countdown of Automatic Dealing) follows it.
+ * When the latest Hand ends, or `undefined` when no Hand has been paid out: when its last phase, the Settle after its
+ * payout, ends. Deal is accepted from this instant, after-Hand requests are applied at it, and Automatic Dealing
+ * announces the next Next-Hand Countdown from it.
  */
-export function payoutEndsAt(schedule: TableSchedule): ServerTime | undefined {
-  return schedule.phases.findLast(phase => phase.kind === 'payout')?.endsAt;
+export function handEndsAt(schedule: TableSchedule): ServerTime | undefined {
+  return schedule.phases.some(phase => phase.kind === 'payout') ? phaseEnd(schedule.phases) : undefined;
 }
 
-/** Whether a Deal at server time `at` arrives before the latest Hand's payout phase has ended. */
-export function beforePayoutEnd(schedule: TableSchedule, at: ServerTime): boolean {
-  const endsAt = payoutEndsAt(schedule);
+/** Whether a Deal at server time `at` arrives before the latest Hand has ended. */
+export function beforeHandEnd(schedule: TableSchedule, at: ServerTime): boolean {
+  const endsAt = handEndsAt(schedule);
   return endsAt !== undefined && at < endsAt;
-}
-
-/**
- * When the latest Hand's presentation ends, payout and any pause between Hands included, or `undefined` when no
- * Hand has been paid out. Automatic Dealing announces the next Next-Hand Countdown from this instant.
- */
-export function presentationEndsAt(schedule: TableSchedule): ServerTime | undefined {
-  return payoutEndsAt(schedule) === undefined ? undefined : phaseEnd(schedule.phases);
 }
 
 /** The schedule with a Next-Hand Countdown announced at `now`. */
@@ -107,11 +114,10 @@ export function withoutNextHand(schedule: TableSchedule): TableSchedule {
 
 /**
  * The next server time at which the table has scheduled work: its Action Window opening, the moment its Action
- * Deadline has passed, the end of the payout phase and of the pause between Hands, or the expiry of its
- * Next-Hand Countdown.
+ * Deadline has passed, the end of the Hand, or the expiry of its Next-Hand Countdown.
  */
 export function nextWakeAt(schedule: TableSchedule, now: ServerTime): ServerTime | undefined {
-  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), payoutEndsAt(schedule), presentationEndsAt(schedule), schedule.nextHandCountdown?.endsAt]
+  const instants = [schedule.actionWindow?.opensAt, timeoutDueAt(schedule.actionWindow), handEndsAt(schedule), schedule.nextHandCountdown?.endsAt]
     .filter((at): at is ServerTime => at !== undefined && at > now);
   return instants.length ? Math.min(...instants) : undefined;
 }

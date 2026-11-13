@@ -100,6 +100,15 @@ describe('a Hand is dealt and played', () => {
     const paid = table({ phases: [phase('showdown', 30_000, 'river'), phase('payout', 32_000, 'river')], state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
     expect(planMotion(sceneOf(shown), paid)).toEqual([{ kind: 'payout', awards: [{ participantId: 'ada', amount: 790 }], at: 32_000 }]);
   });
+  it('plays nothing during a Settle: each motion starts with the phase that presents it, and the stillness after it has none', () => {
+    const flop = sceneOf(table({ state: { board: ['2c', '7d', 'Jh'], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2), seat('cy', 3, { folded: true })] } }));
+    // An all-in runout: the showdown, the turn, the river and the payout, each followed by its Settle.
+    const phases = [phase('showdown', 30_000, 'flop'), phase('settle', 31_000, 'flop'), phase('street', 32_000, 'turn'), phase('settle', 33_000, 'turn'),
+      phase('street', 34_000, 'river'), phase('settle', 35_000, 'river'), phase('payout', 36_000, 'river'), phase('settle', 37_000, 'river')];
+    const done = table({ phases, state: { status: 'completed-hand', board: ['2c', '7d', 'Jh', '9s', 'Qs'], payouts: [{ participantId: 'ada', amount: 790 }], participants: [seat('you', 1, { holeCards: ['As', 'Kd'] }), seat('ada', 2, { holeCards: ['Qh', 'Qc'], stack: 1790 }), seat('cy', 3, { folded: true })] } });
+    const cues = planMotion(flop, done);
+    expect(cues.map(cue => [cue.kind, cue.at]).sort((a, b) => Number(a[1]) - Number(b[1]))).toEqual([['showdown', 30_000], ['board', 32_000], ['board', 34_000], ['payout', 36_000]]);
+  });
 });
 
 describe('who is at the table', () => {

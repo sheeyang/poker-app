@@ -147,8 +147,8 @@ function EdgeCountdown({ opensAt, deadlineAt }: { opensAt: number; deadlineAt: n
     if (!node || !measured) return;
     const length = Math.max(1, deadlineAt - opensAt), warm = Math.max(0, (length - 5000) / length);
     // pathLength 1 makes the dash offset the elapsed fraction; negative offsets clear the stroke from its start.
-    const animation = node.animate([{ strokeDashoffset: 0, stroke: '#edd7a9' }, { strokeDashoffset: -warm, stroke: '#edd7a9', offset: warm }, { strokeDashoffset: -1, stroke: '#eba98f' }], { duration: length, easing: 'linear', fill: 'forwards' });
-    animation.currentTime = Math.max(0, Date.now() - opensAt);
+    // It starts counting when the window opens, after the Settle: it stays whole until then, or joins part-way if later.
+    const animation = node.animate([{ strokeDashoffset: 0, stroke: '#edd7a9' }, { strokeDashoffset: -warm, stroke: '#edd7a9', offset: warm }, { strokeDashoffset: -1, stroke: '#eba98f' }], { duration: length, delay: opensAt - Date.now(), easing: 'linear', fill: 'forwards' });
     return () => animation.cancel();
   }, [opensAt, deadlineAt, measured]);
   let d = '';
