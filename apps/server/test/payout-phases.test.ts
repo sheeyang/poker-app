@@ -7,7 +7,8 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { backToBack, lengthOf, presentedFor, settleOf, windowOpensAt } from './fixtures/phases.js';
+import { backToBack, lengthOf, presentedFor, presentedShowdownFor, settleOf, windowOpensAt } from './fixtures/phases.js';
+import { showdownMs, streetMs } from './fixtures/presentation.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -73,9 +74,11 @@ test('a river showdown turns the hands up, then pays out, each followed by its S
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
   expect(done.view.state.participants.every(p => p.holeCards?.length === 2)).toBe(true);
-  const shown = at + lengthOf('showdown'), turned = shown + settleOf('showdown'), paid = turned + lengthOf('payout');
+  // The river was checked through: the showdown sweeps nothing and turns both hands up, in the order they are shown.
+  const inputs = { swept: [], shown: [{ participantId: human, cardCount: 2 }, { participantId: bot, cardCount: 2 }] };
+  const shown = at + showdownMs(0), turned = shown + settleOf('showdown'), paid = turned + lengthOf('payout');
   expect(done.schedule.phases.slice(-4)).toEqual([
-    { kind: 'showdown', handId: 'hand-1', street: 'river', startsAt: at, endsAt: shown, durationMs: lengthOf('showdown') },
+    { kind: 'showdown', handId: 'hand-1', street: 'river', startsAt: at, endsAt: shown, durationMs: showdownMs(0), inputs },
     { kind: 'settle', handId: 'hand-1', street: 'river', startsAt: shown, endsAt: turned, durationMs: settleOf('showdown') },
     { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: turned, endsAt: paid, durationMs: lengthOf('payout') },
     { kind: 'settle', handId: 'hand-1', street: 'river', startsAt: paid, endsAt: paid + settleOf('payout'), durationMs: settleOf('payout') },
@@ -86,7 +89,7 @@ test('a river showdown turns the hands up, then pays out, each followed by its S
 test('Deal is rejected with its own code until the Settle after the payout ends, and accepted at that moment', async () => {
   const { t, human, bot } = await headsUp();
   await checkDown(t, human, bot);
-  const ends = clock.now() + presentedFor('showdown') + presentedFor('payout');
+  const ends = clock.now() + presentedShowdownFor(0) + presentedFor('payout');
   clock.advanceTo(ends - 1);
   const before = await read(t);
   const early = await submit(t, 'start-hand', {});
@@ -143,10 +146,10 @@ test('a three-way all-in with side pots schedules one showdown, the remaining st
   expect(done.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(1800);
   expect(done.schedule.phases.map(({ kind, street, startsAt, endsAt, durationMs }) => ({ kind, street, startsAt, endsAt, durationMs }))).toEqual(backToBack(at - presentedFor('deal', 'practice', 3), [
     ['deal', 'preflop', lengthOf('deal', 3)], ['settle', 'preflop', settleOf('deal')],
-    ['showdown', 'preflop', lengthOf('showdown')], ['settle', 'preflop', settleOf('showdown')],
-    ['street', 'flop', lengthOf('street')], ['settle', 'flop', settleOf('street')],
-    ['street', 'turn', lengthOf('street')], ['settle', 'turn', settleOf('street')],
-    ['street', 'river', lengthOf('street')], ['settle', 'river', settleOf('street')],
+    ['showdown', 'preflop', showdownMs(3, 3)], ['settle', 'preflop', settleOf('showdown')],
+    ['street', 'flop', streetMs(0, 3)], ['settle', 'flop', settleOf('street')],
+    ['street', 'turn', streetMs(0, 1)], ['settle', 'turn', settleOf('street')],
+    ['street', 'river', streetMs(0, 1)], ['settle', 'river', settleOf('street')],
     ['payout', 'river', lengthOf('payout')], ['settle', 'river', settleOf('payout')],
   ]));
   expect(done.schedule.actionWindow).toBeNull();

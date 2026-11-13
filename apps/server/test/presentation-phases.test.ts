@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, dealBeats, presentationPhaseDurations, settleAfter, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, dealBeats, presentationPhaseDurations, settleAfter, showdownBeats, streetBeats, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage, type StrategyDescriptor } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import { createStrategy, HighestProbabilitySelector, isSupportedStrategy, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../src/server.js';
@@ -57,7 +57,7 @@ async function headsUp() {
 }
 
 /** Each phase's shared length at a Practice Table (a heads-up deal), and the Settle that follows it. */
-const deal = dealMs(2), street = presentationPhaseDurations.street, showdown = presentationPhaseDurations.showdown, payout = presentationPhaseDurations.payout;
+const deal = dealMs(2), payout = presentationPhaseDurations.payout;
 const settled = { deal: settleAfter('deal', 'practice'), street: settleAfter('street', 'practice'), showdown: settleAfter('showdown', 'practice'), payout: settleAfter('payout', 'practice') };
 
 test('a deal carries what it presents, lasts as long as its beats, and is followed by its Settle; the first Action Window opens when the Settle ends', async () => {
@@ -141,11 +141,13 @@ test('each completed betting round reveals its street, followed by its Settle, a
   const flop = await read(t);
   expect(flop.view.state).toMatchObject({ street: 'flop', actorId: bot });
   expect(flop.view.state.board).toHaveLength(3);
+  // The flop sweeps both preflop wagers into the pot, then reveals three board cards, and lasts as long as those beats.
+  const flopInputs = { swept: [human, bot], cardCount: 3 }, street = streetBeats(flopInputs).totalMs;
   expect(flop.schedule).toEqual({
     phases: [
       { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: dealt, endsAt: dealt + deal, durationMs: deal, inputs: expect.any(Object) },
       { kind: 'settle', handId: 'hand-1', street: 'preflop', startsAt: dealt + deal, endsAt: opens, durationMs: settled.deal },
-      { kind: 'street', handId: 'hand-1', street: 'flop', startsAt: flopAt, endsAt: flopAt + street, durationMs: street },
+      { kind: 'street', handId: 'hand-1', street: 'flop', startsAt: flopAt, endsAt: flopAt + street, durationMs: street, inputs: flopInputs },
       { kind: 'settle', handId: 'hand-1', street: 'flop', startsAt: flopAt + street, endsAt: flopAt + street + settled.street, durationMs: settled.street },
     ],
     actionWindow: { participantId: bot, decisionId: flop.view.state.decisionId, opensAt: flopAt + street + settled.street },
@@ -163,11 +165,14 @@ test('each completed betting round reveals its street, followed by its Settle, a
   const turnAt = clock.now();
   const turn = await read(t);
   expect(turn.view.state.board).toHaveLength(4);
+  // A street checked through leaves nothing on the line: the turn sweeps nothing, and reveals one card sooner.
+  const turnInputs = { swept: [], cardCount: 1 }, turned = streetBeats(turnInputs).totalMs;
+  expect(turned).toBeLessThan(street);
   expect(turn.schedule.phases.slice(-2)).toEqual([
-    { kind: 'street', handId: 'hand-1', street: 'turn', startsAt: turnAt, endsAt: turnAt + street, durationMs: street },
-    { kind: 'settle', handId: 'hand-1', street: 'turn', startsAt: turnAt + street, endsAt: turnAt + street + settled.street, durationMs: settled.street },
+    { kind: 'street', handId: 'hand-1', street: 'turn', startsAt: turnAt, endsAt: turnAt + turned, durationMs: turned, inputs: turnInputs },
+    { kind: 'settle', handId: 'hand-1', street: 'turn', startsAt: turnAt + turned, endsAt: turnAt + turned + settled.street, durationMs: settled.street },
   ]);
-  expect(turn.schedule.actionWindow).toMatchObject({ participantId: bot, opensAt: turnAt + street + settled.street });
+  expect(turn.schedule.actionWindow).toMatchObject({ participantId: bot, opensAt: turnAt + turned + settled.street });
   // Presentation Phases are never poker commands.
   expect((await controllers.readPersistedSession(t.id))!.pokerRecord.commands.map(c => c.type)).toEqual(['seat-participant', 'seat-participant', 'start-hand', 'act', 'act', 'act', 'act']);
 });
@@ -287,13 +292,17 @@ test('an all-in runout schedules the showdown, its remaining streets and the pay
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
   expect(done.view.state.board).toHaveLength(5);
+  // The showdown comes first, so it sweeps the line; each street after it is played from its own inputs, sweeping nothing.
+  const shown = { swept: [human, bot], shown: [{ participantId: human, cardCount: 2 }, { participantId: bot, cardCount: 2 }] }, showdown = showdownBeats(shown).totalMs;
+  const flop = { swept: [], cardCount: 3 }, card = { swept: [], cardCount: 1 };
+  const inputs = [undefined, undefined, shown, undefined, flop, undefined, card, undefined, card, undefined, undefined, undefined];
   // The complete result is already in the view; it is presented step by step at these server times, each phase
   // starting when the one before it ends, from the deal to the Settle after the payout.
   const phases = backToBack(dealt, [['deal', 'preflop', deal], ['settle', 'preflop', settled.deal], ['showdown', 'preflop', showdown], ['settle', 'preflop', settled.showdown],
-    ['street', 'flop', street], ['settle', 'flop', settled.street], ['street', 'turn', street], ['settle', 'turn', settled.street], ['street', 'river', street], ['settle', 'river', settled.street],
+    ['street', 'flop', streetBeats(flop).totalMs], ['settle', 'flop', settled.street], ['street', 'turn', streetBeats(card).totalMs], ['settle', 'turn', settled.street], ['street', 'river', streetBeats(card).totalMs], ['settle', 'river', settled.street],
     ['payout', 'river', payout], ['settle', 'river', settled.payout]]);
   expect(done.schedule).toEqual({
-    phases: phases.map(phase => ({ ...phase, handId: 'hand-1', ...(phase.kind === 'deal' ? { inputs: expect.any(Object) } : {}) })),
+    phases: phases.map((phase, i) => ({ ...phase, handId: 'hand-1', ...(phase.kind === 'deal' ? { inputs: expect.any(Object) } : inputs[i] ? { inputs: inputs[i] } : {}) })),
     actionWindow: null,
   });
 });

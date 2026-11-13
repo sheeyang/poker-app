@@ -1,4 +1,4 @@
-import { dealBeats, payoutMotion, type DealBeats, type ObservableTableSession, type PresentationPhaseKind, type Street } from '@poker/contracts';
+import { dealBeats, payoutMotion, showdownBeats, streetBeats, type BoardStreet, type DealBeats, type ObservableTableSession, type PresentationPhaseKind, type ShowdownBeats, type Street, type StreetBeats } from '@poker/contracts';
 import { connectionOf } from './online-status.js';
 
 /**
@@ -48,12 +48,15 @@ export type Cue = { readonly at: number } & (
   /** A fold: an opponent's cards are mucked; your own stay, dimmed. */
   | { readonly kind: 'fold'; readonly participantId: string; readonly muck: boolean; readonly cards: number }
   | { readonly kind: 'check'; readonly participantId: string }
-  /** The betting line is swept into the pot. */
+  /** The betting line is swept into the pot, when no street reveal or showdown presents the sweep (a Hand won by folds). */
   | { readonly kind: 'sweep'; readonly participantIds: readonly string[] }
-  /** A street's board cards, after a burn. `swept`: chips swept in the same change, which go first. */
-  | { readonly kind: 'board'; readonly from: number; readonly to: number; readonly swept: number }
-  /** Hands turned up at showdown. */
-  | { readonly kind: 'showdown'; readonly participantIds: readonly string[]; readonly swept: number }
+  /**
+   * A street reveal, played from its own beats (ADR-0039): the line swept, the burn, then the board cards from position
+   * `from` up to `to`.
+   */
+  | { readonly kind: 'board'; readonly from: number; readonly to: number; readonly beats: StreetBeats }
+  /** The showdown, played from its own beats: the line swept, then each hand turned up; the viewer's own is already face up. */
+  | { readonly kind: 'showdown'; readonly beats: ShowdownBeats; readonly viewerId: string }
   /** The pot is pushed to the winners, and uncalled chips go back. */
   | { readonly kind: 'payout'; readonly awards: readonly { readonly participantId: string; readonly amount: number }[] }
   | { readonly kind: 'sit'; readonly seat: number }
@@ -101,7 +104,32 @@ export function phaseStart(table: ObservableTableSession, kind: PresentationPhas
   return table.schedule.phases.find(p => p.handId === table.view.state.handId && p.kind === kind && (street === undefined || p.street === street))?.startsAt;
 }
 
-const streetOf: Readonly<Record<number, Street>> = { 3: 'flop', 4: 'turn', 5: 'river' };
+/** How many board cards are out before each street reveal. */
+const boardBefore: Readonly<Record<BoardStreet, number>> = { flop: 0, turn: 3, river: 4 };
+const fitted = (phase: { readonly startsAt: number; readonly endsAt: number }) => phase.endsAt - phase.startsAt;
+
+/**
+ * The street reveals and the showdown this view is the first to show, each planned from its own phase's inputs and
+ * fitted to its length, so every viewer plays the same beats at the same server times: in an all-in runout, each street
+ * from its own phase. A viewer with no earlier view (`prev` undefined) gets the identical cues.
+ */
+function revealCues(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'board' | 'showdown' }>[] {
+  const sameHand = !!prev && prev.handId === next.handId, cues: Extract<Cue, { kind: 'board' | 'showdown' }>[] = [];
+  const seen = sameHand ? prev.board.length : 0;
+  for (const phase of table.schedule.phases) {
+    if (phase.handId !== next.handId) continue;
+    if (phase.kind === 'street' && phase.street !== 'preflop') {
+      const from = boardBefore[phase.street], to = from + phase.inputs.cardCount;
+      if (next.board.length >= to && seen < to) cues.push({ kind: 'board', from, to, beats: streetBeats(phase.inputs, fitted(phase)), at: phase.startsAt });
+    }
+    if (phase.kind === 'showdown') {
+      // The showdown has been presented once an opponent's hand is face up.
+      const shown = (scene: TableScene) => scene.seats.some(s => s.shown && s.participantId !== scene.viewerId);
+      if (shown(next) && !(sameHand && shown(prev))) cues.push({ kind: 'showdown', beats: showdownBeats(phase.inputs, fitted(phase)), viewerId: next.viewerId, at: phase.startsAt });
+    }
+  }
+  return cues;
+}
 
 /**
  * The deal, when this view is the first to show its cards: planned from the deal phase's own inputs and fitted to its
@@ -116,18 +144,18 @@ function dealCue(prev: TableScene | undefined, next: TableScene, table: Observab
   if (prev && !last && prev.seats.some(s => s.cards > 0)) return undefined;
   // A rebuy this viewer saw arrive between Hands has landed already; the deal keeps its timing without it.
   const landed = (id: string) => (last?.seats.find(s => s.participantId === id)?.stack ?? 0) > 0;
-  return { kind: 'deal', at: phase.startsAt, beats: dealBeats(phase.inputs, phase.endsAt - phase.startsAt), viewerId: next.viewerId,
+  return { kind: 'deal', at: phase.startsAt, beats: dealBeats(phase.inputs, fitted(phase)), viewerId: next.viewerId,
     fromButton: last?.handId ? last.buttonSeat : null, refills: phase.inputs.refills.filter(r => !landed(r.participantId)).map(r => ({ participantId: r.participantId, amount: r.amount })) };
 }
 
 /**
- * The cues for going from `prev` to the presented `table`. A first view moves nothing but the phase it presents, and
+ * The cues for going from `prev` to the presented `table`. A first view moves nothing but the phases it presents, and
  * nothing moves when the viewer sits down or stands up. When the viewer moves seats, the table is drawn turned so they
  * stay at the bottom and every seat is in a new place: that is one cue, a turn, and nothing else moves with it.
  */
 export function planMotion(prev: TableScene | undefined, table: ObservableTableSession): Cue[] {
   const next = sceneOf(table);
-  if (!prev || prev.tableSessionId !== next.tableSessionId) { const deal = dealCue(undefined, next, table); return deal ? [deal] : []; }
+  if (!prev || prev.tableSessionId !== next.tableSessionId) { const deal = dealCue(undefined, next, table); return [...(deal ? [deal] : []), ...(next.handId ? revealCues(undefined, next, table) : [])]; }
   const viewAt = table.serverTime, cues: Cue[] = [];
   if (prev.viewerSeat !== next.viewerSeat) return prev.viewerSeat !== null && next.viewerSeat !== null ? [{ kind: 'turn', seat: next.viewerSeat, at: viewAt }] : [];
   const before = new Map(prev.seats.map(s => [s.participantId, s]));
@@ -172,16 +200,13 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
     const was = before.get(s.participantId);
     if (was && s.wager > was.wager && !blinds.includes(s.participantId)) cues.push({ kind: 'bet', participantId: s.participantId, toPot: false, at: viewAt });
   }
-  const swept = prev.seats.filter(s => s.wager > 0 && (after.get(s.participantId)?.wager ?? 0) === 0).map(s => s.participantId);
+  // A street reveal or showdown sweeps the line as its first beat, so the burn and the hands wait for it; the sweep is
+  // played here only when no such phase presents it, already or still to come (a Hand won by folds).
+  const reveals = revealCues(prev, next, table);
+  const presented = new Set(table.schedule.phases.flatMap(p => p.handId === next.handId && (p.kind === 'street' || p.kind === 'showdown') && (p.startsAt > viewAt || reveals.some(c => c.at === p.startsAt)) ? p.inputs.swept : []));
+  const swept = prev.seats.filter(s => s.wager > 0 && (after.get(s.participantId)?.wager ?? 0) === 0 && !presented.has(s.participantId)).map(s => s.participantId);
   if (swept.length) cues.push({ kind: 'sweep', participantIds: swept, at: viewAt });
-
-  // Each street presented since the last view, from its own phase: the flop's three cards together, then one by one.
-  const streets: { from: number; to: number }[] = [];
-  if (prev.board.length < 3 && next.board.length >= 3) streets.push({ from: prev.board.length, to: 3 });
-  for (let count = Math.max(prev.board.length, 3) + 1; count <= next.board.length; count++) streets.push({ from: count - 1, to: count });
-  streets.forEach((street, i) => { cues.push({ kind: 'board', ...street, swept: i === 0 ? swept.length : 0, at: phaseStart(table, 'street', streetOf[street.to]) ?? viewAt }); });
-  const revealed = next.seats.filter(s => s.shown && s.participantId !== next.viewerId && !before.get(s.participantId)?.shown).map(s => s.participantId);
-  if (revealed.length) cues.push({ kind: 'showdown', participantIds: revealed, swept: next.board.length > prev.board.length ? 0 : swept.length, at: phaseStart(table, 'showdown') ?? viewAt });
+  cues.push(...reveals);
   if (settling) cues.push({ kind: 'payout', awards: awardsOf(table), at: phaseStart(table, 'payout') ?? viewAt });
   return cues;
 }

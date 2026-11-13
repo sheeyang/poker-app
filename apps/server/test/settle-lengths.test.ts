@@ -26,7 +26,8 @@ const decision = (game: CashGame): CurrentDecision => {
 /** The schedule after `result`, a transition of `game`, accepted at `at`. */
 const step = (game: CashGame, previous: TableSchedule, result: CashGameResult, at: number, options: Omit<ScheduleOptions, 'inputs'>) => {
   const events = eventsOf(result);
-  return scheduleTransition(previous, events, decision(game), at, { ...options, inputs: phaseInputs(game, events) });
+  // The game is played in place, so the table before the transition is gone; no test here reads what a phase sweeps.
+  return scheduleTransition(previous, events, decision(game), at, { ...options, inputs: phaseInputs(game, game, events) });
 };
 
 test('a Settle set to 0 schedules no stillness: the next phase or Action Window starts when the previous phase ends', () => {

@@ -1,13 +1,36 @@
-import type { DealInputs, HandId } from '@poker/contracts';
+import type { DealInputs, HandId, ParticipantId, ShowdownInputs, StreetInputs } from '@poker/contracts';
 import type { CashGame, CashGameEvent } from '@poker/engine';
 import type { PhaseInputs } from './schedule.js';
 
 /**
- * What each Presentation Phase of an accepted transition presents (ADR-0039), read from the table after it and the
- * transition's events. Only what the view already makes public goes in: never a hole card.
+ * What each Presentation Phase of an accepted transition presents (ADR-0039), read from the table before and after it
+ * and the transition's events. Only what the view already makes public goes in: never a hole card.
  */
-export function phaseInputs(after: CashGame, events: readonly CashGameEvent[]): PhaseInputs {
-  return { deal: handId => dealInputs(after, events, handId) };
+export function phaseInputs(before: CashGame, after: CashGame, events: readonly CashGameEvent[]): PhaseInputs {
+  return {
+    deal: handId => dealInputs(after, events, handId),
+    street: (handId, street) => {
+      const dealt = events.find(event => event.type === 'board-dealt' && event.handId === handId && event.street === street);
+      return { swept: sweeps(events, dealt) ? swept(before, handId) : [], cardCount: dealt?.type === 'board-dealt' ? dealt.cards.length : 0 } satisfies StreetInputs;
+    },
+    showdown: handId => ({
+      swept: sweeps(events, events.find(event => event.type === 'hole-cards-revealed' && event.handId === handId)) ? swept(before, handId) : [],
+      shown: events.flatMap(event => event.type === 'hole-cards-revealed' && event.handId === handId ? [{ participantId: event.participantId, cardCount: event.cards.length }] : []),
+    }) satisfies ShowdownInputs,
+  };
+}
+
+/**
+ * Whether the phase that `event` begins sweeps the line: the first street reveal or showdown of the transition does. In
+ * an all-in runout the showdown comes first, so the streets after it sweep nothing.
+ */
+function sweeps(events: readonly CashGameEvent[], event: CashGameEvent | undefined): boolean {
+  return !!event && events.find(e => e.type === 'board-dealt' || e.type === 'hole-cards-revealed') === event;
+}
+
+/** Whose wagers were on the line before the transition, in seat order: the transition that ends the betting round sweeps them. */
+function swept(before: CashGame, handId: HandId): ParticipantId[] {
+  return (before.getHand(handId)?.participants ?? []).filter(p => p.wager > 0).map(p => p.participantId);
 }
 
 /**

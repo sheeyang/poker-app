@@ -54,9 +54,15 @@ export function projectTableOptions(aggregate: PersistedTableSession): Observabl
 }
 /** A phase's kind and what it presents, field by field. */
 function projectPresented(phase: PresentedPhase): PresentedPhase {
-  if (phase.kind !== 'deal') return { kind: phase.kind };
-  const { dealt, blinds, refills } = phase.inputs;
-  return { kind: phase.kind, inputs: { dealt: dealt.map(d => ({ participantId: d.participantId, cardCount: d.cardCount })), blinds: [...blinds], refills: refills.map(r => ({ participantId: r.participantId, amount: r.amount })) } };
+  switch (phase.kind) {
+    case 'deal': {
+      const { dealt, blinds, refills } = phase.inputs;
+      return { kind: phase.kind, inputs: { dealt: dealt.map(d => ({ participantId: d.participantId, cardCount: d.cardCount })), blinds: [...blinds], refills: refills.map(r => ({ participantId: r.participantId, amount: r.amount })) } };
+    }
+    case 'street': return { kind: phase.kind, inputs: { swept: [...phase.inputs.swept], cardCount: phase.inputs.cardCount } };
+    case 'showdown': return { kind: phase.kind, inputs: { swept: [...phase.inputs.swept], shown: phase.inputs.shown.map(s => ({ participantId: s.participantId, cardCount: s.cardCount })) } };
+    default: return { kind: phase.kind };
+  }
 }
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {

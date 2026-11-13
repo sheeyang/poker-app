@@ -6,7 +6,7 @@ import { createStrategy, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { presentedFor } from './fixtures/phases.js';
+import { presentedFor, presentedShowdownFor } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it.
@@ -284,7 +284,8 @@ test('two humans in one Hand study privately, from what each observed at the dec
   // The showdown has since revealed each human's cards to the other, and a later Hand has been dealt.
   const shown = (await t.view(ben.cookie)).view.history[0]!.result!.participants.find(participant => participant.participantId === t.annId)!;
   expect(shown.holeCards).toHaveLength(2);
-  clock.advance(presentedFor('showdown', 'online') + presentedFor('payout', 'online'));
+  // The river was checked through: the showdown sweeps nothing.
+  clock.advance(presentedShowdownFor(0, 2, 'online') + presentedFor('payout', 'online'));
   await dealt(t, 'hand-2');
   const later = await t.view();
   expect((await t.as(cookieOf(later.view.state.actorId!), 'act', { participantId: later.view.state.actorId!, action: { type: 'fold' } })).status).toBe(200);

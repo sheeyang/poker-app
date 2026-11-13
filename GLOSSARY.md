@@ -143,7 +143,7 @@ A server-timed interval in which no Participant may act: the deal, a street reve
 _Avoid_: Animation, presentation window
 
 **Phase Inputs**:
-What a Presentation Phase presents, recorded on the phase, from which the server and every Trainer compute the same beats and so the phase's length. Only what the view already makes public: for the deal, who is dealt in and in what order, how many cards each, the blinds, and who was refilled and by how much.
+What a Presentation Phase presents, recorded on the phase, from which the server and every Trainer compute the same beats and so the phase's length. Only what the view already makes public: for the deal, who is dealt in and in what order, how many cards each, the blinds, and who was refilled and by how much; for a street reveal, whose wagers are swept and how many board cards are revealed; for the showdown, whose wagers are swept and whose hands are turned up.
 _Avoid_: Phase payload, phase data
 
 **Settle**:

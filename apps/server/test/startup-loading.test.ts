@@ -6,7 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
-import { presentedFor } from './fixtures/phases.js';
+import { presentedFor, presentedStreetFor } from './fixtures/phases.js';
 import { announcedCountdown, connectLive } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -111,7 +111,7 @@ test('a Bot decision is scheduled work: an untimed Practice Hand loads at startu
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await stored(t)).pokerRevision, participantId: t.bot, action: { type: 'check' } })).toMatchObject({ ok: true });
   // Heads-up, the Bot in the big blind acts first after the flop too.
   expect((await read(t)).view.state).toMatchObject({ street: 'flop', actorId: t.bot });
-  clock.advance(presentedFor('street'));
+  clock.advance(presentedStreetFor(2));
   await restart();
   expect(loaded()).toContain(t.id);
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await stored(t)).pokerRevision, participantId: t.bot, action: { type: 'check' } })).toMatchObject({ ok: true });

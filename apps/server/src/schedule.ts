@@ -1,4 +1,4 @@
-import { nextHandCountdownMs, presentationPhaseLength, settleAfter, settleLengths, type ActionWindow, type DealInputs, type DecisionId, type HandId, type ParticipantId, type PresentationPhase, type PresentedPhase, type PresentingPhaseKind, type ServerTime, type SettleLengths, type Street, type TableMode, type TableSchedule } from '@poker/contracts';
+import { nextHandCountdownMs, presentationPhaseLength, settleAfter, settleLengths, type ActionWindow, type DealInputs, type DecisionId, type HandId, type ParticipantId, type PresentationPhase, type PresentedPhase, type PresentingPhaseKind, type ServerTime, type SettleLengths, type ShowdownInputs, type Street, type StreetInputs, type TableMode, type TableSchedule } from '@poker/contracts';
 import type { CashGameEvent } from '@poker/engine';
 
 /**
@@ -20,6 +20,8 @@ export type CurrentDecision = { readonly participantId: ParticipantId; readonly 
 /** What a transition's phases present, by kind, for each kind whose length comes from its beats (phase-inputs.ts). */
 export interface PhaseInputs {
   readonly deal: (handId: HandId) => DealInputs;
+  readonly street: (handId: HandId, street: Street) => StreetInputs;
+  readonly showdown: (handId: HandId) => ShowdownInputs;
 }
 
 const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
@@ -58,7 +60,14 @@ export function scheduleTransition(previous: TableSchedule, events: readonly Cas
     cursor += durationMs;
   };
   // A phase carries what it presents, and lasts as long as its beats take for it (ADR-0039).
-  const presented = (kind: PresentingPhaseKind, handId: string): PresentedPhase & { readonly kind: PresentingPhaseKind } => kind === 'deal' ? { kind, inputs: options.inputs.deal(handId) } : { kind };
+  const presented = (kind: PresentingPhaseKind, handId: string): PresentedPhase & { readonly kind: PresentingPhaseKind } => {
+    switch (kind) {
+      case 'deal': return { kind, inputs: options.inputs.deal(handId) };
+      case 'street': return { kind, inputs: options.inputs.street(handId, street) };
+      case 'showdown': return { kind, inputs: options.inputs.showdown(handId) };
+      default: return { kind };
+    }
+  };
   const add = (kind: PresentingPhaseKind, handId: string) => {
     const phase = presented(kind, handId), durationMs = presentationPhaseLength(phase);
     phases.push({ ...phase, handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
