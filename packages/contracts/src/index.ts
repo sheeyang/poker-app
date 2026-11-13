@@ -1,4 +1,5 @@
 /** Participant-safe wire contracts. This package imports no authoritative code. */
+import type { PresentedPhase } from './presentation.js';
 export type ParticipantId = string;
 export type TableSessionId = string;
 export type ChipAmount = number;
@@ -300,16 +301,17 @@ export type PresentationPhaseKind = 'deal' | 'street' | 'showdown' | 'payout' | 
 /**
  * A server-timed interval in which no Participant may act. Clients show the step it presents from
  * `startsAt`; the next phase, or the Action Window, begins at `endsAt`. Phases are never poker commands.
- * A Hand's last phase is its payout, and Deal is accepted when that phase ends.
+ * A Hand's last phase is its payout, and Deal is accepted when that phase ends. A phase whose length comes from its
+ * beats (the deal) carries what it presents as `inputs` (ADR-0039).
  */
-export interface PresentationPhase {
-  readonly kind: PresentationPhaseKind;
+export type PresentationPhase = PresentationPhaseTiming & PresentedPhase;
+interface PresentationPhaseTiming {
   readonly handId: HandId;
   /** The street presented: `preflop` for the deal, the street whose board cards a street reveal shows, and the street the Hand had reached for the showdown and the payout. */
   readonly street: Street;
   readonly startsAt: ServerTime;
   readonly endsAt: ServerTime;
-  /** The server constant used for this entry. */
+  /** The phase's length: the total of its beats for its inputs, or its kind's fixed length. */
   readonly durationMs: number;
 }
 /** The interval in which the current decision's Participant may act. It opens when the preceding phase ends. */

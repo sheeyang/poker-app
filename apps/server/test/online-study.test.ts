@@ -103,7 +103,7 @@ async function dealt(t: Table, handId: string) {
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe(handId);
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   return t.view();
 }
 /** The acting human folds; then the payout phase and the pause between Hands pass, and the next countdown is announced. */
@@ -149,7 +149,7 @@ test('Allow Live Analysis is an Online Table option, on by default and visible t
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.status).toBe('active-hand');
   expect(await refusal(await t.options({ allowLiveAnalysis: true }))).toEqual({ status: 400, code: 'active-hand' });
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   const actor = (await t.view()).view.state.actorId!;
   expect((await t.as(actor === t.annId ? t.ann : ben.cookie, 'act', { participantId: actor, action: { type: 'fold' } })).status).toBe(200);
   expect(await refusal(await t.options({ allowLiveAnalysis: true }))).toEqual({ status: 400, code: 'active-hand' });

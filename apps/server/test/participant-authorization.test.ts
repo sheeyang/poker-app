@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
@@ -53,7 +54,7 @@ async function completedHand(t: Table) {
     clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
     await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
   } else await command(t, 'start-hand');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   clock.advance(2000);
 }

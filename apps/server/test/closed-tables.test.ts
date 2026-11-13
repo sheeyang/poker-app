@@ -7,6 +7,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { idleTableCloseMs, idleTableSweepMs } from '../src/closing.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { announcedCountdown, connectLive } from './fixtures/online.js';
 
@@ -154,7 +155,7 @@ test('closing clears load at startup: an Online Table left waiting on its Bot no
   await command('seat-participant', { participantId: bot, seat: 2 });
   clock.advanceTo((await announcedCountdown(() => view(ann, id))).endsAt);
   await expect.poll(async () => (await view(ann, id)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   // Ann calls from the button; the Bot, whose decisions this server does not make, is to act, and nothing else happens.
   await command('act', { participantId: human, action: { type: 'call' } });
   await live.close();

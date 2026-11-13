@@ -139,7 +139,11 @@ _Avoid_: Active player, ready participant
 ## Play Timing
 
 **Presentation Phase**:
-A server-timed interval in which no Participant may act, such as the deal, a street reveal, showdown, payout, or the pause between Hands. It ends by server time, never by animation completion.
+A server-timed interval in which no Participant may act, such as the deal, a street reveal, showdown, payout, or the pause between Hands. It ends by server time, never by animation completion. A phase whose length comes from its beats carries its Phase Inputs.
+
+**Phase Inputs**:
+What a Presentation Phase presents, recorded on the phase, from which the server and every Trainer compute the same beats and so the phase's length. Only what the view already makes public: for the deal, who is dealt in and in what order, how many cards each, the blinds, and who was refilled and by how much.
+_Avoid_: Phase payload, phase data
 _Avoid_: Animation, presentation window
 
 **Action Window**:

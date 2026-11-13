@@ -147,7 +147,7 @@ async function rexToAct(t: Table) {
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(t.ann, t.annId, 2);
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   return live;
 }
 
@@ -176,7 +176,7 @@ test('options change only between Hands: not while a Hand is played or paid out,
   expect((await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: paidAt + 5000, endsAt: paidAt + 10_000, durationMs: 5000 });
   clock.advanceTo(paidAt + 10_000);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   // Hand 2's button is Ann's, so her Action Window carries the limit chosen during the countdown.
   const second = await t.view();
   expect(second.schedule.actionWindow).toMatchObject({ participantId: t.annId, deadlineAt: second.schedule.actionWindow!.opensAt + 15_000 });
@@ -201,7 +201,7 @@ test('at a Practice Table the owner adds a Bot at any time, and one added during
   const t = await newTable('practice');
   await t.seat(t.ann, t.annId, 1); await t.seat(t.ann, t.botIds[0]!, 2);
   expect((await t.as(t.ann, 'start-hand')).status).toBe(200);
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   const hand = await t.view();
   expect(hand.view.state).toMatchObject({ status: 'active-hand', actorId: t.annId });
 
@@ -390,7 +390,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(ben.cookie, ben.participantId, 2);
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   await botActs(t, { type: 'call' });
 
   const benSees = participant(await t.view(ben.cookie), ben.participantId);

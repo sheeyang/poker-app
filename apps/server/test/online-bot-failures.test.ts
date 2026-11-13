@@ -5,6 +5,7 @@ import type { ConcreteAction, ObservableGameView, ObservableTableSession, Strate
 import { createStrategy, HighestProbabilitySelector, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
@@ -82,7 +83,7 @@ async function botToAct() {
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 2 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => view())).endsAt);
   await expect.poll(async () => (await view()).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   return { id, ann, annId, rex, ben, view, as, annLive, benLive };
 }
 

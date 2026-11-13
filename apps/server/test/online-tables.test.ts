@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy, type ObservableTableSession } from '@poker/contracts';
@@ -247,7 +248,7 @@ async function deal(t: Table) {
   await connectLive(base, t.owner, t.id);
   clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
 }
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000 };
 

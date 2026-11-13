@@ -2,13 +2,14 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage, type StrategyDescriptor } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import { createStrategy, HighestProbabilitySelector, isSupportedStrategy, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { dealMs } from './fixtures/presentation.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -54,35 +55,80 @@ async function headsUp() {
   return { t, human, bot };
 }
 
-test('a deal opens the first Action Window only when its 1.5 s deal phase ends', async () => {
-  const { t, human } = await headsUp();
+test('a deal carries what it presents, lasts as long as its beats, and opens the first Action Window when it ends', async () => {
+  const { t, human, bot } = await headsUp();
   const dealt = clock.now();
   await command(t, 'start-hand');
   const view = await read(t);
   expect(view.serverTime).toBe(dealt);
+  // Heads-up the button (seat 1, the small blind) is dealt first.
+  const inputs = { dealt: [{ participantId: human, cardCount: 2 }, { participantId: bot, cardCount: 2 }], blinds: [human, bot], refills: [] };
+  const length = dealBeats(inputs).totalMs;
   expect(view.schedule).toEqual({
-    phases: [{ kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: dealt, endsAt: dealt + 1500, durationMs: 1500 }],
-    actionWindow: { participantId: human, decisionId: 'hand-1/decision-1', opensAt: dealt + 1500 },
+    phases: [{ kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: dealt, endsAt: dealt + length, durationMs: length, inputs }],
+    actionWindow: { participantId: human, decisionId: 'hand-1/decision-1', opensAt: dealt + length },
   });
-  clock.advance(1499);
+  clock.advance(length - 1);
   const early = await act(t, human, { type: 'call' });
   expect(early.status).toBe(409);
   expect(await early.json()).toMatchObject({ ok: false, rejection: { code: 'action-window-not-open' } });
-  expect(await read(t)).toEqual({ ...view, serverTime: dealt + 1499 });
+  expect(await read(t)).toEqual({ ...view, serverTime: dealt + length - 1 });
   clock.advance(1);
   await accepted(t, human, { type: 'call' });
   expect((await read(t)).view.state).toMatchObject({ actorId: t.ids[1], street: 'preflop' });
+});
+
+test('a full table’s deal is dealt clockwise from left of the button and lasts longer than a heads-up deal', async () => {
+  const t = await table(6);
+  for (const [i, participantId] of t.ids.entries()) await command(t, 'seat-participant', { participantId, seat: i + 1 });
+  await command(t, 'start-hand');
+  const [deal] = (await read(t)).schedule.phases;
+  // The button is seat 1, so seats 2 and 3 post the blinds and seat 2 is dealt first.
+  const inputs = { dealt: [...t.ids.slice(1), t.ids[0]!].map(participantId => ({ participantId, cardCount: 2 })), blinds: [t.ids[1], t.ids[2]], refills: [] };
+  expect(deal).toMatchObject({ kind: 'deal', inputs, durationMs: dealBeats(inputs).totalMs });
+  expect(deal!.durationMs).toBeGreaterThan(dealMs(2));
+  expect(deal!.endsAt - deal!.startsAt).toBe(deal!.durationMs);
+});
+
+test('Rebuy & deal schedules a longer deal that lands the refill first', async () => {
+  const { t } = await headsUp();
+  // Both go all-in until one of them is left with no chips.
+  let busted: string | undefined;
+  while (!busted) {
+    await command(t, 'start-hand');
+    clock.advanceTo((await read(t)).schedule.actionWindow!.opensAt);
+    const preflop = await read(t), actor = preflop.view.state.actorId!, other = t.ids.find(id => id !== actor)!;
+    const all = (id: string) => { const p = preflop.view.state.participants.find(p => p.participantId === id)!; return p.stack + (p.wager ?? 0); };
+    await accepted(t, actor, { type: 'raise', raiseTo: all(actor) });
+    await accepted(t, other, { type: 'call' });
+    clock.advance(60_000);
+    busted = (await read(t)).view.state.participants.find(p => p.stack === 0)?.participantId;
+  }
+  await command(t, 'top-up-to', { participantId: busted, targetStack: 1000 });
+  await command(t, 'start-hand');
+  const [deal] = (await read(t)).schedule.phases;
+  if (deal?.kind !== 'deal') throw new Error('The Hand has no deal phase.');
+  expect(deal.inputs.refills).toEqual([{ participantId: busted, amount: 1000 }]);
+  expect(deal.durationMs).toBe(dealBeats(deal.inputs).totalMs);
+  expect(deal.durationMs).toBeGreaterThan(dealMs(2));
+  // The next Hand comes with no refill.
+  clock.advance(deal.durationMs);
+  const next = await read(t);
+  await accepted(t, next.view.state.actorId!, { type: 'fold' });
+  clock.advance(60_000);
+  await command(t, 'start-hand');
+  expect((await read(t)).schedule.phases[0]).toMatchObject({ kind: 'deal', inputs: { refills: [] }, durationMs: dealMs(2) });
 });
 
 test('each completed betting round reveals its street in a 1 s phase and exposes nothing of later streets', async () => {
   const { t, human, bot } = await headsUp();
   const dealt = clock.now();
   await command(t, 'start-hand');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   await accepted(t, human, { type: 'call' });
   // The Bot's option follows a decision, not a phase: its window opens at once.
   const option = await read(t);
-  expect(option.schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-2', opensAt: dealt + 1500 });
+  expect(option.schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-2', opensAt: dealt + dealMs(2) });
   await accepted(t, bot, { type: 'check' });
   const flopAt = clock.now();
   const flop = await read(t);
@@ -90,7 +136,7 @@ test('each completed betting round reveals its street in a 1 s phase and exposes
   expect(flop.view.state.board).toHaveLength(3);
   expect(flop.schedule).toEqual({
     phases: [
-      { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: dealt, endsAt: dealt + 1500, durationMs: 1500 },
+      { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: dealt, endsAt: dealt + dealMs(2), durationMs: dealMs(2), inputs: expect.any(Object) },
       { kind: 'street', handId: 'hand-1', street: 'flop', startsAt: flopAt, endsAt: flopAt + 1000, durationMs: 1000 },
     ],
     actionWindow: { participantId: bot, decisionId: flop.view.state.decisionId, opensAt: flopAt + 1000 },
@@ -138,7 +184,7 @@ test('live updates and reads carry the schedule and server time, and a restart k
     const read3 = await read(t);
     expect(update).toEqual({ ...read3, type: 'table-update', runtimeStatus: undefined, presentationEvents: update.presentationEvents });
     expect(update.presentationEvents.map(e => e.type)).toContain('hole-cards-dealt');
-    expect(update.schedule.actionWindow).toEqual({ participantId: human, decisionId: 'hand-1/decision-1', opensAt: dealt + 1500 });
+    expect(update.schedule.actionWindow).toEqual({ participantId: human, decisionId: 'hand-1/decision-1', opensAt: dealt + dealMs(2) });
 
     clock.advance(500);
     live.socket.terminate();
@@ -149,9 +195,9 @@ test('live updates and reads carry the schedule and server time, and a restart k
     reconnected = connect(t);
     expect(await reconnected.next(3)).toMatchObject({ schedule: read3.schedule, serverTime: dealt + 500, presentationEvents: [] });
     expect(await (await act(t, human, { type: 'call' })).json()).toMatchObject({ ok: false, rejection: { code: 'action-window-not-open' } });
-    clock.advance(1000);
+    clock.advance(dealMs(2) - 500);
     await accepted(t, human, { type: 'call' });
-    expect((await reconnected.next(4)).serverTime).toBe(dealt + 1500);
+    expect((await reconnected.next(4)).serverTime).toBe(dealt + dealMs(2));
   } finally { live.socket.terminate(); reconnected?.socket.terminate(); }
 });
 
@@ -203,7 +249,7 @@ test('a Bot decision is requested only once its Action Window opens, including a
     botClock.advance(1000);
     await botServer!.close(); await start();
     expect((await readBot()).view.state.actorId).toBe(bot);
-    botClock.advance(499);
+    botClock.advance(dealMs(2) - 1001);
     await readBot();
     expect(evaluations).toEqual([]);
     botClock.advance(1);
@@ -221,7 +267,7 @@ test('a Bot decision is requested only once its Action Window opens, including a
 test('an all-in runout schedules the reveals, its remaining streets and the payout one after another, and opens no Action Window', async () => {
   const { t, human, bot } = await headsUp();
   await command(t, 'start-hand');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   await accepted(t, human, { type: 'raise', raiseTo: 1000 });
   await accepted(t, bot, { type: 'call' });
   const at = clock.now();
@@ -231,7 +277,7 @@ test('an all-in runout schedules the reveals, its remaining streets and the payo
   // The complete result is already in the view; it is presented step by step at these server times.
   expect(done.schedule).toEqual({
     phases: [
-      { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: at - 1500, endsAt: at, durationMs: 1500 },
+      { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: at - dealMs(2), endsAt: at, durationMs: dealMs(2), inputs: expect.any(Object) },
       { kind: 'showdown', handId: 'hand-1', street: 'preflop', startsAt: at, endsAt: at + 2000, durationMs: 2000 },
       { kind: 'street', handId: 'hand-1', street: 'flop', startsAt: at + 2000, endsAt: at + 3000, durationMs: 1000 },
       { kind: 'street', handId: 'hand-1', street: 'turn', startsAt: at + 3000, endsAt: at + 4000, durationMs: 1000 },

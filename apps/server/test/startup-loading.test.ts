@@ -5,6 +5,7 @@ import { baselinePlayingStrategy, type ActionTimeLimitSeconds, type ObservableTa
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { announcedCountdown, connectLive } from './fixtures/online.js';
 
@@ -60,7 +61,7 @@ async function practiceHand(actionTimeLimitSeconds: ActionTimeLimitSeconds | nul
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
   await command(t, 'start-hand');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   return t;
 }
 /** An Online Table in play: its owner, connected, and the Bot are dealt a Hand, and the owner is to act. Then everyone disconnects. */
@@ -71,7 +72,7 @@ async function onlineHand() {
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
   clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   await live.close();
   return t;
 }

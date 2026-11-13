@@ -1,4 +1,4 @@
-import { payoutMotion, type ObservableTableSession, type PresentationPhaseKind, type Street } from '@poker/contracts';
+import { dealBeats, payoutMotion, type DealBeats, type ObservableTableSession, type PresentationPhaseKind, type Street } from '@poker/contracts';
 import { connectionOf } from './online-status.js';
 
 /**
@@ -32,20 +32,17 @@ export interface TableScene {
   readonly viewerSeat: number | null;
   readonly seatCount: number;
   readonly seats: readonly SeatScene[];
-  /** The current Hand's blinds. */
-  readonly blinds: readonly string[];
   /** The current Hand's decisions so far, oldest first. */
   readonly decisions: readonly { readonly participantId: string; readonly type: string }[];
 }
 
 export type Cue = { readonly at: number } & (
-  /** A new Hand: the last one's cards go back to the deck, and the button moves on. */
-  | { readonly kind: 'new-hand'; readonly fromButton: number | null }
   /**
-   * Hole cards are dealt one at a time, clockwise from left of the button; the blinds go in first. `afterRefill`: stacks
-   * were refilled with this deal (Practice's Rebuy & deal), so the refill lands first and the deal starts from it.
+   * The deal phase, played from its own beats (ADR-0039): the last Hand's cards go back to the deck and the button moves
+   * on from `fromButton` (when this viewer saw the last Hand), any refill lands, the blinds go in, and the cards are
+   * dealt; the viewer's own turn face up. `refills`: the refills to show, those this viewer has not already seen land.
    */
-  | { readonly kind: 'deal'; readonly order: readonly { readonly participantId: string; readonly cards: number; readonly viewer: boolean }[]; readonly blinds: readonly string[]; readonly afterRefill: boolean }
+  | { readonly kind: 'deal'; readonly beats: DealBeats; readonly viewerId: string; readonly fromButton: number | null; readonly refills: readonly { readonly participantId: string; readonly amount: number }[] }
   /** Chips go in: to the betting line, or, when the bet closed the street, straight into the pot. */
   | { readonly kind: 'bet'; readonly participantId: string; readonly toPot: boolean }
   /** A fold: an opponent's cards are mucked; your own stay, dimmed. */
@@ -62,11 +59,8 @@ export type Cue = { readonly at: number } & (
   | { readonly kind: 'sit'; readonly seat: number }
   | { readonly kind: 'stand'; readonly seat: number }
   | { readonly kind: 'move'; readonly fromSeat: number; readonly seat: number }
-  /**
-   * Chips added to a stack between Hands: a rebuy or a top-up. `from`: the stack before them. `beforeDeal`: they came
-   * with a new Hand's deal, and land before it starts.
-   */
-  | { readonly kind: 'chips'; readonly participantId: string; readonly amount: number; readonly from: number; readonly beforeDeal: boolean }
+  /** Chips added to a stack between Hands: a rebuy or a top-up. `from`: the stack before them. */
+  | { readonly kind: 'chips'; readonly participantId: string; readonly amount: number; readonly from: number }
   /** The viewer moved to `seat`: the table is drawn turned, so every seat is in a new place. */
   | { readonly kind: 'turn'; readonly seat: number }
   /** Sitting out, returning, disconnecting or reconnecting: the seat's words change. */
@@ -98,7 +92,6 @@ export function sceneOf(table: ObservableTableSession): TableScene {
       participantId: p.participantId, seat: p.seat!, cards: p.cardCount ?? 0, shown: !!p.holeCards?.length, folded: !!p.folded,
       wager: over ? 0 : p.wager ?? 0, stack: p.stack, sittingOut: !!p.sittingOut, offline: connectionOf(table, p.participantId) === 'disconnected',
     })),
-    blinds: [state.smallBlindParticipantId, state.bigBlindParticipantId].filter((id): id is string => !!id),
     decisions: (table.view.history.find(h => h.handId === state.handId)?.decisions ?? []).map(d => ({ participantId: d.action.participantId, type: d.action.action.type })),
   };
 }
@@ -110,20 +103,31 @@ export function phaseStart(table: ObservableTableSession, kind: PresentationPhas
 
 const streetOf: Readonly<Record<number, Street>> = { 3: 'flop', 4: 'turn', 5: 'river' };
 
-/** Seated Participants in dealing order: clockwise, starting left of the button. */
-function dealingOrder<T extends { readonly seat: number }>(seats: readonly T[], buttonSeat: number | null, seatCount: number): T[] {
-  const from = buttonSeat ?? 0;
-  return [...seats].sort((a, b) => ((a.seat - from - 1 + seatCount) % seatCount) - ((b.seat - from - 1 + seatCount) % seatCount));
+/**
+ * The deal, when this view is the first to show its cards: planned from the deal phase's own inputs and fitted to its
+ * length, so every viewer, one who joined late included, plays the same beats at the same server times. A viewer with
+ * no earlier view (`prev` undefined) gets the identical deal, without the last Hand's cards or button to move.
+ */
+function dealCue(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'deal' }> | undefined {
+  const phase = table.schedule.phases.find(p => p.handId === next.handId && p.kind === 'deal');
+  if (phase?.kind !== 'deal' || !phase.inputs || !next.seats.some(s => s.cards > 0)) return undefined;
+  // The view before this Hand, when this viewer saw it.
+  const last = prev && prev.handId !== next.handId ? prev : undefined;
+  if (prev && !last && prev.seats.some(s => s.cards > 0)) return undefined;
+  // A rebuy this viewer saw arrive between Hands has landed already; the deal keeps its timing without it.
+  const landed = (id: string) => (last?.seats.find(s => s.participantId === id)?.stack ?? 0) > 0;
+  return { kind: 'deal', at: phase.startsAt, beats: dealBeats(phase.inputs, phase.endsAt - phase.startsAt), viewerId: next.viewerId,
+    fromButton: last?.handId ? last.buttonSeat : null, refills: phase.inputs.refills.filter(r => !landed(r.participantId)).map(r => ({ participantId: r.participantId, amount: r.amount })) };
 }
 
 /**
- * The cues for going from `prev` to the presented `table`. Nothing moves on a first view, or when the viewer sits down
- * or stands up. When the viewer moves seats, the table is drawn turned so they stay at the bottom and every seat is in a
- * new place: that is one cue, a turn, and nothing else moves with it.
+ * The cues for going from `prev` to the presented `table`. A first view moves nothing but the phase it presents, and
+ * nothing moves when the viewer sits down or stands up. When the viewer moves seats, the table is drawn turned so they
+ * stay at the bottom and every seat is in a new place: that is one cue, a turn, and nothing else moves with it.
  */
 export function planMotion(prev: TableScene | undefined, table: ObservableTableSession): Cue[] {
   const next = sceneOf(table);
-  if (!prev || prev.tableSessionId !== next.tableSessionId) return [];
+  if (!prev || prev.tableSessionId !== next.tableSessionId) { const deal = dealCue(undefined, next, table); return deal ? [deal] : []; }
   const viewAt = table.serverTime, cues: Cue[] = [];
   if (prev.viewerSeat !== next.viewerSeat) return prev.viewerSeat !== null && next.viewerSeat !== null ? [{ kind: 'turn', seat: next.viewerSeat, at: viewAt }] : [];
   const before = new Map(prev.seats.map(s => [s.participantId, s]));
@@ -138,29 +142,21 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
   for (const s of prev.seats) if (!after.has(s.participantId)) cues.push({ kind: 'stand', seat: s.seat, at: viewAt });
 
   const sameHand = !!next.handId && prev.handId === next.handId;
-  const newHand = !!next.handId && prev.handId !== next.handId;
   const settling = sameHand && !prev.settled && next.settled;
   for (const s of next.seats) {
     const was = before.get(s.participantId);
     if (!was || was.seat !== s.seat) continue;
     if (was.sittingOut !== s.sittingOut || was.offline !== s.offline) cues.push({ kind: 'status', participantId: s.participantId, at: viewAt });
     // Stacks only grow inside a Hand when it settles; any other growth in place is a rebuy or a top-up.
-    if (s.stack > was.stack && !settling && prev.handId === next.handId) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack - was.stack, from: was.stack, beforeDeal: false, at: viewAt });
-    // A refill that came with the next Hand (Practice's Rebuy & deal): what the stack held before its blind went in grew.
-    else if (newHand && (prev.settled || !prev.handId) && s.stack + s.wager > was.stack) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack + s.wager - was.stack, from: was.stack, beforeDeal: true, at: phaseStart(table, 'deal') ?? viewAt });
+    // A refill that came with the next Hand (Practice's Rebuy & deal) lands with the deal, from the deal phase's beats.
+    if (s.stack > was.stack && !settling && prev.handId === next.handId) cues.push({ kind: 'chips', participantId: s.participantId, amount: s.stack - was.stack, from: was.stack, at: viewAt });
   }
-  const afterRefill = cues.some(cue => cue.kind === 'chips' && cue.beforeDeal);
   if (!next.handId) return cues;
 
-  // Dealt: everyone holding cards in a new Hand, or, in the same Hand, those whose cards the deal phase has just shown.
-  const dealt = next.seats.filter(s => s.cards > 0 && (newHand || before.get(s.participantId)?.cards === 0));
-  if (newHand && prev.handId) cues.push({ kind: 'new-hand', fromButton: prev.buttonSeat, at: phaseStart(table, 'deal') ?? viewAt });
-  // The blinds go in as the deal starts.
-  const blinds = dealt.length ? next.blinds.filter(id => (after.get(id)?.wager ?? 0) > 0) : [];
-  if (dealt.length) cues.push({
-    kind: 'deal', at: phaseStart(table, 'deal') ?? viewAt, blinds, afterRefill,
-    order: dealingOrder(dealt, next.buttonSeat, next.seatCount).map(s => ({ participantId: s.participantId, cards: s.cards, viewer: s.participantId === next.viewerId })),
-  });
+  const deal = dealCue(prev, next, table);
+  if (deal) cues.push(deal);
+  // The blinds went in with the deal.
+  const blinds = deal?.beats.blinds.map(b => b.participantId) ?? [];
   if (!sameHand) return cues;
 
   // Actions since the last view.

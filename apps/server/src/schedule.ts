@@ -1,11 +1,11 @@
-import { nextHandCountdownMs, presentationPhaseDurations, type ActionWindow, type DecisionId, type ParticipantId, type PresentationPhase, type PresentationPhaseKind, type ServerTime, type Street, type TableSchedule } from '@poker/contracts';
+import { nextHandCountdownMs, presentationPhaseLength, type ActionWindow, type DealInputs, type DecisionId, type HandId, type ParticipantId, type PresentationPhase, type PresentationPhaseKind, type PresentedPhase, type ServerTime, type Street, type TableSchedule } from '@poker/contracts';
 import type { CashGameEvent } from '@poker/engine';
 
 /**
  * Server-owned play timing (ADR-0032). Pure: callers supply the transition's events, the decision
  * current after it, and the time from the injected clock. The resulting schedule is persisted with
  * the commit that produced it; nothing here is a poker command. Phase and countdown lengths come from the shared
- * presentation timing (ADR-0039).
+ * presentation timing (ADR-0039): a phase that presents something lasts as long as its beats take for it.
  */
 
 export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freeze([]), actionWindow: null });
@@ -17,7 +17,12 @@ export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freez
  */
 export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId; readonly actionTimeLimitMs?: number; readonly liveAnalysisDisallowed?: true } | null;
 
-const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
+/** What a transition's phases present, by kind, for each kind whose length comes from its beats (phase-inputs.ts). */
+export interface PhaseInputs {
+  readonly deal: (handId: HandId) => DealInputs;
+}
+
+const phaseEnd =(phases: readonly PresentationPhase[]) => phases.reduce((end, phase) => Math.max(end, phase.endsAt), -Infinity);
 
 /**
  * The schedule after an accepted transition. Each phase starts when the previous one ends (or now),
@@ -30,15 +35,17 @@ const phaseEnd = (phases: readonly PresentationPhase[]) => phases.reduce((end, p
  * (`pauseBetweenHands`), where the pause between Hands follows it. A transition with Hand events always
  * ends any Next-Hand Countdown: the Hand it announced has started.
  */
-export function scheduleTransition(previous: TableSchedule, events: readonly CashGameEvent[], decision: CurrentDecision, now: ServerTime, options: { readonly pauseBetweenHands?: boolean } = {}): TableSchedule {
+export function scheduleTransition(previous: TableSchedule, events: readonly CashGameEvent[], decision: CurrentDecision, now: ServerTime, options: { readonly pauseBetweenHands?: boolean; readonly inputs: PhaseInputs }): TableSchedule {
   if (!events.some(event => 'handId' in event)) return previous;
   let phases = [...previous.phases];
   let cursor = Math.max(now, phaseEnd(phases));
   // The Hand is on the street of its latest phase; a showdown and a payout present the street the Hand reached.
   let street: Street = phases.at(-1)?.street ?? 'preflop';
+  // A phase carries what it presents, and lasts as long as its beats take for it (ADR-0039).
+  const presented = (kind: PresentationPhaseKind, handId: string): PresentedPhase => kind === 'deal' ? { kind, inputs: options.inputs.deal(handId) } : { kind };
   const add = (kind: PresentationPhaseKind, handId: string) => {
-    const durationMs = presentationPhaseDurations[kind];
-    phases.push({ kind, handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
+    const phase = presented(kind, handId), durationMs = presentationPhaseLength(phase);
+    phases.push({ ...phase, handId, street, startsAt: cursor, endsAt: cursor + durationMs, durationMs });
     cursor += durationMs;
   };
   for (const event of events) {

@@ -5,6 +5,7 @@ import WebSocket from 'ws';
 import { baselinePlayingStrategy, type ObservableTableSession, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { connectLive, announcedCountdown } from './fixtures/online.js';
 
@@ -106,7 +107,7 @@ async function onlineHand() {
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => view(ann))).endsAt);
   await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   return { ...table, ben, benId };
 }
 

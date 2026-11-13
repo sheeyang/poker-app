@@ -5,6 +5,7 @@ import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfig
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { connectLive, announcedCountdown } from './fixtures/online.js';
 
@@ -50,7 +51,7 @@ async function headsUp() {
 }
 /** Deals and lets the human fold at once: the Hand is over and its 2 s payout phase starts now. */
 async function foldedHand(t: Table, human: string) {
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   await accepted(t, human, { type: 'fold' });
   return clock.now();
 }
@@ -58,7 +59,7 @@ const participant = (view: ObservableTableSession, id: string) => view.view.stat
 
 test('a sit-out asked for during a Hand is recorded as pending, visible to the table, and applied when the payout phase ends', async () => {
   const { t, human } = await headsUp();
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   const before = await read(t);
   const asked = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
   // Nothing at the poker table changes: only the application records the request, so just the session revision moves.
@@ -80,7 +81,7 @@ test('a sit-out asked for during a Hand is recorded as pending, visible to the t
 
 test('a Stand Up asked for during a Hand cashes out after it, keeps every chip, and applies once however often it is asked or the server restarts', async () => {
   const { t, human, bot } = await headsUp();
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   const asked = await (await submit(t, 'stand-up-participant', { participantId: human }, 'stand-up-once')).json();
   expect(asked).toMatchObject({ ok: true, afterHand: true });
   // The same request again, and a fresh request for the same change, record nothing further.
@@ -111,7 +112,7 @@ test('a Stand Up asked for during a Hand cashes out after it, keeps every chip, 
 
 test('a request whose Hand ended while the server was down is applied once, when the untimed Practice Table is next opened', async () => {
   const { t, human } = await headsUp();
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   await command(t, 'stand-up-participant', { participantId: human });
   await accepted(t, human, { type: 'fold' });
   await server.close();
@@ -132,7 +133,7 @@ test('a request whose Hand ended while the server was down is applied once, when
 
 test('a stronger request replaces a weaker pending one, and a weaker one changes nothing', async () => {
   const { t, human } = await headsUp();
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   const sitOut = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
   const standUp = await command(t, 'stand-up-participant', { participantId: human });
   expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
@@ -144,7 +145,7 @@ test('a stronger request replaces a weaker pending one, and a weaker one changes
 
 test('top-ups and seat moves are not deferred: they wait for the Hand, which lasts until its payout phase ends', async () => {
   const { t, human } = await headsUp();
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   const refused = async (kind: string, fields: object) => { const response = await submit(t, kind, fields); return { status: response.status, code: (await response.json()).rejection?.code }; };
   const attempts: [string, object][] = [['top-up-to', { participantId: human, targetStack: 1000 }], ['move-participant', { participantId: human, seat: 3 }], ['set-sitting-out', { participantId: human, sittingOut: false }]];
   for (const [kind, fields] of attempts) expect({ kind, ...await refused(kind, fields) }).toEqual({ kind, status: 400, code: 'active-hand' });
@@ -187,7 +188,7 @@ test('Deal received before the table has woken for the end of the payout phase s
     const post = async (kind: string, fields: object, revision: number) => (await fetch(origin + '/api/table-sessions/' + created.tableSessionId + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), expectedPokerRevision: revision, ...fields }) })).json();
     const view = async (): Promise<ObservableTableSession> => (await fetch(origin + '/api/table-sessions/' + created.tableSessionId, { headers: { cookie } })).json();
     await post('seat-participant', { participantId: human, seat: 1 }, 0); await post('seat-participant', { participantId: bot, seat: 4 }, 1);
-    await post('start-hand', {}, 2); silent.advance(1500);
+    await post('start-hand', {}, 2); silent.advance(dealMs(2));
     await post('set-sitting-out', { participantId: human, sittingOut: true }, 3);
     await post('act', { participantId: human, action: { type: 'fold' } }, 3);
     silent.advance(2000);
@@ -231,7 +232,7 @@ async function onlineHand() {
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => view(ann))).endsAt);
   await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   const cookieOf = (participantId: string) => participantId === annId ? ann : ben;
   return { ann, ben, id, annId, benId, view, join, preview, as, cookieOf };
 }
@@ -305,7 +306,7 @@ test('nobody manages another human, and an owner who leaves passes the table on,
 test('at a Practice Table a missed Action Deadline plays the Timeout Action without sitting the human out, and a sit-out asked for meanwhile applies after the Hand, before Deal', async () => {
   const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [human, bot] = t.ids as [string, string];
   await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   expect(await command(t, 'set-sitting-out', { participantId: human, sittingOut: true })).toMatchObject({ afterHand: true });
   clock.advance(15_001);
   // The human never acted: the server folded for them, as their own decision.
@@ -327,7 +328,7 @@ test('at a Practice Table a missed Action Deadline plays the Timeout Action with
 test('at a Practice Table a missed Action Deadline with nothing requested leaves the human playing and the table waiting for their Deal', async () => {
   const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [human, bot] = t.ids as [string, string];
   await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   clock.advance(15_001);
   await expect.poll(async () => (await read(t)).view.state.status).toBe('completed-hand');
   clock.advance(2000);

@@ -6,6 +6,7 @@ import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfig
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -53,14 +54,14 @@ async function headsUp() {
 }
 /** Deals and checks every street down: the Hand ends at showdown on the river. */
 async function checkDown(t: Table, human: string, bot: string) {
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   await accepted(t, human, { type: 'call' }); await accepted(t, bot, { type: 'check' });
   for (const _street of ['flop', 'turn', 'river']) { clock.advance(1000); await accepted(t, bot, { type: 'check' }); await accepted(t, human, { type: 'check' }); }
 }
 
 /** Deals, the human raises and the Bot folds: the Hand is over at once. */
 async function foldOut(t: Table, human: string, bot: string) {
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(2));
   await accepted(t, human, { type: 'raise', raiseTo: 60 });
   await accepted(t, bot, { type: 'fold' });
 }
@@ -101,7 +102,7 @@ test('an all-in runout reaches a live client as one complete result, ahead of th
   socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerLiveMessage; if (message.type === 'table-update') updates.push(message); });
   socket.on('open', () => socket.send(JSON.stringify({ type: 'subscribe-table', requestId: randomUUID(), tableSessionId: t.id })));
   try {
-    await command(t, 'start-hand'); clock.advance(1500);
+    await command(t, 'start-hand'); clock.advance(dealMs(2));
     await accepted(t, human, { type: 'raise', raiseTo: 1000 });
     await accepted(t, bot, { type: 'call' });
     await expect.poll(() => updates.some(update => update.pokerRevision === t.revision)).toBe(true);
@@ -122,7 +123,7 @@ test('a three-way all-in with side pots schedules one showdown, the remaining st
   await command(t, 'seat-participant', { participantId: human, seat: 1 });
   await command(t, 'seat-participant', { participantId: short, seat: 3, buyIn: 300 });
   await command(t, 'seat-participant', { participantId: middle, seat: 5, buyIn: 500 });
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(dealMs(3));
   // Each player in turn puts in everything they can.
   for (let step = 0; step < 6; step++) {
     const { actorId, legalActions } = (await read(t)).view.state;
@@ -138,7 +139,7 @@ test('a three-way all-in with side pots schedules one showdown, the remaining st
   expect(total(done.view.state.payouts) + total(done.view.state.returns)).toBe(done.view.state.participants.reduce((sum, p) => sum + (p.contribution ?? 0), 0));
   expect(done.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(1800);
   expect(done.schedule.phases.map(({ kind, street, startsAt, endsAt }) => ({ kind, street, startsAt, endsAt }))).toEqual([
-    { kind: 'deal', street: 'preflop', startsAt: at - 1500, endsAt: at },
+    { kind: 'deal', street: 'preflop', startsAt: at - dealMs(3), endsAt: at },
     { kind: 'showdown', street: 'preflop', startsAt: at, endsAt: at + 2000 },
     { kind: 'street', street: 'flop', startsAt: at + 2000, endsAt: at + 3000 },
     { kind: 'street', street: 'turn', startsAt: at + 3000, endsAt: at + 4000 },
@@ -156,7 +157,7 @@ test('a Hand won by folds has a payout phase and no showdown, and Deal waits for
   expect(done.view.state).toMatchObject({ status: 'completed-hand' });
   expect(done.view.state.participants.find(p => p.participantId === bot)).not.toHaveProperty('holeCards');
   expect(done.schedule.phases.map(({ kind, street, startsAt, endsAt }) => ({ kind, street, startsAt, endsAt }))).toEqual([
-    { kind: 'deal', street: 'preflop', startsAt: at - 1500, endsAt: at },
+    { kind: 'deal', street: 'preflop', startsAt: at - dealMs(2), endsAt: at },
     { kind: 'payout', street: 'preflop', startsAt: at, endsAt: at + 2000 },
   ]);
   clock.advanceTo(at + 1999);

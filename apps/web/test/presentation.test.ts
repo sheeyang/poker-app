@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession, type PresentationPhase, type TableSchedule } from '@poker/contracts';
 import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, handInProgress, nextHandCountdown, nextPresentationChange, payoutEnded, presentTable, recordClockSample } from '../src/presentation.js';
 
-const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500 });
+const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500, inputs: { dealt: [], blinds: [], refills: [] } });
 const street = (name: 'flop' | 'turn' | 'river', startsAt: number): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
 const showdown = (startsAt: number, name: 'preflop' | 'flop' | 'turn' | 'river'): PresentationPhase => ({ kind: 'showdown', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
 const payout = (startsAt: number): PresentationPhase => ({ kind: 'payout', handId: 'hand-1', street: 'river', startsAt, endsAt: startsAt + 2000, durationMs: 2000 });

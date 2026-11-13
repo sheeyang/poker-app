@@ -196,7 +196,7 @@ Tests substitute a manually advanced clock.
 
 Each accepted transition schedules its Presentation Phases
 ([`schedule.ts`](../apps/server/src/schedule.ts)), in the order of the
-transition's events: a 1.5 s `deal` phase when a Hand starts, a 2 s `showdown`
+transition's events: a `deal` phase when a Hand starts, a 2 s `showdown`
 phase when the remaining hands are turned up, a 1 s `street` phase for each
 street dealt, and a 2 s `payout` phase when the Hand completes. At an Online
 Table a 3 s `pause` phase, the pause between Hands of Automatic Dealing, follows
@@ -205,10 +205,17 @@ is one accepted action, so it schedules the showdown, then every remaining
 street, then the payout (and, online, the pause); a river showdown schedules the
 showdown and the payout; a Hand won by folds has only the payout. For the showdown and the
 payout, `street` is the street the Hand had reached. Each phase starts when the
-previous one ends, or at the commit. The schedule is persisted in the Persisted
+previous one ends, or at the commit. The deal's length is not fixed: it carries
+what it presents as `inputs` (`dealt`, who is dealt in, in the engine's dealing
+order, with `cards` each; `blinds`, in the order they go in; and `refills`, each
+Participant the previous Hand left with no chips who rebought since, with the
+`amount`), and lasts as long as the shared deal beats take for them
+(`dealBeats` in [`presentation.ts`](../packages/contracts/src/presentation.ts),
+[ADR-0039](adr/0039-derive-presentation-phase-lengths-from-shared-choreography.md)):
+longer with more cards dealt and with a refill. The inputs are public in the view. The schedule is persisted in the Persisted
 Table Session in the same transaction as that commit; phases are never poker
 commands. It holds the current Hand's phases (`kind`, `handId`, `street`,
-`startsAt`, `endsAt`, `durationMs`) and the current decision's `actionWindow`
+`startsAt`, `endsAt`, `durationMs`, and the deal's `inputs`) and the current decision's `actionWindow`
 (`participantId`, `decisionId`, `opensAt`), which opens when the last phase ends.
 Every complete view and `table-update` carries this `schedule` and the
 `serverTime` at which it was produced, in milliseconds since the Unix epoch.

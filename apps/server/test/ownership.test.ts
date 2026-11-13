@@ -4,6 +4,7 @@ import { Pool } from 'pg';
 import { baselinePlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { announcedCountdown, connectLive } from './fixtures/online.js';
 
@@ -117,7 +118,7 @@ async function dealt(table: Awaited<ReturnType<typeof online>>, seated: (readonl
   for (const [index, participantId] of bots.entries()) expect((await table.as(owner, 'seat-participant', { participantId, seat: seated.length + index + 1 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => table.view(owner))).endsAt);
   await expect.poll(async () => (await table.view(owner)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(dealMs(2));
   const cookieOf = new Map(seated.map(([cookie, participantId]) => [participantId, cookie]));
   /** Plays the Hand to its end and past its payout phase, as seen by `watcher`. */
   async function finish(watcher: string) {

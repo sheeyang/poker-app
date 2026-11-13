@@ -7,6 +7,7 @@ import { createStrategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { connectLive, type LiveConnection } from './fixtures/online.js';
 
@@ -206,7 +207,7 @@ test('a request from anyone not at a table never loads it; a join to an Online T
 test('an untimed Practice Hand holds nothing while it waits for its human: the table unloads, and reloads mid-Hand as it was', async () => {
   const t = await handInProgress(null);
   // Its Action Window opens as the deal is presented; after that nothing is scheduled.
-  clock.advance(1500); await roundTrip();
+  clock.advance(dealMs(2)); await roundTrip();
   const waiting = await read(t);
   expect(waiting.view.state).toMatchObject({ status: 'active-hand', actorId: t.human });
   clock.advance(minute);
@@ -216,7 +217,7 @@ test('an untimed Practice Hand holds nothing while it waits for its human: the t
 
 test('scheduled work holds a table with nobody connected: a timed Practice Hand plays out by its Action Deadline, then the table unloads', async () => {
   const t = await handInProgress(60);
-  clock.advance(1500); await roundTrip();
+  clock.advance(dealMs(2)); await roundTrip();
   const waiting = await stored(t);
   // A minute after the last request, the Action Deadline, a moment away, keeps the table in memory.
   clock.advance(minute); await roundTrip();
@@ -232,7 +233,7 @@ test('scheduled work holds a table with nobody connected: a timed Practice Hand 
 
 test('After-Hand Requests at an untimed Practice Table hold nothing: only its human advances the Hand, so the table unloads and they wait in its record', async () => {
   const t = await handInProgress(null);
-  clock.advance(1500); await roundTrip();
+  clock.advance(dealMs(2)); await roundTrip();
   expect(await command(t, 'stand-up-participant', { participantId: t.human })).toMatchObject({ ok: true, afterHand: true });
   clock.advance(minute);
   await expect.poll(() => loaded(t.id)).toBe(false);
@@ -259,7 +260,7 @@ test('automatic analysis results that arrive after the last subscriber leaves do
   const release = holdAnalysis();
   const t = await handInProgress(null);
   const live = await connectLive(base, t.cookie, t.id);
-  clock.advance(1500); await roundTrip();
+  clock.advance(dealMs(2)); await roundTrip();
   const started = evaluationsStarted;
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   await expect.poll(() => evaluationsStarted).toBeGreaterThan(started);
@@ -278,7 +279,7 @@ test('automatic analysis results that arrive after the last subscriber leaves do
 test('automatic analysis results that arrive after the table has unloaded are kept without loading it again', async () => {
   const release = holdAnalysis();
   const t = await handInProgress(null);
-  clock.advance(1500); await roundTrip();
+  clock.advance(dealMs(2)); await roundTrip();
   const started = evaluationsStarted;
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
   await expect.poll(() => evaluationsStarted).toBeGreaterThan(started);

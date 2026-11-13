@@ -5,6 +5,7 @@ import { baselinePlayingStrategy, type ConcreteAction, type ObservableTableSessi
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
+import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
@@ -80,7 +81,7 @@ const annOnly = (t: Table) => (id: string) => id === t.annId ? t.ann : undefined
 async function dealt(t: Table, handId = 'hand-1') {
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe(handId);
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
 }
 /** Ann, connected, and the Bot are seated heads-up, and Hand 1 is dealt with Ann, on the button, to act. */
 async function dealtHeadsUp(t: Table) {
@@ -114,8 +115,8 @@ test('an Online Table announces a Next-Hand Countdown, visible to everyone, once
   await expect.poll(async () => (await t.view()).view.state.status).toBe('active-hand');
   const hand = await t.view();
   expect(hand.view.state).toMatchObject({ handId: 'hand-1', actorId: t.annId });
-  expect(hand.schedule).toEqual({ phases: [{ kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: seatedAt + 5000, endsAt: seatedAt + 6500, durationMs: 1500 }],
-    actionWindow: { participantId: t.annId, decisionId: 'hand-1/decision-1', opensAt: seatedAt + 6500, deadlineAt: seatedAt + 6500 + 30_000 } });
+  expect(hand.schedule).toEqual({ phases: [{ kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: seatedAt + 5000, endsAt: seatedAt + 5000 + dealMs(2), durationMs: dealMs(2), inputs: { dealt: [{ participantId: t.annId, cardCount: 2 }, { participantId: expect.any(String), cardCount: 2 }], blinds: [t.annId, expect.any(String)], refills: [] } }],
+    actionWindow: { participantId: t.annId, decisionId: 'hand-1/decision-1', opensAt: seatedAt + 5000 + dealMs(2), deadlineAt: seatedAt + 5000 + dealMs(2) + 30_000 } });
   // Ben joined unseated, so he watches the Hand without being dealt in.
   expect(participant(await t.view(ben.cookie), ben.participantId)).toEqual({ participantId: ben.participantId, seat: null, stack: 0, sittingOut: false });
   await expect.poll(() => updates(annLive).at(-1)?.view.state.handId).toBe('hand-1');
@@ -164,7 +165,7 @@ test('when a countdown expires, humans still disconnected are sat out first, and
   expect(participant(hand, t.annId)).toMatchObject({ inHand: true });
   expect(participant(hand, t.botIds[0]!)).toMatchObject({ inHand: true });
   // Ann folds; then she too is gone when the pause ends, so no countdown is announced.
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   await act(t, annOnly(t), { type: 'fold' });
   await annLive.close();
   clock.advance(10_000);
