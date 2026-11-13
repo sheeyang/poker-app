@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
-import { dealMs } from './fixtures/presentation.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { baselinePlayingStrategy, type ObservableTableSession } from '@poker/contracts';
@@ -9,6 +8,7 @@ import { connectLive, announcedCountdown } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
 const clock = new ManualClock();
@@ -182,11 +182,11 @@ test('a Guest who left returns through the same Join Link as the same Participan
   await command(table, table.owner, 'seat-participant', { participantId: table.bindings[1]!.participantId, seat: 1 });
   await command(table, table.owner, 'seat-participant', { participantId: table.ownerParticipant, seat: 2 });
   await deal(table);
-  // Ben watches Rex, on the button, fold Hand 1; then the payout phase ends.
+  // Ben watches Rex, on the button, fold Hand 1; then the Hand ends.
   const dealt = await read(table, ben);
   expect(dealt.view.state.actorId).toBe(table.bindings[1]!.participantId);
   expect((await controller.submitAction(table.id, { requestId: randomUUID(), expectedPokerRevision: dealt.pokerRevision, participantId: dealt.view.state.actorId!, action: { type: 'fold' } })).ok).toBe(true);
-  clock.advance(2000);
+  clock.advance(presentedFor('payout', 'online'));
   const watched = await read(table, ben);
   expect(watched.view.history.map(hand => hand.handId)).toEqual(['hand-1']);
   // Ben leaves between Hands, and is then answered as anyone not at the table is.
@@ -248,7 +248,7 @@ async function deal(t: Table) {
   await connectLive(base, t.owner, t.id);
   clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
-  clock.advance(dealMs(2));
+  clock.advance(presentedFor('deal', 'online'));
 }
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000 };
 

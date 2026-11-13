@@ -3,13 +3,13 @@ import type { CashGame, CashGameEvent, CashGameResult } from '@poker/engine';
 import { isBot, isHuman, type PersistedBinding, type PersistedTableSession } from './aggregate.js';
 import type { PokerMutationKind } from './permissions.js';
 import { reject } from './rejections.js';
-import { beforePayoutEnd } from './schedule.js';
+import { beforeHandEnd } from './schedule.js';
 
 /**
  * After-Hand Requests. A change to a Participant that the table cannot make while a Hand is in progress is
  * recorded in the Persisted Table Session instead (`pendingChanges`), shown to everyone in the table view, and
- * applied together, in one committed transition, once the Hand's payout phase ends. That transition runs before
- * Deal is accepted (Practice) and before the pause between Hands begins (Online).
+ * applied together, in one committed transition, once the Hand ends (the Settle after its payout). That
+ * transition runs before Deal is accepted (Practice) and before the Next-Hand Countdown is announced (Online).
  *
  * The model is a list of `{ participantId, change }` with at most one entry per Participant. A stronger
  * request replaces a weaker one in place; a weaker or equal request changes nothing. Which requests wait for the
@@ -27,11 +27,11 @@ export function recordAfterHandRequest(pending: readonly AfterHandRequest[], par
 
 /**
  * Whether a Hand is in progress for management: it is being played, or its result is still being presented.
- * A Hand ends when its payout phase does, not when its last decision is made: changing stacks or seats while
- * the payout is shown would reveal the result early, and Deal waits for the same instant.
+ * A Hand ends when the Settle after its payout does, not when its last decision is made: changing stacks or
+ * seats while the payout is shown would reveal the result early, and Deal waits for the same instant.
  */
 export function handInProgress(status: 'between-hands' | 'active-hand' | 'completed-hand', schedule: TableSchedule, now: ServerTime): boolean {
-  return status === 'active-hand' || beforePayoutEnd(schedule, now);
+  return status === 'active-hand' || beforeHandEnd(schedule, now);
 }
 
 /** The After-Hand Request a request becomes during a Hand, or `undefined` when it never waits for one. */

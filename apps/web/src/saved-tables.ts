@@ -34,7 +34,7 @@ export type SavedRow =
 
 /**
  * The live details of a loaded table at server time `serverNow`; undefined while it is not loaded. A Hand is in
- * progress until its payout phase ends (`handInProgress`). A Guest who is only watching has no stack.
+ * progress until the Settle after its payout ends (`handInProgress`). A Guest who is only watching has no stack.
  */
 export function liveDetails(tableSessionId: string, table: ObservableTableSession | undefined, serverNow: number): LiveDetails | undefined {
   if (!table) return undefined;

@@ -32,21 +32,22 @@ function middleFor(ctx: MotionContext, card: Box | undefined): Box | undefined {
   return c && card ? { x: c.x, y: c.y, w: card.w, h: card.h } : undefined;
 }
 
-function chipIn(ctx: MotionContext, id: string, delay: number, el: number) {
-  fly(ctx, 'chip', at(ctx, S.body(id)), chipAt(ctx, id), { duration: W.chipFlight, delay, elapsed: el, hideBefore: true });
+/** A bet's chip sliding to the betting line, its amount appearing at `appears`. The deal plays the blinds' own beats. */
+function chipIn(ctx: MotionContext, id: string, delay: number, el: number, flight: number, appears: number) {
+  fly(ctx, 'chip', at(ctx, S.body(id)), chipAt(ctx, id), { duration: flight, delay, elapsed: el, hideBefore: true });
   // Appears whole just before the chip lands on it, so the hand-off cannot be seen.
-  reveal(ctx, q(ctx, S.wager(id)), { delay: delay + W.amountAppears, elapsed: el, duration: 1 });
+  reveal(ctx, q(ctx, S.wager(id)), { delay: delay + appears, elapsed: el, duration: 1 });
 }
 
 /** Sweeps the betting line into the pot; how long that takes, for whatever follows it. */
 function sweep(ctx: MotionContext, ids: readonly string[], delay: number, el: number) {
   ids.forEach((id, n) => {
-    fly(ctx, 'chip', ctx.last.get(S.chip(id))?.box, at(ctx, S.pot), { duration: W.sweepFlight, delay: delay + n * W.sweepStagger, elapsed: el, fadeOut: true });
+    fly(ctx, 'chip', ctx.last.get(S.chip(id))?.box, at(ctx, S.pot), { duration: T.sweepFlight, delay: delay + n * T.sweepStagger, elapsed: el, fadeOut: true });
     // The amount stays until its chip leaves, then fades: the chip itself is the flying ghost.
     const w = ctx.last.get(S.wager(id));
-    if (w) stay(ctx, 'clone', w.box, [{ opacity: 1 }, { opacity: 0 }], { duration: W.sweepAmountFade, delay: delay + n * W.sweepStagger, elapsed: el, easing: 'linear', html: w.html.replace('<i', '<i style="visibility:hidden"') });
+    if (w) stay(ctx, 'clone', w.box, [{ opacity: 1 }, { opacity: 0 }], { duration: T.sweepAmountFade, delay: delay + n * T.sweepStagger, elapsed: el, easing: 'linear', html: w.html.replace('<i', '<i style="visibility:hidden"') });
   });
-  if (ids.length) play(ctx, q(ctx, S.pot), [{ opacity: .35 }, { opacity: 1 }], { duration: W.potBrightens, delay: delay + W.potAfterSweep + ids.length * W.sweepStagger, elapsed: el, easing: 'linear' });
+  if (ids.length) play(ctx, q(ctx, S.pot), [{ opacity: .35 }, { opacity: 1 }], { duration: T.potBrightens, delay: delay + T.potAfterSweep + ids.length * T.sweepStagger, elapsed: el, easing: 'linear' });
 }
 const sweptFor = (count: number) => (count ? W.sweptBase + count * W.sweepStagger : 0);
 
@@ -104,7 +105,7 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
     }
     case 'bet':
       if (cue.toPot) fly(ctx, 'chip', at(ctx, S.body(cue.participantId)), at(ctx, S.pot), { duration: T.betToPot, elapsed: el, fadeOut: true });
-      else chipIn(ctx, cue.participantId, 0, el);
+      else chipIn(ctx, cue.participantId, 0, el, T.betFlight, T.betAmountAppears);
       reveal(ctx, q(ctx, S.caption(cue.participantId)), { duration: T.caption, elapsed: el });
       break;
     case 'fold':

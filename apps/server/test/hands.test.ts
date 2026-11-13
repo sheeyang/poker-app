@@ -5,7 +5,7 @@ import { Pool } from 'pg';
 import { baselinePlayingStrategy } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import { InstantClock } from './fixtures/clock.js';
-import { dealMs } from './fixtures/presentation.js';
+import { presentedFor } from './fixtures/phases.js';
 
 // Not a timing test: every Presentation Phase ends at once (see fixtures/clock.ts).
 const clock = new InstantClock();
@@ -93,9 +93,9 @@ test('Start Hand and Fold withhold every consequence until COMMIT and use the sa
   beforeCommit = async context => { if (context.tableSessionId === t.id && context.requestId === 'held-start') { entered.resolve(); await release.promise; } };
   const starting = submit(t, 'start-hand', { requestId: 'held-start', expectedPokerRevision: 2 });
   await entered.promise;
-  // Let the held Deal's presentation end by the clock, so the Fold is inside its Action Window whenever the server
+  // Let the held Deal's presentation and its Settle end by the clock, so the Fold is inside its Action Window whenever the server
   // stamps its arrival and only the FIFO decides its fate. presentation-phases.test.ts covers acting too early.
-  clock.advance(dealMs(2));
+  clock.advance(presentedFor('deal'));
   let folding: Promise<Response>;
   try {
     const waiting = await read(t);

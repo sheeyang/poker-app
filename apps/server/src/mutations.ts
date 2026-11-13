@@ -19,7 +19,7 @@ import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges, validateTrainerConfiguration } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
-import { announceNextHand, beforeActionWindow, beforePayoutEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
+import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputs } from './phase-inputs.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
@@ -308,15 +308,15 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * during an outage, resolves as its Timeout Action here (`timeOut`), before any further action is accepted:
    * a human's late act is rejected with `action-deadline-passed` whichever runs first.
    *
-   * The end of a Hand's payout phase (`payoutEndsAt`) is one of those wake-ups: it fires here, in the FIFO,
-   * and `loadScheduledTables` reaches it after a restart. Deal itself is gated by the clock alone (`beforePayoutEnd`
+   * The end of a Hand, the Settle after its payout (`handEndsAt`), is one of those wake-ups: it fires here, in the FIFO,
+   * and `loadScheduledTables` reaches it after a restart. Deal itself is gated by the clock alone (`beforeHandEnd`
    * in `accept`). The work that must happen when the Hand ends runs from here once
-   * `payoutEndsAt(schedule) <= clock.now()`: applying the after-Hand requests (`settleAfterHand`), queued as
+   * `handEndsAt(schedule) <= clock.now()`: applying the after-Hand requests (`settleAfterHand`), queued as
    * its own FIFO task. `accept` runs the same step first, so a request that arrives ahead of this wake-up
    * still sees them applied.
    *
-   * At an Online Table, Automatic Dealing (`dealNextHand`) follows: once the pause between Hands has ended and
-   * the after-Hand requests are applied, a Next-Hand Countdown is announced if the table can deal, and an expired
+   * At an Online Table, Automatic Dealing (`dealNextHand`) follows: once the Hand has ended and the after-Hand
+   * requests are applied, a Next-Hand Countdown is announced if the table can deal, and an expired
    * countdown runs its recheck, including one that expired during an outage. A connection change runs the
    * schedule too, since it can let the table deal.
    */
@@ -332,7 +332,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (afterHandDue(session)) void enqueue(id, () => settleAfterHand(id)).catch(() => {});
     ensureBot(id, session, forceBot);
   }
-  /** Whether the Hand has ended (its payout phase is over) with after-Hand requests still waiting to be applied. */
+  /** Whether the Hand has ended (the Settle after its payout is over) with after-Hand requests still waiting to be applied. */
   function afterHandDue(session: CommittedSession): boolean {
     const { aggregate } = session;
     if (!aggregate.pendingChanges.length) return false;
@@ -340,15 +340,14 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     return !handInProgress(status, aggregate.schedule, clock.now());
   }
   /**
-   * Applies every after-Hand request in one committed transition once the Hand's payout phase has ended, and
+   * Applies every after-Hand request in one committed transition once the Hand has ended, and
    * clears them in the same transaction: one poker revision step for all engine commands, one session revision
    * step. Runs in the table FIFO (from `runSchedule`, or at the start of `accept`), so a Deal can never be
    * accepted ahead of it. Idempotent: it does nothing unless requests are pending, its request ID derives from
    * the session revision they were pending at, and a restart finds the requests still pending or already gone.
    *
-   * At an Online Table the pause between Hands is already in the schedule (it follows the payout phase), and
-   * Automatic Dealing announces no Next-Hand Countdown while requests are pending, so this transition always
-   * comes first, including the sit-outs that Timeout Actions queue.
+   * At an Online Table Automatic Dealing announces no Next-Hand Countdown while requests are pending, so this
+   * transition always comes first, including the sit-outs that Timeout Actions queue.
    */
   async function settleAfterHand(id: string): Promise<void> {
     await commitScheduled(id, session => {
@@ -419,7 +418,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const dealt = canDeal(participants) ? working.startHand() : undefined;
       const started = dealt?.ok ? dealt.events.find(event => event.type === 'hand-started') : undefined;
       if (dealt?.ok) events.push(...dealt.events);
-      const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { pauseBetweenHands: true, inputs: phaseInputs(working, events) }) : withoutNextHand(aggregate.schedule);
+      const schedule = started ? scheduleTransition(withoutNextHand(aggregate.schedule), events, decisionAfter(aggregate, working, events), now, { mode: 'online', inputs: phaseInputs(working, events) }) : withoutNextHand(aggregate.schedule);
       const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1, schedule, ...(events.length ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}) };
       return { requestId: started && 'handId' in started ? 'deal:' + started.handId : 'no-deal:' + aggregate.sessionRevision, fingerprint: fingerprint({ step, sittingOut: disconnected, deal: !!started }), events, next: { aggregate: next, game: working } };
     });
@@ -822,9 +821,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             // No one acts during a Presentation Phase, and the next Hand is not dealt before the last one is paid out.
             if (!result && kind === 'act' && beforeActionWindow(session.aggregate.schedule, (request as ActRequest).participantId, arrivedAt))
               result = reject('action-window-not-open', 'This decision’s Action Window opens when the current Presentation Phase ends. Act once it opens.');
-            if (!result && kind === 'start-hand' && beforePayoutEnd(session.aggregate.schedule, arrivedAt))
-              result = reject('payout-phase-not-ended', 'The last Hand is still being paid out. Deal when its payout phase ends.');
-            // Judged when the request is processed, not when it arrived: the Hand ends for management when its payout phase does.
+            if (!result && kind === 'start-hand' && beforeHandEnd(session.aggregate.schedule, arrivedAt))
+              result = reject('payout-phase-not-ended', 'The last Hand is still being paid out. Deal when it ends.');
+            // Judged when the request is processed, not when it arrived: the Hand ends for management when the Settle after its payout does.
             const during = !result && authority.kind === 'human' ? duringHand(tableState(session), session.aggregate, kind, binding, request, clock.now()) : undefined;
             if (during && 'rejection' in during) result = during.rejection;
             else if (during) {
@@ -899,8 +898,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                   const { tableSessionId: _table, pokerRevision: _revision, ...identity } = authority.identity;
                   return { ...identity, commandIndex: pokerRecord.commands.length - 1 };
                 })() : undefined;
-                // The schedule commits with the transition that produced it; Automatic Dealing pauses between Hands.
-                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { pauseBetweenHands: session.aggregate.mode === 'online', inputs: phaseInputs(working, accepted.events) });
+                // The schedule commits with the transition that produced it; the table's mode chooses the Settle after the payout.
+                const schedule = scheduleTransition(session.aggregate.schedule, accepted.events, decisionAfter(session.aggregate, working, accepted.events), clock.now(), { mode: session.aggregate.mode, inputs: phaseInputs(working, accepted.events) });
                 // At an Online Table a Timeout Action, a human's or a failed Bot's, also sits its Participant out after the Hand.
                 const sitsOutAfterHand = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,
@@ -960,7 +959,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (!result && tableOptions) result = validateTableOptionChanges((request as SetTableOptionsRequest).options);
             if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
             if (!result && tableOptions) {
-              // A Practice Table keeps the options it was created with. At an Online Table they change between Hands only: a Hand lasts until its payout phase ends.
+              // A Practice Table keeps the options it was created with. At an Online Table they change between Hands only: a Hand lasts until the Settle after its payout ends.
               if (session.aggregate.mode !== 'online') result = reject('unavailable-at-practice-tables', 'A Practice Table keeps the options it was created with.');
               else if (handInProgress(tableState(session).status, session.aggregate.schedule, clock.now())) result = reject('active-hand', 'Change table options between Hands, once the payout has been shown.');
             }

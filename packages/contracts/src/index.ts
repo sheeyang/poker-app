@@ -213,7 +213,7 @@ export interface MutationAcknowledgement {
   readonly tableSessionId: TableSessionId;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
-  /** The request was made during a Hand: it is recorded as pending and applies when the Hand's payout phase ends. */
+  /** The request was made during a Hand: it is recorded as pending and applies when the Hand ends, with the Settle after its payout. */
   readonly afterHand?: true;
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
@@ -292,17 +292,21 @@ export interface SavedTable {
 }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
- * What a Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's
+ * What a presenting Presentation Phase presents. The deal reveals hole cards; a street reveal reveals that street's
  * board cards; the showdown turns the remaining hands up; the payout awards the pots and returns uncalled chips.
- * The pause, only under Automatic Dealing (Online Tables), follows the payout and presents nothing new: the next
- * Next-Hand Countdown is announced when it ends.
  */
-export type PresentationPhaseKind = 'deal' | 'street' | 'showdown' | 'payout' | 'pause';
+export type PresentingPhaseKind = 'deal' | 'street' | 'showdown' | 'payout';
+/**
+ * A Presentation Phase's kind: one that presents something, or the Settle that follows each of them. In a Settle the
+ * table is still: it presents nothing new, nothing moves, and nobody may act.
+ */
+export type PresentationPhaseKind = PresentingPhaseKind | 'settle';
 /**
  * A server-timed interval in which no Participant may act. Clients show the step it presents from
  * `startsAt`; the next phase, or the Action Window, begins at `endsAt`. Phases are never poker commands.
- * A Hand's last phase is its payout, and Deal is accepted when that phase ends. A phase whose length comes from its
- * beats (the deal) carries what it presents as `inputs` (ADR-0039).
+ * Each presenting phase is followed by its Settle, unless that Settle's length is 0. A Hand's last phase is the
+ * Settle after its payout: the Hand ends, and Deal is accepted, when that phase ends. A phase whose length comes from
+ * its beats (the deal) carries what it presents as `inputs` (ADR-0039).
  */
 export type PresentationPhase = PresentationPhaseTiming & PresentedPhase;
 interface PresentationPhaseTiming {
@@ -314,7 +318,7 @@ interface PresentationPhaseTiming {
   /** The phase's length: the total of its beats for its inputs, or its kind's fixed length. */
   readonly durationMs: number;
 }
-/** The interval in which the current decision's Participant may act. It opens when the preceding phase ends. */
+/** The interval in which the current decision's Participant may act. It opens when the preceding phase, a Settle, ends. */
 export interface ActionWindow {
   readonly participantId: ParticipantId;
   readonly decisionId: DecisionId;
@@ -398,7 +402,7 @@ export interface ObservableTableSession {
   readonly schedule: TableSchedule;
   /** When the server produced this view, so clients can estimate the server clock. */
   readonly serverTime: ServerTime;
-  /** Changes asked for during the Hand in progress, applied together when its payout phase ends. Public. */
+  /** Changes asked for during the Hand in progress, applied together when it ends, with the Settle after its payout. Public. */
   readonly pendingChanges: readonly AfterHandRequest[];
   /**
    * At an Online Table, the human Participants connected to it when the view was produced: their Guest has at least

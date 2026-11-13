@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
-import { dealMs } from './fixtures/presentation.js';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
@@ -8,6 +7,7 @@ import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilit
 import { connectLive, announcedCountdown } from './fixtures/online.js';
 import { createServer } from '../src/server.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
 const clock = new ManualClock();
@@ -48,15 +48,16 @@ async function command(t: Table, kind: string, contents: object = {}, cookie = t
 async function completedHand(t: Table) {
   await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
-  if ((await read(t)).mode === 'online') {
+  const { mode } = await read(t);
+  if (mode === 'online') {
     // An Online Table deals by itself once its connected human and the Bot are seated and the countdown runs out.
     await connectLive(base, t.cookie, t.id);
     clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
     await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
   } else await command(t, 'start-hand');
-  clock.advance(dealMs(2));
+  clock.advance(presentedFor('deal', mode));
   await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
-  clock.advance(2000);
+  clock.advance(presentedFor('payout', mode));
 }
 const join = (t: Table, cookie: string) => post('/api/table-sessions/' + t.id + '/join-table', cookie, { requestId: randomUUID() });
 async function settledAnalysis(t: Table, decisionId = 'hand-1/decision-1', cookie = t.cookie) {

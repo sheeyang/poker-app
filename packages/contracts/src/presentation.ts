@@ -1,4 +1,4 @@
-import type { ChipAmount, ParticipantId, PresentationPhaseKind } from './index.js';
+import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseKind, TableMode } from './index.js';
 
 /**
  * Presentation timing, shared by the server and the Trainer (ADR-0039). The server schedules Presentation Phases and
@@ -16,14 +16,14 @@ export interface PresentationPhaseInputs {
   readonly deal: DealInputs;
 }
 
-/** The fixed length of each Presentation Phase whose kind has no beats of its own. */
-export const presentationPhaseDurations: Readonly<Record<Exclude<PresentationPhaseKind, keyof PresentationPhaseInputs>, number>> = Object.freeze({ street: 1000, showdown: 2000, payout: 2000, pause: 3000 });
+/** The fixed length of each presenting Presentation Phase whose kind has no beats of its own yet. */
+export const presentationPhaseDurations: Readonly<Record<Exclude<PresentingPhaseKind, keyof PresentationPhaseInputs>, number>> = Object.freeze({ street: 1000, showdown: 2000, payout: 2000 });
 
 /** A phase's kind and what it presents: all the server needs for its length, and a Trainer for its beats. */
 export type PresentedPhase = { readonly [K in PresentationPhaseKind]: { readonly kind: K } & (K extends keyof PresentationPhaseInputs ? { readonly inputs: PresentationPhaseInputs[K] } : unknown) }[PresentationPhaseKind];
 
-/** How long a Presentation Phase lasts: the total of its beats, or its kind's fixed length. */
-export function presentationPhaseLength(phase: PresentedPhase): number {
+/** How long a presenting Presentation Phase lasts: the total of its beats, or its kind's fixed length. */
+export function presentationPhaseLength(phase: PresentedPhase & { readonly kind: PresentingPhaseKind }): number {
   return 'inputs' in phase ? dealBeats(phase.inputs).totalMs : presentationPhaseDurations[phase.kind];
 }
 
@@ -47,23 +47,34 @@ function beatFunction<I, B extends PhaseBeats>(plan: (inputs: I, at: (ms: number
   };
 }
 
+/** The length of the Settle after each presenting phase, by the phase it follows; after the payout, by table mode too. */
+export interface SettleLengths {
+  readonly deal: number;
+  readonly street: number;
+  readonly showdown: number;
+  readonly payout: Readonly<Record<TableMode, number>>;
+}
+
+/**
+ * The Settle lengths: a moment to take in the deal or a street before acting, time to read the turned hands before the
+ * pot is pushed, and a moment to see the result before the next Hand can start. Each may be 0: a Settle of 0 is not
+ * scheduled, and what follows starts when the phase before it ends.
+ */
+export const settleLengths: SettleLengths = Object.freeze({ deal: 300, street: 300, showdown: 1200, payout: Object.freeze({ practice: 600, online: 3000 }) });
+
+/** The length of the Settle after a phase of `kind` at a table of `mode`. */
+export const settleAfter = (kind: PresentingPhaseKind, mode: TableMode, lengths: SettleLengths = settleLengths): number => kind === 'payout' ? lengths.payout[mode] : lengths[kind];
+
 /** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
 export const nextHandCountdownMs = 5000;
 
-/** Chips on the betting line: a wager going in, and the line swept to the pot. */
+/**
+ * Chips on the betting line inside a Presentation Phase: the room a street reveal or showdown leaves for the line to be
+ * swept. The blinds go in with the deal (`dealMotion`); a bet and the sweep itself are motion with no phase (`tableMotion`).
+ */
 export const wagerMotion = Object.freeze({
-  /** A chip's flight from the seat to the betting line. */
-  chipFlight: 300,
-  /** When the wager's amount appears, just before its chip lands. */
-  amountAppears: 290,
-  /** A swept chip's flight to the pot, and the gap between one wager's chip and the next. */
-  sweepFlight: 280, sweepStagger: 40,
-  /** A swept wager's amount fading as its chip leaves. */
-  sweepAmountFade: 140,
-  /** The pot brightening once the chips reach it, after the sweep starts (plus one stagger per wager). */
-  potAfterSweep: 260, potBrightens: 160,
   /** The room a sweep of n wagers takes before what follows it: `sweptBase + n × sweepStagger`, or 0 with none. */
-  sweptBase: 320,
+  sweptBase: 320, sweepStagger: 40,
 });
 
 /**
@@ -172,27 +183,38 @@ export const payoutMotion = Object.freeze({
   captionBeforeLanding: 20, caption: 160,
 });
 
-/** Table motion with no Presentation Phase: it is timed from the view that carried it and never gates play. */
+/**
+ * Table motion with no Presentation Phase: it is timed from the view that carried it and never gates play. It plays at
+ * the phases' followable tempo, 1.5× the M5 motion's timings.
+ */
 export const tableMotion = Object.freeze({
+  /** A bet's chip flight from the seat to the betting line, and when its amount appears, just before the chip lands. */
+  betFlight: 450, betAmountAppears: 435,
   /** A bet straight into the pot (when there is no betting line to land on). */
-  betToPot: 340,
+  betToPot: 510,
   /** An acting seat's caption appearing. */
-  caption: 150,
+  caption: 225,
   /** A folded hand mucked to the middle of the table, card after card. */
-  muckFlight: 340, muckStagger: 40,
-  check: 240,
-  /** When the line is swept outside a street reveal or a showdown. */
-  sweepAt: 120,
+  muckFlight: 510, muckStagger: 60,
+  check: 360,
+  /** The line swept to the pot: when it starts, after the view that carried it. */
+  sweepAt: 180,
+  /** A swept chip's flight to the pot, and the gap between one wager's chip and the next. */
+  sweepFlight: 420, sweepStagger: 60,
+  /** A swept wager's amount fading as its chip leaves. */
+  sweepAmountFade: 210,
+  /** The pot brightening once the chips reach it, after the sweep starts (plus one stagger per wager). */
+  potAfterSweep: 390, potBrightens: 240,
   /** A seat settling in place. */
-  seatArrives: 240,
+  seatArrives: 360,
   /** A Participant sitting down: the empty seat fading, then the seat arriving. */
-  sitFade: 140, sitArrivesAt: 80,
+  sitFade: 210, sitArrivesAt: 120,
   /** A Participant standing up or moving: the seat they left fading and shrinking, then the seats arriving. */
-  leaveFade: 200, leaveArrivesAt: 140, moveVacatedArrivesAt: 200,
+  leaveFade: 300, leaveArrivesAt: 210, moveVacatedArrivesAt: 300,
   /** Chips added to a stack: their flight in from the table's edge, the floating amount, and the figure's roll. */
-  chipsFlight: 560, chipsLabel: 1100, stackRoll: 700,
+  chipsFlight: 840, chipsLabel: 1650, stackRoll: 1050,
   /** The viewer's own seat change: the old seats fading, the new ones arriving, and the label naming the seat. */
-  seatChangeFade: 160, seatChangeArrivesAt: 120, seatChangeArrives: 220, seatChangeLabel: 1600,
+  seatChangeFade: 240, seatChangeArrivesAt: 180, seatChangeArrives: 330, seatChangeLabel: 2400,
   /** A seat's status changing: its caption and connection label. */
-  status: 180,
+  status: 270,
 });

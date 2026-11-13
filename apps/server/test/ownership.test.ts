@@ -4,8 +4,8 @@ import { Pool } from 'pg';
 import { baselinePlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
-import { dealMs } from './fixtures/presentation.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 import { announcedCountdown, connectLive } from './fixtures/online.js';
 
 // Ownership of an Online Table passes when its owner leaves (ADR-0034). Online Tables always have Action Deadlines,
@@ -118,7 +118,7 @@ async function dealt(table: Awaited<ReturnType<typeof online>>, seated: (readonl
   for (const [index, participantId] of bots.entries()) expect((await table.as(owner, 'seat-participant', { participantId, seat: seated.length + index + 1 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => table.view(owner))).endsAt);
   await expect.poll(async () => (await table.view(owner)).view.state.handId).toBe('hand-1');
-  clock.advance(dealMs(2));
+  clock.advance(presentedFor('deal', 'online'));
   const cookieOf = new Map(seated.map(([cookie, participantId]) => [participantId, cookie]));
   /** Plays the Hand to its end and past its payout phase, as seen by `watcher`. */
   async function finish(watcher: string) {
@@ -129,7 +129,7 @@ async function dealt(table: Awaited<ReturnType<typeof online>>, seated: (readonl
       if (human) expect((await table.as(human, 'act', { participantId: state.actorId, action: { type: 'fold' } })).status).toBe(200);
       else { clock.advance(31_000); await expect.poll(async () => (await table.view(watcher)).view.state.actorId).not.toBe(state.actorId); }
     }
-    clock.advance(5000);
+    clock.advance(presentedFor('payout', 'online'));
   }
   return { live, finish };
 }

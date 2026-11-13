@@ -25,7 +25,7 @@ export function nextBotName(table: ObservableTableSession): string {
 
 /**
  * The owner's table option controls: shown to the owner of an Online Table (a Practice Table keeps the options it was
- * created with), and editable between Hands only. A Hand lasts until its payout phase ends (`handOpen`).
+ * created with), and editable between Hands only. A Hand lasts until the Settle after its payout ends (`handOpen`).
  */
 export function optionControls(table: ObservableTableSession, handOpen: boolean): { shown: boolean; editable: boolean } {
   return { shown: table.mode === 'online' && table.viewerParticipantId === table.ownerParticipantId, editable: !handOpen };

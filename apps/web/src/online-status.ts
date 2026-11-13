@@ -70,7 +70,7 @@ export type NextHandStatus = { readonly kind: 'countdown'; readonly seconds: num
 /**
  * What happens next between Hands at an Online Table at server time `serverNow`:
  * - `countdown`: the Next-Hand Countdown is running, with whole seconds left;
- * - `soon`: the table can deal, so the server announces a countdown once the last Hand's pause is over;
+ * - `soon`: the table can deal, so the server announces a countdown once the last Hand has ended;
  * - `waiting`: it cannot, until two Eligible Participants, one of them a connected human, are ready.
  * `undefined` during a Hand and at Practice Tables, where the human deals.
  */
