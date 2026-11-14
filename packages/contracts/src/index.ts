@@ -604,4 +604,5 @@ export interface ScoreAverages { readonly decisionScore: number; readonly action
 export * from './anchored-beats.js';
 export * from './motion-beats.js';
 export * from './presentation.js';
+export * from './presenting-beats.js';
 export * from './timings.js';
