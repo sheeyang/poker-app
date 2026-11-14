@@ -202,17 +202,26 @@ function perform(cue: PlayedCue, ctx: MotionContext, el: number, timings: Timing
 const remembered = new Map<string, { scene: TableScene; last: Snapshot; at: number }>();
 const REMEMBER_FOR = 30_000;
 
+/**
+ * An animation of a table on a virtual clock (the motion lab): held, and set to its age on that clock, which is where
+ * it began (`from`) plus the clock's time since it was born.
+ */
+interface Driven { readonly animation: Animation; readonly bornAt: number; readonly from: number }
+
 /** A stack figure that should roll to its new total, and from what. */
 export interface StackRoll { readonly from: number; readonly id: string }
 
 /**
  * Plays the table's motion. Returns the stage's ref, and the stack figures that roll in this render: chips added to a
- * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows.
+ * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows. `driven`: the
+ * table is on a virtual clock, so every animation is held at that clock's time rather than run.
  */
-export function useTableMotion(table: ObservableTableSession, serverNow: number, timings: Timings = committedTimings) {
+export function useTableMotion(table: ObservableTableSession, serverNow: number, timings: Timings = committedTimings, driven = false) {
   const stage = useRef<HTMLElement>(null);
-  const kept = remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
-  const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>());
+  const kept = remembered.get(table.tableSessionId), fresh = kept && serverNow - kept.at < REMEMBER_FOR ? kept : undefined;
+  const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>()), held = useRef<Driven[]>([]);
+  const clock = useRef(serverNow);
+  clock.current = serverNow;
   const cues = planMotion(scene.current, table).filter(cue => serverNow - cue.at < lasts(cue));
   useLayoutEffect(() => {
     const node = stage.current, fx = node?.querySelector<HTMLElement>('[data-motion-layer="over"]'), under = node?.querySelector<HTMLElement>('[data-motion-layer="under"]');
@@ -220,6 +229,7 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number,
     if (!node || !fx || !under) return;
     const ctx: MotionContext = { stage: node, fx, under, last: last.current, track: animation => {
       running.current.add(animation);
+      if (driven) { animation.pause(); held.current.push({ animation, bornAt: clock.current, from: Number(animation.currentTime ?? 0) }); }
       const done = () => running.current.delete(animation);
       animation.addEventListener('finish', done); animation.addEventListener('cancel', done);
     } };
@@ -231,7 +241,17 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number,
       resting.set(key, old && moving ? old : value);
     }
     last.current = resting;
-    remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
+    remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: serverNow });
+  });
+  // A driven table's animations follow its clock: a ghost that has played out is gone, as it would be when finished.
+  useLayoutEffect(() => {
+    if (!driven) return;
+    held.current = held.current.filter(({ animation }) => (animation.effect as KeyframeEffect | null)?.target?.isConnected);
+    for (const { animation, bornAt, from } of held.current) {
+      animation.currentTime = from + (serverNow - bornAt);
+      const target = (animation.effect as KeyframeEffect | null)?.target, end = animation.effect?.getComputedTiming().endTime;
+      if (target instanceof HTMLElement && target.classList.contains('motion-ghost') && typeof end === 'number') target.classList.toggle('motion-done', Number(animation.currentTime) >= end);
+    }
   });
   useEffect(() => () => { for (const animation of running.current) animation.cancel(); }, []);
   const rolls = new Map<string, StackRoll>();

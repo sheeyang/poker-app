@@ -1,0 +1,56 @@
+/* The motion lab (development only): a workbench in the cardroom's palette. The table keeps the top; the timeline is a
+   single instrument beneath it, so playhead and table read as one thing. */
+.lab { --lab-gutter: 76px; min-height: 100vh; display: flex; flex-direction: column; gap: 4px; padding: 14px 28px 20px; max-width: 1400px; margin: 0 auto; }
+.lab-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 24px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.lab-bar h1 { margin: 0 12px 0 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -.015em; align-self: center; }
+.lab-field { display: grid; gap: 4px; font-size: .76rem; color: var(--muted); }
+.lab-field select, .lab-field input { min-height: 36px; padding: 6px 10px; width: auto; }
+.lab-field input { width: 84px; font-variant-numeric: tabular-nums; }
+.lab-unit { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: .86rem; }
+.lab-segments { display: inline-flex; border: 1px solid var(--control-line); border-radius: 8px; overflow: hidden; }
+.lab-segments button { min-height: 36px; padding: 6px 14px; border: 0; border-radius: 0; background: transparent; font-size: .86rem; font-variant-numeric: tabular-nums; }
+.lab-segments button + button { border-left: 1px solid var(--control-line); }
+.lab-segments button[aria-pressed="true"] { background: var(--gold); color: var(--primary-text); }
+.lab-segments button[aria-pressed="true"]:hover { background: var(--gold-hover); }
+
+.lab-table { padding: 0; }
+.lab-table .table-stage { margin: 4px auto 0; height: min(46vh, 500px); min-height: 380px; }
+
+.lab-timeline { margin-top: 2px; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.lab-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; margin-bottom: 12px; }
+.lab-buttons { display: inline-flex; gap: 6px; }
+.lab-transport button { min-height: 36px; padding: 6px 14px; font-size: .86rem; }
+.lab-play { min-width: 84px; }
+.lab-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .86rem; min-width: 150px; }
+.lab-time strong { color: var(--text); font-weight: 600; }
+.lab-loop[aria-pressed="true"] { border-color: var(--gold); color: var(--gold); }
+
+.lab-grid { display: grid; grid-template-columns: var(--lab-gutter) minmax(0, 1fr); }
+.lab-labels { display: flex; flex-direction: column; }
+.lab-label { display: flex; align-items: center; font-size: .76rem; color: var(--muted); border-top: 1px solid var(--line); }
+.lab-label-ruler { height: 18px; border-top: 0; }
+.lab-label-band { height: 34px; }
+.lab-tracks { position: relative; cursor: col-resize; touch-action: none; user-select: none; }
+.lab-ruler { position: relative; height: 18px; font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
+.lab-ruler span { position: absolute; top: 0; padding-left: 4px; border-left: 1px solid var(--line); height: 100%; line-height: 16px; }
+.lab-band { position: relative; height: 34px; }
+.lab-block { position: absolute; top: 0; height: 30px; min-height: 0; padding: 0 6px; justify-content: flex-start; gap: 0; overflow: hidden; border: 1px solid var(--control-line); border-radius: 5px; background: var(--raised); color: var(--text); font-size: .74rem; font-weight: 600; cursor: pointer; }
+.lab-block span { overflow: hidden; text-overflow: clip; white-space: nowrap; }
+.lab-block-settle { background: var(--field); color: var(--muted); font-weight: 400; border-style: dashed; }
+.lab-block-countdown { background: transparent; color: var(--muted); font-weight: 400; border-style: dotted; }
+.lab-block[aria-pressed="true"] { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
+.lab-lane { position: relative; border-top: 1px solid var(--line); pointer-events: none; }
+.lab-beat { position: absolute; height: 12px; min-width: 2px; border-radius: 3px; background: var(--lane); }
+.lab-lane-cards { --lane: #ddc28b; }
+.lab-lane-chips { --lane: #90b8c9; }
+.lab-lane-board { --lane: #a4c3b0; }
+.lab-lane-stacks { --lane: #c8a79a; }
+.lab-lane-seats { --lane: #a4b5a9; }
+.lab-loop-region { position: absolute; top: 18px; bottom: 0; background: color-mix(in srgb, var(--gold) 9%, transparent); border-inline: 1px dashed var(--gold); pointer-events: none; }
+.lab-playhead { position: absolute; top: 0; bottom: 0; width: 0; margin-left: -1px; border-left: 2px solid var(--gold); cursor: col-resize; z-index: 3; }
+.lab-playhead::before { content: ""; position: absolute; top: -2px; left: -8px; width: 14px; height: 18px; background: var(--gold); clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); }
+.lab-playhead:focus-visible { outline: none; }
+.lab-playhead:focus-visible::before { outline: 2px solid var(--text); outline-offset: 2px; }
+.lab-playhead::after { content: ""; position: absolute; top: 0; bottom: 0; left: -10px; width: 20px; }
+
+@media (max-width: 760px) { .lab { padding: 10px 12px; } .lab-grid { --lab-gutter: 52px; } }
