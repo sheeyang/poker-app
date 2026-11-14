@@ -1,3 +1,4 @@
+import { describeBeats, evaluateBeats, type BeatDef, type BeatDescription, type PlacedBeat } from './anchored-beats.js';
 import { committedTimings, type Timings } from './timings.js';
 import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseKind, TableMode } from './index.js';
 
@@ -158,27 +159,39 @@ export function returnBeat(cardsReturn: DealBeats['cardsReturn'], n: number, cou
 }
 
 /**
+ * The deal's beats as data (ADR-0040): each an anchor, a gap and a length over the deal's timings. Cards go one at a
+ * time to each Participant in dealing order, then round again: the more there are, the closer together. The cards
+ * leave once the blinds start; a refill lands before the blinds go in.
+ */
+const dealDefs = [
+  { beat: 'cardsReturn', each: 'once', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.returnRoom' }, { timing: 'deal.returnFlight' }] },
+  { beat: 'buttonMoves', each: 'once', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.buttonMoves' }] },
+  { beat: 'refill', each: 'refills', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.refillLands' }] },
+  { beat: 'blind', each: 'blinds', follows: { to: 'end', of: 'refill', instance: 'last' }, gap: [{ timing: 'deal.blindsAfterRefill', times: 'refilled' }, { timing: 'deal.blindStagger', times: 'index' }], length: [{ timing: 'deal.blindFlight' }] },
+  { beat: 'blindAppears', each: 'blinds', follows: { to: 'end', of: 'blind', instance: 'same' }, gap: [{ timing: 'deal.blindAppearsBefore', times: -1 }], length: [] },
+  { beat: 'card', each: 'cards', follows: { to: 'start', of: 'blind', instance: 'first' }, gap: [{ timing: 'deal.cardsAfterBlinds' }, { spacing: 'deal.cardGap', room: 'deal.cardsRoom', over: 'cards', times: 'index', whole: true }], length: [{ timing: 'deal.cardFlight' }] },
+  { beat: 'cardAppears', each: 'cards', follows: { to: 'end', of: 'card', instance: 'same' }, gap: [{ timing: 'deal.cardAppearsBefore', times: -1 }], length: [] },
+  { beat: 'cardTurn', each: 'cards', follows: { to: 'end', of: 'card', instance: 'same' }, gap: [{ timing: 'deal.turnAfterLanding' }], length: [{ timing: 'deal.turn' }] },
+] as const satisfies readonly BeatDef[];
+
+/** What each deal beat follows, its gap and length formulas, and the timings that directly set it: the deal's description. */
+export const dealBeatDescription: readonly BeatDescription[] = describeBeats(dealDefs);
+
+/**
  * The deal's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. Cards go
  * one at a time to each Participant in dealing order, then round again: the more there are, the closer together.
  */
 export const dealBeats = beatFunction((inputs: DealInputs, at, timings): DealBeats => {
-  const motion = timings.deal;
-  const blindsAt = inputs.refills.length ? motion.refillLands + motion.blindsAfterRefill : 0;
-  const refills = inputs.refills.map(({ participantId, amount }) => ({ participantId, amount, startsAt: at(0), endsAt: at(motion.refillLands) }));
-  const blinds = inputs.blinds.map((participantId, n) => {
-    const leaves = blindsAt + n * motion.blindStagger, lands = leaves + motion.blindFlight;
-    return { participantId, startsAt: at(leaves), endsAt: at(lands), appearsAt: at(lands - motion.blindAppearsBefore) };
-  });
-  const count = inputs.dealt.reduce((sum, s) => sum + s.cardCount, 0), rounds = Math.max(0, ...inputs.dealt.map(s => s.cardCount));
-  const gap = Math.min(motion.cardGap, Math.floor(motion.cardsRoom / Math.max(1, count)));
-  const cards: DealBeats['cards'][number][] = [];
-  for (let card = 0; card < rounds; card++) for (const { participantId, cardCount: held } of inputs.dealt) {
-    if (card >= held) continue;
-    const leaves = blindsAt + motion.cardsAfterBlinds + cards.length * gap, lands = leaves + motion.cardFlight, turns = lands + motion.turnAfterLanding;
-    cards.push({ participantId, card, startsAt: at(leaves), endsAt: at(lands), appearsAt: at(lands - motion.cardAppearsBefore), turn: { startsAt: at(turns), endsAt: at(turns + motion.turn) } });
-  }
-  const cardsReturn = { startsAt: at(0), endsAt: at(motion.returnRoom + motion.returnFlight), flight: at(motion.returnFlight) - at(0), stagger: at(motion.returnStagger) - at(0) };
-  const buttonMoves = { startsAt: at(0), endsAt: at(motion.buttonMoves) };
+  const rounds = Math.max(0, ...inputs.dealt.map(s => s.cardCount));
+  const dealt: { participantId: ParticipantId; card: number }[] = [];
+  for (let card = 0; card < rounds; card++) for (const { participantId, cardCount: held } of inputs.dealt) if (card < held) dealt.push({ participantId, card });
+  const placed = evaluateBeats(dealDefs, { refills: inputs.refills.length, refilled: Math.min(1, inputs.refills.length), blinds: inputs.blinds.length, cards: dealt.length }, timings);
+  const scaled = ({ startsAt, endsAt }: PlacedBeat): Beat => ({ startsAt: at(startsAt), endsAt: at(endsAt) });
+  const refills = inputs.refills.map(({ participantId, amount }, n) => ({ participantId, amount, ...scaled(placed.refill[n]!) }));
+  const blinds = inputs.blinds.map((participantId, n) => ({ participantId, ...scaled(placed.blind[n]!), appearsAt: at(placed.blindAppears[n]!.endsAt) }));
+  const cards = dealt.map(({ participantId, card }, n) => ({ participantId, card, ...scaled(placed.card[n]!), appearsAt: at(placed.cardAppears[n]!.endsAt), turn: scaled(placed.cardTurn[n]!) }));
+  const cardsReturn = { ...scaled(placed.cardsReturn[0]!), flight: at(timings.deal.returnFlight) - at(0), stagger: at(timings.deal.returnStagger) - at(0) };
+  const buttonMoves = scaled(placed.buttonMoves[0]!);
   const totalMs = Math.max(cardsReturn.endsAt, buttonMoves.endsAt, ...refills.map(b => b.endsAt), ...blinds.map(b => b.endsAt), ...cards.map(c => c.turn.endsAt));
   return { totalMs, cardsReturn, buttonMoves, refills, blinds, cards };
 });
