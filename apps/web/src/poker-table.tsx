@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties } from 'react';
-import { tableMotion, type ObservableTableSession } from '@poker/contracts';
+import { chipsBeats, type ObservableTableSession } from '@poker/contracts';
 import { Card } from './cards.js';
 import { chips, potTotal, seatPosition, actionLabel } from './table-model.js';
 import { Icon } from './icons.js';
@@ -112,7 +112,7 @@ function RollingFigure({ from, to, rolled }: { from: number; to: number; rolled:
   useLayoutEffect(() => {
     const root = ref.current, strip = root?.firstElementChild, [a, b] = Array.from(strip?.children ?? []) as HTMLElement[];
     if (!root || !strip || !a || !b) return;
-    const timing = { duration: tableMotion.stackRoll, easing: 'cubic-bezier(.2,.8,.25,1)', fill: 'both' as const };
+    const timing = { duration: chipsBeats().roll.endsAt, easing: 'cubic-bezier(.2,.8,.25,1)', fill: 'both' as const };
     const animations = [
       strip.animate([{ translate: '0 0' }, { translate: '0 -1.2em' }], timing),
       // The figure's width follows the number in view, so "chips" after it never jumps.

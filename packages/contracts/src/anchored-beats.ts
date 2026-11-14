@@ -15,6 +15,8 @@ export type Count = number | 'index' | string;
 /** What a beat follows: the phase's start (or its table event), or the start or end of another beat. */
 export type Anchor =
   | { readonly to: 'phase' }
+  /** The table event that causes the beat, for motion with no phase: it plays from that moment. */
+  | { readonly to: 'event'; readonly event: string }
   /** The start or end of beat group `of`: the instance with the same index, the first, or (for ends) the last to end. */
   | { readonly to: 'start' | 'end'; readonly of: string; readonly instance: 'same' | 'first' | 'last' };
 
@@ -73,7 +75,7 @@ export function evaluateBeats<D extends readonly BeatDef[]>(defs: D, counts: Cou
   };
   const anchorAt = (def: BeatDef, index: number): number => {
     const a = def.follows;
-    if (a.to === 'phase') return 0;
+    if (a.to === 'phase' || a.to === 'event') return 0;
     const group = placed[a.of] ?? [];
     if (a.to === 'end') {
       if (!group.length) return 0;
@@ -113,6 +115,7 @@ const timingsOf = (formula: Formula): TimingPath[] => formula.flatMap(term => is
 
 const followsText = (anchor: Anchor): string => {
   if (anchor.to === 'phase') return 'the start of the phase';
+  if (anchor.to === 'event') return `the ${anchor.event}`;
   return `the ${anchor.to} of ${anchor.instance === 'same' ? `its ${anchor.of}` : `the ${anchor.instance} ${anchor.of}`}`;
 };
 

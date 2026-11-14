@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { returnBeat, sweepBeats, tableMotion as T, type Beat, type ObservableTableSession, type SweepBeats } from '@poker/contracts';
+import { chipsBeats, committedTimings, returnBeat, sweepBeats, type Beat, type ObservableTableSession, type SweepBeats, type Timings } from '@poker/contracts';
 import { at, box, flipUp, fly, play, q, reveal, snapshot, stay, type Box, type MotionContext, type Snapshot } from './motion.js';
 import { planMotion, sceneOf, type Cue, type TableScene } from './table-motion.js';
 import { chips } from './table-model.js';
+import { withBeats, type PlayedCue } from './motion-plan.js';
 
 /**
  * The table's motion (ADR-0038). The Hand is dealt from the deck: cards leave it one at a time in dealing order,
@@ -40,8 +41,6 @@ function chipIn(ctx: MotionContext, id: string, flight: Beat & { readonly appear
   // Appears whole just before the chip lands on it, so the hand-off cannot be seen.
   reveal(ctx, q(ctx, S.wager(id)), { delay: flight.appearsAt, elapsed: el, duration: 1 });
 }
-/** A bet's chip flight, from the view that carried it. */
-const betFlight = { startsAt: 0, endsAt: T.betFlight, appearsAt: T.betAmountAppears };
 
 /** Sweeps the betting line into the pot, at the sweep's own beats: a street reveal's or showdown's, or its own. */
 function sweep(ctx: MotionContext, beats: SweepBeats, el: number) {
@@ -60,26 +59,23 @@ function burnBox(ctx: MotionContext) {
   return at(ctx, S.burn) ?? (d && { ...d, x: d.x + d.w + 10 });
 }
 
-/** A copy of what stood at `seat`, played in place over the change. */
-function fadeOutClone(ctx: MotionContext, seat: number, frames: Keyframe[] = [{ opacity: 1 }, { opacity: 0 }], duration: number, el: number) {
+/** A copy of what stood at `seat`, played in place over the change, for `beat`. */
+function fadeOutClone(ctx: MotionContext, seat: number, frames: Keyframe[] = [{ opacity: 1 }, { opacity: 0 }], beat: Beat, el: number) {
   const c = ctx.last.get(S.seat(seat));
-  stay(ctx, 'clone', c?.box, frames, { duration, elapsed: el, html: c?.html });
+  stay(ctx, 'clone', c?.box, frames, { ...span(beat, el), html: c?.html });
 }
-const arrive = (ctx: MotionContext, seat: number, delay: number, el: number) => play(ctx, q(ctx, S.seat(seat)), [{ opacity: 0, scale: '.92' }, { opacity: 1, scale: '1' }], { duration: T.seatArrives, delay, elapsed: el });
+const arrive = (ctx: MotionContext, seat: number, beat: Beat, el: number) => play(ctx, q(ctx, S.seat(seat)), [{ opacity: 0, scale: '.92' }, { opacity: 1, scale: '1' }], span(beat, el));
 
 /**
  * Chips added to a stack: in from the table's edge over `flight`, while the amount floats up off the stack and the
  * figure rolls to its new total (StackFigure).
  */
-function chipsIn(ctx: MotionContext, id: string, amount: number, flight: Beat, el: number) {
+function chipsIn(ctx: MotionContext, id: string, amount: number, flight: Beat, label: Beat, el: number) {
   const s = at(ctx, S.stack(id));
   fly(ctx, 'stack', s && { x: ctx.stage.clientWidth + 10, y: ctx.stage.clientHeight - 20, w: 0, h: 0 }, s, { ...span(flight, el), arc: 40, fadeOut: true });
-  if (s) stay(ctx, 'label', { ...s, y: s.y - 14 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px -4px', offset: .25 }, { opacity: 1, translate: '0px -8px', offset: .7 }, { opacity: 0, translate: '0px -14px' }], { duration: T.chipsLabel, delay: flight.startsAt, elapsed: el, easing: 'linear', text: `+${chips(amount)} chips` });
+  if (s) stay(ctx, 'label', { ...s, y: s.y - 14 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px -4px', offset: .25 }, { opacity: 1, translate: '0px -8px', offset: .7 }, { opacity: 0, translate: '0px -14px' }], { ...span(label, el), easing: 'linear', text: `+${chips(amount)} chips` });
 }
-/** Chips added to a stack between Hands, from the view that carried them. */
-const chipsFlight = { startsAt: 0, endsAt: T.chipsFlight };
-
-function perform(cue: Cue, ctx: MotionContext, el: number) {
+function perform(cue: PlayedCue, ctx: MotionContext, el: number, timings: Timings) {
   switch (cue.kind) {
     case 'deal': {
       // Every timing is the deal phase's own beat, already fitted to the phase (dealBeats).
@@ -90,7 +86,8 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       const from = cue.fromButton === null ? undefined : ctx.last.get(S.buttonAnchor(cue.fromButton))?.box, button = q(ctx, S.button), to = box(ctx, button);
       if (from && to) play(ctx, button, [{ translate: `${from.x - to.x}px ${from.y - to.y}px` }, { translate: '0px 0px' }], spanned(beats.buttonMoves));
       // A refill's chips land on the stack before the blinds go in.
-      for (const refill of beats.refills) chipsIn(ctx, refill.participantId, refill.amount, refill, el);
+      const labelLength = chipsBeats(timings).label.endsAt;
+      for (const refill of beats.refills) chipsIn(ctx, refill.participantId, refill.amount, refill, { startsAt: refill.startsAt, endsAt: refill.startsAt + labelLength }, el);
       for (const blind of beats.blinds) chipIn(ctx, blind.participantId, blind, el);
       const held = new Map<string, number>();
       for (const c of beats.cards) held.set(c.participantId, (held.get(c.participantId) ?? 0) + 1);
@@ -102,22 +99,28 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       }
       break;
     }
-    case 'bet':
-      if (cue.toPot) fly(ctx, 'chip', at(ctx, S.body(cue.participantId)), at(ctx, S.pot), { duration: T.betToPot, elapsed: el, fadeOut: true });
-      else chipIn(ctx, cue.participantId, betFlight, el);
-      reveal(ctx, q(ctx, S.caption(cue.participantId)), { duration: T.caption, elapsed: el });
+    case 'bet': {
+      const { beats } = cue;
+      if (cue.toPot) fly(ctx, 'chip', at(ctx, S.body(cue.participantId)), at(ctx, S.pot), { ...span(beats.chip, el), fadeOut: true });
+      else chipIn(ctx, cue.participantId, { ...beats.chip, appearsAt: beats.amountAppears ?? beats.chip.endsAt }, el);
+      reveal(ctx, q(ctx, S.caption(cue.participantId)), span(beats.caption, el));
       break;
-    case 'fold':
-      if (cue.muck) for (let k = 0; k < cue.cards; k++) {
+    }
+    case 'fold': {
+      const { beats } = cue;
+      beats.mucks.forEach((muck, k) => {
         const from = ctx.last.get(S.card(cue.participantId, k))?.box;
-        fly(ctx, 'small-back', from, middleFor(ctx, from), { duration: T.muckFlight, delay: k * T.muckStagger, elapsed: el, fadeOut: true, spin: [tilt(k, cue.cards), 90] });
-      }
-      reveal(ctx, q(ctx, S.caption(cue.participantId)), { duration: T.caption, elapsed: el });
+        fly(ctx, 'small-back', from, middleFor(ctx, from), { ...span(muck, el), fadeOut: true, spin: [tilt(k, cue.cards), 90] });
+      });
+      reveal(ctx, q(ctx, S.caption(cue.participantId)), span(beats.caption, el));
       break;
-    case 'check':
-      play(ctx, q(ctx, S.body(cue.participantId)), [{ scale: '1' }, { scale: '.96', offset: .35 }, { scale: '1' }], { duration: T.check, elapsed: el });
-      reveal(ctx, q(ctx, S.caption(cue.participantId)), { duration: T.caption, elapsed: el });
+    }
+    case 'check': {
+      const { beats } = cue;
+      play(ctx, q(ctx, S.body(cue.participantId)), [{ scale: '1' }, { scale: '.96', offset: .35 }, { scale: '1' }], span(beats.press, el));
+      reveal(ctx, q(ctx, S.caption(cue.participantId)), span(beats.caption, el));
       break;
+    }
     case 'sweep':
       sweep(ctx, sweepBeats(cue.participantIds), el);
       break;
@@ -158,34 +161,35 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       break;
     }
     case 'sit':
-      fadeOutClone(ctx, cue.seat, undefined, T.sitFade, el);
-      arrive(ctx, cue.seat, T.sitArrivesAt, el);
+      fadeOutClone(ctx, cue.seat, undefined, cue.beats.fade, el);
+      arrive(ctx, cue.seat, cue.beats.arrives, el);
       break;
     case 'stand':
-      fadeOutClone(ctx, cue.seat, [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '.94' }], T.leaveFade, el);
-      arrive(ctx, cue.seat, T.leaveArrivesAt, el);
+      fadeOutClone(ctx, cue.seat, [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '.94' }], cue.beats.fade, el);
+      arrive(ctx, cue.seat, cue.beats.arrives, el);
       break;
     case 'move':
-      fadeOutClone(ctx, cue.fromSeat, [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '.94' }], T.leaveFade, el);
-      fadeOutClone(ctx, cue.seat, undefined, T.sitFade, el);
-      arrive(ctx, cue.seat, T.leaveArrivesAt, el);
-      arrive(ctx, cue.fromSeat, T.moveVacatedArrivesAt, el);
+      fadeOutClone(ctx, cue.fromSeat, [{ opacity: 1, scale: '1' }, { opacity: 0, scale: '.94' }], cue.beats.leftFade, el);
+      fadeOutClone(ctx, cue.seat, undefined, cue.beats.newFade, el);
+      arrive(ctx, cue.seat, cue.beats.newArrives, el);
+      arrive(ctx, cue.fromSeat, cue.beats.vacatedArrives, el);
       break;
     case 'chips':
-      chipsIn(ctx, cue.participantId, cue.amount, chipsFlight, el);
+      chipsIn(ctx, cue.participantId, cue.amount, cue.beats.flight, cue.beats.label, el);
       break;
     case 'turn': {
       // Every seat is in a new place: the ring dissolves into it while the felt, board and pot stay, and a label at the
       // bottom says where you are now.
-      for (const [key, was] of ctx.last) if (key.startsWith('[data-table-seat=')) stay(ctx, 'clone', was.box, [{ opacity: 1 }, { opacity: 0 }], { duration: T.seatChangeFade, elapsed: el, easing: 'linear', html: was.html });
-      for (const node of Array.from(ctx.stage.querySelectorAll('[data-table-seat]'))) play(ctx, node, [{ opacity: 0, scale: '.97' }, { opacity: 1, scale: '1' }], { duration: T.seatChangeArrives, delay: T.seatChangeArrivesAt, elapsed: el });
+      const { beats } = cue;
+      for (const [key, was] of ctx.last) if (key.startsWith('[data-table-seat=')) stay(ctx, 'clone', was.box, [{ opacity: 1 }, { opacity: 0 }], { ...span(beats.fade, el), easing: 'linear', html: was.html });
+      for (const node of Array.from(ctx.stage.querySelectorAll('[data-table-seat]'))) play(ctx, node, [{ opacity: 0, scale: '.97' }, { opacity: 1, scale: '1' }], span(beats.arrives, el));
       const you = at(ctx, S.seat(cue.seat));
-      if (you) stay(ctx, 'label', { ...you, y: you.y - you.h / 2 - 16 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px 0px', offset: .15 }, { opacity: 1, translate: '0px 0px', offset: .8 }, { opacity: 0, translate: '0px -6px' }], { duration: T.seatChangeLabel, delay: T.seatChangeArrivesAt, elapsed: el, text: `You’re in seat ${cue.seat}` });
+      if (you) stay(ctx, 'label', { ...you, y: you.y - you.h / 2 - 16 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px 0px', offset: .15 }, { opacity: 1, translate: '0px 0px', offset: .8 }, { opacity: 0, translate: '0px -6px' }], { ...span(beats.label, el), text: `You’re in seat ${cue.seat}` });
       break;
     }
     case 'status':
-      reveal(ctx, q(ctx, S.caption(cue.participantId)), { duration: T.status, elapsed: el });
-      reveal(ctx, q(ctx, `${S.body(cue.participantId)} .connection-label`), { duration: T.status, elapsed: el });
+      reveal(ctx, q(ctx, S.caption(cue.participantId)), span(cue.beats.caption, el));
+      reveal(ctx, q(ctx, `${S.body(cue.participantId)} .connection-label`), span(cue.beats.connection, el));
       break;
   }
 }
@@ -205,7 +209,7 @@ export interface StackRoll { readonly from: number; readonly id: string }
  * Plays the table's motion. Returns the stage's ref, and the stack figures that roll in this render: chips added to a
  * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows.
  */
-export function useTableMotion(table: ObservableTableSession, serverNow: number) {
+export function useTableMotion(table: ObservableTableSession, serverNow: number, timings: Timings = committedTimings) {
   const stage = useRef<HTMLElement>(null);
   const kept = remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
   const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>());
@@ -219,7 +223,7 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number)
       const done = () => running.current.delete(animation);
       animation.addEventListener('finish', done); animation.addEventListener('cancel', done);
     } };
-    for (const cue of cues) perform(cue, ctx, Math.max(0, serverNow - cue.at));
+    for (const cue of cues) perform(withBeats(cue, timings), ctx, Math.max(0, serverNow - cue.at), timings);
     // Where things rest now, for the next change. Things still moving keep where they rested before.
     const now = snapshot(node, SNAPSHOT), resting = new Map<string, { box: Box; html: string }>();
     for (const [key, value] of now) {
