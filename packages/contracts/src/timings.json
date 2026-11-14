@@ -1,0 +1,89 @@
+{
+  "deal": {
+    "returnFlight": 540,
+    "returnStagger": 27,
+    "returnRoom": 240,
+    "buttonMoves": 780,
+    "refillLands": 720,
+    "blindsAfterRefill": 30,
+    "blindFlight": 450,
+    "blindAppearsBefore": 15,
+    "blindStagger": 120,
+    "cardsAfterBlinds": 330,
+    "cardsRoom": 1350,
+    "cardGap": 112,
+    "cardFlight": 510,
+    "cardAppearsBefore": 15,
+    "turnAfterLanding": 30,
+    "turn": 390
+  },
+  "street": {
+    "burnEarliest": 240,
+    "burnFlight": 300,
+    "appearsBefore": 15,
+    "boardAfterBurn": 300,
+    "flopFlight": 330,
+    "flopSpread": 270,
+    "flopTurnsAfterLanding": 30,
+    "flopTurnStagger": 60,
+    "flopTurn": 360,
+    "cardFlight": 390,
+    "cardTurnsAfterLanding": 15,
+    "cardTurn": 390
+  },
+  "showdown": {
+    "turnsAfterSweep": 225,
+    "handStagger": 300,
+    "cardStagger": 180,
+    "turn": 570
+  },
+  "payout": {
+    "potAt": 225,
+    "potPulse": 1050,
+    "firstLands": 1065,
+    "stagger": 300,
+    "push": 840,
+    "landFade": 240,
+    "captionBeforeLanding": 30,
+    "caption": 240
+  },
+  "settle": {
+    "deal": 300,
+    "street": 300,
+    "showdown": 1200,
+    "payout": {
+      "practice": 600,
+      "online": 3000
+    }
+  },
+  "nextHandCountdownMs": 5000,
+  "motion": {
+    "betFlight": 450,
+    "betAmountAppears": 435,
+    "betToPot": 510,
+    "caption": 225,
+    "muckFlight": 510,
+    "muckStagger": 60,
+    "check": 360,
+    "sweepAt": 180,
+    "sweepFlight": 420,
+    "sweepStagger": 60,
+    "sweepAmountFade": 210,
+    "potAfterSweep": 390,
+    "potBrightens": 240,
+    "seatArrives": 360,
+    "sitFade": 210,
+    "sitArrivesAt": 120,
+    "leaveFade": 300,
+    "leaveArrivesAt": 210,
+    "moveVacatedArrivesAt": 300,
+    "chipsFlight": 840,
+    "chipsLabel": 1650,
+    "stackRoll": 1050,
+    "seatChangeFade": 240,
+    "seatChangeArrivesAt": 180,
+    "seatChangeArrives": 330,
+    "seatChangeLabel": 2400,
+    "status": 270
+  }
+}

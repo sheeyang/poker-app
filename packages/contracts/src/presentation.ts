@@ -1,3 +1,4 @@
+import { committedTimings, type Timings } from './timings.js';
 import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseKind, TableMode } from './index.js';
 
 /**
@@ -5,6 +6,7 @@ import type { ChipAmount, ParticipantId, PresentationPhaseKind, PresentingPhaseK
  * the Next-Hand Countdown from it; the Trainer times the table's motion from it. Every value is in milliseconds.
  * Overlays (menus, dialogs, notices, the analysis panel) are not table events and keep their own timings in the web app.
  *
+ * Every timing lives in `timings.json` (ADR-0040); the beat functions take a `Timings` and default to the committed ones.
  * Motion offsets are from the moment the motion presents: a phase's start, or the view that carried it.
  */
 
@@ -48,12 +50,12 @@ export interface PhaseBeats { readonly totalMs: number }
  * `at`. Given the phase's own length, the beats are scaled to fit it exactly, since the phase is authoritative (a
  * Trainer and the server may briefly disagree during a deploy); without one, they keep their natural timing.
  */
-function beatFunction<I, B extends PhaseBeats>(plan: (inputs: I, at: (ms: number) => number) => B): (inputs: I, durationMs?: number) => B {
-  return (inputs, durationMs) => {
-    const natural = plan(inputs, ms => ms);
+function beatFunction<I, B extends PhaseBeats>(plan: (inputs: I, at: (ms: number) => number, timings: Timings) => B): (inputs: I, durationMs?: number, timings?: Timings) => B {
+  return (inputs, durationMs, timings = committedTimings) => {
+    const natural = plan(inputs, ms => ms, timings);
     if (durationMs === undefined || durationMs === natural.totalMs || natural.totalMs <= 0) return natural;
     const scale = durationMs / natural.totalMs;
-    return { ...plan(inputs, ms => ms * scale), totalMs: durationMs };
+    return { ...plan(inputs, ms => ms * scale, timings), totalMs: durationMs };
   };
 }
 
@@ -71,13 +73,13 @@ export interface SettleLengths {
  * see the result before the next Hand can start. Each may be 0: a Settle of 0 is not scheduled, and what follows
  * starts when the phase before it ends.
  */
-export const settleLengths: SettleLengths = Object.freeze({ deal: 300, street: 300, showdown: 1200, payout: Object.freeze({ practice: 600, online: 3000 }) });
+export const settleLengths: SettleLengths = committedTimings.settle;
 
 /** The length of the Settle after a phase of `kind` at a table of `mode`. */
 export const settleAfter = (kind: PresentingPhaseKind, mode: TableMode, lengths: SettleLengths = settleLengths): number => kind === 'payout' ? lengths.payout[mode] : lengths[kind];
 
 /** How long an Online Table's Next-Hand Countdown runs, from its announcement to the next Hand. */
-export const nextHandCountdownMs = 5000;
+export const nextHandCountdownMs = committedTimings.nextHandCountdownMs;
 
 /** Seats in the order the engine deals them: clockwise from left of the button, or heads-up the button first. */
 export function dealingOrder<S extends { readonly seat: number }>(seats: readonly S[], buttonSeat: number): S[] {
@@ -99,7 +101,7 @@ export interface SweepBeats {
  * The sweep of `swept`, in the order given, at `tableMotion`'s sweep timings; when its last chip reaches the pot
  * (`lands`), and when its last beat ends (`endsAt`), both 0 with nothing swept.
  */
-function sweepPlan(swept: readonly ParticipantId[], at: (ms: number) => number): { readonly beats: SweepBeats; readonly lands: number; readonly endsAt: number } {
+function sweepPlan(swept: readonly ParticipantId[], at: (ms: number) => number, tableMotion: Timings['motion']): { readonly beats: SweepBeats; readonly lands: number; readonly endsAt: number } {
   const leaves = (n: number) => tableMotion.sweepAt + n * tableMotion.sweepStagger;
   const wagers = swept.map((participantId, n) => ({ participantId, startsAt: at(leaves(n)), endsAt: at(leaves(n) + tableMotion.sweepFlight), amountFades: { startsAt: at(leaves(n)), endsAt: at(leaves(n) + tableMotion.sweepAmountFade) } }));
   if (!swept.length) return { beats: { wagers }, lands: 0, endsAt: 0 };
@@ -112,31 +114,12 @@ function sweepPlan(swept: readonly ParticipantId[], at: (ms: number) => number):
  * The line swept with no Presentation Phase to present it (a Hand won by folds): the same beats a street reveal or a
  * showdown plays first, from the view that carried it.
  */
-export const sweepBeats = (swept: readonly ParticipantId[]): SweepBeats => sweepPlan(swept, ms => ms).beats;
+export const sweepBeats = (swept: readonly ParticipantId[], timings: Timings = committedTimings): SweepBeats => sweepPlan(swept, ms => ms, timings.motion).beats;
 
 /**
  * The deal: the last Hand's cards back to the deck, the button on, any refill and the blinds in, and the cards out in
  * dealing order. The deal phase lasts as long as these beats (`dealBeats`).
  */
-export const dealMotion = Object.freeze({
-  /**
-   * Each of the last Hand's cards returning to the deck, one after another; and the most time from the first setting
-   * off to the last, so the gap between them tightens when many return.
-   */
-  returnFlight: 540, returnStagger: 27, returnRoom: 240,
-  buttonMoves: 780,
-  /** A refill that came with the deal (Practice's Rebuy & deal): its chips fly in, and the blinds follow once they land. */
-  refillLands: 720, blindsAfterRefill: 30,
-  /** Each blind's chip flight to the betting line, its amount appearing just before it lands, and the gap to the next. */
-  blindFlight: 450, blindAppearsBefore: 15, blindStagger: 120,
-  /**
-   * When the first card leaves the deck, after the blinds start; the room the cards share, and the most between two
-   * of them, so the spacing tightens past twelve cards; each card's flight, and when it appears in place before landing.
-   */
-  cardsAfterBlinds: 330, cardsRoom: 1350, cardGap: 112, cardFlight: 510, cardAppearsBefore: 15,
-  /** A Participant's own cards turning face up, after each lands. */
-  turnAfterLanding: 30, turn: 390,
-});
 
 /** What the deal presents. Every field is public in the view: who holds cards, the blinds' wagers, and stacks. */
 export interface DealInputs {
@@ -178,8 +161,8 @@ export function returnBeat(cardsReturn: DealBeats['cardsReturn'], n: number, cou
  * The deal's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. Cards go
  * one at a time to each Participant in dealing order, then round again: the more there are, the closer together.
  */
-export const dealBeats = beatFunction((inputs: DealInputs, at): DealBeats => {
-  const motion = dealMotion;
+export const dealBeats = beatFunction((inputs: DealInputs, at, timings): DealBeats => {
+  const motion = timings.deal;
   const blindsAt = inputs.refills.length ? motion.refillLands + motion.blindsAfterRefill : 0;
   const refills = inputs.refills.map(({ participantId, amount }) => ({ participantId, amount, startsAt: at(0), endsAt: at(motion.refillLands) }));
   const blinds = inputs.blinds.map((participantId, n) => {
@@ -201,23 +184,10 @@ export const dealBeats = beatFunction((inputs: DealInputs, at): DealBeats => {
 });
 
 /**
- * A street reveal: the line swept (`tableMotion`'s sweep), the burn once the last swept chip reaches the pot, then the
- * board cards: the flop leaves the deck as one stack and spreads, the turn and the river one card each, and each card
- * turns face up once it lands. The street reveal lasts as long as these beats (`streetBeats`), 1.5× the M5 timings.
+ * A street reveal: the line swept, the burn once the last swept chip reaches the pot, then the board cards: the flop
+ * leaves the deck as one stack and spreads, the turn and the river one card each, and each card turns face up once it
+ * lands. The street reveal lasts as long as these beats (`streetBeats`).
  */
-export const streetMotion = Object.freeze({
-  /** When the burn sets off with nothing swept; with a sweep, it sets off as the last chip reaches the pot. */
-  burnEarliest: 240,
-  burnFlight: 300,
-  /** A card (the burn, or a board card) appearing in place, just before it lands. */
-  appearsBefore: 15,
-  /** When the board cards leave the deck, after the burn sets off. */
-  boardAfterBurn: 300,
-  /** The flop: its stack's flight, its spread once it lands, and its cards turning one after another. */
-  flopFlight: 330, flopSpread: 270, flopTurnsAfterLanding: 30, flopTurnStagger: 60, flopTurn: 360,
-  /** The turn and the river: the card's flight, and its turn once it lands. */
-  cardFlight: 390, cardTurnsAfterLanding: 15, cardTurn: 390,
-});
 
 /** What a street reveal presents. Every field is public in the view: whose wagers left the line, and the board. */
 export interface StreetInputs {
@@ -240,8 +210,8 @@ export interface StreetBeats extends PhaseBeats {
 }
 
 /** A street reveal's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
-export const streetBeats = beatFunction((inputs: StreetInputs, at): StreetBeats => {
-  const motion = streetMotion, sweep = sweepPlan(inputs.swept, at);
+export const streetBeats = beatFunction((inputs: StreetInputs, at, timings): StreetBeats => {
+  const motion = timings.street, sweep = sweepPlan(inputs.swept, at, timings.motion);
   const burnAt = Math.max(motion.burnEarliest, sweep.lands), boardAt = burnAt + motion.boardAfterBurn, flop = inputs.cardCount > 1;
   const burn = { startsAt: at(burnAt), endsAt: at(burnAt + motion.burnFlight), appearsAt: at(burnAt + motion.burnFlight - motion.appearsBefore) };
   const lands = boardAt + (flop ? motion.flopFlight : motion.cardFlight);
@@ -254,14 +224,9 @@ export const streetBeats = beatFunction((inputs: StreetInputs, at): StreetBeats 
 });
 
 /**
- * The showdown: the line swept (`tableMotion`'s sweep), then each hand turned up in turn, card by card, once the last
- * swept chip reaches the pot. The showdown lasts as long as these beats (`showdownBeats`); the time to read the hands
- * is the Settle after it (`settleLengths.showdown`).
+ * The showdown: the line swept, then each hand turned up in turn, card by card, once the last swept chip reaches the
+ * pot. The showdown lasts as long as these beats (`showdownBeats`); the time to read the hands is the Settle after it.
  */
-export const showdownMotion = Object.freeze({
-  /** When the first card turns, after the sweep; the gap to the next hand, and to a hand's next card; and each turn. */
-  turnsAfterSweep: 225, handStagger: 300, cardStagger: 180, turn: 570,
-});
 
 /** What the showdown presents. Every field is public in the view: whose wagers left the line, and whose hands are face up. */
 export interface ShowdownInputs {
@@ -278,8 +243,8 @@ export interface ShowdownBeats extends PhaseBeats {
 }
 
 /** The showdown's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
-export const showdownBeats = beatFunction((inputs: ShowdownInputs, at): ShowdownBeats => {
-  const motion = showdownMotion, sweep = sweepPlan(inputs.swept, at), first = sweep.lands + motion.turnsAfterSweep;
+export const showdownBeats = beatFunction((inputs: ShowdownInputs, at, timings): ShowdownBeats => {
+  const motion = timings.showdown, sweep = sweepPlan(inputs.swept, at, timings.motion), first = sweep.lands + motion.turnsAfterSweep;
   const hands = inputs.shown.map(({ participantId, cardCount }, h) => ({ participantId, cards: Array.from({ length: cardCount }, (_, card) => {
     const turns = first + h * motion.handStagger + card * motion.cardStagger;
     return { card, turn: { startsAt: at(turns), endsAt: at(turns + motion.turn) } };
@@ -292,21 +257,6 @@ export const showdownBeats = beatFunction((inputs: ShowdownInputs, at): Showdown
  * The payout: the pot pushed onto each winner's stack in turn. The payout phase lasts as long as these beats
  * (`payoutBeats`).
  */
-export const payoutMotion = Object.freeze({
-  /** The pot dimming and brightening as it is pushed. */
-  potAt: 225, potPulse: 1050,
-  /**
-   * When the first award lands on its winner's stack, and the gap to each next landing: wide enough that each winner's
-   * figure is seen to change on its own, while the next push is already on its way.
-   */
-  firstLands: 1065, stagger: 300,
-  /** Each award's push from the pot, ending as it lands. */
-  push: 840,
-  /** The pushed chips fading into the stack once they land. */
-  landFade: 240,
-  /** The winner's caption appearing, from just before the chips land. */
-  captionBeforeLanding: 30, caption: 240,
-});
 
 /** What the payout presents. Every field is public in the view once the Hand is complete: its payouts and returns. */
 export interface PayoutInputs {
@@ -329,8 +279,8 @@ export interface PayoutBeats extends PhaseBeats {
 }
 
 /** The payout's beats, from the phase's start, given what it presents; with `durationMs`, fitted to that length. */
-export const payoutBeats = beatFunction((inputs: PayoutInputs, at): PayoutBeats => {
-  const motion = payoutMotion;
+export const payoutBeats = beatFunction((inputs: PayoutInputs, at, timings): PayoutBeats => {
+  const motion = timings.payout;
   const pot = { startsAt: at(motion.potAt), endsAt: at(motion.potAt + motion.potPulse) };
   const awards = inputs.awards.map(({ participantId, won, returned }, i) => {
     const lands = motion.firstLands + i * motion.stagger, caption = lands - motion.captionBeforeLanding;
@@ -340,41 +290,8 @@ export const payoutBeats = beatFunction((inputs: PayoutInputs, at): PayoutBeats 
   return { totalMs, pot, awards };
 });
 
-/**
- * Table motion with no Presentation Phase: it is timed from the view that carried it and never gates play. It plays at
- * the phases' followable tempo, 1.5× the M5 motion's timings.
- */
-export const tableMotion = Object.freeze({
-  /** A bet's chip flight from the seat to the betting line, and when its amount appears, just before the chip lands. */
-  betFlight: 450, betAmountAppears: 435,
-  /** A bet straight into the pot (when there is no betting line to land on). */
-  betToPot: 510,
-  /** An acting seat's caption appearing. */
-  caption: 225,
-  /** A folded hand mucked to the middle of the table, card after card. */
-  muckFlight: 510, muckStagger: 60,
-  check: 360,
-  /** The line swept to the pot: when it starts, after the view that carried it. */
-  sweepAt: 180,
-  /** A swept chip's flight to the pot, and the gap between one wager's chip and the next. */
-  sweepFlight: 420, sweepStagger: 60,
-  /** A swept wager's amount fading as its chip leaves. */
-  sweepAmountFade: 210,
-  /** The pot brightening once the chips reach it, after the sweep starts (plus one stagger per wager). */
-  potAfterSweep: 390, potBrightens: 240,
-  /** A seat settling in place. */
-  seatArrives: 360,
-  /** A Participant sitting down: the empty seat fading, then the seat arriving. */
-  sitFade: 210, sitArrivesAt: 120,
-  /** A Participant standing up or moving: the seat they left fading and shrinking, then the seats arriving. */
-  leaveFade: 300, leaveArrivesAt: 210, moveVacatedArrivesAt: 300,
-  /** Chips added to a stack: their flight in from the table's edge, the floating amount, and the figure's roll. */
-  chipsFlight: 840, chipsLabel: 1650, stackRoll: 1050,
-  /** The viewer's own seat change: the old seats fading, the new ones arriving, and the label naming the seat. */
-  seatChangeFade: 240, seatChangeArrivesAt: 180, seatChangeArrives: 330, seatChangeLabel: 2400,
-  /** A seat's status changing: its caption and connection label. */
-  status: 270,
-});
+/** Table motion with no Presentation Phase: timed from the view that carried it, and never gates play. */
+export const tableMotion = committedTimings.motion;
 
 /** Reading Phase Inputs field by field: each reader returns `undefined` for a value of the wrong shape. */
 const record = (value: unknown): Record<string, unknown> | undefined => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined);

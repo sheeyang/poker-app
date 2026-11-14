@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dealBeats, payoutBeats, presentationPhaseLength, presentingPhase, readPhaseInputs, returnBeat, showdownBeats, streetBeats, type DealInputs, type PayoutInputs, type ShowdownBeats, type StreetBeats, type SweepBeats } from '../src/index.js';
+import { committedTimings, dealBeats, payoutBeats, sweepBeats, timingNotes, presentationPhaseLength, presentingPhase, readPhaseInputs, returnBeat, showdownBeats, streetBeats, type DealInputs, type PayoutInputs, type ShowdownBeats, type StreetBeats, type SweepBeats } from '../src/index.js';
 
 /** `players` dealt in clockwise, two cards each, the first two posting the blinds. */
 const deal = (players: number, refills: DealInputs['refills'] = []): DealInputs => {
@@ -249,5 +249,32 @@ describe('reading Phase Inputs', () => {
     for (const value of [undefined, { swept: [] }, { swept: 'p1', cardCount: 3 }, { swept: [], cardCount: -1 }, { swept: [], cardCount: 1.5 }]) expect(readPhaseInputs('street', value)).toBeUndefined();
     expect(readPhaseInputs('showdown', { swept: [], shown: [{ participantId: 'p1', cardCount: '2' }] })).toBeUndefined();
     expect(readPhaseInputs('payout', { awards: [{ participantId: 'p1', won: 300 }] })).toBeUndefined();
+  });
+});
+
+describe('timings passed to the beat functions', () => {
+  const faster = { ...committedTimings, deal: { ...committedTimings.deal, buttonMoves: 100, cardFlight: 100 }, street: { ...committedTimings.street, flopFlight: 100 }, showdown: { ...committedTimings.showdown, turn: 100 }, payout: { ...committedTimings.payout, firstLands: 500, push: 100 }, motion: { ...committedTimings.motion, sweepFlight: 100 } };
+  const swept = ['p1', 'p2'];
+
+  it('changes every kind of beat and its phase length', () => {
+    const shown = [{ participantId: 'p1', cardCount: 2 }], awards = [{ participantId: 'p1', won: 10, returned: 0 }];
+    const cases = [
+      [dealBeats(deal(6)), dealBeats(deal(6), undefined, faster)],
+      [streetBeats({ swept, cardCount: 3 }), streetBeats({ swept, cardCount: 3 }, undefined, faster)],
+      [showdownBeats({ swept, shown }), showdownBeats({ swept, shown }, undefined, faster)],
+      [payoutBeats({ awards }), payoutBeats({ awards }, undefined, faster)],
+    ] as const;
+    for (const [committed, tuned] of cases) { expect(tuned).not.toEqual(committed); expect(tuned.totalMs).toBeLessThan(committed.totalMs); }
+    expect(sweepBeats(swept, faster)).not.toEqual(sweepBeats(swept));
+  });
+
+  it('gives the committed beats when given the committed timings', () => {
+    expect(dealBeats(deal(6), undefined, committedTimings)).toEqual(dealBeats(deal(6)));
+  });
+
+  it('documents exactly the timings the JSON file holds', () => {
+    const paths = (value: object, prefix = ''): string[] => Object.entries(value).flatMap(([key, v]) => typeof v === 'object' ? paths(v, `${prefix}${key}.`) : [`${prefix}${key}`]);
+    expect(Object.keys(timingNotes).sort()).toEqual(paths(committedTimings).sort());
+    for (const note of Object.values(timingNotes)) expect(note.trim()).not.toBe('');
   });
 });
