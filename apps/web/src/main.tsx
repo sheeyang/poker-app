@@ -18,4 +18,9 @@ const onlineTable = createRoute({ getParentRoute: () => root, path: '/online/$ta
 const router = createRouter({ routeTree: root.addChildren([index, practice, practiceTable, online, onlineTable]) });
 declare module '@tanstack/react-router' { interface Register { router: typeof router } }
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false }, mutations: { retry: false } } });
-createRoot(document.getElementById('root')!).render(<React.StrictMode><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></React.StrictMode>);
+const app = <React.StrictMode><QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider></React.StrictMode>;
+const mount = createRoot(document.getElementById('root')!);
+// The motion lab (ADR-0040) is development only: `import.meta.env.DEV` is false in a production build, so this branch, the
+// page and its styles are not part of it. It needs no server, so it takes the page whole instead of the app shell.
+if (import.meta.env.DEV && location.pathname.replace(/\/$/, '') === '/motion-lab') void import('./motion-lab.js').then(({ MotionLabPage }) => mount.render(<React.StrictMode><MotionLabPage /></React.StrictMode>));
+else mount.render(app);

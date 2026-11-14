@@ -15,9 +15,11 @@ import { useTableMotion, type StackRoll } from './table-choreography.js';
  * `actorWindowOpen`: the acting Participant's Action Window is open, so they are now deciding.
  * `countdown`: whole seconds left before their Action Deadline, shown to everyone; `undefined` without one.
  * `nextHand`: between Hands at an Online Table, the Next-Hand Countdown or why there is none.
+ * `driven`: the motion lab plays the table on a virtual clock, so every animation is held at the time `serverNow` says.
+ * Everything here that reads time takes it from `serverNow`, never the machine's clock.
  * Seat and Participant actions open beside the object the player points at.
  */
-export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextHand, handOpen, choosing, openSeat, openParticipant }: { table: ObservableTableSession; serverNow: number; actorWindowOpen: boolean; countdown?: number; nextHand?: NextHandStatus; handOpen: boolean; choosing: boolean; openSeat: (seat: number, anchor: HTMLElement) => void; openParticipant: (participantId: string, anchor: HTMLElement) => void }) {
+export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextHand, handOpen, choosing, driven, openSeat, openParticipant }: { table: ObservableTableSession; serverNow: number; actorWindowOpen: boolean; countdown?: number; nextHand?: NextHandStatus; handOpen: boolean; choosing: boolean; driven?: boolean; openSeat: (seat: number, anchor: HTMLElement) => void; openParticipant: (participantId: string, anchor: HTMLElement) => void }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const viewerSeat = state.participants.find(p => p.participantId === humanId)?.seat ?? null;
@@ -27,9 +29,7 @@ export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextH
   const currentHistory = table.view.history.find(h => h.handId === state.handId);
   const actions = currentHistory?.decisions ?? [];
   const payouts = state.payouts ?? [];
-  const { stage, rolls } = useTableMotion(table, serverNow);
-  // Client time minus server time, for parts that keep their own clock between renders.
-  const offset = serverNow - Date.now();
+  const { stage, rolls } = useTableMotion(table, serverNow, driven);
   const held = heldStacks(table, serverNow);
   const actionWindow = currentWindow(table);
   // Once betting is over the last street's chips are in the pot; the line is swept.
@@ -74,7 +74,7 @@ export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextH
       return <div data-table-seat={seat} key={seat} className={`table-seat ${hero ? 'hero-seat' : ''} ${actor ? 'acting-seat' : ''} ${timed ? 'timed-seat' : ''} ${participant?.folded ? 'folded-seat' : ''} ${offline ? 'offline-seat' : ''}`} style={seatPosition(index, count) as CSSProperties}>
         {participant ? <>
           {cardsShown && <div className="hole-cards">{Array.from({ length: participant.cardCount ?? 0 }, (_, i) => <Card key={`${state.handId}-${i}`} card={participant.holeCards?.[i]} small={!hero} faces attrs={{ 'data-card': `${participant.participantId}-${i}` }} />)}</div>}
-          <div className="seat-body" data-seat-body={participant.participantId}><SeatTarget className="seat-target" data-table-participant={participant.participantId} aria-label={actionable ? `${label} actions` : undefined} aria-haspopup={actionable ? 'menu' : undefined} onClick={actionable ? event => openParticipant(participant.participantId, event.currentTarget) : undefined}><span className={`avatar avatar-${index % 4}`} aria-hidden="true">{hero ? 'Y' : binding?.name.replace('Bot ', '').slice(0, 2)}</span><span className="seat-copy"><strong>{label}</strong>{offline && <small className="connection-label">Disconnected</small>}<span data-stack={participant.participantId}><StackFigure value={participant.stack} hold={hold && { value: hold.value, until: hold.until - offset }} roll={rolls.get(participant.participantId)} /> <small>chips</small></span></span></SeatTarget>{state.buttonSeat === seat && <span className="dealer-marker" data-motion="button" title="Dealer button">D</span>}<span className="dealer-marker motion-anchor" data-button-anchor={seat} aria-hidden="true" />{timed && timed.deadlineAt !== undefined && <EdgeCountdown key={timed.decisionId} opensAt={timed.opensAt - offset} deadlineAt={timed.deadlineAt - offset} />}</div>
+          <div className="seat-body" data-seat-body={participant.participantId}><SeatTarget className="seat-target" data-table-participant={participant.participantId} aria-label={actionable ? `${label} actions` : undefined} aria-haspopup={actionable ? 'menu' : undefined} onClick={actionable ? event => openParticipant(participant.participantId, event.currentTarget) : undefined}><span className={`avatar avatar-${index % 4}`} aria-hidden="true">{hero ? 'Y' : binding?.name.replace('Bot ', '').slice(0, 2)}</span><span className="seat-copy"><strong>{label}</strong>{offline && <small className="connection-label">Disconnected</small>}<span data-stack={participant.participantId}><StackFigure value={participant.stack} now={serverNow} hold={hold} roll={rolls.get(participant.participantId)} /> <small>chips</small></span></span></SeatTarget>{state.buttonSeat === seat && <span className="dealer-marker" data-motion="button" title="Dealer button">D</span>}<span className="dealer-marker motion-anchor" data-button-anchor={seat} aria-hidden="true" />{timed && timed.deadlineAt !== undefined && <EdgeCountdown key={timed.decisionId} now={serverNow} driven={driven} opensAt={timed.opensAt} deadlineAt={timed.deadlineAt} />}</div>
           <div className="seat-caption" data-caption={participant.participantId}>{state.status === 'completed-hand' && payout > 0 ? `Won ${chips(payout)}` : pending ? afterHandRequestLabel(pending) : state.status === 'completed-hand' && participant.stack === 0 ? 'Rebuy to play' : participant.sittingOut ? 'Sitting out' : turn ? turn : participant.allIn ? 'All-in' : participant.folded ? 'Folded' : recentAction ? actionLabel(recentAction) : ''}</div>
           {(participant.wager ?? 0) > 0 && !lineSwept && <span className={`seat-wager wager-${index}`} data-wager={participant.participantId}><i aria-hidden="true" data-wager-chip={participant.participantId} />{chips(participant.wager ?? 0)}{state.smallBlindParticipantId === participant.participantId ? <small>SB</small> : state.bigBlindParticipantId === participant.participantId ? <small>BB</small> : null}</span>}
         </> : <button className="empty-seat empty-seat-open" onClick={event => openSeat(seat, event.currentTarget)} aria-label={`Seat ${seat} actions`} title={`Seat ${seat} actions`} aria-haspopup="menu"><Icon name="plus" size={24} /></button>}
@@ -88,15 +88,15 @@ export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextH
  * A stack's figure. A winner's shows their old stack until the payout's chips land on it (`hold`, until a client
  * time), then the new total at once; chips added between Hands roll it up to the new total (`roll`).
  */
-function StackFigure({ value, hold, roll }: { value: number; hold?: { value: number; until: number }; roll?: StackRoll }) {
+function StackFigure({ value, now, hold, roll }: { value: number; now: number; hold?: { value: number; until: number }; roll?: StackRoll }) {
   const [, refresh] = useReducer((n: number) => n + 1, 0);
-  const holding = hold !== undefined && Date.now() < hold.until;
+  const holding = hold !== undefined && now < hold.until;
   const until = hold?.until;
   useEffect(() => {
     if (!holding || until === undefined) return;
-    const timer = setTimeout(refresh, until - Date.now() + 1);
+    const timer = setTimeout(refresh, until - now + 1);
     return () => clearTimeout(timer);
-  }, [holding, until]);
+  }, [holding, until, now]);
   const [rolling, setRolling] = useState<{ from: number; to: number; id: string; done?: boolean }>();
   if (roll && roll.id !== rolling?.id) setRolling({ from: roll.from, to: value, id: roll.id });
   if (holding) return <>{chips(hold.value)}</>;
@@ -126,11 +126,13 @@ function RollingFigure({ from, to, rolled }: { from: number; to: number; rolled:
 
 /**
  * The acting seat's border as its Action Deadline clock: a brass stroke round the seat that clears clockwise from the
- * top, like a clock hand, warming in the last five seconds. `opensAt` and `deadlineAt` are client times. Presentation
+ * top, like a clock hand, warming in the last five seconds. `opensAt`, `deadlineAt` and `now` are server times; `driven`
+ * holds the stroke at `now` instead of letting it run. Presentation
  * only: the server alone closes the window.
  */
-function EdgeCountdown({ opensAt, deadlineAt }: { opensAt: number; deadlineAt: number }) {
-  const svg = useRef<SVGSVGElement>(null), path = useRef<SVGPathElement>(null);
+function EdgeCountdown({ opensAt, deadlineAt, now, driven }: { opensAt: number; deadlineAt: number; now: number; driven?: boolean }) {
+  const svg = useRef<SVGSVGElement>(null), path = useRef<SVGPathElement>(null), animationRef = useRef<Animation>(undefined), nowRef = useRef(now);
+  nowRef.current = now;
   const [size, setSize] = useState<{ w: number; h: number }>();
   useLayoutEffect(() => {
     const body = svg.current?.parentElement;
@@ -148,9 +150,14 @@ function EdgeCountdown({ opensAt, deadlineAt }: { opensAt: number; deadlineAt: n
     const length = Math.max(1, deadlineAt - opensAt), warm = Math.max(0, (length - 5000) / length);
     // pathLength 1 makes the dash offset the elapsed fraction; negative offsets clear the stroke from its start.
     // It starts counting when the window opens, after the Settle: it stays whole until then, or joins part-way if later.
-    const animation = node.animate([{ strokeDashoffset: 0, stroke: '#edd7a9' }, { strokeDashoffset: -warm, stroke: '#edd7a9', offset: warm }, { strokeDashoffset: -1, stroke: '#eba98f' }], { duration: length, delay: opensAt - Date.now(), easing: 'linear', fill: 'forwards' });
-    return () => animation.cancel();
-  }, [opensAt, deadlineAt, measured]);
+    const animation = node.animate([{ strokeDashoffset: 0, stroke: '#edd7a9' }, { strokeDashoffset: -warm, stroke: '#edd7a9', offset: warm }, { strokeDashoffset: -1, stroke: '#eba98f' }], { duration: length, easing: 'linear', fill: 'forwards' });
+    // Its time is how long the window has been open: negative, it waits whole; late, it joins part-way.
+    animation.currentTime = nowRef.current - opensAt;
+    if (driven) animation.pause();
+    animationRef.current = animation;
+    return () => { animationRef.current = undefined; animation.cancel(); };
+  }, [opensAt, deadlineAt, measured, driven]);
+  useLayoutEffect(() => { if (driven && animationRef.current) animationRef.current.currentTime = now - opensAt; }, [driven, now, opensAt]);
   let d = '';
   if (size) {
     // From top centre, clockwise round the seat body's 12px corners, on its 1px border.

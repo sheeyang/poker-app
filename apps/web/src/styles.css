@@ -1234,6 +1234,7 @@ fieldset.composer-field { display: block; }
 /* Centred by `transform`, which applies after the animated rotate and scale; an origin at the box's top-left, which the
    centring moves onto its centre, turns a ghost about its own centre so it lands exactly on the real thing. */
 .motion-ghost { position: absolute; transform: translate(-50%, -50%); transform-origin: 0 0; }
+.motion-ghost.motion-done { visibility: hidden; }
 .ghost-back { border-radius: 5px; }
 .ghost-small-back { border-radius: 4px; }
 .ghost-back .card-back-face, .ghost-small-back .card-back-face { border-radius: inherit; }
