@@ -31,8 +31,13 @@ export interface LabView { readonly at: number; readonly table: ObservableTableS
 /** A phase, a Settle or the Next-Hand Countdown, drawn as one block of the timeline's band. */
 export interface LabBlock { readonly kind: PresentationPhase['kind'] | 'countdown'; readonly label: string; readonly startsAt: number; readonly endsAt: number }
 
-/** One beat as a bar on a lane, in milliseconds from the start of the script. */
-export interface LabBeat { readonly lane: Lane; readonly label: string; readonly startsAt: number; readonly endsAt: number }
+/** Which description a beat comes from: a presenting phase's, or the kind of motion with no Presentation Phase. */
+export type BeatSource = 'deal' | 'street' | 'showdown' | 'payout' | 'sweep' | 'bet' | 'fold' | 'check';
+/** The description group and place that made a beat: the `index`th of the group's beats in its `scope` (one phase, or one table event), which starts at `scopeStart`. */
+export interface BeatRef { readonly source: BeatSource; readonly group: string; readonly index: number; readonly scope: string; readonly scopeStart: number }
+
+/** One beat as a bar on a lane, in milliseconds from the start of the script. `id` is its place among the lab's beats, in time order. */
+export interface LabBeat { readonly id: number; readonly lane: Lane; readonly label: string; readonly startsAt: number; readonly endsAt: number; readonly ref: BeatRef }
 
 export interface MotionLab {
   readonly views: readonly LabView[];
@@ -181,33 +186,42 @@ export function motionLab(input: LabInput): MotionLab {
     views.push({ at, table: table(at, first(upNext!.step), windowOpensAt) });
   }
 
-  // Every beat, from its phase's start, as the table plays it: the shared beat functions at the phase's own length.
-  const bar = (lane: Lane, label: string, start: number, beat: { startsAt: number; endsAt: number }) => beats.push({ lane, label, startsAt: start + beat.startsAt, endsAt: start + beat.endsAt });
-  const sweep = (start: number, sw: SweepBeats) => { for (const w of sw.wagers) bar('chips', `${nameOf(w.participantId)} chips to pot`, start, w); if (sw.pot) bar('chips', 'Pot brightens', start, sw.pot); };
+  // Every beat, from its phase's start, as the table plays it: the shared beat functions at the phase's own length. Each
+  // bar carries the description group and place that made it (`ref`), so the lab's annotations read the same descriptions.
+  const bar = (lane: Lane, label: string, source: BeatSource, group: string, index: number, scope: { id: string; at: number }, beat: { startsAt: number; endsAt: number }) =>
+    beats.push({ id: 0, lane, label, startsAt: scope.at + beat.startsAt, endsAt: scope.at + beat.endsAt, ref: { source, group, index, scope: scope.id, scopeStart: scope.at } });
   const name = nameOf;
-  for (const p of phases) {
+  for (const [n, p] of phases.entries()) {
+    const scope = { id: `phase-${n}`, at: p.startsAt };
+    const sweep = (source: BeatSource, sw: SweepBeats) => { for (const [i, w] of sw.wagers.entries()) bar('chips', `${name(w.participantId)} chips to pot`, source, 'sweepWager', i, scope, w); if (sw.pot) bar('chips', 'Pot brightens', source, 'sweepPot', 0, scope, sw.pot); };
     if (p.kind === 'deal') {
       const b = dealBeats(p.inputs, p.durationMs, timings);
-      bar('cards', 'Cards return', p.startsAt, b.cardsReturn); bar('seats', 'Button moves', p.startsAt, b.buttonMoves);
-      for (const r of b.refills) bar('stacks', `${name(r.participantId)} refill`, p.startsAt, r);
-      for (const blind of b.blinds) bar('chips', `${name(blind.participantId)} blind`, p.startsAt, blind);
-      for (const c of b.cards) { bar('cards', `${name(c.participantId)} card ${c.card + 1}`, p.startsAt, c); if (c.participantId === YOU) bar('cards', `${name(c.participantId)} card ${c.card + 1} turns`, p.startsAt, c.turn); }
+      bar('cards', 'Cards return', 'deal', 'cardsReturn', 0, scope, b.cardsReturn); bar('seats', 'Button moves', 'deal', 'buttonMoves', 0, scope, b.buttonMoves);
+      for (const [i, r] of b.refills.entries()) bar('stacks', `${name(r.participantId)} refill`, 'deal', 'refill', i, scope, r);
+      for (const [i, blind] of b.blinds.entries()) bar('chips', `${name(blind.participantId)} blind`, 'deal', 'blind', i, scope, blind);
+      for (const [i, c] of b.cards.entries()) { bar('cards', `${name(c.participantId)} card ${c.card + 1}`, 'deal', 'card', i, scope, c); if (c.participantId === YOU) bar('cards', `${name(c.participantId)} card ${c.card + 1} turns`, 'deal', 'cardTurn', i, scope, c.turn); }
     } else if (p.kind === 'street') {
-      const b = streetBeats(p.inputs, p.durationMs, timings);
-      sweep(p.startsAt, b.sweep); bar('board', 'Burn', p.startsAt, b.burn);
-      for (const c of b.cards) { bar('board', `Board card ${c.card + 1}`, p.startsAt, c); if (c.spread) bar('board', 'Flop spreads', p.startsAt, c.spread); bar('board', `Board card ${c.card + 1} turns`, p.startsAt, c.turn); }
+      const b = streetBeats(p.inputs, p.durationMs, timings), flop = p.inputs.cardCount > 1;
+      sweep('street', b.sweep); bar('board', 'Burn', 'street', 'burn', 0, scope, b.burn);
+      for (const c of b.cards) {
+        bar('board', `Board card ${c.card + 1}`, 'street', flop ? 'flopCard' : 'boardCard', flop ? c.card : 0, scope, c);
+        if (c.spread) bar('board', 'Flop spreads', 'street', 'flopSpread', c.card, scope, c.spread);
+        bar('board', `Board card ${c.card + 1} turns`, 'street', flop ? 'flopCardTurn' : 'boardCardTurn', flop ? c.card : 0, scope, c.turn);
+      }
     } else if (p.kind === 'showdown') {
       const b = showdownBeats(p.inputs, p.durationMs, timings);
-      sweep(p.startsAt, b.sweep);
-      for (const h of b.hands) for (const c of h.cards) bar('cards', `${name(h.participantId)} card ${c.card + 1} turns`, p.startsAt, c.turn);
+      sweep('showdown', b.sweep);
+      let turned = 0;
+      for (const h of b.hands) for (const c of h.cards) bar('cards', `${name(h.participantId)} card ${c.card + 1} turns`, 'showdown', 'cardTurn', turned++, scope, c.turn);
     } else if (p.kind === 'payout') {
       const b = payoutBeats(p.inputs, p.durationMs, timings);
-      bar('chips', 'Pot pulses', p.startsAt, b.pot);
-      for (const a of b.awards) { bar('stacks', `${name(a.participantId)} award`, p.startsAt, a); bar('stacks', `${name(a.participantId)} award fades`, p.startsAt, a.fade); bar('seats', `${name(a.participantId)} caption`, p.startsAt, a.caption); }
+      bar('chips', 'Pot pulses', 'payout', 'pot', 0, scope, b.pot);
+      for (const [i, a] of b.awards.entries()) { bar('stacks', `${name(a.participantId)} award`, 'payout', 'award', i, scope, a); bar('stacks', `${name(a.participantId)} award fades`, 'payout', 'awardFade', i, scope, a.fade); bar('seats', `${name(a.participantId)} caption`, 'payout', 'awardCaption', i, scope, a.caption); }
     }
   }
   beats.push(...motionBeats(motion, timings));
   beats.sort((x, y) => x.startsAt - y.startsAt || x.endsAt - y.endsAt);
+  beats.forEach((beat, id) => { (beat as { id: number }).id = id; });
 
   for (const p of phases) blocks.push({ kind: p.kind, label: p.kind === 'street' ? STREET_LABEL[p.street] : PHASE_LABEL[p.kind], startsAt: p.startsAt, endsAt: p.endsAt });
   const handEnd = Math.max(...phases.map(p => p.endsAt));
@@ -230,25 +244,27 @@ export function motionLab(input: LabInput): MotionLab {
 /** The beats of motion with no Presentation Phase, from the anchored beat functions, each from the view that carried it. */
 function motionBeats(motion: readonly Motion[], timings: Timings): LabBeat[] {
   const out: LabBeat[] = [];
-  const bar = (lane: Lane, label: string, at: number, beat: { startsAt: number; endsAt: number }) => out.push({ lane, label, startsAt: at + beat.startsAt, endsAt: at + beat.endsAt });
-  for (const m of motion) {
+  for (const [n, m] of motion.entries()) {
+    const scope = `motion-${n}`;
+    const bar = (lane: Lane, label: string, source: BeatSource, group: string, index: number, beat: { startsAt: number; endsAt: number }) =>
+      out.push({ id: 0, lane, label, startsAt: m.at + beat.startsAt, endsAt: m.at + beat.endsAt, ref: { source, group, index, scope, scopeStart: m.at } });
     if (m.kind === 'sweep') {
       const sw = sweepBeats(m.swept, timings);
-      for (const w of sw.wagers) bar('chips', `${nameOf(w.participantId)} chips to pot`, m.at, w);
-      if (sw.pot) bar('chips', 'Pot brightens', m.at, sw.pot);
+      for (const [i, w] of sw.wagers.entries()) bar('chips', `${nameOf(w.participantId)} chips to pot`, 'sweep', 'sweepWager', i, w);
+      if (sw.pot) bar('chips', 'Pot brightens', 'sweep', 'sweepPot', 0, sw.pot);
       continue;
     }
     const who = nameOf(m.who);
-    if (m.kind === 'check') { const b = checkBeats(timings); bar('seats', `${who} checks`, m.at, b.press); bar('seats', `${who} caption`, m.at, b.caption); }
+    if (m.kind === 'check') { const b = checkBeats(timings); bar('seats', `${who} checks`, 'check', 'press', 0, b.press); bar('seats', `${who} caption`, 'check', 'caption', 0, b.caption); }
     else if (m.kind === 'fold') {
       const b = foldBeats(m.who === YOU ? 0 : 2, timings);
-      for (const [i, muck] of b.mucks.entries()) bar('cards', `${who} muck ${i + 1}`, m.at, muck);
-      bar('seats', `${who} caption`, m.at, b.caption);
+      for (const [i, muck] of b.mucks.entries()) bar('cards', `${who} muck ${i + 1}`, 'fold', 'muck', i, muck);
+      bar('seats', `${who} caption`, 'fold', 'caption', 0, b.caption);
     } else {
       const b = betBeats(m.toPot, timings);
-      bar('chips', `${who} ${m.kind === 'call' ? 'calls' : m.kind === 'bet' ? 'bets' : 'raises'}`, m.at, b.chip);
-      if (b.amountAppears !== undefined) bar('chips', `${who} amount appears`, m.at, { startsAt: b.amountAppears, endsAt: b.amountAppears });
-      bar('seats', `${who} caption`, m.at, b.caption);
+      bar('chips', `${who} ${m.kind === 'call' ? 'calls' : m.kind === 'bet' ? 'bets' : 'raises'}`, 'bet', m.toPot ? 'potChip' : 'lineChip', 0, b.chip);
+      if (b.amountAppears !== undefined) bar('chips', `${who} amount appears`, 'bet', 'lineAmount', 0, { startsAt: b.amountAppears, endsAt: b.amountAppears });
+      bar('seats', `${who} caption`, 'bet', 'caption', 0, b.caption);
     }
   }
   return out;

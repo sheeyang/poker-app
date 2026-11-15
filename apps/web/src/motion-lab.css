@@ -85,3 +85,30 @@
 .lab-timing-note { margin: 0; font-size: .74rem; color: var(--muted); line-height: 1.35; }
 
 @media (max-width: 1100px) { .lab-workbench { grid-template-columns: minmax(0, 1fr); } .lab-panel { position: static; max-height: 70vh; } }
+
+/* Annotations: a beat pulses where an edit set it, lights while its timing is hovered, and explains itself when selected. */
+.lab-beat { padding: 0; min-height: 0; min-width: 4px; border: 0; pointer-events: auto; cursor: pointer; transition: opacity 150ms, box-shadow 150ms; }
+.lab-beat:hover { box-shadow: 0 0 0 1px var(--text); }
+.lab-beat:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; z-index: 2; }
+.lab-beat[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--text); z-index: 2; }
+.lab-tracks.has-lit .lab-beat:not(.is-lit) { opacity: .3; }
+.lab-beat.is-lit { box-shadow: 0 0 0 2px var(--gold); z-index: 1; }
+.lab-beat.is-pulsing { animation: lab-pulse 900ms cubic-bezier(.16,1,.3,1); }
+@keyframes lab-pulse { 0% { box-shadow: 0 0 0 0 var(--gold); filter: brightness(1.5); transform: scaleY(1.6); } 100% { box-shadow: 0 0 0 10px transparent; filter: none; transform: none; } }
+.lab-link { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: visible; }
+.lab-link-line { stroke: var(--gold); stroke-width: 1.5; }
+.lab-link-anchor { stroke: var(--gold); stroke-width: 1; stroke-dasharray: 3 3; }
+.lab-link-dot { fill: var(--gold); }
+.lab-link-text { fill: var(--gold); font-size: 10px; }
+.lab-timing.is-setting { box-shadow: inset 2px 0 0 var(--gold); padding-left: 8px; }
+.lab-detail { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.lab-detail header { display: flex; align-items: baseline; gap: 10px; }
+.lab-detail h2 { margin: 0; font-size: .9rem; font-weight: 600; }
+.lab-detail-when { flex: 1; color: var(--muted); font-size: .76rem; font-variant-numeric: tabular-nums; }
+.lab-detail dl { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 4px 12px; margin: 8px 0 0; font-size: .8rem; }
+.lab-detail dt { color: var(--muted); }
+.lab-detail dd { margin: 0; overflow-wrap: anywhere; }
+.lab-detail code { font-size: .76rem; }
+.lab-detail-ms { color: var(--muted); font-variant-numeric: tabular-nums; margin-left: 6px; }
+.lab-chip { display: inline-block; margin: 0 6px 4px 0; padding: 0 6px; border: 1px solid var(--control-line); border-radius: 999px; }
+.lab-detail-note { margin: 6px 0 0; font-size: .74rem; color: var(--muted); }

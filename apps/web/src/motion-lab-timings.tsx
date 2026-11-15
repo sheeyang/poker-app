@@ -23,9 +23,13 @@ export interface TimingPanelProps {
   /** The selected block's index in `totals`, or null. */
   readonly selected: number | null;
   readonly onSelect: (index: number | null) => void;
+  /** Told which timing the pointer or focus is on, or null: hovering lights the beats it directly sets. */
+  readonly hovered: (path: TimingPath | null) => void;
+  /** The timings that set the selected beat. */
+  readonly marked: readonly TimingPath[];
 }
 
-function TimingRow({ path, note, committed, edits, onEdit }: { path: TimingPath; note: string; committed: number; edits: Edits; onEdit: TimingPanelProps['onEdit'] }) {
+function TimingRow({ path, note, committed, edits, onEdit, hovered, marked }: { path: TimingPath; note: string; committed: number; edits: Edits; onEdit: TimingPanelProps['onEdit']; hovered: TimingPanelProps['hovered']; marked: boolean }) {
   const changed = path in edits, value = edits[path] ?? committed, max = Math.max(sliderMax(path), value);
   const onKey = (event: KeyboardEvent) => {
     const direction = event.key === 'ArrowUp' || event.key === 'ArrowRight' ? 1 : event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -1 : 0;
@@ -33,7 +37,7 @@ function TimingRow({ path, note, committed, edits, onEdit }: { path: TimingPath;
     event.preventDefault();
     onEdit(path, nudged(value, direction, event.shiftKey));
   };
-  return <li className={`lab-timing${changed ? ' is-changed' : ''}`} data-timing={path}>
+  return <li className={`lab-timing${changed ? ' is-changed' : ''}${marked ? ' is-setting' : ''}`} data-timing={path} onPointerEnter={() => hovered(path)} onPointerLeave={() => hovered(null)} onFocus={() => hovered(path)} onBlur={() => hovered(null)}>
     <div className="lab-timing-head">
       <span className="lab-timing-name">{nameOf(path)}{changed && <span className="lab-changed" title={`Committed: ${committed} ms`}>changed</span>}</span>
       <span className="lab-timing-ms">
@@ -47,7 +51,7 @@ function TimingRow({ path, note, committed, edits, onEdit }: { path: TimingPath;
   </li>;
 }
 
-export function TimingPanel({ groups, edits, onEdit, totals, selected, onSelect }: TimingPanelProps) {
+export function TimingPanel({ groups, edits, onEdit, totals, selected, onSelect, hovered, marked }: TimingPanelProps) {
   const count = Object.keys(edits).length;
   return <aside className="lab-panel" aria-label="Timings">
     <section className="lab-totals" aria-label="Phase totals">
@@ -62,7 +66,7 @@ export function TimingPanel({ groups, edits, onEdit, totals, selected, onSelect 
     <div className="lab-panel-list">
       {groups.map(g => <section key={g.id} className="lab-group">
         <h3>{GROUP_LABEL[g.id] ?? g.id}</h3>
-        <ul>{g.timings.map(t => <TimingRow key={t.path} {...t} edits={edits} onEdit={onEdit} />)}</ul>
+        <ul>{g.timings.map(t => <TimingRow key={t.path} {...t} edits={edits} onEdit={onEdit} hovered={hovered} marked={marked.includes(t.path)} />)}</ul>
       </section>)}
     </div>
   </aside>;

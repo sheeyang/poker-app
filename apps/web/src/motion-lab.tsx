@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type Ref } from 'react';
 import { flushSync } from 'react-dom';
-import type { TableMode } from '@poker/contracts';
+import type { TableMode, TimingPath } from '@poker/contracts';
 import { PokerTable } from './poker-table.js';
 import { actionWindowOpen, deadlineCountdown, presentTable } from './presentation.js';
 import { nextHandStatus } from './online-status.js';
 import { lanes, motionLab, scenarios, type LabBlock, type LabBeat, type Lane, type MotionLab, type ScenarioId } from './motion-lab-model.js';
 import { blockTimings, effectiveTimings, listedTimings, phaseTotals, setEdit, type Edits } from './motion-lab-edits.js';
 import { TimingPanel } from './motion-lab-timings.js';
+import { beatKey, beatSelection, beatsSetBy, pulsedBeats } from './motion-lab-annotations.js';
+import { BeatBars, BeatDetail, BeatLink } from './motion-lab-beats.js';
 import './motion-lab.css';
 
 /**
@@ -60,6 +62,12 @@ export function MotionLabPage() {
   const timings = useMemo(() => effectiveTimings(edits), [edits]);
   const lab = useMemo(() => motionLab({ scenario, mode, actionGapMs: gap, timings }), [scenario, mode, gap, timings]);
   const [time, setTime] = useState(0), [playing, setPlaying] = useState(false), [speed, setSpeed] = useState<number>(1), [loop, setLoop] = useState(false), [selected, setSelected] = useState<number | null>(null);
+  // Annotations: an edit pulses the beats it directly sets, hovering a timing lights them, selecting a beat explains it.
+  const [pulse, setPulse] = useState<{ paths: readonly TimingPath[]; seq: number }>({ paths: [], seq: 0 }), [hovered, setHovered] = useState<TimingPath | null>(null), [beatPicked, setBeatPicked] = useState<string | null>(null);
+  const pulsed = useMemo(() => new Set(pulsedBeats(lab.beats, pulse.paths).map(b => b.id)), [lab, pulse]);
+  const lit = useMemo(() => new Set(hovered ? beatsSetBy(lab.beats, hovered).map(b => b.id) : []), [lab, hovered]);
+  const beatId = beatPicked === null ? null : lab.beats.find(b => beatKey(b) === beatPicked)?.id ?? null;
+  const selection = useMemo(() => beatId === null ? null : beatSelection(lab.beats, beatId, timings) ?? null, [lab, beatId, timings]);
   const table = useRef<LabTableHandle>(null), clock = useRef(0), tracks = useRef<HTMLDivElement>(null);
   const block = selected === null ? undefined : lab.blocks[selected];
   const region = loop && block ? block : { startsAt: 0, endsAt: lab.totalMs };
@@ -77,7 +85,7 @@ export function MotionLabPage() {
   // A different scenario, mode or gap is a different script: start it from the top.
   const script = `${scenario}|${mode}|${gap}`;
   const [seen, setSeen] = useState(script);
-  if (seen !== script) { setSeen(script); setTime(0); setPlaying(false); setSelected(null); setLoop(false); clock.current = 0; }
+  if (seen !== script) { setSeen(script); setTime(0); setPlaying(false); setSelected(null); setLoop(false); clock.current = 0; setPulse({ paths: [], seq: pulse.seq }); setBeatPicked(null); }
 
   // The virtual clock: real elapsed time times the speed. Past the region's end it stops, or wraps when looping.
   const live = useRef({ speed, region, seek });
@@ -153,8 +161,8 @@ export function MotionLabPage() {
           <span className="lab-label lab-label-band">Phases</span>
           {lanes.map(({ id, label }) => <span key={id} className="lab-label" style={{ height: `${(Math.max(...byLane.get(id)!.map(p => p.row), 0) + 1) * 16 + 8}px` }}>{label}</span>)}
         </div>
-        <div className="lab-tracks" ref={tracks}
-          onPointerDown={event => { if ((event.target as HTMLElement).closest('.lab-block')) return; scrub.current = true; event.currentTarget.setPointerCapture(event.pointerId); setPlaying(false); seek(timeAt(event)); }}
+        <div className={`lab-tracks${lit.size ? ' has-lit' : ''}`} ref={tracks}
+          onPointerDown={event => { if ((event.target as HTMLElement).closest('.lab-block, .lab-beat')) return; scrub.current = true; event.currentTarget.setPointerCapture(event.pointerId); setPlaying(false); seek(timeAt(event)); }}
           onPointerMove={event => { if (scrub.current) seek(timeAt(event)); }}
           onPointerUp={() => { scrub.current = false; }} onPointerCancel={() => { scrub.current = false; }}>
           <div className="lab-ruler" aria-hidden="true">{ticks.map(t => <span key={t} style={{ left: percent(t) }}>{t / 1000}s</span>)}</div>
@@ -163,16 +171,18 @@ export function MotionLabPage() {
           {lanes.map(({ id }) => {
             const rows = byLane.get(id)!, height = (Math.max(...rows.map(p => p.row), 0) + 1) * 16 + 8;
             return <div key={id} className={`lab-lane lab-lane-${id}`} style={{ height }}>
-              {rows.map(({ beat, row }, i) => <span key={i} className="lab-beat" title={`${beat.label}: ${seconds(beat.startsAt)} to ${seconds(beat.endsAt)}`} style={{ left: percent(beat.startsAt), width: percent(Math.max(beat.endsAt - beat.startsAt, 12)), top: 4 + row * 16 }} />)}
+              <BeatBars rows={rows} totalMs={lab.totalMs} pulsed={pulsed} pulseSeq={pulse.seq} lit={lit} selected={beatId} onSelect={id => setBeatPicked(id === null ? null : beatKey(lab.beats.find(b => b.id === id)!))} />
             </div>;
           })}
           {block && loop && <div className="lab-loop-region" style={{ left: percent(block.startsAt), width: percent(block.endsAt - block.startsAt) }} aria-hidden="true" />}
+          <BeatLink tracks={tracks} selection={selection} totalMs={lab.totalMs} layout={lab} />
           <div className="lab-playhead" role="slider" tabIndex={0} aria-label="Playhead" aria-valuemin={0} aria-valuemax={Math.round(lab.totalMs)} aria-valuenow={Math.round(time)} aria-valuetext={seconds(time)} style={{ left: percent(time) }} onKeyDown={onKey} />
         </div>
       </div>
+      {selection && <BeatDetail selection={selection} onClose={() => setBeatPicked(null)} />}
     </section>
     </div>
-    <TimingPanel groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} onEdit={(path, value) => setEdits(current => setEdit(current, path, value))} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
+    <TimingPanel hovered={setHovered} marked={selection?.setBy ?? []} groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} onEdit={(path, value) => { setPulse(p => ({ paths: [path], seq: p.seq + 1 })); setEdits(current => setEdit(current, path, value)); }} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
     </div>
   </div>;
 }
