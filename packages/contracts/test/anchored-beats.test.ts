@@ -27,13 +27,13 @@ describe('the deal’s beat description', () => {
     expect(beat('blind').setBy).toEqual(['deal.blindsAfterRefill', 'deal.blindStagger', 'deal.blindFlight']);
     expect(beat('card').setBy).toEqual(['deal.cardsAfterBlinds', 'deal.cardGap', 'deal.cardsRoom', 'deal.cardFlight']);
     expect(beat('cardTurn').setBy).toEqual(['deal.turnAfterLanding', 'deal.turn']);
-    expect(beat('cardsReturn').setBy).toEqual(['deal.returnRoom', 'deal.returnFlight']);
+    expect(beat('cardsReturn').setBy).toEqual(['deal.returnRoom', 'deal.returnFlight', 'deal.returnStagger']);
   });
 
-  it('lists only timings that exist, and every deal timing sets some beat or its spacing', () => {
+  it('lists only timings that exist, and every deal timing directly sets some beat', () => {
     const listed = new Set(dealBeatDescription.flatMap(b => b.setBy));
     for (const path of listed) expect(path.startsWith('deal.')).toBe(true);
-    expect([...Object.keys(committedTimings.deal)].map(k => `deal.${k}`).filter(p => !listed.has(p as never))).toEqual(['deal.returnStagger']);
+    expect([...Object.keys(committedTimings.deal)].map(k => `deal.${k}`).filter(p => !listed.has(p as never))).toEqual([]);
   });
 });
 

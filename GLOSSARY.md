@@ -18,7 +18,11 @@ _Avoid_: Poker game, Trainer table, advice engine
 
 **Research Lab**:
 The analysis experience for comparing strategies and running automated strategy-versus-strategy simulations.
-_Avoid_: Trainer, simulator
+_Avoid_: Trainer, simulator, Motion Lab
+
+**Motion Lab**:
+The development-only page (`/motion-lab`, absent from production builds) that replays scripted Hands, lets each Timing be edited, pulses the Beats an edited Timing directly sets, and exports the whole Timing file. Not the Research Lab: it tunes table motion, not strategies.
+_Avoid_: Research Lab, animation editor, timing tool
 
 **Admin Mode**:
 The application mode in which authorized privileged completed-Hand inspection and hidden-information reveal are available. It is never available at an Online Table and does not expand the information legally observable to a Participant or supplied to a Policy.
@@ -147,11 +151,19 @@ What a Presentation Phase presents, recorded on the phase, from which the server
 _Avoid_: Phase payload, phase data
 
 **Beat**:
-A timed moment of table motion, such as a card leaving the deck, a card landing or the line being swept, placed as an offset from the start of its Presentation Phase or of the table event that caused it. A presenting phase's beats, computed from its Phase Inputs, decide its length.
-_Avoid_: Animation, keyframe, step
+A timed moment of table motion, such as a card leaving the deck, a card landing or the line being swept. It is an Anchor, a gap after that Anchor and a length, the gap and length being sums of Timings. A presenting phase's beats, computed from its Phase Inputs, decide its length.
+_Avoid_: Animation, keyframe, step, offset
+
+**Anchor**:
+What a Beat follows: the start of its Presentation Phase, the table event that caused it, the start or end of another Beat, or the end of the last of several Beats, optionally never earlier than a Timing. A Timing directly sets a Beat only when it appears in that Beat's own gap or length (or its Anchor's floor); a Beat that merely moves because an earlier one grew is not directly set by it.
+_Avoid_: Trigger, offset, parent
+
+**Timing**:
+A named table-motion duration, in milliseconds: a Beat's gap or length term, a Settle's length, the Next-Hand Countdown. All live in one JSON file in the shared contracts package, each with a description in a typed notes map, and the server and every Trainer read the same values.
+_Avoid_: Constant, delay, duration setting
 
 **Settle**:
-The Presentation Phase after every deal, street reveal, showdown and payout, in which the table is still: nothing moves and nobody may act. Its length is a shared constant chosen by the phase it follows and, after the payout, by table mode; it may be 0. A Hand ends when the Settle after its payout ends.
+The Presentation Phase after every deal, street reveal, showdown and payout, in which the table is still: nothing moves and nobody may act. Its length is a Timing chosen by the phase it follows and, after the payout, by table mode; it may be 0. A Hand ends when the Settle after its payout ends.
 _Avoid_: Pause, pause between Hands, delay, cooldown
 
 **Action Window**:

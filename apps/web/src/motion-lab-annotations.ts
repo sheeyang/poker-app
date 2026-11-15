@@ -14,14 +14,6 @@ const DESCRIPTIONS: Record<BeatSource, readonly BeatDescription[]> = {
   sweep: sweepBeatDescription, bet: betBeatDescription, fold: foldBeatDescription, check: checkBeatDescription,
 };
 
-/**
- * Timings that act on a beat without appearing in its own gap or length. `deal.returnStagger` only spaces the returning
- * cards inside the cards-return beat: it moves no beat, so no beat output changes, but an edit to it still lands there.
- */
-const SPACES_WITHIN: Readonly<Record<string, { readonly timing: TimingPath; readonly note: string }>> = {
-  'deal.cardsReturn': { timing: 'deal.returnStagger', note: 'deal.returnStagger spaces the returning cards inside this beat; it does not move or resize it.' },
-};
-
 /** The description of the group `beat` belongs to. */
 export function descriptionOf(beat: LabBeat): BeatDescription {
   const description = DESCRIPTIONS[beat.ref.source].find(d => d.beat === beat.ref.group);
@@ -29,13 +21,8 @@ export function descriptionOf(beat: LabBeat): BeatDescription {
   return description;
 }
 
-const within = (beat: LabBeat) => SPACES_WITHIN[`${beat.ref.source}.${beat.ref.group}`];
-
 /** Every timing that directly sets `beat`: the floor of its anchor, then its gap and length. */
-export const setBy = (beat: LabBeat): readonly TimingPath[] => {
-  const extra = within(beat);
-  return extra ? [...descriptionOf(beat).setBy, extra.timing] : descriptionOf(beat).setBy;
-};
+export const setBy = (beat: LabBeat): readonly TimingPath[] => descriptionOf(beat).setBy;
 
 /** The beats `path` directly sets: what hovering the timing lights. */
 export const beatsSetBy = (beats: readonly LabBeat[], path: TimingPath): readonly LabBeat[] => beats.filter(beat => setBy(beat).includes(path));
@@ -69,8 +56,6 @@ export interface BeatSelection {
   /** The gap and length as formulas over timings and counts. */
   readonly gap: string;
   readonly length: string;
-  /** What a timing that sets the beat does besides its gap and length, when there is something to say. */
-  readonly note: string | undefined;
 }
 
 const timingAt = (timings: Timings, path: TimingPath): number => path.split('.').reduce<unknown>((node, key) => (node as Record<string, unknown>)[key], timings) as number;
@@ -94,8 +79,7 @@ export function beatSelection(beats: readonly LabBeat[], id: number, timings: Ti
     }
   }
   if (floor) at = Math.max(at, beat.ref.scopeStart + timingAt(timings, floor));
-  const extra = within(beat);
-  return { beat, description, setBy: setBy(beat), follows: { text: description.follows, target, edge: target ? edge : null, floor, at }, gap: description.gap, length: description.length, note: extra?.note };
+  return { beat, description, setBy: setBy(beat), follows: { text: description.follows, target, edge: target ? edge : null, floor, at }, gap: description.gap, length: description.length };
 }
 
 /** A beat's place across edits: its ids shift as an edit reorders beats in time, this does not. */

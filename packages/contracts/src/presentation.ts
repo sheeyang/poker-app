@@ -168,7 +168,7 @@ export function returnBeat(cardsReturn: DealBeats['cardsReturn'], n: number, cou
  * leave once the blinds start; a refill lands before the blinds go in.
  */
 const dealDefs = [
-  { beat: 'cardsReturn', each: 'once', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.returnRoom' }, { timing: 'deal.returnFlight' }] },
+  { beat: 'cardsReturn', each: 'once', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.returnRoom' }, { timing: 'deal.returnFlight' }, { timing: 'deal.returnStagger', times: 0 }] },
   { beat: 'buttonMoves', each: 'once', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.buttonMoves' }] },
   { beat: 'refill', each: 'refills', follows: { to: 'phase' }, gap: [], length: [{ timing: 'deal.refillLands' }] },
   { beat: 'blind', each: 'blinds', follows: { to: 'end', of: 'refill', instance: 'last' }, gap: [{ timing: 'deal.blindsAfterRefill', times: 'refilled' }, { timing: 'deal.blindStagger', times: 'index' }], length: [{ timing: 'deal.blindFlight' }] },

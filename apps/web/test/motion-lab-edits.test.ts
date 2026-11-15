@@ -46,6 +46,7 @@ describe('the list', () => {
   };
   it('lists exactly the timings a selected phase uses', () => {
     expect(listed('Deal')).toEqual(paths(dealBeatDescription));
+    expect(listed('Deal')).toContain('deal.returnStagger');
     expect(listed('Flop')).toEqual(paths(streetBeatDescription));
     expect(listed('Showdown')).toEqual(paths(showdownBeatDescription));
     expect(listed('Payout')).toEqual(paths(payoutBeatDescription));

@@ -4,7 +4,7 @@ import { committedTimings, type TimingPath } from '@poker/contracts';
 import { dropSaved, exportPreview, exportTimings, keepFlagged, reconcile, saveEdits, type Saved } from '../src/motion-lab-saved.js';
 
 const flight = committedTimings.deal.cardFlight;
-const file = readFileSync(new URL('../../../packages/contracts/src/timings.json', import.meta.url), 'utf8').replace(/\r?\n/g, '\r\n');
+const file = readFileSync(new URL('../../../packages/contracts/src/timings.json', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const gone = 'gone.timing' as TimingPath;
 
 describe('saved edits', () => {
@@ -44,6 +44,7 @@ describe('saved edits', () => {
 });
 
 describe('export', () => {
+  it('exports LF line endings, as the file is stored in git', () => expect(exportTimings({})).not.toContain('\r'));
   it('is exactly the committed file when nothing changed', () => expect(exportTimings({})).toBe(file));
   it('is the committed file with only the edited numbers changed', () => {
     const out = exportTimings({ 'deal.cardFlight': 900, 'settle.payout.online': 1 });

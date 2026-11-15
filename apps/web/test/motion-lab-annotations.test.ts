@@ -30,7 +30,7 @@ describe('the beats an edit pulses', () => {
   it('include a sweep with no phase and a street reveal alike', () => {
     expect(groups(pulsedBeats(labOf('folds').beats, ['motion.sweepFlight']))).toEqual(['street.sweepWager', 'sweep.sweepWager']);
   });
-  it('include the deal timing returnStagger on the cards-return beat, which spaces the returning cards inside it', () => {
+  it('include the deal timing returnStagger on the cards-return beat, which it directly sets', () => {
     expect(groups(pulsedBeats(labOf('heads-up').beats, ['deal.returnStagger']))).toEqual(['deal.cardsReturn']);
   });
   it('are none for an edit to a timing no beat of the scenario uses', () => {

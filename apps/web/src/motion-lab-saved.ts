@@ -65,5 +65,5 @@ export interface Change { readonly path: TimingPath; readonly old: number; reado
 export const exportPreview = (edits: Edits): Change[] =>
   timingGroups.flatMap(g => g.timings).flatMap(t => (t.path in edits && edits[t.path] !== t.committed ? [{ path: t.path, old: t.committed, value: edits[t.path]! }] : []));
 
-/** The whole timing file with the edits applied: the committed file's shape (two-space indent, CRLF line endings, a final line break), ready to paste over it. */
-export const exportTimings = (edits: Edits): string => `${JSON.stringify(effectiveTimings(edits), null, 2)}\n`.replace(/\n/g, '\r\n');
+/** The whole timing file with the edits applied: the committed file's shape (two-space indent, LF line endings as stored in git, a final line break), ready to paste over it. */
+export const exportTimings = (edits: Edits): string => `${JSON.stringify(effectiveTimings(edits), null, 2)}\n`;

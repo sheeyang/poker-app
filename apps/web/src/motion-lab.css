@@ -40,7 +40,7 @@
 .lab-block-countdown { background: transparent; color: var(--muted); font-weight: 400; border-style: dotted; }
 .lab-block[aria-pressed="true"] { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); }
 .lab-lane { position: relative; border-top: 1px solid var(--line); pointer-events: none; }
-.lab-beat { position: absolute; height: 12px; min-width: 2px; border-radius: 3px; background: var(--lane); }
+.lab-beat { position: absolute; height: 12px; min-width: 2px; border-radius: 4px; background: var(--lane); }
 .lab-lane-cards { --lane: #ddc28b; }
 .lab-lane-chips { --lane: #90b8c9; }
 .lab-lane-board { --lane: #a4c3b0; }

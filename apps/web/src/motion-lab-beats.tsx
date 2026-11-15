@@ -83,6 +83,5 @@ export function BeatDetail({ selection, onClose }: { selection: BeatSelection; o
       <dt>Set by</dt>
       <dd>{selection.setBy.length ? selection.setBy.map(path => <code key={path} className="lab-chip">{path}</code>) : 'No timing'}</dd>
     </dl>
-    {selection.note && <p className="lab-detail-note">{selection.note}</p>}
   </section>;
 }

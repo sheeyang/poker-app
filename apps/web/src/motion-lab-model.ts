@@ -39,6 +39,13 @@ export interface BeatRef { readonly source: BeatSource; readonly group: string; 
 /** One beat as a bar on a lane, in milliseconds from the start of the script. `id` is its place among the lab's beats, in time order. */
 export interface LabBeat { readonly id: number; readonly lane: Lane; readonly label: string; readonly startsAt: number; readonly endsAt: number; readonly ref: BeatRef }
 
+/** A beat before it has a place in time order, so no id yet. */
+type Bar = Omit<LabBeat, 'id'>;
+
+/** A bar on `lane`, from `beat`'s offsets in `scope` (one phase, or one table event), which starts at `scope.at`. */
+const barOf = (lane: Lane, label: string, source: BeatSource, group: string, index: number, scope: { id: string; at: number }, beat: { startsAt: number; endsAt: number }): Bar =>
+  ({ lane, label, startsAt: scope.at + beat.startsAt, endsAt: scope.at + beat.endsAt, ref: { source, group, index, scope: scope.id, scopeStart: scope.at } });
+
 export interface MotionLab {
   readonly views: readonly LabView[];
   readonly blocks: readonly LabBlock[];
@@ -71,7 +78,7 @@ export function motionLab(input: LabInput): MotionLab {
   const timings = input.timings ?? committedTimings, mode = input.mode, gap = input.actionGapMs ?? DEFAULT_GAP;
   const sc = scenarioDefs.find(s => s.id === input.scenario)!;
   const ids = Array.from({ length: sc.seats }, (_, i) => idOf(i + 1)), buttonSeat = sc.seats === 2 ? 1 : sc.seats;
-  const views: LabView[] = [], blocks: LabBlock[] = [], beats: LabBeat[] = [], motion: Motion[] = [];
+  const views: LabView[] = [], blocks: LabBlock[] = [], bars: Bar[] = [], motion: Motion[] = [];
   const stakes = { small: defaultConfiguration.smallBlind, big: defaultConfiguration.bigBlind };
   const seats: Record<string, Seat> = Object.fromEntries(ids.map(id => [id, { stack: id === idOf(sc.refill ?? 0) ? 0 : BUY_IN, wager: 0, contribution: 0, folded: false, allIn: false }]));
   const phases: PresentationPhase[] = [];
@@ -188,8 +195,7 @@ export function motionLab(input: LabInput): MotionLab {
 
   // Every beat, from its phase's start, as the table plays it: the shared beat functions at the phase's own length. Each
   // bar carries the description group and place that made it (`ref`), so the lab's annotations read the same descriptions.
-  const bar = (lane: Lane, label: string, source: BeatSource, group: string, index: number, scope: { id: string; at: number }, beat: { startsAt: number; endsAt: number }) =>
-    beats.push({ id: 0, lane, label, startsAt: scope.at + beat.startsAt, endsAt: scope.at + beat.endsAt, ref: { source, group, index, scope: scope.id, scopeStart: scope.at } });
+  const bar = (...args: Parameters<typeof barOf>) => { bars.push(barOf(...args)); };
   const name = nameOf;
   for (const [n, p] of phases.entries()) {
     const scope = { id: `phase-${n}`, at: p.startsAt };
@@ -219,9 +225,8 @@ export function motionLab(input: LabInput): MotionLab {
       for (const [i, a] of b.awards.entries()) { bar('stacks', `${name(a.participantId)} award`, 'payout', 'award', i, scope, a); bar('stacks', `${name(a.participantId)} award fades`, 'payout', 'awardFade', i, scope, a.fade); bar('seats', `${name(a.participantId)} caption`, 'payout', 'awardCaption', i, scope, a.caption); }
     }
   }
-  beats.push(...motionBeats(motion, timings));
-  beats.sort((x, y) => x.startsAt - y.startsAt || x.endsAt - y.endsAt);
-  beats.forEach((beat, id) => { (beat as { id: number }).id = id; });
+  bars.push(...motionBeats(motion, timings));
+  const beats: LabBeat[] = bars.sort((x, y) => x.startsAt - y.startsAt || x.endsAt - y.endsAt).map((b, id) => ({ id, ...b }));
 
   for (const p of phases) blocks.push({ kind: p.kind, label: p.kind === 'street' ? STREET_LABEL[p.street] : PHASE_LABEL[p.kind], startsAt: p.startsAt, endsAt: p.endsAt });
   const handEnd = Math.max(...phases.map(p => p.endsAt));
@@ -242,12 +247,12 @@ export function motionLab(input: LabInput): MotionLab {
 }
 
 /** The beats of motion with no Presentation Phase, from the anchored beat functions, each from the view that carried it. */
-function motionBeats(motion: readonly Motion[], timings: Timings): LabBeat[] {
-  const out: LabBeat[] = [];
+function motionBeats(motion: readonly Motion[], timings: Timings): Bar[] {
+  const out: Bar[] = [];
   for (const [n, m] of motion.entries()) {
     const scope = `motion-${n}`;
     const bar = (lane: Lane, label: string, source: BeatSource, group: string, index: number, beat: { startsAt: number; endsAt: number }) =>
-      out.push({ id: 0, lane, label, startsAt: m.at + beat.startsAt, endsAt: m.at + beat.endsAt, ref: { source, group, index, scope, scopeStart: m.at } });
+      out.push(barOf(lane, label, source, group, index, { id: scope, at: m.at }, beat));
     if (m.kind === 'sweep') {
       const sw = sweepBeats(m.swept, timings);
       for (const [i, w] of sw.wagers.entries()) bar('chips', `${nameOf(w.participantId)} chips to pot`, 'sweep', 'sweepWager', i, w);
