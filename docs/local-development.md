@@ -45,8 +45,8 @@ The motion lab replays a scripted Hand on the real poker table on a virtual cloc
 
 Start the Trainer's dev server alone (`pnpm --filter @poker/web dev`, port 5174 unless `POKER_WEB_PORT` is set; `pnpm dev:trainer` works too) and open `/motion-lab`, for example <http://127.0.0.1:5174/motion-lab>.
 
-- **Script.** Choose the scenario (heads-up so far), the table mode (Practice or Online, which changes the payout's Settle and adds the Next-Hand Countdown) and the time before each scripted action, in milliseconds.
-- **Timeline.** The band shows the deal, each street reveal, the showdown, the payout and every Settle as blocks. Under it, lanes for cards, chips, the board, stacks and seats draw each beat as a bar from its start to its end, including bets and checks, which have no Presentation Phase. Hover a bar for its label and times.
+- **Script.** Choose the scenario (heads-up, 6-handed, 9-handed, won by folds, an all-in runout, a split pot, or Rebuy & deal), the table mode (Practice or Online, which changes the payout's Settle and adds the Next-Hand Countdown) and the time before each scripted action, in milliseconds.
+- **Timeline.** The band shows the deal, each street reveal, the showdown, the payout and every Settle as blocks. Under it, lanes for cards, chips, the board, stacks and seats draw each beat as a bar from its start to its end, including bets, folds and checks, which have no Presentation Phase and are drawn from their anchored beats. Hover a bar for its label and times.
 - **Transport.** Play and pause; drag across the timeline to scrub backward and forward; step one frame with the Back and Next buttons, or the arrow keys on the focused playhead (Shift for ten frames; Home and End jump to the ends, Space plays); select a phase block and turn on Loop to repeat it; and speeds of 0.1×, 0.25×, 0.5× and 1×. Speed and scrubbing only change how you watch: the timings played are the committed ones in `packages/contracts/src/timings.json`.
 
 ## Checks and compiled startup
