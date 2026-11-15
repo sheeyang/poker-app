@@ -5,9 +5,10 @@ import { PokerTable } from './poker-table.js';
 import { actionWindowOpen, deadlineCountdown, presentTable } from './presentation.js';
 import { nextHandStatus } from './online-status.js';
 import { lanes, motionLab, scenarios, type LabBlock, type LabBeat, type Lane, type MotionLab, type ScenarioId } from './motion-lab-model.js';
-import { blockTimings, effectiveTimings, listedTimings, phaseTotals, setEdit, type Edits } from './motion-lab-edits.js';
+import { blockTimings, effectiveTimings, listedTimings, phaseTotals } from './motion-lab-edits.js';
+import { useSavedEdits } from './motion-lab-saved-ui.js';
 import { TimingPanel } from './motion-lab-timings.js';
-import { beatKey, beatSelection, beatsSetBy, pulsedBeats } from './motion-lab-annotations.js';
+import { beatKey, beatSelection, beatsSetBy, changedPaths, pulsedBeats } from './motion-lab-annotations.js';
 import { BeatBars, BeatDetail, BeatLink } from './motion-lab-beats.js';
 import './motion-lab.css';
 
@@ -58,12 +59,15 @@ function packed(beats: readonly LabBeat[]): { readonly beat: LabBeat; readonly r
 
 export function MotionLabPage() {
   const [scenario, setScenario] = useState<ScenarioId>('heads-up'), [mode, setMode] = useState<TableMode>('practice'), [gap, setGap] = useState(600);
-  const [edits, setEdits] = useState<Edits>({});
+  const saved = useSavedEdits(), edits = saved.edits;
   const timings = useMemo(() => effectiveTimings(edits), [edits]);
   const lab = useMemo(() => motionLab({ scenario, mode, actionGapMs: gap, timings }), [scenario, mode, gap, timings]);
   const [time, setTime] = useState(0), [playing, setPlaying] = useState(false), [speed, setSpeed] = useState<number>(1), [loop, setLoop] = useState(false), [selected, setSelected] = useState<number | null>(null);
   // Annotations: an edit pulses the beats it directly sets, hovering a timing lights them, selecting a beat explains it.
   const [pulse, setPulse] = useState<{ paths: readonly TimingPath[]; seq: number }>({ paths: [], seq: 0 }), [hovered, setHovered] = useState<TimingPath | null>(null), [beatPicked, setBeatPicked] = useState<string | null>(null);
+  // Whatever changes the edits (a field, a reset, keeping a flagged edit) pulses the beats of the timings that changed.
+  const [seenEdits, setSeenEdits] = useState(edits), editsKey = JSON.stringify(edits);
+  if (JSON.stringify(seenEdits) !== editsKey) { setSeenEdits(edits); setPulse(p => ({ paths: changedPaths(seenEdits, edits), seq: p.seq + 1 })); }
   const pulsed = useMemo(() => new Set(pulsedBeats(lab.beats, pulse.paths).map(b => b.id)), [lab, pulse]);
   const lit = useMemo(() => new Set(hovered ? beatsSetBy(lab.beats, hovered).map(b => b.id) : []), [lab, hovered]);
   const beatId = beatPicked === null ? null : lab.beats.find(b => beatKey(b) === beatPicked)?.id ?? null;
@@ -182,7 +186,7 @@ export function MotionLabPage() {
       {selection && <BeatDetail selection={selection} onClose={() => setBeatPicked(null)} />}
     </section>
     </div>
-    <TimingPanel hovered={setHovered} marked={selection?.setBy ?? []} groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} onEdit={(path, value) => { setPulse(p => ({ paths: [path], seq: p.seq + 1 })); setEdits(current => setEdit(current, path, value)); }} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
+    <TimingPanel hovered={setHovered} marked={selection?.setBy ?? []} groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} saved={saved} onEdit={saved.edit} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
     </div>
   </div>;
 }
