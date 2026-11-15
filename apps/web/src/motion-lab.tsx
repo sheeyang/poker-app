@@ -5,6 +5,8 @@ import { PokerTable } from './poker-table.js';
 import { actionWindowOpen, deadlineCountdown, presentTable } from './presentation.js';
 import { nextHandStatus } from './online-status.js';
 import { lanes, motionLab, scenarios, type LabBlock, type LabBeat, type Lane, type MotionLab, type ScenarioId } from './motion-lab-model.js';
+import { blockTimings, effectiveTimings, listedTimings, phaseTotals, setEdit, type Edits } from './motion-lab-edits.js';
+import { TimingPanel } from './motion-lab-timings.js';
 import './motion-lab.css';
 
 /**
@@ -54,7 +56,9 @@ function packed(beats: readonly LabBeat[]): { readonly beat: LabBeat; readonly r
 
 export function MotionLabPage() {
   const [scenario, setScenario] = useState<ScenarioId>('heads-up'), [mode, setMode] = useState<TableMode>('practice'), [gap, setGap] = useState(600);
-  const lab = useMemo(() => motionLab({ scenario, mode, actionGapMs: gap }), [scenario, mode, gap]);
+  const [edits, setEdits] = useState<Edits>({});
+  const timings = useMemo(() => effectiveTimings(edits), [edits]);
+  const lab = useMemo(() => motionLab({ scenario, mode, actionGapMs: gap, timings }), [scenario, mode, gap, timings]);
   const [time, setTime] = useState(0), [playing, setPlaying] = useState(false), [speed, setSpeed] = useState<number>(1), [loop, setLoop] = useState(false), [selected, setSelected] = useState<number | null>(null);
   const table = useRef<LabTableHandle>(null), clock = useRef(0), tracks = useRef<HTMLDivElement>(null);
   const block = selected === null ? undefined : lab.blocks[selected];
@@ -66,6 +70,9 @@ export function MotionLabPage() {
     setTime(next);
     table.current?.moveTo(next);
   }, [lab]);
+
+  // An edit that shortens the script can leave the playhead past its end.
+  useEffect(() => { if (clock.current > lab.totalMs) seek(lab.totalMs); }, [lab, seek]);
 
   // A different scenario, mode or gap is a different script: start it from the top.
   const script = `${scenario}|${mode}|${gap}`;
@@ -124,6 +131,8 @@ export function MotionLabPage() {
       <label className="lab-field"><span>Time before each action</span><span className="lab-unit"><input type="number" min={0} step={50} value={gap} onChange={event => setGap(Math.max(0, Number(event.target.value) || 0))} /> ms</span></label>
     </header>
 
+    <div className="lab-workbench">
+    <div className="lab-main">
     <div className="lab-table"><LabTable key={script} lab={lab} handle={table} /></div>
 
     <section className="lab-timeline" aria-label="Timeline">
@@ -162,5 +171,8 @@ export function MotionLabPage() {
         </div>
       </div>
     </section>
+    </div>
+    <TimingPanel groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} onEdit={(path, value) => setEdits(current => setEdit(current, path, value))} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
+    </div>
   </div>;
 }
