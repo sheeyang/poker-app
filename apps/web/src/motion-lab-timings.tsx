@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from 'react';
 import type { TimingPath } from '@poker/contracts';
+import { SavedEditsSection, type SavedEdits } from './motion-lab-saved-ui.js';
 import { nudged, sliderMax, type Edits, type TimingGroup } from './motion-lab-edits.js';
 
 /**
@@ -18,6 +19,7 @@ const nameOf = (path: TimingPath) => {
 export interface TimingPanelProps {
   readonly groups: readonly TimingGroup[];
   readonly edits: Edits;
+  readonly saved: SavedEdits;
   readonly onEdit: (path: TimingPath, value: number) => void;
   readonly totals: readonly { readonly label: string; readonly ms: number }[];
   /** The selected block's index in `totals`, or null. */
@@ -47,13 +49,14 @@ function TimingRow({ path, note, committed, edits, onEdit }: { path: TimingPath;
   </li>;
 }
 
-export function TimingPanel({ groups, edits, onEdit, totals, selected, onSelect }: TimingPanelProps) {
+export function TimingPanel({ groups, edits, saved, onEdit, totals, selected, onSelect }: TimingPanelProps) {
   const count = Object.keys(edits).length;
   return <aside className="lab-panel" aria-label="Timings">
     <section className="lab-totals" aria-label="Phase totals">
       <h2>Phase totals</h2>
       <ul>{totals.map((t, i) => <li key={i}><button type="button" aria-pressed={selected === i} onClick={() => onSelect(selected === i ? null : i)}><span>{t.label}</span><strong>{seconds(t.ms)}</strong></button></li>)}</ul>
     </section>
+    <SavedEditsSection saved={saved} />
     <div className="lab-panel-head">
       <h2>Timings</h2>
       <span className="lab-panel-meta">{selected === null ? 'All phases' : `For ${totals[selected]!.label.toLowerCase()}`}{count > 0 && ` · ${count} changed`}</span>

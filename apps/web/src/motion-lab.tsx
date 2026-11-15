@@ -5,7 +5,8 @@ import { PokerTable } from './poker-table.js';
 import { actionWindowOpen, deadlineCountdown, presentTable } from './presentation.js';
 import { nextHandStatus } from './online-status.js';
 import { lanes, motionLab, scenarios, type LabBlock, type LabBeat, type Lane, type MotionLab, type ScenarioId } from './motion-lab-model.js';
-import { blockTimings, effectiveTimings, listedTimings, phaseTotals, setEdit, type Edits } from './motion-lab-edits.js';
+import { blockTimings, effectiveTimings, listedTimings, phaseTotals } from './motion-lab-edits.js';
+import { useSavedEdits } from './motion-lab-saved-ui.js';
 import { TimingPanel } from './motion-lab-timings.js';
 import './motion-lab.css';
 
@@ -56,7 +57,7 @@ function packed(beats: readonly LabBeat[]): { readonly beat: LabBeat; readonly r
 
 export function MotionLabPage() {
   const [scenario, setScenario] = useState<ScenarioId>('heads-up'), [mode, setMode] = useState<TableMode>('practice'), [gap, setGap] = useState(600);
-  const [edits, setEdits] = useState<Edits>({});
+  const saved = useSavedEdits(), edits = saved.edits;
   const timings = useMemo(() => effectiveTimings(edits), [edits]);
   const lab = useMemo(() => motionLab({ scenario, mode, actionGapMs: gap, timings }), [scenario, mode, gap, timings]);
   const [time, setTime] = useState(0), [playing, setPlaying] = useState(false), [speed, setSpeed] = useState<number>(1), [loop, setLoop] = useState(false), [selected, setSelected] = useState<number | null>(null);
@@ -172,7 +173,7 @@ export function MotionLabPage() {
       </div>
     </section>
     </div>
-    <TimingPanel groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} onEdit={(path, value) => setEdits(current => setEdit(current, path, value))} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
+    <TimingPanel groups={listedTimings(selected === null ? undefined : blockTimings(lab.blocks, selected, mode))} edits={edits} saved={saved} onEdit={saved.edit} totals={phaseTotals(lab.blocks)} selected={selected} onSelect={setSelected} />
     </div>
   </div>;
 }
