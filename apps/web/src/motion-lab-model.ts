@@ -1,4 +1,5 @@
-import { baselinePlayingStrategy, committedTimings, dealBeats, defaultConfiguration, defaultTrainerConfiguration, payoutBeats, settleAfter, showdownBeats, streetBeats, type ChipAmount, type ConcreteAction, type DealInputs, type ObservableParticipant, type ObservableTableSession, type PayoutInputs, type PresentationPhase, type PresentingPhaseKind, type ShowdownInputs, type SweepBeats, type Street, type StreetInputs, type TableMode, type Timings } from '@poker/contracts';
+import { baselinePlayingStrategy, betBeats, checkBeats, committedTimings, dealBeats, dealingOrder, defaultConfiguration, defaultTrainerConfiguration, foldBeats, payoutBeats, settleAfter, showdownBeats, streetBeats, sweepBeats, type ChipAmount, type ConcreteAction, type DealInputs, type ObservableParticipant, type ObservableTableSession, type PayoutInputs, type PresentationPhase, type PresentingPhaseKind, type ShowdownInputs, type SweepBeats, type Street, type StreetInputs, type TableMode, type Timings } from '@poker/contracts';
+import { scenarioDefs, type ScenarioId, type Step } from './motion-lab-scenarios.js';
 
 /**
  * The motion lab's model (ADR-0040): pure. From timings and a scenario it gives everything the motion lab draws: the
@@ -6,8 +7,8 @@ import { baselinePlayingStrategy, committedTimings, dealBeats, defaultConfigurat
  * the views on a virtual clock; nothing here reads a clock or touches a server.
  */
 
-export type ScenarioId = 'heads-up';
-export const scenarios: readonly { readonly id: ScenarioId; readonly label: string }[] = [{ id: 'heads-up', label: 'Heads-up' }];
+export type { ScenarioId } from './motion-lab-scenarios.js';
+export const scenarios: readonly { readonly id: ScenarioId; readonly label: string }[] = scenarioDefs.map(({ id, label }) => ({ id, label }));
 
 /** What moves: the lane each beat is drawn on. */
 export type Lane = 'cards' | 'chips' | 'board' | 'stacks' | 'seats';
@@ -45,39 +46,42 @@ export interface MotionLab {
   readonly viewAt: (time: number) => ObservableTableSession;
 }
 
-const YOU = 'you', BOT = 'bot', HAND = 'hand-1', DEFAULT_GAP = 600;
-const BOARD = ['2c', '7d', 'Ts', 'Kc', '3h'];
+const YOU = 'you', HAND = 'hand-1', DEFAULT_GAP = 600, BUY_IN = 1000;
 const STREET_LABEL: Record<Street, string> = { preflop: 'Deal', flop: 'Flop', turn: 'Turn', river: 'River' };
 const PHASE_LABEL: Record<PresentationPhase['kind'], string> = { deal: 'Deal', street: 'Street', showdown: 'Showdown', payout: 'Payout', settle: 'Settle' };
+const STREETS: readonly Street[] = ['preflop', 'flop', 'turn', 'river'];
+const BOT_NAMES = ['', '', 'Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Fay', 'Gus', 'Hal'];
+const HOLES: Record<number, readonly [string, string]> = { 1: ['As', 'Kd'], 2: ['Qh', 'Jc'], 3: ['5s', '5d'], 4: ['6h', '6c'], 5: ['4s', '4d'], 6: ['8s', '8h'], 7: ['9s', '9d'], 8: ['Qd', 'Qc'], 9: ['Jh', 'Jd'] };
+const SPLIT_HOLES: Record<number, readonly [string, string]> = { 2: ['Ah', 'Kc'] };
 
-/** One scripted action: who acts, what they do, and the chips it puts in (the amount to bet or call to). */
-interface Step { readonly who: string; readonly action: ConcreteAction; /** It ends the street's betting. */ readonly closes?: true }
-const heads: readonly Step[] = [
-  { who: YOU, action: { type: 'call' } }, { who: BOT, action: { type: 'check' }, closes: true },
-  { who: BOT, action: { type: 'check' } }, { who: YOU, action: { type: 'bet', betTo: 40 } }, { who: BOT, action: { type: 'call' }, closes: true },
-  { who: BOT, action: { type: 'check' } }, { who: YOU, action: { type: 'check' }, closes: true },
-  { who: BOT, action: { type: 'bet', betTo: 60 } }, { who: YOU, action: { type: 'call' }, closes: true },
-];
+const idOf = (seat: number) => (seat === 1 ? YOU : `bot-${seat}`);
+const seatOf = (id: string) => (id === YOU ? 1 : Number(id.slice(4)));
+const nameOf = (id: string) => (id === YOU ? 'You' : BOT_NAMES[seatOf(id)]!);
 
-interface Seat { stack: ChipAmount; wager: ChipAmount; contribution: ChipAmount }
+interface Seat { stack: ChipAmount; wager: ChipAmount; contribution: ChipAmount; folded: boolean; allIn: boolean }
+/** What the table presented as motion with no Presentation Phase: an action, or the sweep of a Hand won by folds. */
+type Motion = { readonly at: number; readonly kind: 'fold' | 'check' | 'call' | 'bet' | 'raise'; readonly who: string; readonly toPot: boolean } | { readonly at: number; readonly kind: 'sweep'; readonly swept: readonly string[] };
 
 export function motionLab(input: LabInput): MotionLab {
   const timings = input.timings ?? committedTimings, mode = input.mode, gap = input.actionGapMs ?? DEFAULT_GAP;
-  const views: LabView[] = [], blocks: LabBlock[] = [], beats: LabBeat[] = [];
-  const stakes = { small: defaultConfiguration.smallBlind, big: defaultConfiguration.bigBlind }, buyIn = 1000;
-  const seats: Record<string, Seat> = { [YOU]: { stack: buyIn - stakes.small, wager: stakes.small, contribution: stakes.small }, [BOT]: { stack: buyIn - stakes.big, wager: stakes.big, contribution: stakes.big } };
-  let phases: PresentationPhase[] = [], board = 0, street: Street = 'preflop', cursor = 0, windowOpensAt = 0;
+  const sc = scenarioDefs.find(s => s.id === input.scenario)!;
+  const ids = Array.from({ length: sc.seats }, (_, i) => idOf(i + 1)), buttonSeat = sc.seats === 2 ? 1 : sc.seats;
+  const views: LabView[] = [], blocks: LabBlock[] = [], beats: LabBeat[] = [], motion: Motion[] = [];
+  const stakes = { small: defaultConfiguration.smallBlind, big: defaultConfiguration.bigBlind };
+  const seats: Record<string, Seat> = Object.fromEntries(ids.map(id => [id, { stack: id === idOf(sc.refill ?? 0) ? 0 : BUY_IN, wager: 0, contribution: 0, folded: false, allIn: false }]));
+  const phases: PresentationPhase[] = [];
+  let board = 0, street: Street = 'preflop', cursor = 0, windowOpensAt = 0;
   const decisions: { decisionId: string; action: { participantId: string; action: ConcreteAction } }[] = [];
-  const log: { at: number; who: string; type: ConcreteAction['type']; toPot: boolean }[] = [];
   let result: { payouts: { participantId: string; amount: number }[]; shown: boolean } | undefined;
+  const holes = (id: string) => (input.scenario === 'split' ? SPLIT_HOLES[seatOf(id)] : undefined) ?? HOLES[seatOf(id)]!;
 
   const table = (at: number, actor: string | null, opensAt: number | null, extra: { countdown?: { startsAt: number; endsAt: number } } = {}): ObservableTableSession => {
     const complete = !!result, started = phases.length > 0;
-    const participants: ObservableParticipant[] = [[YOU, 1], [BOT, 2]].map(([id, seat]) => {
-      const s = seats[id as string]!;
+    const participants: ObservableParticipant[] = ids.map(id => {
+      const s = seats[id]!;
       return {
-        participantId: id as string, seat: seat as number, sittingOut: false, stack: complete ? s.stack + (result!.payouts.find(p => p.participantId === id)?.amount ?? 0) : s.stack,
-        ...(started ? { inHand: true, folded: false, allIn: false, contribution: s.contribution, wager: s.wager, cardCount: 2, ...(id === YOU || (complete && result!.shown) ? { holeCards: id === YOU ? ['As', 'Kd'] : ['Qh', 'Jc'] } : {}) } : {}),
+        participantId: id, seat: seatOf(id), sittingOut: false, stack: complete ? s.stack + (result!.payouts.find(p => p.participantId === id)?.amount ?? 0) : s.stack,
+        ...(started ? { inHand: true, folded: s.folded, allIn: s.allIn, contribution: s.contribution, wager: s.wager, cardCount: 2, ...(id === YOU || (complete && result!.shown && !s.folded) ? { holeCards: [...holes(id)] } : {}) } : {}),
       };
     });
     const total = Object.values(seats).reduce((sum, s) => sum + s.contribution, 0);
@@ -86,16 +90,16 @@ export function motionLab(input: LabInput): MotionLab {
       tableSessionId: 'motion-lab', mode, options: { actionTimeLimitSeconds: online ? 30 : null, allowLiveAnalysis: true }, viewerParticipantId: YOU, ownerParticipantId: YOU,
       pokerRevision: views.length + 1, sessionRevision: views.length + 1, serverTime: at, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
       ...(online ? { connectedParticipantIds: [YOU] } : {}),
-      bindings: [{ participantId: YOU, name: 'You', controller: { kind: 'human' } }, { participantId: BOT, name: 'Bot Ada', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
+      bindings: ids.map(id => ({ participantId: id, name: id === YOU ? 'You' : `Bot ${nameOf(id)}`, controller: id === YOU ? { kind: 'human' as const } : { kind: 'bot' as const, playingStrategy: baselinePlayingStrategy } })),
       schedule: { phases: [...phases], actionWindow: actor && opensAt !== null ? { participantId: actor, decisionId: `d${decisions.length}`, opensAt, ...(online && actor === YOU ? { deadlineAt: opensAt + 30_000 } : {}) } : null, ...(extra.countdown ? { nextHandCountdown: { ...extra.countdown, durationMs: extra.countdown.endsAt - extra.countdown.startsAt } } : {}) },
       view: {
-        configuration: { ...defaultConfiguration, seatCount: 2 },
+        configuration: { ...defaultConfiguration, seatCount: sc.seats },
         history: started ? [{ handId: HAND, description: '', decisions: decisions.map(d => ({ ...d, state: {} as never })) }] : [],
         state: started ? {
-          status: complete ? 'completed-hand' : 'active-hand', buttonSeat: 1, handId: HAND, street, board: BOARD.slice(0, board), pots: complete ? [{ amount: total, eligibleParticipantIds: [YOU, BOT] }] : [],
-          actorId: complete ? null : actor, decisionId: complete ? null : `d${decisions.length}`, legalActions: [], smallBlindParticipantId: YOU, bigBlindParticipantId: BOT, participants,
+          status: complete ? 'completed-hand' : 'active-hand', buttonSeat, handId: HAND, street, board: sc.board.slice(0, board), pots: complete ? [{ amount: total, eligibleParticipantIds: ids.filter(id => !seats[id]!.folded) }] : [],
+          actorId: complete ? null : actor, decisionId: complete ? null : `d${decisions.length}`, legalActions: [], smallBlindParticipantId: idOf(1), bigBlindParticipantId: idOf(2), participants,
           ...(complete ? { payouts: result!.payouts, returns: [] } : {}),
-        } : { status: 'between-hands', buttonSeat: 1, board: [], pots: [], actorId: null, legalActions: [], participants: [[YOU, 1], [BOT, 2]].map(([id, seat]) => ({ participantId: id as string, seat: seat as number, sittingOut: false, stack: buyIn })) },
+        } : { status: 'between-hands', buttonSeat, board: [], pots: [], actorId: null, legalActions: [], participants: participants.map(({ participantId, seat, sittingOut, stack }) => ({ participantId, seat, sittingOut, stack })) },
       },
     };
   };
@@ -108,45 +112,79 @@ export function motionLab(input: LabInput): MotionLab {
     const settle = settleAfter(kind, mode, timings.settle);
     if (settle > 0) { phases.push({ kind: 'settle', handId: HAND, street: st, startsAt: cursor, endsAt: cursor + settle, durationMs: settle }); cursor += settle; }
   };
+  const onLine = () => ids.filter(id => seats[id]!.wager > 0);
+  const live = () => ids.filter(id => !seats[id]!.folded);
+  /** The Hand is over: the pot goes to `winners`, split evenly, and the payout is presented. */
+  const finish = (at: number, winners: readonly string[], shown: boolean) => {
+    const pot = Object.values(seats).reduce((sum, s) => sum + s.contribution, 0), each = Math.floor(pot / winners.length);
+    const awards = winners.map((participantId, i) => ({ participantId, won: each + (i === 0 ? pot - each * winners.length : 0), returned: 0 }));
+    result = { payouts: awards.map(a => ({ participantId: a.participantId, amount: a.won })), shown };
+    add('payout', street,{ awards });
+    views.push({ at, table: table(at, null, null) });
+  };
 
-  // Before the Hand: the table waits, then deals.
+  // Before the Hand: the table waits (a refilled seat empty), then deals.
   views.push({ at: 0, table: table(0, null, null) });
+  const flat = sc.streets.flatMap((steps, street) => steps.map((step, i) => ({ step, street, closes: i === steps.length - 1 })));
+  const first = (step: Step) => idOf(step.seat);
+  const blinds = [idOf(1), idOf(2)];
+  seats[idOf(1)]!.stack = BUY_IN - stakes.small; seats[idOf(2)]!.stack = BUY_IN - stakes.big;
+  seats[idOf(1)]!.wager = seats[idOf(1)]!.contribution = stakes.small; seats[idOf(2)]!.wager = seats[idOf(2)]!.contribution = stakes.big;
   cursor = gap;
-  add('deal', 'preflop', { dealt: [YOU, BOT].map(participantId => ({ participantId, cardCount: 2 })), blinds: [YOU, BOT], refills: [] });
+  add('deal', 'preflop', {
+    dealt: dealingOrder(ids.map(id => ({ participantId: id, seat: seatOf(id) })), buttonSeat).map(({ participantId }) => ({ participantId, cardCount: 2 })),
+    blinds, refills: sc.refill ? [{ participantId: idOf(sc.refill), amount: BUY_IN }] : [],
+  });
   windowOpensAt = cursor;
-  views.push({ at: phases[0]!.startsAt, table: table(phases[0]!.startsAt, YOU, windowOpensAt) });
+  views.push({ at: phases[0]!.startsAt, table: table(phases[0]!.startsAt, first(flat[0]!.step), windowOpensAt) });
 
-  for (const step of heads) {
-    const at = windowOpensAt + gap, acts = seats[step.who]!, other = seats[step.who === YOU ? BOT : YOU]!;
-    const to = step.action.type === 'bet' ? step.action.betTo : step.action.type === 'call' ? other.wager : acts.wager;
-    acts.stack -= to - acts.wager; acts.contribution += to - acts.wager; acts.wager = to;
-    decisions.push({ decisionId: `d${decisions.length}`, action: { participantId: step.who, action: step.action } });
+  for (const [n, { step, closes }] of flat.entries()) {
+    const at = windowOpensAt + gap, id = idOf(step.seat), me = seats[id]!, upNext = flat[n + 1];
+    const top = Math.max(...ids.map(i => seats[i]!.wager));
+    let action: ConcreteAction, to = me.wager;
+    if (step.move === 'fold' || step.move === 'check') action = { type: step.move };
+    else if (step.move === 'call') { action = { type: 'call' }; to = me.wager + Math.min(top - me.wager, me.stack); }
+    else { to = step.move; action = top > 0 ? { type: 'raise', raiseTo: to } : { type: 'bet', betTo: to }; }
+    me.stack -= to - me.wager; me.contribution += to - me.wager; me.wager = to;
+    if (action.type === 'fold') me.folded = true;
+    if (me.stack === 0 && action.type !== 'fold' && action.type !== 'check') me.allIn = true;
+    decisions.push({ decisionId: `d${decisions.length}`, action: { participantId: id, action } });
     cursor = at;
-    log.push({ at, who: step.who, type: step.action.type, toPot: !!step.closes && step.action.type !== 'check' && street !== 'river' });
-    if (!step.closes) { windowOpensAt = at; views.push({ at, table: table(at, step.who === YOU ? BOT : YOU, at) }); continue; }
-    const swept = [YOU, BOT].filter(id => seats[id]!.wager > 0), wagers = swept.map(id => seats[id]!.wager);
-    for (const id of [YOU, BOT]) seats[id]!.wager = 0;
-    if (street === 'river') {
-      // Betting is over: the hands are shown, then the pot is paid. The line stays in the view; the showdown sweeps it.
-      swept.forEach((id, i) => { seats[id]!.wager = wagers[i]!; });
-      add('showdown', 'river', { swept, shown: [{ participantId: BOT, cardCount: 2 }, { participantId: YOU, cardCount: 2 }] });
-      const pot = Object.values(seats).reduce((sum, s) => sum + s.contribution, 0);
-      result = { payouts: [{ participantId: YOU, amount: pot }], shown: true };
-      add('payout', 'river', { awards: [{ participantId: YOU, won: pot, returned: 0 }] });
-      views.push({ at, table: table(at, null, null) });
-      continue;
+    const remaining = live();
+    if (remaining.length === 1) {
+      // Won by folds: the line is swept with no street reveal, and the pot is paid at once.
+      const swept = onLine();
+      for (const i of ids) seats[i]!.wager = 0;
+      motion.push({ at, kind: 'fold', who: id, toPot: false }, ...(swept.length ? [{ at, kind: 'sweep' as const, swept }] : []));
+      finish(at, remaining, false);
+      break;
     }
-    street = street === 'preflop' ? 'flop' : street === 'flop' ? 'turn' : 'river';
+    if (!closes) { motion.push({ at, kind: action.type, who: id, toPot: false }); windowOpensAt = at; views.push({ at, table: table(at, first(upNext!.step), at) }); continue; }
+    const runout = remaining.filter(i => seats[i]!.stack > 0).length <= 1;
+    if (runout || street === 'river') {
+      // Betting is over: the hands are shown, then the pot is paid. The line stays in the view; the showdown sweeps it.
+      motion.push({ at, kind: action.type, who: id, toPot: false });
+      const swept = onLine(), reached = street;
+      if (runout) board = 5, street = 'river';
+      add('showdown', reached, { swept, shown: [...remaining.filter(i => i !== YOU), ...remaining.filter(i => i === YOU)].map(participantId => ({ participantId, cardCount: 2 })) });
+      if (runout) for (const next of STREETS.slice(STREETS.indexOf(reached) + 1)) add('street', next, { swept: [], cardCount: next === 'flop' ? 3 : 1 });
+      finish(at, sc.winners.map(idOf).filter(i => remaining.includes(i)), true);
+      break;
+    }
+    motion.push({ at, kind: action.type, who: id, toPot: action.type !== 'check' });
+    const swept = onLine();
+    for (const i of ids) seats[i]!.wager = 0;
+    street = STREETS[STREETS.indexOf(street) + 1]!;
     board = street === 'flop' ? 3 : street === 'turn' ? 4 : 5;
     add('street', street, { swept, cardCount: street === 'flop' ? 3 : 1 });
     windowOpensAt = cursor;
-    views.push({ at, table: table(at, BOT, windowOpensAt) });
+    views.push({ at, table: table(at, first(upNext!.step), windowOpensAt) });
   }
 
   // Every beat, from its phase's start, as the table plays it: the shared beat functions at the phase's own length.
-  const name = (id: string) => (id === YOU ? 'You' : 'Ada');
   const bar = (lane: Lane, label: string, start: number, beat: { startsAt: number; endsAt: number }) => beats.push({ lane, label, startsAt: start + beat.startsAt, endsAt: start + beat.endsAt });
-  const sweep = (start: number, sw: SweepBeats) => { for (const w of sw.wagers) bar('chips', `${name(w.participantId)} chips to pot`, start, w); if (sw.pot) bar('chips', 'Pot brightens', start, sw.pot); };
+  const sweep = (start: number, sw: SweepBeats) => { for (const w of sw.wagers) bar('chips', `${nameOf(w.participantId)} chips to pot`, start, w); if (sw.pot) bar('chips', 'Pot brightens', start, sw.pot); };
+  const name = nameOf;
   for (const p of phases) {
     if (p.kind === 'deal') {
       const b = dealBeats(p.inputs, p.durationMs, timings);
@@ -168,12 +206,7 @@ export function motionLab(input: LabInput): MotionLab {
       for (const a of b.awards) { bar('stacks', `${name(a.participantId)} award`, p.startsAt, a); bar('stacks', `${name(a.participantId)} award fades`, p.startsAt, a.fade); bar('seats', `${name(a.participantId)} caption`, p.startsAt, a.caption); }
     }
   }
-  // Motion with no Presentation Phase, from the view that carried it.
-  for (const a of log) {
-    if (a.type === 'check') bar('seats', `${name(a.who)} checks`, a.at, { startsAt: 0, endsAt: timings.motion.check });
-    else bar('chips', `${name(a.who)} ${a.type}s`, a.at, { startsAt: 0, endsAt: a.toPot ? timings.motion.betToPot : timings.motion.betFlight });
-    bar('seats', `${name(a.who)} caption`, a.at, { startsAt: 0, endsAt: timings.motion.caption });
-  }
+  beats.push(...motionBeats(motion, timings));
   beats.sort((x, y) => x.startsAt - y.startsAt || x.endsAt - y.endsAt);
 
   for (const p of phases) blocks.push({ kind: p.kind, label: p.kind === 'street' ? STREET_LABEL[p.street] : PHASE_LABEL[p.kind], startsAt: p.startsAt, endsAt: p.endsAt });
@@ -187,7 +220,36 @@ export function motionLab(input: LabInput): MotionLab {
     totalMs = endsAt;
   }
 
-  const breakpoints = [...new Set([...views.map(v => v.at), ...blocks.flatMap(b => [b.startsAt, b.endsAt]), ...views.flatMap(v => v.table.schedule.actionWindow ? [v.table.schedule.actionWindow.opensAt] : [])])].sort((a, b) => a - b);
+  // A payout holds each winner's old stack figure until their award lands, so each landing changes what the table presents.
+  const landings = phases.flatMap(p => p.kind === 'payout' ? payoutBeats(p.inputs, p.durationMs, timings).awards.map(a => p.startsAt + a.endsAt) : []);
+  const breakpoints = [...new Set([...views.map(v => v.at), ...blocks.flatMap(b => [b.startsAt, b.endsAt]), ...landings, ...views.flatMap(v => v.table.schedule.actionWindow ? [v.table.schedule.actionWindow.opensAt] : [])])].sort((a, b) => a - b);
   const viewAt = (time: number) => (views.findLast(v => v.at <= time) ?? views[0]!).table;
   return { views, blocks, beats, totalMs, breakpoints, viewAt };
+}
+
+/** The beats of motion with no Presentation Phase, from the anchored beat functions, each from the view that carried it. */
+function motionBeats(motion: readonly Motion[], timings: Timings): LabBeat[] {
+  const out: LabBeat[] = [];
+  const bar = (lane: Lane, label: string, at: number, beat: { startsAt: number; endsAt: number }) => out.push({ lane, label, startsAt: at + beat.startsAt, endsAt: at + beat.endsAt });
+  for (const m of motion) {
+    if (m.kind === 'sweep') {
+      const sw = sweepBeats(m.swept, timings);
+      for (const w of sw.wagers) bar('chips', `${nameOf(w.participantId)} chips to pot`, m.at, w);
+      if (sw.pot) bar('chips', 'Pot brightens', m.at, sw.pot);
+      continue;
+    }
+    const who = nameOf(m.who);
+    if (m.kind === 'check') { const b = checkBeats(timings); bar('seats', `${who} checks`, m.at, b.press); bar('seats', `${who} caption`, m.at, b.caption); }
+    else if (m.kind === 'fold') {
+      const b = foldBeats(m.who === YOU ? 0 : 2, timings);
+      for (const [i, muck] of b.mucks.entries()) bar('cards', `${who} muck ${i + 1}`, m.at, muck);
+      bar('seats', `${who} caption`, m.at, b.caption);
+    } else {
+      const b = betBeats(m.toPot, timings);
+      bar('chips', `${who} ${m.kind === 'call' ? 'calls' : m.kind === 'bet' ? 'bets' : 'raises'}`, m.at, b.chip);
+      if (b.amountAppears !== undefined) bar('chips', `${who} amount appears`, m.at, { startsAt: b.amountAppears, endsAt: b.amountAppears });
+      bar('seats', `${who} caption`, m.at, b.caption);
+    }
+  }
+  return out;
 }
