@@ -174,6 +174,7 @@ test('when a countdown expires, humans still disconnected are sat out first, and
   clock.advance(presentedFor('deal', 'online'));
   await act(t, annOnly(t), { type: 'fold' });
   await annLive.close();
+  await expect.poll(async () => (await t.view()).connectedParticipantIds).toEqual([]);
   clock.advance(10_000);
   const idle = await t.view();
   expect(idle.schedule.nextHandCountdown).toBeUndefined();
