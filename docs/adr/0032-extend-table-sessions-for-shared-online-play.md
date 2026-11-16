@@ -27,7 +27,7 @@ A Practice Table deals each Hand explicitly, accepting Deal as soon as the payou
 
 An Online Table always has an Action Time Limit and Automatic Dealing. After the payout phase and the pause between Hands, a Next-Hand Countdown starts the next Hand if at least two Eligible Participants remain, at least one of them human. Otherwise the countdown is cancelled, and a fresh one is announced once the condition holds again. A disconnected human stays in the current Hand, and their deadline continues. A timeout, or a disconnection still in effect when the countdown expires, sits the human out after the Hand; returning requires an explicit resume.
 
-Active deadlines and schedules persist. After a restart, an Action Deadline that expired during the outage resolves as a Timeout Action exactly once before further actions are accepted. Recovery never duplicates Timeout Actions, payouts, or Hand starts. Fairer handling of Action Deadlines and Next-Hand Countdowns that expire during an outage belongs to M9 — Release preparation.
+Active deadlines and schedules persist. After a restart, an Action Deadline that expired during the outage resolves as a Timeout Action exactly once before further actions are accepted. Recovery never duplicates Timeout Actions, payouts, or Hand starts. Fairer handling of Action Deadlines and Next-Hand Countdowns that expire during an outage belongs to M11 — Release preparation.
 
 Two details of these rules are accepted as built:
 
@@ -64,4 +64,4 @@ Two details of these rules are accepted as built:
 ## Consequences
 
 - A Guest who loses the browser identity also loses control of their Participants.
-- Removal can be bypassed by clearing browser storage until accounts exist. M9 owns this together with backups, name moderation, idle-table cleanup, and outage fairness.
+- Removal can be bypassed by clearing browser storage until accounts exist. M11 owns this together with backups, name moderation, idle-table cleanup, and outage fairness.

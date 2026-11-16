@@ -85,8 +85,7 @@ Revision verification:
 ## Completion — 24 October 2026
 
 The user accepted M3 as complete after the final Trainer UI cleanup in commit
-`1e37264`. M4 — Shared gameplay foundation is now the current focus. The current
-eight-milestone roadmap defers elaborate animations to M5 and historical replay
+`1e37264`. M4 — Shared gameplay foundation is now the current focus. The roadmap defers elaborate animations to M5 and historical replay
 and deeper analysis to M6; these are not outstanding M3 requirements.
 
 The final interface includes a shared expandable decision box with aligned

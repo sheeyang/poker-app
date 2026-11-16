@@ -482,7 +482,7 @@ one of them human.
 - **Restarts.** A persisted countdown survives a restart. One that expired during
   the outage runs its recheck at startup, before any request is served; as every
   human then counts as disconnected, the seated humans are sat out and nothing is
-  dealt (fairer outage handling belongs to M9).
+  dealt (fairer outage handling belongs to M11).
 
 **Connection status.** A human is connected while at least one live connection of
 their Guest (`/api/live` subscription or the table socket) is subscribed to the

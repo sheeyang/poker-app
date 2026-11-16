@@ -1,6 +1,6 @@
 # M2 ticket breakdown
 
-Source: [M2 — Numerical Trainer analysis](m2-numerical-trainer-analysis.md), the accepted M2 conversation through Q18, the current six-milestone plan, and ADR-0006, ADR-0008, ADR-0017, ADR-0018, ADR-0019, and ADR-0026.
+Source: [M2 — Numerical Trainer analysis](m2-numerical-trainer-analysis.md), the accepted M2 conversation through Q18, the milestone plan, and ADR-0006, ADR-0008, ADR-0017, ADR-0018, ADR-0019, and ADR-0026.
 
 Status: approved on 20 October 2026 and published as GitHub issues #17–#25, all labelled ready-for-agent, with all ten native blocking relationships verified. The source is a local spec rather than a published parent issue; no parent issue was created, modified, or closed.
 
@@ -69,7 +69,7 @@ Each ticket is a complete, independently verifiable behavior through the existin
 - Each slice carries its own checks and Playground demonstration. Keep typecheck, tests, build, and package-boundary validation green as slices land; no separate testing/hardening ticket defers core correctness to the end.
 - HTTP carries get-or-start, Retry, results, and averages; user-channel WebSocket messages notify completion/failure with Table Session/request/attempt identity after state is readable. Initial readiness, reconnect, and relevant notifications reconcile through HTTP without polling.
 - Persist successful derived results and reproducibility metadata; jobs/failures may be transient. There is no durable analysis obligation, guaranteed background completion, recovery sweep, promotion, preemption, reserved Bot capacity, or starvation-prevention rule.
-- Deliver numerical baseline Strategy behavior through the Playground without advice or good/bad judgments. M3 owns product presentation and request timing; M4 owns overall-history summaries and general replay/comparison tools. No stronger Strategies, Bot distribution retention, or human-action reference assignments are added.
+- Deliver numerical baseline Strategy behavior through the Playground without advice or good/bad judgments. M3 owns product presentation and request timing; M6 owns overall-history summaries and general replay/comparison tools. No stronger Strategies, Bot distribution retention, or human-action reference assignments are added.
 
 ## Coverage
 

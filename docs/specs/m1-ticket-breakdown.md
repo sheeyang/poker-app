@@ -1,6 +1,6 @@
 # M1 ticket breakdown
 
-Source: [M1 — Playable engine, server, and Playground](m1-playable-engine-server-playground.md), the current six-milestone plan, and its accepted ADRs.
+Source: [M1 — Playable engine, server, and Playground](m1-playable-engine-server-playground.md), the milestone plan, and its accepted ADRs.
 
 Status: approved for implementation on 7 October 2026. Published as GitHub issues #1–#15 with native blocking relationships. The source is a local spec; there is no parent tracker issue. See [implementation status and evidence](m1-implementation.md).
 

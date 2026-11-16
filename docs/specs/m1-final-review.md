@@ -70,7 +70,7 @@ functional-scope review; source was sampled rather than exhaustively inspected.
 The fresh documentation check verified PRODUCT.md, styles and component samples.
 It preserved the coherent incumbent interface. The pre-existing absence of
 DESIGN.md and its sidecar was reported; no visual-system change was approved.
-Polished product UX and animations remain deferred to M3 by the specification.
+Polished product UX remains deferred to M3, and elaborate animations to M5, by the specification.
 
 ## Completion verification
 
