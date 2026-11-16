@@ -146,6 +146,10 @@ _Avoid_: Animation, presentation window
 What a Presentation Phase presents, recorded on the phase, from which the server and every Trainer compute the same beats and so the phase's length. Only what the view already makes public: for the deal, who is dealt in and in what order, how many cards each, the blinds, and who was refilled with it (by Rebuy & deal) and by how much; for a street reveal, whose wagers are swept and how many board cards are revealed; for the showdown, whose wagers are swept and whose hands are turned up; for the payout, each Participant paid, in seat order, with what they won and what came back to them uncalled.
 _Avoid_: Phase payload, phase data
 
+**Beat**:
+A timed moment of table motion, such as a card leaving the deck, a card landing or the line being swept, placed as an offset from the start of its Presentation Phase or of the table event that caused it. A presenting phase's beats, computed from its Phase Inputs, decide its length.
+_Avoid_: Animation, keyframe, step
+
 **Settle**:
 The Presentation Phase after every deal, street reveal, showdown and payout, in which the table is still: nothing moves and nobody may act. Its length is a shared constant chosen by the phase it follows and, after the payout, by table mode; it may be 0. A Hand ends when the Settle after its payout ends.
 _Avoid_: Pause, pause between Hands, delay, cooldown
