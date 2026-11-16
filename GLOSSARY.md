@@ -125,7 +125,7 @@ A Leave Table imposed by the Table Owner. The Guest may join again like any othe
 _Avoid_: Ban, kick
 
 **After-Hand Request**:
-A change to a Participant asked for during a Hand (a human's Sitting Out, Stand Up, Leave Table or Removal, or the Table Owner's Sitting Out or removal of a Bot) that is recorded and applied for everyone together when the Hand's payout phase ends. Everyone at the table can see it pending.
+A change to a Participant asked for during a Hand (a human's Sitting Out, Stand Up, Leave Table or Removal, or the Table Owner's Sitting Out or removal of a Bot) that is recorded and applied for everyone together when the Hand ends, with the Settle after its payout. Everyone at the table can see it pending.
 _Avoid_: Queued action, deferred command
 
 **Sitting Out**:
@@ -139,8 +139,20 @@ _Avoid_: Active player, ready participant
 ## Play Timing
 
 **Presentation Phase**:
-A server-timed interval in which no Participant may act, such as the deal, a street reveal, showdown, payout, or the pause between Hands. It ends by server time, never by animation completion.
+A server-timed interval in which no Participant may act: the deal, a street reveal, the showdown or the payout, each followed by its Settle. It ends by server time, never by animation completion. A phase whose length comes from its beats carries its Phase Inputs.
 _Avoid_: Animation, presentation window
+
+**Phase Inputs**:
+What a Presentation Phase presents, recorded on the phase, from which the server and every Trainer compute the same beats and so the phase's length. Only what the view already makes public: for the deal, who is dealt in and in what order, how many cards each, the blinds, and who was refilled with it (by Rebuy & deal) and by how much; for a street reveal, whose wagers are swept and how many board cards are revealed; for the showdown, whose wagers are swept and whose hands are turned up; for the payout, each Participant paid, in seat order, with what they won and what came back to them uncalled.
+_Avoid_: Phase payload, phase data
+
+**Beat**:
+A timed moment of table motion, such as a card leaving the deck, a card landing or the line being swept, placed as an offset from the start of its Presentation Phase or of the table event that caused it. A presenting phase's beats, computed from its Phase Inputs, decide its length.
+_Avoid_: Animation, keyframe, step
+
+**Settle**:
+The Presentation Phase after every deal, street reveal, showdown and payout, in which the table is still: nothing moves and nobody may act. Its length is a shared constant chosen by the phase it follows and, after the payout, by table mode; it may be 0. A Hand ends when the Settle after its payout ends.
+_Avoid_: Pause, pause between Hands, delay, cooldown
 
 **Action Window**:
 The server-opened interval in which exactly one Participant may act on their current decision. It opens only after any preceding Presentation Phase ends.

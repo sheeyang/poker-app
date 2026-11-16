@@ -34,10 +34,10 @@ describe('the next Hand at an Online Table, between Hands', () => {
     // Bots never play on alone.
     expect(nextHandStatus(table([seated('ann', 1, { stack: 0 }), seated('rex', 3)], ['ann']), 0)).toEqual({ kind: 'waiting' });
   });
-  it('expects a countdown soon while the table can deal, as during the pause after a Hand', () => {
-    const paid = table([seated('ann', 1), seated('rex', 2)], ['ann'], { phases: [{ kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: 0, endsAt: 2_000, durationMs: 2_000 }, { kind: 'pause', handId: 'hand-1', street: 'preflop', startsAt: 2_000, endsAt: 5_000, durationMs: 3_000 }], actionWindow: null });
-    const paused = { ...paid, view: { ...paid.view, state: { ...paid.view.state, status: 'completed-hand' as const, handId: 'hand-1' } } };
-    expect(nextHandStatus(paused, 3_000)).toEqual({ kind: 'soon' });
+  it('expects a countdown soon while the table can deal, as during the Settle after a payout', () => {
+    const paid = table([seated('ann', 1), seated('rex', 2)], ['ann'], { phases: [{ kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: 0, endsAt: 2_000, durationMs: 2_000 }, { kind: 'settle', handId: 'hand-1', street: 'preflop', startsAt: 2_000, endsAt: 5_000, durationMs: 3_000 }], actionWindow: null });
+    const settling = { ...paid, view: { ...paid.view, state: { ...paid.view.state, status: 'completed-hand' as const, handId: 'hand-1' } } };
+    expect(nextHandStatus(settling, 3_000)).toEqual({ kind: 'soon' });
   });
   it('is told in words everyone can follow', () => {
     expect([nextHandLabel({ kind: 'countdown', seconds: 3 }), nextHandLabel({ kind: 'countdown', seconds: 5 }, true), nextHandLabel({ kind: 'countdown', seconds: 0 }), nextHandLabel({ kind: 'soon' }), nextHandLabel({ kind: 'waiting' }), nextHandLabel(undefined)])

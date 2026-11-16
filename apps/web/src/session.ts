@@ -27,28 +27,26 @@ export type Attempt = TableAttempt | { readonly kind: 'create'; readonly body: C
 interface SessionState {
   pending: Attempt | null;
   analysisOpen: boolean;
-  animations: boolean;
   setup: { requestId: string; tableId?: string; paused?: string; afterHandId?: string | null } | null;
   setSetup: (setup: SessionState['setup']) => void;
   setPending: (pending: Attempt | null) => void;
   toggleAnalysis: () => void;
-  setAnimations: (enabled: boolean) => void;
 }
 
 export const useSession = create<SessionState>()(persist(set => ({
-  pending: null, analysisOpen: true, animations: true, setup: null,
+  pending: null, analysisOpen: true, setup: null,
   setSetup: setup => set({ setup }),
   setPending: pending => set({ pending }),
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
-  setAnimations: animations => set({ animations }),
 }), {
   name: 'poker-trainer-v1',
   // Browser storage keeps only device preferences; what belongs to the Guest, such as when each table was last opened, is on the server (ADR-0037). A request, and anything a Guest typed into one, lives in memory for the life of the page.
-  version: 3,
-  partialize: ({ analysisOpen, animations }) => ({ analysisOpen, animations }),
+  // Version 4 dropped the card-animation switch: table motion has no preference (ADR-0038).
+  version: 4,
+  partialize: ({ analysisOpen }) => ({ analysisOpen }),
   migrate: stored => {
-    const { analysisOpen, animations } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen' | 'animations'>>;
-    return { analysisOpen: analysisOpen ?? true, animations: animations ?? true } as SessionState;
+    const { analysisOpen } = (stored ?? {}) as Partial<Pick<SessionState, 'analysisOpen'>>;
+    return { analysisOpen: analysisOpen ?? true } as SessionState;
   },
 }));
 

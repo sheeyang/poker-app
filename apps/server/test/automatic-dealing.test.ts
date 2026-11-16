@@ -6,6 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { handEndsAt, lengthOf, presentedFor, settleOf, windowOpensAt } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -76,11 +77,11 @@ async function act(t: Table, cookieOf: (participantId: string) => string | undef
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: current.pokerRevision, participantId: actor, action })).toMatchObject({ ok: true });
 }
 const annOnly = (t: Table) => (id: string) => id === t.annId ? t.ann : undefined;
-/** Lets the announced countdown run out and the deal phase pass: the first Action Window of the Hand is open. */
+/** Lets the announced countdown run out and the deal phase and its Settle pass: the first Action Window of the Hand is open. */
 async function dealt(t: Table, handId = 'hand-1') {
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe(handId);
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
 }
 /** Ann, connected, and the Bot are seated heads-up, and Hand 1 is dealt with Ann, on the button, to act. */
 async function dealtHeadsUp(t: Table) {
@@ -114,31 +115,37 @@ test('an Online Table announces a Next-Hand Countdown, visible to everyone, once
   await expect.poll(async () => (await t.view()).view.state.status).toBe('active-hand');
   const hand = await t.view();
   expect(hand.view.state).toMatchObject({ handId: 'hand-1', actorId: t.annId });
-  expect(hand.schedule).toEqual({ phases: [{ kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: seatedAt + 5000, endsAt: seatedAt + 6500, durationMs: 1500 }],
-    actionWindow: { participantId: t.annId, decisionId: 'hand-1/decision-1', opensAt: seatedAt + 6500, deadlineAt: seatedAt + 6500 + 30_000 } });
+  const dealtAt = seatedAt + 5000, opens = dealtAt + presentedFor('deal', 'online');
+  expect(hand.schedule).toEqual({ phases: [
+    { kind: 'deal', handId: 'hand-1', street: 'preflop', startsAt: dealtAt, endsAt: dealtAt + lengthOf('deal'), durationMs: lengthOf('deal'), inputs: { dealt: [{ participantId: t.annId, cardCount: 2 }, { participantId: expect.any(String), cardCount: 2 }], blinds: [t.annId, expect.any(String)], refills: [] } },
+    { kind: 'settle', handId: 'hand-1', street: 'preflop', startsAt: dealtAt + lengthOf('deal'), endsAt: opens, durationMs: settleOf('deal', 'online') },
+  ], actionWindow: { participantId: t.annId, decisionId: 'hand-1/decision-1', opensAt: opens, deadlineAt: opens + 30_000 } });
   // Ben joined unseated, so he watches the Hand without being dealt in.
   expect(participant(await t.view(ben.cookie), ben.participantId)).toEqual({ participantId: ben.participantId, seat: null, stack: 0, sittingOut: false });
   await expect.poll(() => updates(annLive).at(-1)?.view.state.handId).toBe('hand-1');
 });
 
-test('after each Hand the payout phase and a 3 s pause pass before the next countdown is announced, and the server keeps dealing while the table can', async () => {
+test('after each Hand the payout phase and its Settle pass before the next countdown is announced, and the server keeps dealing while the table can', async () => {
   const t = await onlineTable();
   await dealtHeadsUp(t);
   await act(t, annOnly(t), { type: 'fold' });
   const finished = await t.view();
   const paidAt = clock.now();
   expect(finished.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
+  const ends = paidAt + lengthOf('payout') + settleOf('payout', 'online');
   expect(finished.schedule.phases.slice(-2)).toEqual([
-    { kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: paidAt, endsAt: paidAt + 2000, durationMs: 2000 },
-    { kind: 'pause', handId: 'hand-1', street: 'preflop', startsAt: paidAt + 2000, endsAt: paidAt + 5000, durationMs: 3000 },
+    { kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: paidAt, endsAt: paidAt + lengthOf('payout'), durationMs: lengthOf('payout'), inputs: { awards: [expect.objectContaining({ won: expect.any(Number), returned: expect.any(Number) })] } },
+    { kind: 'settle', handId: 'hand-1', street: 'preflop', startsAt: paidAt + lengthOf('payout'), endsAt: ends, durationMs: settleOf('payout', 'online') },
   ]);
   expect(chipsAtTable(finished)).toBe(2000);
-  // Nothing is announced during the payout phase or the pause.
-  clock.advanceTo(paidAt + 4999);
+  // Nothing is announced during the payout phase or its Settle.
+  clock.advanceTo(paidAt + lengthOf('payout'));
   expect((await t.view()).schedule.nextHandCountdown).toBeUndefined();
-  clock.advanceTo(paidAt + 5000);
-  await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: paidAt + 5000, endsAt: paidAt + 10_000, durationMs: 5000 });
-  clock.advanceTo(paidAt + 10_000);
+  clock.advanceTo(ends - 1);
+  expect((await t.view()).schedule.nextHandCountdown).toBeUndefined();
+  clock.advanceTo(ends);
+  await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: ends, endsAt: ends + 5000, durationMs: 5000 });
+  clock.advanceTo(ends + 5000);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
   const second = await t.view();
   // The button moves on, so the Bot is first to act; every chip is still at the table.
@@ -163,10 +170,11 @@ test('when a countdown expires, humans still disconnected are sat out first, and
   expect(participant(hand, ben.participantId)).toEqual({ participantId: ben.participantId, seat: 2, stack: 1000, sittingOut: true });
   expect(participant(hand, t.annId)).toMatchObject({ inHand: true });
   expect(participant(hand, t.botIds[0]!)).toMatchObject({ inHand: true });
-  // Ann folds; then she too is gone when the pause ends, so no countdown is announced.
-  clock.advance(1500);
+  // Ann folds; then she too is gone when the Hand ends, so no countdown is announced.
+  clock.advance(presentedFor('deal', 'online'));
   await act(t, annOnly(t), { type: 'fold' });
   await annLive.close();
+  await expect.poll(async () => (await t.view()).connectedParticipantIds).toEqual([]);
   clock.advance(10_000);
   const idle = await t.view();
   expect(idle.schedule.nextHandCountdown).toBeUndefined();
@@ -264,7 +272,7 @@ test('every Online Table enforces its Action Time Limit: a missed deadline plays
   expect({ status: late.status, code: (await late.json()).rejection?.code }).toEqual({ status: 409, code: 'action-deadline-passed' });
   // On every later street Ben acts first and times out again, and Ann checks behind.
   for (const street of ['flop', 'turn', 'river']) {
-    clock.advance(1000);
+    clock.advanceTo(windowOpensAt(await t.view()));
     const next = await t.view();
     expect(next.view.state).toMatchObject({ street, actorId: ben.participantId });
     clock.advanceTo(next.schedule.actionWindow!.deadlineAt! + 1);
@@ -275,8 +283,8 @@ test('every Online Table enforces its Action Time Limit: a missed deadline plays
   expect(finished.view.state.status).toBe('completed-hand');
   expect(finished.view.history[0]!.decisions.filter(decision => decision.action.participantId === ben.participantId).map(decision => decision.action.action)).toEqual([{ type: 'check' }, { type: 'check' }, { type: 'check' }, { type: 'check' }]);
   expect(finished.pendingChanges).toEqual([{ participantId: ben.participantId, change: 'sit-out' }]);
-  // When the payout phase ends Ben sits out, even though he is still connected, so nothing is dealt.
-  clock.advanceTo(finished.schedule.phases.find(phase => phase.kind === 'payout')!.endsAt);
+  // When the Hand ends Ben sits out, even though he is still connected, so nothing is dealt.
+  clock.advanceTo(handEndsAt(finished));
   await expect.poll(async () => participant(await t.view(), ben.participantId).sittingOut).toBe(true);
   clock.advance(60_000);
   expect(await t.view()).toMatchObject({ pendingChanges: [], view: { state: { status: 'completed-hand', handId: 'hand-1' } } });
@@ -314,7 +322,7 @@ test('a human who disconnects mid-Hand stays in it under a running deadline, rec
   // Rex, the big blind, checks; the Hand runs to a showdown without Ben, and the next Hand deals all four.
   await act(t, cookieOf, { type: 'check' });
   for (let street = 0; street < 3; street++) {
-    clock.advance(1000);
+    clock.advanceTo(windowOpensAt(await t.view()));
     await act(t, cookieOf, { type: 'check' });
     await act(t, cookieOf, { type: 'check' });
   }
@@ -377,7 +385,7 @@ test('an Action Deadline that expired during an outage plays one Timeout Action 
   // Preflop Ann faces the big blind, so her Timeout Action folded. The Hand is presented from the restart on.
   expect(resumed.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.annId, action: { type: 'fold' } }]);
   expect(resumed.pendingChanges).toEqual([{ participantId: t.annId, change: 'sit-out' }]);
-  clock.advanceTo(resumed.schedule.phases.find(phase => phase.kind === 'payout')!.endsAt);
+  clock.advanceTo(handEndsAt(resumed));
   await expect.poll(async () => participant(await t.view(), t.annId).sittingOut).toBe(true);
   const settled = await t.view();
   expect(settled).toMatchObject({ pendingChanges: [], view: { state: { status: 'completed-hand', handId: 'hand-1' } } });

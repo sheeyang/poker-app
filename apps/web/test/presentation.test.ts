@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession, type PresentationPhase, type TableSchedule } from '@poker/contracts';
-import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, handInProgress, nextHandCountdown, nextPresentationChange, payoutEnded, presentTable, recordClockSample } from '../src/presentation.js';
+import { actionWindowOpen, dealOpen, deadlineCountdown, estimateClockOffset, handEnded, handInProgress, nextHandCountdown, nextPresentationChange, presentTable, recordClockSample } from '../src/presentation.js';
 
-const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500 });
+const deal = (startsAt: number, handId = 'hand-1'): PresentationPhase => ({ kind: 'deal', handId, street: 'preflop', startsAt, endsAt: startsAt + 1500, durationMs: 1500, inputs: { dealt: [], blinds: [], refills: [] } });
 const street = (name: 'flop' | 'turn' | 'river', startsAt: number): PresentationPhase => ({ kind: 'street', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
 const showdown = (startsAt: number, name: 'preflop' | 'flop' | 'turn' | 'river'): PresentationPhase => ({ kind: 'showdown', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
 const payout = (startsAt: number): PresentationPhase => ({ kind: 'payout', handId: 'hand-1', street: 'river', startsAt, endsAt: startsAt + 2000, durationMs: 2000 });
+const settle = (startsAt: number, durationMs: number, name: PresentationPhase['street'] = 'river'): PresentationPhase => ({ kind: 'settle', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + durationMs, durationMs });
 function table(state: Partial<ObservableCashGameState>, schedule: TableSchedule): ObservableTableSession {
   return { tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime: 0, schedule, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'bot', name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
@@ -121,25 +122,30 @@ describe('revealing received steps at their phase timestamps', () => {
   });
 });
 
-describe('Deal follows the payout phase', () => {
+describe('Deal follows the Settle after the payout', () => {
   const completed = { status: 'completed-hand' as const, actorId: null, decisionId: null, legalActions: [] };
-  const paid = table(completed, { phases: [deal(0), payout(4_000)], actionWindow: null });
-  it('opens exactly when the payout phase ends', () => {
+  const paid = table(completed, { phases: [deal(0), payout(4_000), settle(6_000, 600)], actionWindow: null });
+  it('opens exactly when the Settle after the payout ends', () => {
     expect(dealOpen(paid, 4_000)).toBe(false);
-    expect(dealOpen(paid, 5_999)).toBe(false);
-    expect(dealOpen(paid, 6_000)).toBe(true);
+    expect(dealOpen(paid, 6_000)).toBe(false);
+    expect(dealOpen(paid, 6_599)).toBe(false);
+    expect(dealOpen(paid, 6_600)).toBe(true);
+  });
+  it('opens when the payout ends if its Settle was 0', () => {
+    expect(dealOpen(table(completed, { phases: [deal(0), payout(4_000)], actionWindow: null }), 6_000)).toBe(true);
   });
   it('stays closed while After-Hand Requests wait, since the server applies them before it accepts a Deal', () => {
     const waiting = { ...paid, pendingChanges: [{ participantId: 'you', change: 'sit-out' as const }] };
-    expect(dealOpen(waiting, 6_000)).toBe(false);
-    expect(payoutEnded(waiting, 6_000)).toBe(true);
+    expect(dealOpen(waiting, 6_600)).toBe(false);
+    expect(handEnded(waiting, 6_600)).toBe(true);
     // The view that applies them carries none, and Deal opens with it.
-    expect(dealOpen({ ...waiting, pendingChanges: [] }, 6_000)).toBe(true);
+    expect(dealOpen({ ...waiting, pendingChanges: [] }, 6_600)).toBe(true);
   });
   it('is the next presentation change once the payout phase has started', () => {
     expect(nextPresentationChange(paid, 3_999)).toBe(4_000);
     expect(nextPresentationChange(paid, 4_000)).toBe(6_000);
-    expect(nextPresentationChange(paid, 6_000)).toBeUndefined();
+    expect(nextPresentationChange(paid, 6_000)).toBe(6_600);
+    expect(nextPresentationChange(paid, 6_600)).toBeUndefined();
   });
   it('is open when no Hand has been paid out yet, or the Hand ended under an earlier schedule', () => {
     expect(dealOpen(table({ status: 'between-hands', handId: undefined, actorId: null, decisionId: null, legalActions: [] }, { phases: [], actionWindow: null }), 0)).toBe(true);
@@ -151,12 +157,13 @@ describe('Deal follows the payout phase', () => {
 });
 
 describe('action controls follow the Action Window', () => {
-  const window = { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_500 };
-  const turn = table({}, { phases: [deal(0)], actionWindow: window });
-  it('enable for the acting Participant only once the window opens', () => {
-    expect(actionWindowOpen(turn, 'you', 1_499)).toBe(false);
-    expect(actionWindowOpen(turn, 'you', 1_500)).toBe(true);
-    expect(actionWindowOpen(turn, 'bot', 1_500)).toBe(false);
+  const window = { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_800 };
+  const turn = table({}, { phases: [deal(0), settle(1_500, 300, 'preflop')], actionWindow: window });
+  it('enable for the acting Participant only once the window opens, after the Settle', () => {
+    expect(actionWindowOpen(turn, 'you', 1_500)).toBe(false);
+    expect(actionWindowOpen(turn, 'you', 1_799)).toBe(false);
+    expect(actionWindowOpen(turn, 'you', 1_800)).toBe(true);
+    expect(actionWindowOpen(turn, 'bot', 1_800)).toBe(false);
   });
   it('stay disabled without a window for the current decision', () => {
     expect(actionWindowOpen(table({}, { phases: [deal(0)], actionWindow: null }), 'you', 10_000)).toBe(false);
@@ -166,19 +173,19 @@ describe('action controls follow the Action Window', () => {
 });
 
 describe('the Action Deadline', () => {
-  // A 15 s Action Time Limit: the window opens when the 1.5 s deal ends and closes 15 s later.
-  const timed = table({}, { phases: [deal(0)], actionWindow: { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_500, deadlineAt: 16_500 } });
+  // A 15 s Action Time Limit: the window opens when the 1.5 s deal and its 0.3 s Settle end, and closes 15 s later.
+  const timed = table({}, { phases: [deal(0), settle(1_500, 300, 'preflop')], actionWindow: { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_800, deadlineAt: 16_800 } });
   it('disables action controls at the deadline, on the estimated server clock', () => {
-    expect(actionWindowOpen(timed, 'you', 1_500)).toBe(true);
-    expect(actionWindowOpen(timed, 'you', 16_499)).toBe(true);
-    expect(actionWindowOpen(timed, 'you', 16_500)).toBe(false);
+    expect(actionWindowOpen(timed, 'you', 1_800)).toBe(true);
+    expect(actionWindowOpen(timed, 'you', 16_799)).toBe(true);
+    expect(actionWindowOpen(timed, 'you', 16_800)).toBe(false);
     expect(actionWindowOpen(timed, 'you', 60_000)).toBe(false);
-    const offset = estimateClockOffset([{ serverTime: 1_500, receivedAt: 101_500 }]);
-    expect(actionWindowOpen(timed, 'you', 116_499 + offset)).toBe(true);
-    expect(actionWindowOpen(timed, 'you', 116_500 + offset)).toBe(false);
+    const offset = estimateClockOffset([{ serverTime: 1_800, receivedAt: 101_800 }]);
+    expect(actionWindowOpen(timed, 'you', 116_799 + offset)).toBe(true);
+    expect(actionWindowOpen(timed, 'you', 116_800 + offset)).toBe(false);
   });
-  it('counts down whole seconds from when the window opens', () => {
-    expect([0, 1_500, 1_501, 2_500, 16_499, 16_500, 20_000].map(at => deadlineCountdown(timed, at))).toEqual([15, 15, 15, 14, 1, 0, 0]);
+  it('counts down whole seconds from when the window opens, holding still through the deal and its Settle', () => {
+    expect([0, 1_500, 1_799, 1_800, 1_801, 2_800, 16_799, 16_800, 20_000].map(at => deadlineCountdown(timed, at))).toEqual([15, 15, 15, 15, 15, 14, 1, 0, 0]);
   });
   it('has no countdown without a deadline, as for a Bot or a table without an Action Time Limit', () => {
     expect(deadlineCountdown(table({}, { phases: [deal(0)], actionWindow: { participantId: 'you', decisionId: 'hand-1/decision-1', opensAt: 1_500 } }), 5_000)).toBeUndefined();
@@ -186,23 +193,23 @@ describe('the Action Deadline', () => {
   });
   it('is the next presentation change at each second of its countdown, and at the deadline', () => {
     expect(nextPresentationChange(timed, 1_000)).toBe(1_500);
-    expect(nextPresentationChange(timed, 1_500)).toBe(2_500);
-    expect(nextPresentationChange(timed, 2_499)).toBe(2_500);
-    expect(nextPresentationChange(timed, 15_600)).toBe(16_500);
-    expect(nextPresentationChange(timed, 16_500)).toBeUndefined();
+    expect(nextPresentationChange(timed, 1_500)).toBe(1_800);
+    expect(nextPresentationChange(timed, 1_800)).toBe(2_800);
+    expect(nextPresentationChange(timed, 2_799)).toBe(2_800);
+    expect(nextPresentationChange(timed, 15_900)).toBe(16_800);
+    expect(nextPresentationChange(timed, 16_800)).toBeUndefined();
   });
 });
 
 describe('the Next-Hand Countdown', () => {
   const completed = { status: 'completed-hand' as const, actorId: null, decisionId: null, legalActions: [] };
-  const pause = (startsAt: number): PresentationPhase => ({ kind: 'pause', handId: 'hand-1', street: 'preflop', startsAt, endsAt: startsAt + 3_000, durationMs: 3_000 });
-  // The Hand was paid out at 4 s, the pause ended at 9 s, and the countdown runs from 9 s to 14 s.
-  const announced = table(completed, { phases: [deal(0), payout(4_000), pause(6_000)], actionWindow: null, nextHandCountdown: { startsAt: 9_000, endsAt: 14_000, durationMs: 5_000 } });
+  // The Hand was paid out at 4 s, the Settle after its payout ended at 9 s, and the countdown runs from 9 s to 14 s.
+  const announced = table(completed, { phases: [deal(0), payout(4_000), settle(6_000, 3_000)], actionWindow: null, nextHandCountdown: { startsAt: 9_000, endsAt: 14_000, durationMs: 5_000 } });
   it('counts down whole seconds to the next Hand, for everyone at the table', () => {
     expect([9_000, 9_001, 10_000, 13_999, 14_000, 20_000].map(at => nextHandCountdown(announced, at))).toEqual([5, 5, 4, 1, 0, 0]);
   });
   it('is absent until the server announces one, and once the Hand it announced is dealt', () => {
-    expect(nextHandCountdown(table(completed, { phases: [deal(0), payout(4_000), pause(6_000)], actionWindow: null }), 9_500)).toBeUndefined();
+    expect(nextHandCountdown(table(completed, { phases: [deal(0), payout(4_000), settle(6_000, 3_000)], actionWindow: null }), 9_500)).toBeUndefined();
     expect(nextHandCountdown(table({ handId: 'hand-2' }, { ...announced.schedule, phases: [deal(14_000, 'hand-2')] }), 14_500)).toBeUndefined();
   });
   it('is the next presentation change at each of its seconds and at its expiry', () => {
@@ -211,20 +218,21 @@ describe('the Next-Hand Countdown', () => {
     expect(nextPresentationChange(announced, 13_500)).toBe(14_000);
     expect(nextPresentationChange(announced, 14_000)).toBeUndefined();
   });
-  it('presents nothing new during the pause between Hands', () => {
-    const paused = table({ ...completed, payouts: [{ participantId: 'you', amount: 30 }] }, { phases: [deal(0), payout(4_000), pause(6_000)], actionWindow: null });
-    expect(presentTable(paused, 7_000)).toBe(paused);
-    expect(nextPresentationChange(paused, 6_500)).toBe(9_000);
+  it('presents nothing new during the Settle after the payout', () => {
+    const settling = table({ ...completed, payouts: [{ participantId: 'you', amount: 30 }] }, { phases: [deal(0), payout(4_000), settle(6_000, 3_000)], actionWindow: null });
+    expect(presentTable(settling, 7_000)).toBe(settling);
+    expect(nextPresentationChange(settling, 6_500)).toBe(9_000);
   });
 });
 
 describe('a Hand in progress, as the table, the Current Table banner and the saved-tables ledger all say it', () => {
   const completed = { status: 'completed-hand' as const, actorId: null, decisionId: null, legalActions: [] };
-  it('lasts while the Hand is played and until its payout phase ends', () => {
+  it('lasts while the Hand is played and until the Settle after its payout ends', () => {
     expect(handInProgress(table({}, { phases: [deal(0)], actionWindow: null }), 1_000)).toBe(true);
-    const paid = table(completed, { phases: [deal(0), payout(4_000)], actionWindow: null });
-    expect(handInProgress(paid, 5_999)).toBe(true);
-    expect(handInProgress(paid, 6_000)).toBe(false);
+    const paid = table(completed, { phases: [deal(0), payout(4_000), settle(6_000, 600)], actionWindow: null });
+    expect(handInProgress(paid, 6_000)).toBe(true);
+    expect(handInProgress(paid, 6_599)).toBe(true);
+    expect(handInProgress(paid, 6_600)).toBe(false);
   });
   it('is over between Hands, and when the Hand ended under an earlier schedule', () => {
     expect(handInProgress(table({ status: 'between-hands', handId: undefined, actorId: null, decisionId: null, legalActions: [] }, { phases: [], actionWindow: null }), 0)).toBe(false);

@@ -22,7 +22,7 @@ export const liveAnalysisDisallowed = () => reject('live-analysis-disallowed', '
 /** Rejections that refuse who is asking: 403. */
 const forbidden: ReadonlySet<string> = new Set(['actor-not-authorized', 'not-your-participant', 'table-owner-required', 'unavailable-at-online-tables', 'unavailable-at-practice-tables', 'live-analysis-disallowed', 'table-password-required', 'wrong-table-password']);
 /** Rejections that a fresh view or a new request resolves, because the table or the request ID moved on: 409. */
-const conflicts: ReadonlySet<string> = new Set(['request-id-conflict', 'stale-poker-revision', 'stale-session-revision', 'action-window-not-open', 'action-deadline-passed', 'payout-phase-not-ended', 'name-taken', 'table-full', 'current-table-elsewhere']);
+const conflicts: ReadonlySet<string> = new Set(['request-id-conflict', 'stale-poker-revision', 'stale-session-revision', 'action-window-not-open', 'action-deadline-passed', 'hand-not-ended', 'name-taken', 'table-full', 'current-table-elsewhere']);
 /** Rejections that say the table is gone for good: 410. */
 const gone: ReadonlySet<string> = new Set(['table-closed']);
 /** Rejections that say the table is unavailable for now, not that the request is wrong: 503. */

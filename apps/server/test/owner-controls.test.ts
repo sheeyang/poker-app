@@ -6,6 +6,7 @@ import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 // Online Tables always have Action Deadlines, so time moves only when a test moves it (see fixtures/clock.ts).
@@ -141,13 +142,13 @@ test('a Practice Table has no option changes after creation', async () => {
   expect(await t.view()).toEqual(before);
 });
 
-/** Rex in seat 1, the button, and Ann in seat 2, connected; the countdown has run out and the deal phase passed: Rex's first Action Window is open. */
+/** Rex in seat 1, the button, and Ann in seat 2, connected; the countdown has run out and the deal phase and its Settle passed: Rex's first Action Window is open. */
 async function rexToAct(t: Table) {
   const live = await t.connect();
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(t.ann, t.annId, 2);
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   return live;
 }
 
@@ -163,20 +164,22 @@ test('options change only between Hands: not while a Hand is played or paid out,
   await botActs(t, { type: 'fold' });
   const paidAt = clock.now();
   expect((await t.view()).view.state.status).toBe('completed-hand');
-  // The payout phase is still part of the Hand.
+  // The payout phase and its Settle are still part of the Hand.
+  const ends = paidAt + presentedFor('payout', 'online');
   expect(await refusal(await t.setOptions(t.ann, { actionTimeLimitSeconds: 15 }))).toEqual({ status: 400, code: 'active-hand' });
-  clock.advanceTo(paidAt + 2000);
-  expect((await t.setOptions(t.ann, { allowLiveAnalysis: false })).status).toBe(200);
+  clock.advanceTo(ends - 1);
+  expect(await refusal(await t.setOptions(t.ann, { actionTimeLimitSeconds: 15 }))).toEqual({ status: 400, code: 'active-hand' });
 
-  // The countdown is announced once the pause has passed. Changing an option while it runs does not cancel or restart it.
-  clock.advanceTo(paidAt + 5000);
-  await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: paidAt + 5000, endsAt: paidAt + 10_000, durationMs: 5000 });
-  clock.advanceTo(paidAt + 7000);
+  // The countdown is announced when the Hand ends. Changing an option while it runs does not cancel or restart it.
+  clock.advanceTo(ends);
+  await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: ends, endsAt: ends + 5000, durationMs: 5000 });
+  expect((await t.setOptions(t.ann, { allowLiveAnalysis: false })).status).toBe(200);
+  clock.advanceTo(ends + 2000);
   expect((await t.setOptions(t.ann, { actionTimeLimitSeconds: 15 })).status).toBe(200);
-  expect((await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: paidAt + 5000, endsAt: paidAt + 10_000, durationMs: 5000 });
-  clock.advanceTo(paidAt + 10_000);
+  expect((await t.view()).schedule.nextHandCountdown).toEqual({ startsAt: ends, endsAt: ends + 5000, durationMs: 5000 });
+  clock.advanceTo(ends + 5000);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   // Hand 2's button is Ann's, so her Action Window carries the limit chosen during the countdown.
   const second = await t.view();
   expect(second.schedule.actionWindow).toMatchObject({ participantId: t.annId, deadlineAt: second.schedule.actionWindow!.opensAt + 15_000 });
@@ -201,7 +204,7 @@ test('at a Practice Table the owner adds a Bot at any time, and one added during
   const t = await newTable('practice');
   await t.seat(t.ann, t.annId, 1); await t.seat(t.ann, t.botIds[0]!, 2);
   expect((await t.as(t.ann, 'start-hand')).status).toBe(200);
-  clock.advance(1500);
+  clock.advance(presentedFor('deal'));
   const hand = await t.view();
   expect(hand.view.state).toMatchObject({ status: 'active-hand', actorId: t.annId });
 
@@ -216,7 +219,7 @@ test('at a Practice Table the owner adds a Bot at any time, and one added during
   expect(chipsAtTable(mid)).toBe(2800);
 
   expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'fold' } })).status).toBe(200);
-  clock.advance(2000);
+  clock.advance(presentedFor('payout'));
   expect((await t.as(t.ann, 'start-hand')).status).toBe(200);
   const second = await t.view();
   // Dealt in with the normal blinds of three players, and nothing extra for the seat she took.
@@ -239,7 +242,7 @@ test('at an Online Table the owner adds a Bot at any time, and it joins the next
   expect(participant(mid, cleoId)).toEqual({ participantId: cleoId, seat: 3, stack: 800, sittingOut: false });
   expect(mid.view.state.status).toBe('active-hand');
   await botActs(t, { type: 'fold' });
-  clock.advanceTo(clock.now() + 2000 + 3000);
+  clock.advance(presentedFor('payout', 'online'));
   await expect.poll(async () => (await t.view()).schedule.nextHandCountdown).toBeDefined();
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
@@ -363,12 +366,12 @@ test('a seated Bot is sat out or removed after the Hand, shown to everyone as pe
   expect(await gone.json()).not.toHaveProperty('afterHand');
   expect((await t.view(ben.cookie)).departedParticipantIds).toEqual([tia]);
 
-  // The Hand is played out; when its payout phase ends Rex has left and Sol sits out.
+  // The Hand is played out; when it ends Rex has left and Sol sits out.
   await botActs(t, { type: 'fold' });
   expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'fold' } })).status).toBe(200);
   expect((await t.view()).view.state.status).toBe('completed-hand');
   expect((await t.view()).pendingChanges).toHaveLength(3);
-  clock.advance(2000);
+  clock.advance(presentedFor('payout', 'online'));
   await expect.poll(async () => (await t.view()).pendingChanges).toEqual([]);
   const settled = await t.view(ben.cookie);
   // Rex's folded hand is still in the completed Hand he played; he has no Seat or chips any more.
@@ -390,7 +393,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   await t.seat(t.ann, t.botIds[0]!, 1); await t.seat(ben.cookie, ben.participantId, 2);
   clock.advanceTo((await announcedCountdown(() => t.view())).endsAt);
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   await botActs(t, { type: 'call' });
 
   const benSees = participant(await t.view(ben.cookie), ben.participantId);

@@ -6,6 +6,7 @@ import { baselinePlayingStrategy, type ObservableTableSession, type ServerLiveMe
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { presentedFor } from './fixtures/phases.js';
 import { connectLive, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -106,11 +107,11 @@ async function onlineHand() {
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => view(ann))).endsAt);
   await expect.poll(async () => (await view(ann)).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(presentedFor('deal', 'online'));
   return { ...table, ben, benId };
 }
 
-test('during a Hand, Removal is an After-Hand Request that outranks the Guest’s own, and applies once the payout phase ends, even across a restart', async () => {
+test('during a Hand, Removal is an After-Hand Request that outranks the Guest’s own, and applies once the Hand ends, even across a restart', async () => {
   const { ann, annId, ben, benId, id, view, join, preview, as } = await onlineHand();
   // Ben asks to leave after the Hand; the owner's Removal replaces that, and nothing at the poker table changes yet.
   expect(await (await as(ben, 'leave-table', { participantId: benId })).json()).toMatchObject({ ok: true, afterHand: true });
@@ -136,11 +137,11 @@ test('during a Hand, Removal is an After-Hand Request that outranks the Guest’
   const decided = await view(ben);
   expect(decided.view.state.status).toBe('completed-hand');
   const stacks = decided.view.state.participants.map(p => p.stack);
-  clock.advance(1999);
+  clock.advance(presentedFor('payout', 'online') - 1);
   expect((await get('/api/table-sessions/' + id, ben)).status).toBe(200);
   expect((await view(ann)).pendingChanges).toEqual([{ participantId: benId, change: 'remove' }]);
 
-  // The server restarts before the payout phase ends. The request survives, and applies exactly once when it does.
+  // The server restarts before the Hand ends. The request survives, and applies exactly once when it does.
   await server.close(); await startServer();
   const bensConnection = await listen(ben, id);
   expect((await view(ben)).pendingChanges).toEqual([{ participantId: benId, change: 'remove' }]);
@@ -170,7 +171,7 @@ test('during a Hand, Removal of a Guest without a Seat also waits for the Hand',
   expect((await get('/api/table-sessions/' + id, cy)).status).toBe(200);
   const actor = (await view(ann)).view.state.actorId!;
   expect(await (await as(actor === annId ? ann : ben, 'act', { participantId: actor, action: { type: 'fold' } })).json()).toMatchObject({ ok: true });
-  clock.advance(2000);
+  clock.advance(presentedFor('payout', 'online'));
   await expect.poll(async () => (await get('/api/table-sessions/' + id, cy)).status).toBe(404);
   expect(await (await join(cy)).json()).toMatchObject({ ok: true, participantId: cyId });
 });

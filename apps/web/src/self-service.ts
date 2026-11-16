@@ -3,10 +3,10 @@ import { afterHandRequestStrength, type ObservableTableSession, type AfterHandRe
 /**
  * What the viewer's own controls do right now. Pure: the Trainer shows what the server will do, and the
  * server alone decides. A change the table cannot make during a Hand is not blocked: it is asked for now and
- * applies after the Hand, which ends when its payout phase does (`handOpen`).
+ * applies after the Hand, which ends when the Settle after its payout does (`handOpen`).
  *
  * - `now`: applies at once.
- * - `after-hand`: recorded as pending and applied when the Hand's payout phase ends.
+ * - `after-hand`: recorded as pending and applied when the Hand ends.
  * - `unavailable`: nothing to ask for, or something stronger is already pending.
  */
 export type Availability = 'now' | 'after-hand' | 'unavailable';

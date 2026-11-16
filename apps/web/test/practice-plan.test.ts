@@ -20,11 +20,11 @@ describe('practice preparation from confirmed state', () => {
       expect(practiceStep(started, 'h1', 'r')).toBeNull();
     }
   });
-  it('refills a busted opponent before another explicit deal', () => {
+  it('refills a busted opponent with the deal itself (Rebuy & deal)', () => {
     const t = table();
     const ended = { ...t, view: { ...t.view, state: { ...t.view.state, status: 'completed-hand' as const, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 4000, sittingOut: false }, { participantId: 'bot', seat: 2, stack: 0, sittingOut: false }] } } };
-    expect(practiceStep(ended, 'h1', 'r')).toMatchObject({ kind: 'manage', operation: 'top-up-to', body: { participantId: 'bot', targetStack: 2000 } });
-    expect(practiceStep({ ...ended, view: { ...ended.view, state: { ...ended.view.state, participants: ended.view.state.participants.map(p => ({ ...p, stack: 2000 })) } } }, 'h1', 'r')).toMatchObject({ kind: 'start', body: { expectedPokerRevision: 7 } });
+    expect(practiceStep(ended, 'h1', 'r')).toEqual({ kind: 'start', tableId: 't', body: { requestId: 'r', expectedPokerRevision: 7, refills: [{ participantId: 'bot', targetStack: 2000 }] } });
+    expect(practiceStep({ ...ended, view: { ...ended.view, state: { ...ended.view.state, participants: ended.view.state.participants.map(p => ({ ...p, stack: 2000 })) } } }, 'h1', 'r')).toEqual({ kind: 'start', tableId: 't', body: { requestId: 'r', expectedPokerRevision: 7 } });
   });
   it('leaves a sitting-out human to the Deal, which resumes them, but preserves deliberately removed opponents', () => {
     const t = table();
@@ -37,6 +37,11 @@ describe('practice preparation from confirmed state', () => {
   it('rebuys a busted human who sat out before the Deal resumes them', () => {
     const t = table();
     const busted = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 0, sittingOut: true }, { participantId: 'bot', seat: 2, stack: 1000, sittingOut: false }] } } };
-    expect(practiceStep(busted, 'h1', 'r')).toMatchObject({ kind: 'manage', operation: 'top-up-to', body: { participantId: 'you', targetStack: 2000 } });
+    expect(practiceStep(busted, 'h1', 'r')).toMatchObject({ kind: 'start', body: { refills: [{ participantId: 'you', targetStack: 2000 }] } });
+  });
+  it('needs an opponent with chips or a refill to deal', () => {
+    const t = table();
+    const alone = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 0, sittingOut: false }] } } };
+    expect(() => practiceStep(alone, 'h1', 'r')).toThrow('Add an opponent');
   });
 });

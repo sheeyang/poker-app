@@ -16,8 +16,8 @@ export function practiceStep(table: ObservableTableSession, afterHandId: string 
   }
   // Deal returns the human from a sit-out they chose in the commit that starts the Hand, so they count as playing.
   const playing = (p: ObservableTableSession['view']['state']['participants'][number]) => p.seat !== null && (!p.sittingOut || p.participantId === table.viewerParticipantId);
-  const emptyStack = state.participants.find(p => playing(p) && p.stack === 0);
-  if (emptyStack) return { kind: 'manage', operation: 'top-up-to', tableId, body: { ...metadata, participantId: emptyStack.participantId, targetStack: table.view.configuration.defaultBuyIn } };
-  if (state.participants.filter(p => playing(p) && p.stack > 0).length < 2) throw new Error('Add an opponent in table options before dealing.');
-  return { kind: 'start', tableId, body: metadata };
+  if (state.participants.filter(playing).length < 2) throw new Error('Add an opponent in table options before dealing.');
+  // Rebuy & deal: every empty stack is refilled in the commit that deals, so the refill lands with the deal.
+  const refills = state.participants.filter(p => playing(p) && p.stack === 0).map(p => ({ participantId: p.participantId, targetStack: table.view.configuration.defaultBuyIn }));
+  return { kind: 'start', tableId, body: refills.length ? { ...metadata, refills } : metadata };
 }

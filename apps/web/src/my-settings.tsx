@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons.js';
 import { browserBinding, DisplayNameForm, useDisplayName } from './display-name.js';
-import { useSession } from './session.js';
 
 const initialOf = (name: string | undefined) => name?.trim()[0]?.toUpperCase();
 
 /**
- * The Guest's profile: the name they sit down with and how cards animate. Reachable from every page, so it opens
+ * The Guest's profile: the name they sit down with. Reachable from every page, so it opens
  * from the header; Table options holds only what is about one table.
  */
 export function MySettings() {
@@ -28,9 +27,6 @@ export function MySettings() {
 }
 
 function ProfilePopover({ displayName, close }: { displayName: string | undefined; close: () => void }) {
-  const animations = useSession(s => s.animations), setAnimations = useSession(s => s.setAnimations);
-  // Each click on the card, or on the switch, replays the deal so the switch shows what it does.
-  const [plays, setPlays] = useState(0);
   return <div className="profile-pop" role="dialog" aria-labelledby="profile-title">
     <div className="profile-pop-heading"><h2 id="profile-title">Profile</h2><button type="button" className="icon-button" aria-label="Close Profile" onClick={close}><Icon name="close" /></button></div>
     <div className="profile-hero">
@@ -39,12 +35,5 @@ function ProfilePopover({ displayName, close }: { displayName: string | undefine
     </div>
     <p className="muted profile-note">Your name applies to tables you create or join from now on, not to tables you are already at.</p>
     {!displayName && <p className="muted profile-note">{browserBinding}</p>}
-    <section className="settings-section">
-      <h3>Cards</h3>
-      <div className="profile-preview">
-        <button type="button" key={plays} className={`profile-card${animations ? ' is-animated' : ''}`} aria-label="Preview the card animation" onClick={() => setPlays(plays + 1)}><span>A♠</span></button>
-        <label className="live-toggle"><span><strong>Card animations</strong><small>{animations ? 'Cards deal and flip. Click the card to preview.' : 'Cards appear at once.'}</small></span><input type="checkbox" role="switch" checked={animations} onChange={event => { setAnimations(event.target.checked); setPlays(plays + 1); }} /></label>
-      </div>
-    </section>
   </div>;
 }

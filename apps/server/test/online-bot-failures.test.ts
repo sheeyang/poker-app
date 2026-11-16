@@ -6,6 +6,7 @@ import { createStrategy, HighestProbabilitySelector, type Strategy } from '@poke
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { handEndsAt, presentedFor, windowOpensAt } from './fixtures/phases.js';
 import { connectLive, type LiveConnection, announcedCountdown } from './fixtures/online.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -82,7 +83,7 @@ async function botToAct() {
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 2 })).status).toBe(200);
   clock.advanceTo((await announcedCountdown(() => view())).endsAt);
   await expect.poll(async () => (await view()).view.state.handId).toBe('hand-1');
-  clock.advance(1500);
+  clock.advance(presentedFor('deal', 'online'));
   return { id, ann, annId, rex, ben, view, as, annLive, benLive };
 }
 
@@ -115,8 +116,8 @@ test('when the retry fails too, the server plays the Bot’s Timeout Action, sit
   // Practice's explicit Retry is not offered: the server has already handled the failure.
   const retry = await post('/api/table-sessions/' + t.id + '/retry-bot', t.ann, { requestId: randomUUID(), expectedSessionRevision: (await t.view()).sessionRevision, participantId: t.rex });
   expect({ status: retry.status, code: (await retry.json()).rejection?.code }).toEqual({ status: 403, code: 'unavailable-at-online-tables' });
-  // After the payout phase the Bot sits out, so Ann alone cannot be dealt a Hand.
-  clock.advanceTo(failed.schedule.phases.find(phase => phase.kind === 'payout')!.endsAt);
+  // When the Hand ends the Bot sits out, so Ann alone cannot be dealt a Hand.
+  clock.advanceTo(handEndsAt(failed));
   await expect.poll(async () => (await t.view()).view.state.participants.find(p => p.participantId === t.rex)?.sittingOut).toBe(true);
   clock.advance(60_000);
   const idle = await t.view();
@@ -141,7 +142,7 @@ test('analysis never delays or fails a Bot decision, even when it fills all the 
     expect((await post('/api/table-sessions/' + t.id + '/analysis', t.ann, { decisionId, live: true })).status).toBe(200);
     await expect.poll(() => heldAnalyses.length).toBe(1);
     expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'check' } })).status).toBe(200);
-    clock.advance(1000);
+    clock.advanceTo(windowOpensAt(await t.view()));
     expect((await t.as(t.ann, 'act', { participantId: t.annId, action: { type: 'check' } })).status).toBe(200);
     // Rex's decision runs at once and plays what its Strategy chose: no failure, no Timeout Action, no sit-out.
     await expect.poll(async () => (await t.view()).view.history[0]!.decisions.at(-1)!.action).toEqual({ participantId: t.rex, action: { type: 'bet', betTo: 60 } });

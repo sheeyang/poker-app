@@ -33,7 +33,7 @@ export interface CurrentTableBanner {
   readonly yourTurn: boolean;
   /** The viewer's pending Leave Table or Removal, in words: "Leaving after this hand". */
   readonly pending: string | undefined;
-  /** A Hand is in progress until its payout phase ends: Leave Table then waits for it. */
+  /** A Hand is in progress until the Settle after its payout ends: Leave Table then waits for it. */
   readonly handOpen: boolean;
   /** What Leave game does now, as Leave Table at the table would. */
   readonly leave: Availability;

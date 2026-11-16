@@ -2,11 +2,13 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, payoutBeats, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type ServerLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { nameGuest } from './fixtures/guest.js';
 import { ManualClock } from './fixtures/clock.js';
+import { backToBack, lengthOf, presentedFor, presentedShowdownFor, settleOf, windowOpensAt } from './fixtures/phases.js';
+import { showdownMs, streetMs } from './fixtures/presentation.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('Set TEST_DATABASE_URL to a real PostgreSQL test database.');
@@ -51,45 +53,61 @@ async function headsUp() {
   await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
   return { t, human, bot };
 }
+/**
+ * What the view's payout presents, and so how long it lasts: a showdown may split the pot, and each winner's award
+ * takes its own beat.
+ */
+function paidFor(view: ObservableTableSession) {
+  const payout = view.schedule.phases.find(phase => phase.kind === 'payout');
+  if (payout?.kind !== 'payout') throw new Error('The Hand has no payout phase.');
+  expect(payout.inputs.awards.length).toBeGreaterThan(0);
+  return { durationMs: payoutBeats(payout.inputs).totalMs, inputs: payout.inputs };
+}
+
 /** Deals and checks every street down: the Hand ends at showdown on the river. */
 async function checkDown(t: Table, human: string, bot: string) {
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advanceTo(windowOpensAt(await read(t)));
   await accepted(t, human, { type: 'call' }); await accepted(t, bot, { type: 'check' });
-  for (const _street of ['flop', 'turn', 'river']) { clock.advance(1000); await accepted(t, bot, { type: 'check' }); await accepted(t, human, { type: 'check' }); }
+  for (const _street of ['flop', 'turn', 'river']) { clock.advanceTo(windowOpensAt(await read(t))); await accepted(t, bot, { type: 'check' }); await accepted(t, human, { type: 'check' }); }
 }
 
 /** Deals, the human raises and the Bot folds: the Hand is over at once. */
 async function foldOut(t: Table, human: string, bot: string) {
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   await accepted(t, human, { type: 'raise', raiseTo: 60 });
   await accepted(t, bot, { type: 'fold' });
 }
 
-test('a river showdown turns the hands up in a 2 s showdown phase, then pays out in a 2 s payout phase', async () => {
+test('a river showdown turns the hands up, then pays out, each followed by its Settle', async () => {
   const { t, human, bot } = await headsUp();
   await checkDown(t, human, bot);
   const at = clock.now();
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null });
   expect(done.view.state.participants.every(p => p.holeCards?.length === 2)).toBe(true);
-  expect(done.schedule.phases.slice(-2)).toEqual([
-    { kind: 'showdown', handId: 'hand-1', street: 'river', startsAt: at, endsAt: at + 2000, durationMs: 2000 },
-    { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: at + 2000, endsAt: at + 4000, durationMs: 2000 },
+  // The river was checked through: the showdown sweeps nothing and turns both hands up, in the order they are shown.
+  const inputs = { swept: [], shown: [{ participantId: human, cardCount: 2 }, { participantId: bot, cardCount: 2 }] };
+  const shown = at + showdownMs(0), turned = shown + settleOf('showdown'), payout = paidFor(done), paid = turned + payout.durationMs;
+  expect(done.schedule.phases.slice(-4)).toEqual([
+    { kind: 'showdown', handId: 'hand-1', street: 'river', startsAt: at, endsAt: shown, durationMs: showdownMs(0), inputs },
+    { kind: 'settle', handId: 'hand-1', street: 'river', startsAt: shown, endsAt: turned, durationMs: settleOf('showdown') },
+    { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: turned, endsAt: paid, ...payout },
+    { kind: 'settle', handId: 'hand-1', street: 'river', startsAt: paid, endsAt: paid + settleOf('payout'), durationMs: settleOf('payout') },
   ]);
   expect(done.schedule.actionWindow).toBeNull();
 });
 
-test('Deal is rejected with its own code until the payout phase ends, and accepted at that moment', async () => {
+test('Deal is rejected with its own code until the Settle after the payout ends, and accepted at that moment', async () => {
   const { t, human, bot } = await headsUp();
   await checkDown(t, human, bot);
-  const at = clock.now();
-  clock.advanceTo(at + 3999);
+  const ends = clock.now() + presentedShowdownFor(0) + paidFor(await read(t)).durationMs + settleOf('payout');
+  clock.advanceTo(ends - 1);
   const before = await read(t);
   const early = await submit(t, 'start-hand', {});
   expect(early.status).toBe(409);
-  expect(await early.json()).toMatchObject({ ok: false, rejection: { code: 'payout-phase-not-ended' } });
+  expect(await early.json()).toMatchObject({ ok: false, rejection: { code: 'hand-not-ended' } });
   expect(await read(t)).toEqual(before);
-  clock.advanceTo(at + 4000);
+  clock.advanceTo(ends);
   await command(t, 'start-hand');
   expect((await read(t)).view.state).toMatchObject({ status: 'active-hand', handId: 'hand-2' });
 });
@@ -101,7 +119,7 @@ test('an all-in runout reaches a live client as one complete result, ahead of th
   socket.on('message', data => { const message = JSON.parse(data.toString()) as ServerLiveMessage; if (message.type === 'table-update') updates.push(message); });
   socket.on('open', () => socket.send(JSON.stringify({ type: 'subscribe-table', requestId: randomUUID(), tableSessionId: t.id })));
   try {
-    await command(t, 'start-hand'); clock.advance(1500);
+    await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
     await accepted(t, human, { type: 'raise', raiseTo: 1000 });
     await accepted(t, bot, { type: 'call' });
     await expect.poll(() => updates.some(update => update.pokerRevision === t.revision)).toBe(true);
@@ -111,7 +129,7 @@ test('an all-in runout reaches a live client as one complete result, ahead of th
     expect(update.view.state.board).toHaveLength(5);
     expect(update.view.state.payouts?.length).toBeGreaterThan(0);
     expect(update.presentationEvents.map(event => event.type)).toEqual(expect.arrayContaining(['hole-cards-revealed', 'board-dealt', 'pot-awarded', 'hand-completed']));
-    expect(update.schedule.phases.map(phase => phase.kind)).toEqual(['deal', 'showdown', 'street', 'street', 'street', 'payout']);
+    expect(update.schedule.phases.map(phase => phase.kind)).toEqual(['deal', 'settle', 'showdown', 'settle', 'street', 'settle', 'street', 'settle', 'street', 'settle', 'payout', 'settle']);
     expect(update.schedule.phases.at(-1)!.startsAt).toBeGreaterThan(update.serverTime);
   } finally { socket.terminate(); }
 });
@@ -122,7 +140,7 @@ test('a three-way all-in with side pots schedules one showdown, the remaining st
   await command(t, 'seat-participant', { participantId: human, seat: 1 });
   await command(t, 'seat-participant', { participantId: short, seat: 3, buyIn: 300 });
   await command(t, 'seat-participant', { participantId: middle, seat: 5, buyIn: 500 });
-  await command(t, 'start-hand'); clock.advance(1500);
+  await command(t, 'start-hand'); clock.advance(presentedFor('deal', 'practice', 3));
   // Each player in turn puts in everything they can.
   for (let step = 0; step < 6; step++) {
     const { actorId, legalActions } = (await read(t)).view.state;
@@ -137,35 +155,50 @@ test('a three-way all-in with side pots schedules one showdown, the remaining st
   const total = (transfers: readonly { amount: number }[] = []) => transfers.reduce((sum, transfer) => sum + transfer.amount, 0);
   expect(total(done.view.state.payouts) + total(done.view.state.returns)).toBe(done.view.state.participants.reduce((sum, p) => sum + (p.contribution ?? 0), 0));
   expect(done.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(1800);
-  expect(done.schedule.phases.map(({ kind, street, startsAt, endsAt }) => ({ kind, street, startsAt, endsAt }))).toEqual([
-    { kind: 'deal', street: 'preflop', startsAt: at - 1500, endsAt: at },
-    { kind: 'showdown', street: 'preflop', startsAt: at, endsAt: at + 2000 },
-    { kind: 'street', street: 'flop', startsAt: at + 2000, endsAt: at + 3000 },
-    { kind: 'street', street: 'turn', startsAt: at + 3000, endsAt: at + 4000 },
-    { kind: 'street', street: 'river', startsAt: at + 4000, endsAt: at + 5000 },
-    { kind: 'payout', street: 'river', startsAt: at + 5000, endsAt: at + 7000 },
-  ]);
+  expect(done.schedule.phases.map(({ kind, street, startsAt, endsAt, durationMs }) => ({ kind, street, startsAt, endsAt, durationMs }))).toEqual(backToBack(at - presentedFor('deal', 'practice', 3), [
+    ['deal', 'preflop', lengthOf('deal', 3)], ['settle', 'preflop', settleOf('deal')],
+    ['showdown', 'preflop', showdownMs(3, 3)], ['settle', 'preflop', settleOf('showdown')],
+    ['street', 'flop', streetMs(0, 3)], ['settle', 'flop', settleOf('street')],
+    ['street', 'turn', streetMs(0, 1)], ['settle', 'turn', settleOf('street')],
+    ['street', 'river', streetMs(0, 1)], ['settle', 'river', settleOf('street')],
+    ['payout', 'river', paidFor(done).durationMs], ['settle', 'river', settleOf('payout')],
+  ]));
   expect(done.schedule.actionWindow).toBeNull();
 });
 
-test('a Hand won by folds has a payout phase and no showdown, and Deal waits for it', async () => {
+test('a Hand won by folds has a payout phase and its Settle but no showdown, and Deal waits for the Settle', async () => {
   const { t, human, bot } = await headsUp();
   await foldOut(t, human, bot);
   const at = clock.now();
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand' });
   expect(done.view.state.participants.find(p => p.participantId === bot)).not.toHaveProperty('holeCards');
+  const dealt = at - presentedFor('deal'), paid = at + lengthOf('payout'), ends = paid + settleOf('payout');
   expect(done.schedule.phases.map(({ kind, street, startsAt, endsAt }) => ({ kind, street, startsAt, endsAt }))).toEqual([
-    { kind: 'deal', street: 'preflop', startsAt: at - 1500, endsAt: at },
-    { kind: 'payout', street: 'preflop', startsAt: at, endsAt: at + 2000 },
+    { kind: 'deal', street: 'preflop', startsAt: dealt, endsAt: dealt + lengthOf('deal') },
+    { kind: 'settle', street: 'preflop', startsAt: dealt + lengthOf('deal'), endsAt: at },
+    { kind: 'payout', street: 'preflop', startsAt: at, endsAt: paid },
+    { kind: 'settle', street: 'preflop', startsAt: paid, endsAt: ends },
   ]);
-  clock.advanceTo(at + 1999);
+  clock.advanceTo(paid);
+  expect(await (await submit(t, 'start-hand', {})).json()).toMatchObject({ ok: false, rejection: { code: 'hand-not-ended' } });
+  clock.advanceTo(ends - 1);
   expect((await submit(t, 'start-hand', {})).status).toBe(409);
-  clock.advanceTo(at + 2000);
+  clock.advanceTo(ends);
   await command(t, 'start-hand');
 });
 
-test('a restart keeps the payout phase, so Deal still waits for it; a Deal after it needs no wait', async () => {
+test('a payout carries what each winner won and what came back uncalled, and lasts as long as its beats', async () => {
+  const { t, human, bot } = await headsUp();
+  // The human's raise to 60 is called by no one: 40 of it comes back, and the blinds' 40 are won.
+  await foldOut(t, human, bot);
+  const payout = (await read(t)).schedule.phases.find(phase => phase.kind === 'payout');
+  const inputs = { awards: [{ participantId: human, won: 40, returned: 40 }] };
+  expect(payout).toMatchObject({ kind: 'payout', inputs, durationMs: payoutBeats(inputs).totalMs });
+  expect(payout!.endsAt - payout!.startsAt).toBe(payout!.durationMs);
+});
+
+test('a restart keeps the payout phase and its Settle, so Deal still waits for them; a Deal after them needs no wait', async () => {
   const { t, human, bot } = await headsUp();
   await foldOut(t, human, bot);
   const at = clock.now();
@@ -174,7 +207,7 @@ test('a restart keeps the payout phase, so Deal still waits for it; a Deal after
   await server.close(); await startServer();
   expect(await read(t)).toEqual({ ...paying, serverTime: at + 1000 });
   expect((await submit(t, 'start-hand', {})).status).toBe(409);
-  clock.advanceTo(at + 2000);
+  clock.advanceTo(at + presentedFor('payout'));
   await server.close(); await startServer();
   await command(t, 'start-hand');
   expect((await read(t)).view.state).toMatchObject({ status: 'active-hand', handId: 'hand-2' });
@@ -184,7 +217,7 @@ test('Deal resumes a human who sat out by choice in the same commit that starts 
   const { t, human, bot } = await headsUp();
   await foldOut(t, human, bot);
   // Sitting out is a change between Hands: during the payout phase it would only be recorded to apply after it.
-  clock.advance(2000);
+  clock.advance(presentedFor('payout'));
   await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
   expect((await read(t)).view.state.participants.find(p => p.participantId === human)).toMatchObject({ sittingOut: true });
   const revision = t.revision;
@@ -199,7 +232,7 @@ test('Deal resumes a human who sat out by choice in the same commit that starts 
 test('a Deal that cannot start the Hand leaves the sitting-out human sitting out', async () => {
   const { t, human, bot } = await headsUp();
   await foldOut(t, human, bot);
-  clock.advance(2000);
+  clock.advance(presentedFor('payout'));
   await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
   await command(t, 'stand-up-participant', { participantId: bot });
   const before = await read(t);

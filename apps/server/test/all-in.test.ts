@@ -3,7 +3,7 @@ import { nameGuest } from './fixtures/guest.js';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { afterAll, beforeAll, expect, test, vi } from 'vitest';
-import { baselinePlayingStrategy, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type TableLiveMessage } from '@poker/contracts';
+import { baselinePlayingStrategy, payoutBeats, type ConcreteAction, type ObservableGameConfiguration, type ObservableTableSession, type ObservableTableUpdate, type TableLiveMessage } from '@poker/contracts';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { InstantClock } from './fixtures/clock.js';
@@ -203,6 +203,9 @@ test('folded-only caps publish one 8-chip pot and an equal split to the tied liv
   expect(done.view.state).toMatchObject({ board: ['8s', 'Jc', 'Th', '9c', '7h'], pots: [{ amount: 8, eligibleParticipantIds: [alice, bob] }], returns: [], payouts: [{ participantId: alice, amount: 4 }, { participantId: bob, amount: 4 }] });
   expect(done.view.state.participants.map(p => [p.stack, p.contribution])).toEqual([[12, 2], [12, 2], [8, 2], [9, 1], [9, 1]]); expect(done.view.state.participants.filter(p => p.holeCards).map(p => p.participantId)).toEqual([alice, bob]);
   expect(done.view.history[0]!.decisions.every(d => d.state.participants.filter(p => p.holeCards).length === 1)).toBe(true);
+  // The split is presented award by award, in seat order, and the payout lasts as long as its beats.
+  const inputs = { awards: [{ participantId: alice, won: 4, returned: 0 }, { participantId: bob, won: 4, returned: 0 }] };
+  expect(done.schedule.phases.find(p => p.kind === 'payout')).toMatchObject({ inputs, durationMs: payoutBeats(inputs).totalMs });
   await server.close(); await startServer(); expect(await read(t)).toEqual(done);
 });
 
@@ -222,6 +225,8 @@ test('genuine live all-in caps keep separate 5-chip and 3-chip pots even when th
     expect(done.view.state.participants.map(p => [p.stack, p.contribution, p.folded])).toEqual([[13, 2, false], [11, 2, false], [0, 2, false], [0, 1, false], [0, 1, false]]);
     expect(done.view.state.participants.every(p => p.holeCards?.length === 2)).toBe(true); expect(update.view).toEqual(done.view);
     expect(update.presentationEvents.flatMap(e => e.type === 'pot-awarded' ? [e.amount] : [])).toEqual([3, 2, 2, 1]);
+    // Each winner's pots are pushed to them as one award.
+    expect(done.schedule.phases.find(p => p.kind === 'payout')).toMatchObject({ inputs: { awards: [{ participantId: alice, won: 5, returned: 0 }, { participantId: bob, won: 3, returned: 0 }] } });
     expect(done.view.history[0]!.decisions.every(d => d.state.participants.filter(p => p.holeCards).length === 1)).toBe(true);
     expect(JSON.stringify(update)).not.toMatch(/"(?:seed|deck|burns|drawnCardCount|commands)"\s*:/);
     live.socket.terminate(); await server.close(); await startServer(); expect(await read(t)).toEqual(done);

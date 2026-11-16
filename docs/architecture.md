@@ -6,7 +6,7 @@ in [the ADRs](adr/); concrete server behavior is described in
 
 | Path | Responsibility |
 | --- | --- |
-| [`packages/contracts`](../packages/contracts) | Explicit participant-safe HTTP/WebSocket and observable game types. |
+| [`packages/contracts`](../packages/contracts) | Explicit participant-safe HTTP/WebSocket and observable game types, and the shared presentation timing (`presentation.ts`): the beat functions, Phase Inputs and Settle lengths from which the server derives each Presentation Phase's length and the Trainer plays the table's motion (ADR-0039). |
 | [`packages/engine`](../packages/engine) | Trusted CashGame construction, rules, records, replay, forks, and ParticipantCashGame projections. |
 | [`packages/strategies`](../packages/strategies) | Policy/Action Selector implementation and validation. |
 | [`packages/solver`](../packages/solver) | Deferred Solver capability boundary. |
@@ -41,6 +41,7 @@ package implementations.
 - [ADR-0029](adr/0029-retire-the-playground.md): retirement of the independent Playground.
 - [ADR-0030](adr/0030-handoff-hosted-authority-after-listener-readiness.md): hosted single-authority handoff and application readiness.
 - [ADR-0031](adr/0031-host-production-on-one-oracle-always-free-vm.md): production hosting on one Oracle Always Free VM.
+- [ADR-0039](adr/0039-derive-presentation-phase-lengths-from-shared-choreography.md): presentation timing shared by the server and the Trainer, in Contracts.
 
 Seed derivation, random sources, deck order/shuffle, and selector sampling are
 specified in [random v1](random-v1.md).

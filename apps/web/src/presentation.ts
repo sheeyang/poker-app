@@ -1,4 +1,4 @@
-import type { BoardStreet, ObservableTableSession } from '@poker/contracts';
+import { handEndsAt, type BoardStreet, type ObservableTableSession } from '@poker/contracts';
 
 /**
  * Presentation of the server's schedule. Pure: the Trainer shows already-received facts at their server
@@ -22,14 +22,14 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
   const undealt = upcoming.some(phase => phase.kind === 'deal');
   const unrevealed = upcoming.some(phase => phase.kind === 'showdown');
   const boardCount = Math.min(state.board.length, ...upcoming.flatMap(phase => phase.kind === 'street' && phase.street !== 'preflop' ? [boardBefore[phase.street]] : []));
-  const settling = state.status === 'completed-hand' && upcoming.some(phase => phase.kind === 'payout');
-  if (!undealt && !unrevealed && boardCount === state.board.length && !settling) return table;
+  const unpaid = state.status === 'completed-hand' && upcoming.some(phase => phase.kind === 'payout');
+  if (!undealt && !unrevealed && boardCount === state.board.length && !unpaid) return table;
   const received = (participantId: string, transfers: typeof state.payouts) => (transfers ?? []).filter(t => t.participantId === participantId).reduce((total, t) => total + t.amount, 0);
   return { ...table, view: { ...table.view, state: {
     ...state,
     board: state.board.slice(0, boardCount),
     participants: state.participants.map(p => {
-      const shown = settling ? { ...p, stack: p.stack - received(p.participantId, state.payouts) - received(p.participantId, state.returns) } : p;
+      const shown = unpaid ? { ...p, stack: p.stack - received(p.participantId, state.payouts) - received(p.participantId, state.returns) } : p;
       if (undealt && p.inHand) {
         const { holeCards: _hidden, ...rest } = shown;
         return { ...rest, cardCount: 0 };
@@ -41,38 +41,38 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
       }
       return shown;
     }),
-    ...(settling ? { status: 'active-hand' as const, payouts: [], returns: [] } : {}),
+    ...(unpaid ? { status: 'active-hand' as const, payouts: [], returns: [] } : {}),
   } } };
 }
 
 /**
- * Whether the latest Hand has ended at server time `serverNow`: its payout phase is over, or no Hand has been paid
- * out under a schedule. Until then the Hand is still in progress for management.
+ * Whether the latest Hand has ended at server time `serverNow`: its last phase, the Settle after its payout, is over, or
+ * no Hand has been paid out under a schedule. Until then the Hand is still in progress for management.
  */
-export function payoutEnded(table: ObservableTableSession, serverNow: number): boolean {
-  const payout = phasesOf(table).findLast(phase => phase.kind === 'payout');
-  return !payout || serverNow >= payout.endsAt;
+export function handEnded(table: ObservableTableSession, serverNow: number): boolean {
+  const endsAt = handEndsAt(phasesOf(table));
+  return endsAt === undefined || serverNow >= endsAt;
 }
 
 /**
- * Whether a Hand is in progress at server time `serverNow`: it is being played, or its payout phase has not ended. The
+ * Whether a Hand is in progress at server time `serverNow`: it is being played, or it has not ended (`handEnded`). The
  * table, the Current Table banner and the saved-tables ledger all say "Hand in progress" or "Between hands" by this.
  */
 export function handInProgress(table: ObservableTableSession, serverNow: number): boolean {
-  return table.view.state.status === 'active-hand' || !payoutEnded(table, serverNow);
+  return table.view.state.status === 'active-hand' || !handEnded(table, serverNow);
 }
 
 /**
- * Whether Deal is available at server time `serverNow`: the latest Hand has ended (`payoutEnded`) and no After-Hand
+ * Whether Deal is available at server time `serverNow`: the latest Hand has ended (`handEnded`) and no After-Hand
  * Request is still waiting. The server applies those in their own commit before it accepts a Deal, so a Deal sent
  * before the view without them arrives would name a stale revision. Mirrors the server's rule; the server alone decides.
  */
 export function dealOpen(table: ObservableTableSession, serverNow: number): boolean {
-  return payoutEnded(table, serverNow) && table.pendingChanges.length === 0;
+  return handEnded(table, serverNow) && table.pendingChanges.length === 0;
 }
 
 /** The Action Window of the current decision, if the schedule has one. */
-function currentWindow(table: ObservableTableSession) {
+export function currentWindow(table: ObservableTableSession) {
   const state = table.view.state, window = table.schedule.actionWindow;
   return state.status === 'active-hand' && window && window.participantId === state.actorId && window.decisionId === state.decisionId ? window : undefined;
 }
@@ -95,12 +95,6 @@ export function deadlineCountdown(table: ObservableTableSession, serverNow: numb
   const window = currentWindow(table);
   if (window?.deadlineAt === undefined) return undefined;
   return Math.max(0, Math.ceil((window.deadlineAt - Math.max(serverNow, window.opensAt)) / 1000));
-}
-
-/** The whole seconds the current decision's Action Window lasts, from opening to its Action Deadline; `undefined` without one. */
-export function deadlineLength(table: ObservableTableSession): number | undefined {
-  const window = currentWindow(table);
-  return window?.deadlineAt === undefined ? undefined : Math.max(1, Math.round((window.deadlineAt - window.opensAt) / 1000));
 }
 
 /**

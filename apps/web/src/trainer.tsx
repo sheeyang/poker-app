@@ -25,6 +25,8 @@ import { TableSkeleton } from './loading-skeleton.js';
 import { SeatGlyph } from './felt.js';
 import { actionLabel, chips, modeLabel, playerName } from './table-model.js';
 import { usePresentation } from './use-presentation.js';
+import { EASE, EASE_IN } from './motion.js';
+import { foldRemovedNotices } from './overlay-motion.js';
 
 /**
  * A table's own page, `/practice/<id>` or `/online/<id>`: the table named by the address, shown to its Participants.
@@ -33,9 +35,11 @@ import { usePresentation } from './use-presentation.js';
  */
 export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSessionId: string }) {
   const selected = tableSessionId;
-  const analysisOpen = useSession(s => s.analysisOpen), animations = useSession(s => s.animations);
+  const analysisOpen = useSession(s => s.analysisOpen);
   const [settings, setSettings] = useState<false | 'all'>(false), [joinLinkOpen, setJoinLinkOpen] = useState(false);
   const { identity, command, live, consumeLive } = useShell();
+  // Notices the app removes fold away, so the ones below slide up instead of jumping.
+  const foldNotices = useCallback((node: HTMLDivElement) => foldRemovedNotices(node), []);
   const navigate = useNavigate(), queryClient = useQueryClient();
   const read = useQuery({ queryKey: ['table-session', selected], queryFn: ({ signal }) => api.readSession(selected, signal), enabled: identity.isSuccess, structuralSharing: retainNewestTable });
   const unread = read.error instanceof RequestFailure && read.error.code === 'not-found';
@@ -86,7 +90,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const presentation = usePresentation(current, humanId);
   const shown = presentation?.table;
   const handDecisions = analysis.acceptedDecisions.filter(d => d.handId === current?.view.state.handId);
-  const handOpen = current?.view.state.status === 'active-hand' || presentation?.payoutEnded === false;
+  const handOpen = current?.view.state.status === 'active-hand' || presentation?.handEnded === false;
   // At an Online Table: whose table it is, who is watching, and the ways in for a Guest without a Seat.
   const online = current?.mode === 'online';
   const owner = !!current && current.viewerParticipantId === current.ownerParticipantId;
@@ -112,12 +116,28 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   function review(id?: string) {
     if (id) analysis.selectDecision(id);
     else if (handDecisions.length) analysis.selectView('hand');
+    const opening = !useSession.getState().analysisOpen;
     useSession.setState({ analysisOpen: true });
-    requestAnimationFrame(() => document.getElementById('analysis-panel')?.focus({ preventScroll: true }));
+    requestAnimationFrame(() => {
+      const panel = document.getElementById('analysis-panel');
+      // Opened, the panel slides in from the right edge; one already open stays put.
+      if (opening) panel?.animate([{ translate: '60px 0', opacity: 0 }, { translate: '0 0', opacity: 1 }], { duration: 300, easing: EASE });
+      panel?.focus({ preventScroll: true });
+    });
   }
+  const closing = useRef(false);
   function closeAnalysis() {
-    useSession.setState({ analysisOpen: false });
-    requestAnimationFrame(() => document.getElementById('play-controls')?.focus({ preventScroll: true }));
+    const panel = document.getElementById('analysis-panel');
+    const done = () => {
+      closing.current = false;
+      useSession.setState({ analysisOpen: false });
+      requestAnimationFrame(() => document.getElementById('play-controls')?.focus({ preventScroll: true }));
+    };
+    if (!panel) { done(); return; }
+    if (closing.current) return;
+    closing.current = true;
+    // It leaves the way it came, faster; the table takes the space once it has gone.
+    panel.animate([{ translate: '0 0', opacity: 1 }, { translate: '40px 0', opacity: 0 }], { duration: 180, easing: EASE_IN, fill: 'forwards' }).onfinish = done;
   }
   if (outcome?.show === 'join-form' || outcome?.show === 'password-join-form') return <JoinTable tableSessionId={selected} preview={outcome.preview} joined={joined} />;
   if (unread && !outcome && !preview.error) return <JoinTableSkeleton />;
@@ -144,7 +164,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   return <>
     <main id="main-table" className={`play-workspace ${analysisOpen ? 'with-analysis' : ''}`}>
       <div className="play-area">
-        <div className="table-notices">
+        <div className="table-notices" ref={foldNotices}>
           <CommandFeedback command={command} />
           {identity.isError && <div className="global-notice notice-error" role="alert"><div><strong>Couldn’t connect to the poker server.</strong><p>This table is still saved.</p></div><button onClick={() => void identity.refetch()}>Retry connection</button></div>}
           {current && <>
@@ -169,11 +189,11 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
             {/* The tray announces the next Hand; this is its glanceable echo beside the Hand it follows. */}
             {nextHandShort && <span className="hand-status-next" aria-hidden="true">{nextHandShort}</span>}</div>
           {preparing ? <section className="practice-preparing" role="status"><Icon name="cards" size={38} /><h2>{setup.paused ? 'Your setup is saved.' : setup.afterHandId === undefined ? 'Getting everyone to the table…' : 'Preparing the next hand…'}</h2><p>{setup.paused ?? (setup.afterHandId === undefined ? `${current.view.state.participants.filter(p => p.seat !== null).length} of ${current.bindings.length} players seated. Your hand starts next.` : 'Returning players and refilling empty stacks before the deal.')}</p>{setup.paused && <div className="button-row"><button className="primary" disabled={command.busy} onClick={() => { command.dismiss(); useSession.getState().setSetup({ ...setup, paused: undefined }); }}>Continue setup</button><button onClick={() => { useSession.getState().setSetup(null); setSettings('all'); }}>Table options</button></div>}</section> : <>
-            <PokerTable table={shown} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} countdownLength={presentation.countdownLength} nextHand={presentation.nextHand} events={live.recentEvents} eventCount={live.eventCount} animate={animations} handOpen={handOpen} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} />
+            <PokerTable table={shown} serverNow={presentation.serverNow} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} nextHand={presentation.nextHand} handOpen={handOpen} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} />
 
           </>}
           <div className="table-dock"><div className="table-dock-inner">
-            {!preparing && <div id="play-controls" className="play-controls" data-timed={shown.options.actionTimeLimitSeconds ? '' : undefined} tabIndex={-1}><ActionTray table={shown} actionOpen={presentation.actionOpen} countdown={presentation.countdown} countdownLength={presentation.countdownLength} dealOpen={presentation.dealOpen} nextHand={presentation.nextHand} command={command} openSettings={() => interactions.chooseSeats()} review={review} online={onlineActions} /></div>}
+            {!preparing && <div id="play-controls" className="play-controls" data-timed={shown.options.actionTimeLimitSeconds ? '' : undefined} tabIndex={-1}><ActionTray table={shown} actionOpen={presentation.actionOpen} countdown={presentation.countdown} dealOpen={presentation.dealOpen} nextHand={presentation.nextHand} command={command} openSettings={() => interactions.chooseSeats()} review={review} online={onlineActions} /></div>}
           <div className="below-table">{watching.length > 0 && <p className="table-watchers"><span>Watching</span>{watching.map(binding => participantActions(current, binding.participantId, handOpen).length ? <button key={binding.participantId} className="watching-player" data-table-participant={binding.participantId} aria-label={`${playerName(current, binding)} actions`} aria-haspopup="menu" onClick={event => interactions.openParticipant(binding.participantId, event.currentTarget)}>{playerName(current, binding)}</button> : <span key={binding.participantId}>{playerName(current, binding)}</span>)}</p>}<details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === humanId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details></div>
           <footer className="table-footer"><span>All amounts in chips</span></footer>
           </div></div>

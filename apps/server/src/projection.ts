@@ -1,4 +1,4 @@
-import type { ConcreteAction, ObservableTableOptions, ObservableCashGameState, ObservableGameConfiguration, ObservablePresentationEvent, ObservableTableSession, ObservableTableUpdate, ParticipantBinding, StrategyDescriptor, TableOptions, TableSchedule } from '@poker/contracts';
+import { presentingPhase, readPhaseInputs, type ConcreteAction, type ObservableTableOptions, type ObservableCashGameState, type ObservableGameConfiguration, type ObservablePresentationEvent, type ObservableTableSession, type ObservableTableUpdate, type ParticipantBinding, type PresentedPhase, type StrategyDescriptor, type TableOptions, type TableSchedule } from '@poker/contracts';
 import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 import { handInProgress } from './after-hand.js';
@@ -52,9 +52,16 @@ export function projectOptions(options: TableOptions): TableOptions {
 export function projectTableOptions(aggregate: PersistedTableSession): ObservableTableOptions {
   return { ...projectOptions(aggregate.options), ...(aggregate.tablePasswordHash ? { hasTablePassword: true as const } : {}) };
 }
+/** A phase's kind and what it presents, its Phase Inputs read field by field. */
+function projectPresented(phase: PresentedPhase): PresentedPhase {
+  if (phase.kind === 'settle') return { kind: phase.kind };
+  const inputs = readPhaseInputs(phase.kind, phase.inputs);
+  if (!inputs) throw new Error('A scheduled phase carries Phase Inputs of the wrong shape.');
+  return presentingPhase(phase.kind, inputs);
+}
 function projectSchedule(schedule: TableSchedule): TableSchedule {
   return {
-    phases: schedule.phases.map(p => ({ kind: p.kind, handId: p.handId, street: p.street, startsAt: p.startsAt, endsAt: p.endsAt, durationMs: p.durationMs })),
+    phases: schedule.phases.map(p => ({ ...projectPresented(p), handId: p.handId, street: p.street, startsAt: p.startsAt, endsAt: p.endsAt, durationMs: p.durationMs })),
     actionWindow: schedule.actionWindow && { participantId: schedule.actionWindow.participantId, decisionId: schedule.actionWindow.decisionId, opensAt: schedule.actionWindow.opensAt,
       ...(schedule.actionWindow.deadlineAt !== undefined ? { deadlineAt: schedule.actionWindow.deadlineAt } : {}),
       ...(schedule.actionWindow.liveAnalysisDisallowed ? { liveAnalysisDisallowed: true as const } : {}) },

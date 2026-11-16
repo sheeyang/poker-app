@@ -9,7 +9,7 @@ A Guest is a server row reached by a long-lived cookie. There is no login, and n
 ## Decisions
 
 - **A Guest stays bound to one browser.** Clearing site data or using another browser makes a new Guest. This is stated in the Guest glossary entry, and the Trainer says it once, when the Guest first sets a display name.
-- **Last-opened times move to the server**, keyed by Guest and table, beside membership. Browser storage keeps only device preferences: card animations and the analysis panel. Times already in a browser are not imported; saved lists start unordered and order themselves as tables are opened.
+- **Last-opened times move to the server**, keyed by Guest and table, beside membership. Browser storage keeps only device preferences: card animations and the analysis panel (card animations were later removed; see ADR-0038). Times already in a browser are not imported; saved lists start unordered and order themselves as tables are opened.
 - **A Guest with no tables and no display name is purged** after a period of inactivity, starting at 90 days. This needs a last-seen time on the Guest, updated at most once a day. A Guest who owns or belongs to a table is never purged.
 - **The cookie slides.** Each visit sets it again with a fresh year, at most once a day, so a regular player does not become a new Guest on an anniversary.
 
