@@ -127,9 +127,9 @@ Admin Mode is enabled by default for M1. Its explicit Reveal Hidden Information 
 
 - Trainer recommendations, Reference Strategy selection UI, Live Analysis, Decision Score, Action Rank Score, and retained derived-analysis results/caches (M2).
 - The main product Web interface, polished product UX, dealing/burn animations, and animation-driven flows (M3, with elaborate animations in M5). Safe presentation-event contracts are included now.
-- Product hand history, action-by-action replay tooling, reanalysis, counterfactual Strategy comparison, Range Visualizer, Equity / Poker Math Overlay, and deeper Research tools (M6). Engine reconstruction, historical participant projections, and authorized completed-Hand inspection are included now.
-- A concrete Solver, language-neutral Solver execution implementation, hypothetical scenario construction, or a shared transition-kernel extraction (M9).
-- Automated successive-Hand simulation runs, mass simulation, benchmarking, Research Lab comparisons, throughput targets, and non-trivial performance optimization (M10).
+- Product hand history, action-by-action replay tooling, reanalysis, counterfactual Strategy comparison, and deeper Research tools (M6), plus the Range Visualizer and Equity / Poker Math Overlay (M7). Engine reconstruction, historical participant projections, and authorized completed-Hand inspection are included now.
+- A concrete Solver, language-neutral Solver execution implementation, hypothetical scenario construction, or a shared transition-kernel extraction (M10).
+- Automated successive-Hand simulation runs, mass simulation, benchmarking, Research Lab comparisons, throughput targets, and non-trivial performance optimization (M11).
 - Accounts, publication/deployment beyond local development, online multiplayer, multiple server processes, distributed mutation coordination, and database row locking for multi-server operation.
 - Other poker variants, tournaments, separate rules profiles, alternative ante structures, straddles, missed-blind debt, seat-change penalties, optional showing/mucking, rabbit hunting, dealer corrections, and other alternative live-poker procedures.
 - Persistent Strategy memory, manual Action Selectors, browser-authoritative poker, unrestricted live inspection, persisted engine snapshots/event histories, Reset Table, backward compatibility guarantees, migrations for pre-release record-breaking changes, or version-specific old-engine replay implementations.
@@ -137,6 +137,6 @@ Admin Mode is enabled by default for M1. Its explicit Reveal Hidden Information 
 ## Further Notes
 
 - Source of scope: M1 in the milestone plan. Relevant accepted decisions are ADR-0001, ADR-0005, ADR-0009, and ADR-0011 through ADR-0022, plus ADR-0025. Superseded ADR-0002, ADR-0003, ADR-0007, and ADR-0010 are historical context only.
-- Milestone numbers follow the current plan: Trainer M2, main product UI M3, animations M5, Replay/Analysis/Research M6, Solver M9, and simulation/benchmarking M10. This spec changes no accepted architectural decision.
+- Milestone numbers follow the current plan: Trainer M2, main product UI M3, animations M5, Replay/Analysis/Research M6, Range Visualizer and Equity Overlay M7, Solver M10, and simulation/benchmarking M11. This spec changes no accepted architectural decision.
 - The canonical action comparator, absolute 1e-9 normalization tolerance, and enabled-by-default seat-change policy are concrete M1 details chosen by this spec where existing ADRs leave them open. Record those choices in implementation documentation and tests. Versioned random algorithms and request fingerprints must likewise be explicit and reproducible before completion.
 - This is one milestone spec for issue-tracker publication with the ready-for-agent label. It does not request implementation, create child tickets, or alter the roadmap. The principal test seams require the check specified by the invoked to-spec skill before publication.

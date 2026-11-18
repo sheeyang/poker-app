@@ -18,4 +18,4 @@ Giving every table its own URL raised the question of what a friend sees when so
 - Every Participant holds the invitation, because it is in their address bar. Without a Table Password, anyone at the table can bring in others, where previously only the owner could.
 - A table with no Table Password has no way to keep a removed Guest out. The owner sets or changes the password to do so, and every later newcomer then needs it.
 - An earlier `/join/<token>` link stops working, as [ADR-0014](0014-allow-pre-release-record-breaking-changes.md) allows before release.
-- The M11 item to make Removal survive cleared browser storage no longer applies.
+- The M12 item to make Removal survive cleared browser storage no longer applies.

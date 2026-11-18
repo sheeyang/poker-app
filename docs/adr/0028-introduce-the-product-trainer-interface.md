@@ -53,8 +53,8 @@ face-down burn motion. Complete views render immediately, and missed or skipped
 animations never replay state transitions or gate legal actions. Reduced motion
 and the user's animation preference disable motion without changing gameplay.
 
-General historical navigation, replay, counterfactual comparison, range and equity
-tools remain M6. This decision extends ADR-0017, ADR-0022 and ADR-0026.
+General historical navigation, replay and counterfactual comparison remain M6;
+range and equity tools remain M7. This decision extends ADR-0017, ADR-0022 and ADR-0026.
 
 ## UX revision after product feedback
 
