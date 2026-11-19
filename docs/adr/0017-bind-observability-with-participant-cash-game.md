@@ -1,5 +1,7 @@
 # Bind Observability with ParticipantCashGame
 
+**Amended by [ADR-0040](0040-cover-the-whole-table-session-in-observable-session-history.md):** Observable Session History covers the whole Table Session rather than starting when a Participant joins. Every Participant sees the same public history of every Hand, plus their own hole cards. The rest of this decision stands.
+
 CashGame will expose a participant-scoped ParticipantCashGame facade that binds one stable ParticipantId and constructs participant-safe views, historical projections, and presentation events. WebSocket updates contain a complete Observable Game View for synchronization plus optional Observable Presentation Events for animation; raw CashGame state and CashGameEvents remain server-side. Complete views make reconnects and missed updates self-healing, while presentation events are never an authoritative state delta.
 
 The facade is projection-only: authenticated server orchestration submits mutations through CashGame, and binding an observer does not establish authorization. The server explicitly maps these projections to plain wire DTOs owned by `packages/contracts`, which does not depend on the engine.

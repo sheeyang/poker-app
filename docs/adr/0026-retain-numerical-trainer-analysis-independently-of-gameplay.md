@@ -1,5 +1,7 @@
 # Retain Numerical Trainer Analysis Independently of Gameplay
 
+**Amended by [ADR-0041](0041-add-table-history-replay-and-overall-history.md):** the Reference Strategy and Live Analysis setting form the Guest's Trainer Configuration, used at every table, in review and in every summary. Live Analysis defaults to on. Overall-history summaries are delivered in M6, with bulk reanalysis under the `history-analysis` purpose.
+
 **Amended by [ADR-0032](0032-extend-table-sessions-for-shared-online-play.md):** at both table modes, the Reference Strategy, Live Analysis setting, Analysis Results, scores, and summaries below belong to a Participant rather than a Table Session. Authorization follows the Participant's Human Controller instead of Table Ownership. An Online Table may disallow Live Analysis. Timeout Actions are scored as human decisions, and a Session summary tab replaces the explicit end-of-session action.
 
 M2 proves the complete numerical analysis pipeline using the existing baseline Strategies, with stronger Strategies remaining separate scope. The application provides Policy probabilities, concrete sizings, the Reference Strategy's selected action, and numerical alignment scores; the human interprets them, and the application does not give advice or label decisions good or bad. The established scoring formulas and package boundaries in ADR-0006, ADR-0008, and ADR-0019 still apply.

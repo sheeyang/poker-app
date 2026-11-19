@@ -1,6 +1,6 @@
 # Extend Table Sessions for Shared Online Play
 
-**Status:** Accepted. The fixed per-kind Presentation Phase lengths and the pause between Hands (Play timing) are superseded by [ADR-0039](0039-derive-presentation-phase-lengths-from-shared-choreography.md) (spec #68). Everything else remains in effect.
+**Status:** Accepted. The fixed per-kind Presentation Phase lengths and the pause between Hands (Play timing) are superseded by [ADR-0039](0039-derive-presentation-phase-lengths-from-shared-choreography.md) (spec #68). The when-joined Observable Session History is superseded by [ADR-0040](0040-cover-the-whole-table-session-in-observable-session-history.md), and the per-Participant Trainer configuration by the Guest's Trainer Configuration in [ADR-0041](0041-add-table-history-replay-and-overall-history.md). Everything else remains in effect.
 
 [M4 — Shared gameplay foundation](../milestones.md#m4--shared-gameplay-foundation) opens the hosted product to the public and lets humans play each other. Every Table Session is created as either a Practice Table, where one human plays only against Bots, or an Online Table, which Guests join through its Join Link. The mode is fixed at creation and is never inferred from how many humans are seated. Practice keeps the existing Trainer flow, while Online Tables are always timed and automatically dealt. This replaces the earlier M4 plan of one manually provisioned Table Session with two secret per-Participant links. Accounts, lobbies, and matchmaking remain unscheduled.
 
