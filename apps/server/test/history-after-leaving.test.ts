@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
 import { highestProbabilityPlayingStrategy, baselinePlayingStrategy, defaultPlayingStrategy, strategyToken, supportedStrategies, type DecisionAnalysis, type TableHandReplay, type ObservableTableSession, type ScoreSummary, type ServerLiveMessage, type StrategyDescriptor, type TableHistory } from '@poker/contracts';
+import { createStrategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
 import { idleTableCloseMs, idleTableSweepMs } from '../src/closing.js';
@@ -20,9 +21,22 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controller: TableSessionControllerCommands;
+/** While `holding`, each Strategy evaluation waits here until released, then the real Strategy answers it. */
+const held: (() => void)[] = [];
+let holding = false;
+const hold = () => { holding = true; };
+const release = () => { holding = false; for (const answer of held.splice(0)) answer(); };
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controller = commands; } });
+  // Enough running slots that every submitted analysis runs at once: the held evaluations are all the outstanding jobs.
+  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, jobRunnerOptions: { concurrency: 32, maximumQueued: 32 }, onControllerCommandsReady: commands => { controller = commands; },
+    strategyFactory: descriptor => {
+      const strategy = createStrategy(descriptor);
+      return { actionSelector: strategy.actionSelector, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, options) => {
+        if (holding) await new Promise<void>(resolve => held.push(resolve));
+        return strategy.policy.evaluate(view, options);
+      } } };
+    } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -302,4 +316,41 @@ test('at a table not in memory, and once it is a Closed Table, former Participan
   await strangerRefused(t.id, benDecision, (await (await post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId: benDecision, history: true })).json() as DecisionAnalysis).requestId);
   expect(loaded(t.id)).toBe(false);
   expect(await aggregate()).toEqual(closed);
+});
+
+test('a former Participant\'s study is history-analysis under the cap of 8 even when asked for as in-table study, a summary included', async () => {
+  const t = await threeHanded();
+  for (const hand of ['hand-1', 'hand-2', 'hand-3']) await t.playHand(hand);
+  expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
+  const decisions = t.decisions.get(t.ben.participantId)!;
+  expect(decisions.length).toBeGreaterThan(8);
+  // Every post-action analysis has finished: nothing is held yet.
+  await expect.poll(async () => (await Promise.all(decisions.map(async decisionId => ((await (await post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId, history: true })).json()) as DecisionAnalysis).status))).every(status => status === 'complete')).toBe(true);
+  await study(t.ben.cookie, baselinePlayingStrategy);
+  hold();
+  try {
+    // Asked plainly, with neither `history` nor a Strategy, as the in-table analysis panel asks.
+    const asked = await Promise.all(decisions.map(decisionId => post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId })));
+    expect(asked.map(response => response.status)).toEqual(decisions.map(() => 200));
+    await expect.poll(() => held.length).toBe(8);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(held.length).toBe(8);
+    release();
+    for (const response of asked) {
+      const { requestId } = await response.json() as DecisionAnalysis;
+      await expect.poll(async () => ((await (await get('/api/table-sessions/' + t.id + '/analysis/' + requestId, t.ben.cookie)).json()) as DecisionAnalysis).status).toBe('complete');
+    }
+    // A plain session summary under yet another Reference Strategy: the same bound.
+    await study(t.ben.cookie, highestProbabilityPlayingStrategy);
+    hold();
+    const response = await post('/api/table-sessions/' + t.id + '/session-summaries', t.ben.cookie, {});
+    expect(response.status).toBe(200);
+    const summary = await response.json() as ScoreSummary;
+    expect(summary).toMatchObject({ status: 'pending', decisionCount: decisions.length });
+    await expect.poll(() => held.length).toBe(8);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(held.length).toBe(8);
+    release();
+    await expect.poll(async () => ((await (await get('/api/table-sessions/' + t.id + '/summaries/' + summary.requestId, t.ben.cookie)).json()) as ScoreSummary).status).toBe('complete');
+  } finally { release(); }
 });

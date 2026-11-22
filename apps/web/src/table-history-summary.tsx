@@ -15,7 +15,7 @@ function useTableSummary(tableSessionId: string, completedHands: number | undefi
   const key = [tableSessionId, completedHands, strategy ? strategyToken(strategy) : null];
   const created = useQuery({
     queryKey: ['table-summary', ...key], enabled: asked, staleTime: Number.POSITIVE_INFINITY, gcTime: 0, retry: false, placeholderData: keepPreviousData,
-    queryFn: () => api.createSessionSummary(tableSessionId, strategy),
+    queryFn: () => api.requestTableHistorySummary(tableSessionId, strategy),
   });
   const requestId = created.data?.requestId;
   const current = useQuery({

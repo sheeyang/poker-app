@@ -11,6 +11,11 @@ interface FrozenSummaryMetadata {
   readonly participantId: string; readonly tableSessionId: string;
   readonly capturedPokerRevision: number; readonly referenceStrategy: StrategyDescriptor; readonly decisionIds: readonly string[];
   readonly members: readonly FrozenEvaluationInput[];
+  /**
+   * The Guest whose `history-analysis` runs it, when it is study from history (Table History, a compared Strategy, a
+   * former Participant): then its analyses and mean run under that Guest's bound, never as `summary-analysis`.
+   */
+  readonly historyGuestId?: string;
 }
 export type FrozenScoreSummary = FrozenSummaryMetadata & ScoreSummaryScope;
 /**
@@ -69,8 +74,9 @@ interface HistoryRequest { readonly input: FrozenHistorySummary; requestId: stri
 export interface ScoredPage { readonly limit: number; readonly offset: number }
 interface ScoredRequest { readonly input: FrozenScoredHistory; readonly requestId: string; attemptId: string; readonly members: readonly Dependency[] }
 /**
- * All scopes/owners share this one coordinator and the application's existing runner. A table's summaries are admitted
- * under this coordinator's own small bound as `summary-analysis`. An Overall History summary's analyses are submitted
+ * All scopes/owners share this one coordinator and the application's existing runner. A table's summaries from play are
+ * admitted under this coordinator's own small bound as `summary-analysis`. A summary from history, Table History's (a
+ * compared Strategy's and a former Participant's included) and every Overall History summary, has its analyses submitted
  * at once as the Guest's `history-analysis`, whose per-Guest bound (`history`) holds back the rest of a large set
  * without a capacity error, so its progress covers the whole set.
  */
@@ -244,13 +250,14 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
   });
   return {
     async create(input: FrozenScoreSummary): Promise<ScoreSummary> {
-      const { participantId: _participant, members: _members, ...metadata } = input;
+      const { participantId: _participant, members: _members, historyGuestId, ...metadata } = input;
       const requestId = randomUUID();
       const owner: Owner = {
+        ...(historyGuestId ? { guestId: historyGuestId } : {}),
         accept: change => acceptJobResult(input.tableSessionId, input.participantId, change),
         notify: entry => publish(input.participantId, { type: 'analysis-update', resource: 'summary', tableSessionId: input.tableSessionId, requestId, attemptId: entry.attempt, status: entry.outcome.status as 'complete' | 'error' }),
       };
-      const members = dependenciesOf(input.members);
+      const members = dependenciesOf(input.members, historyGuestId);
       const entry = entryOf(owner, members);
       const request: TableRequest = { input, identity: immutableData({ ok: true as const, ...metadata, requestId, attemptId: entry.attempt, decisionCount: input.decisionIds.length }), entry };
       // Inspect every existing match without submitting missing work or changing its purpose.

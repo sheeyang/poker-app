@@ -493,14 +493,16 @@ export async function createServer(options: ServerOptions) {
       return state || reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
-  app.post<{ Params: { id: string }; Body: { strategy?: StrategyDescriptor } }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
+  // `history: true` asks from Table History: run as the reader's `history-analysis`, under their per-Guest bound, as is
+  // any summary naming a Strategy to compare and any summary a former Participant asks for (ADR-0041).
+  app.post<{ Params: { id: string }; Body: { strategy?: StrategyDescriptor; history?: true } }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).some(key => key !== 'strategy'))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request, or only a Strategy to summarize them under.' } });
+    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || request.body.history !== undefined && request.body.history !== true || Object.keys(request.body).some(key => key !== 'strategy' && key !== 'history'))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request, or a Strategy to summarize them under and whether Table History asks.' } });
     if (request.body && 'strategy' in request.body && !(options.supportsStrategy ?? isSupportedStrategy)(request.body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      const input = await mutations.captureSessionSummary(request.params.id, userId, request.body?.strategy);
+      const input = await mutations.captureSessionSummary(request.params.id, userId, { ...(request.body?.strategy ? { strategy: request.body.strategy } : {}), history: request.body?.history === true });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       const state = await summaries.create(input);
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
@@ -513,7 +515,7 @@ export async function createServer(options: ServerOptions) {
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId' && key !== 'strategy')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply the Hand ID, and optionally a Strategy.' } });
     if ('strategy' in request.body && !(options.supportsStrategy ?? isSupportedStrategy)(request.body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      const input = await mutations.captureHandSummary(request.params.id, userId, request.body.handId, request.body.strategy);
+      const input = await mutations.captureHandSummary(request.params.id, userId, request.body.handId, request.body.strategy ? { strategy: request.body.strategy } : {});
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'hand-unavailable', message: 'Choose an existing Hand.' } });
       const state = await summaries.create(input);
@@ -524,7 +526,8 @@ export async function createServer(options: ServerOptions) {
   // scheduled as `history-analysis`, behind all play and live study, under the reader's per-Guest bound.
   // `strategy` names a supported Strategy to analyze it under instead of the Guest's Reference Strategy (Counterfactual
   // Comparison): the same frozen inputs and seeds, its own result. It never changes the Guest's Trainer Configuration, and
-  // it applies only to an accepted decision, so it cannot be combined with `live`.
+  // it applies only to an accepted decision, so it cannot be combined with `live`. The server decides the schedule, not
+  // the flag: a named Strategy, and any study by a former Participant, is always `history-analysis` (ADR-0041).
   app.post<{ Params: { id: string }; Body: GetOrStartAnalysisRequest }>('/api/table-sessions/:id/analysis', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
@@ -532,18 +535,18 @@ export async function createServer(options: ServerOptions) {
     if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || request.body.history !== undefined && request.body.history !== true || request.body.live && request.body.history || request.body.live && 'strategy' in request.body || Object.keys(request.body).some(key => !['decisionId', 'live', 'history', 'strategy'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and either an optional Live Analysis request or an optional history request, with an optional Strategy for an accepted decision.' } });
     if ('strategy' in request.body && !(options.supportsStrategy ?? isSupportedStrategy)(request.body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      if (request.body.history) {
+      if (request.body.history || 'strategy' in request.body) {
         const input = await mutations.captureHistoryEvaluation(request.params.id, userId, request.body.decisionId, request.body.strategy);
         if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
         if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose one of your own accepted decisions.' } });
         const state = await analysis.getOrStart(input, { purpose: 'history-analysis', guestId: userId });
         return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
       }
-      const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId, request.body.strategy);
-      if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-      if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: request.body.strategy ? 'Choose one of your own accepted decisions.' : 'Choose a current or accepted human decision.' } });
-      if ('ok' in input) return reply.code(outcomeStatus(input)).send(input);
-      const state = await analysis.getOrStart(input, request.body.live ? 'live-analysis' : 'interactive-analysis');
+      const studied = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
+      if (studied === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+      if (studied === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });
+      if ('ok' in studied) return reply.code(outcomeStatus(studied)).send(studied);
+      const state = await analysis.getOrStart(studied.input, studied.former ? { purpose: 'history-analysis', guestId: userId } : request.body.live ? 'live-analysis' : 'interactive-analysis');
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });
