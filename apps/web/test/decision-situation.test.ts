@@ -240,6 +240,9 @@ describe('decision situation', () => {
     expect(html.replace(/<[^>]*>/g, '')).toContain('80.0/100');
     for (const removed of ['Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);
     expect(html).toContain('aria-label="Analysis settings"');
+    // The settings edit the Guest's Trainer Configuration, and say that it is one choice for every table.
+    expect(html).toContain('>Trainer Configuration</h3>');
+    expect(html.replace(/<[^>]*>/g, '')).toContain('Applies at every table, in review and in every summary.');
     expect(html).toContain('About these scores');
     expect(html).toContain('Reference actions');
     expect(html).toContain('Raise-to 150');

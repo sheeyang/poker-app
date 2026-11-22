@@ -42,6 +42,24 @@ must be 1-20 characters of letters, digits, spaces and basic punctuation
 until a name exists, and the human Participant takes the Guest's name at creation
 and keeps it when the Guest later edits their name.
 
+The Guest's Trainer Configuration (their Reference Strategy and Live Analysis
+setting) belongs to the Guest, not to any table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+It is stored with their identity; a Guest who never changed it has the default,
+with Live Analysis on. `GET /api/trainer-configuration` answers `{ ok: true,
+trainerConfiguration }`. `PUT /api/trainer-configuration` with `{ requestId,
+trainerConfiguration }` changes it for every table and answers the same shape.
+It carries no table revision. The same `requestId` and configuration apply once
+and answer the original outcome again; the same `requestId` with another
+configuration is 409 `request-id-conflict`. Anything but a complete
+`referenceStrategy` and boolean `liveAnalysis` is 400
+`invalid-trainer-configuration`, and an unsupported Strategy 400
+`unsupported-strategy`. Both routes answer 401 without an identity. Once a change
+commits, every `/api/live` connection of that Guest receives
+`{ type: 'trainer-configuration-changed' }`, with nothing else: each tab reads the
+configuration and its table views and analysis again over HTTP. Every analysis or
+summary request captures the Reference Strategy at request time, and keeps it
+after later changes.
+
 An Online Table's address is its Join Link ([ADR-0033](adr/0033-use-the-online-table-address-as-its-join-link.md)):
 the web Trainer's `/online/:tableSessionId`, which shows the table to its Participants and the
 join form to any other Guest. It never changes, and every Participant can pass it on, since
@@ -85,7 +103,7 @@ All table paths below start with `/api/table-sessions`:
 | --- | --- |
 | `POST` to the base path | There is no per-Guest table cap, so a Guest may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`), `bots`, each with `name` and `playingStrategy`, and an Online Table's `tablePassword` (see [Table Password](#table-password)). An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, closed?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`, and a [Closed Table](#closed-tables) `closed: true` as well. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
-| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. At an Online Table `inspection.adminMode` is always `false`. |
+| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and the viewing Guest's current `trainerConfiguration`, beside the table's Allow Live Analysis in `options`. At an Online Table `inspection.adminMode` is always `false`. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. When the Table Owner's Leave Table takes effect, ownership passes or the table closes in the same transition, see [Ownership](#ownership). Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until the Settle after its payout ends. They are never deferred. |
@@ -93,7 +111,6 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
 | `POST /:id/set-table-password` | Table Owner only, Online Tables only, at any time, even during a Hand. Requires `requestId` and `tablePassword`, a string to set or change the password or `null` to remove it; there is no expected revision. See [Table Password](#table-password). |
-| `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
 | `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
@@ -127,19 +144,20 @@ At a Practice Table the owner is the only human, so neither applies there. Actin
 for a Bot remains the definitive rejection 403 `actor-not-authorized`.
 
 Analysis Results, scores and summaries belong to the Participant whose decisions
-they analyze. Each one uses that Participant's own Reference Strategy, and only
+they analyze. Each one uses the Reference Strategy its Guest had when it was requested, and only
 that Participant's Human Controller can capture, read or retry it or receive its
 `analysis-update`. Its inputs are the Participant's own observable view at the
 original decision (`getView({ at })`), so later streets, showdown reveals and later
 Hands never reach it. Responses carry no game view, cards, deck or master seed, only
 the derived evaluation and selection seeds that reproduce them.
 
-The Persisted Table Session is version 2. It records the table `mode`, and each
-human binding's Guest, `membership` (`joined` or `left`) and Trainer
-configuration, the table `options`, and the
-`pendingChanges` (after-Hand requests, empty by default). Version-1 records load as Practice Tables whose human takes the
-table-level Trainer configuration, and are rewritten at their next commit. Each version names one
-format: a version-2 row that lacks part of it fails restoration (503 `record-restoration-failed`)
+The Persisted Table Session is version 3. It records the table `mode`, and each
+human binding's Guest and `membership` (`joined` or `left`), the table `options`, and the
+`pendingChanges` (after-Hand requests, empty by default). It holds no Trainer Configuration.
+Version-2 records, whose human bindings each kept one, and version-1 records, which kept one
+for the table, load with it discarded, so their Guests use their own; version 1 loads as a
+Practice Table. Both are rewritten at their next commit. Each version names one
+format: a row that lacks part of its version's format fails restoration (503 `record-restoration-failed`)
 rather than receiving defaults ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)
 on ADR-0014). The
 `table_memberships` index (Guest, table, Participant, status, last-opened time) is written in the

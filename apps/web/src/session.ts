@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useRouter } from '@tanstack/react-router';
 import { api, RequestFailure } from '@poker/client';
-import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest } from '@poker/contracts';
+import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest, TrainerConfigurationAcknowledgement } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
 import { withMembershipEnded } from './current-table.js';
 
@@ -12,6 +12,7 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'act'; readonly body: ActRequest }
   | { readonly kind: 'seat'; readonly body: SeatParticipantRequest }
   | { readonly kind: 'manage'; readonly operation: ParticipantManagementKind; readonly body: ParticipantManagementRequest }
+  /** The Guest's Trainer Configuration, for every table, asked for from this one. */
   | { readonly kind: 'trainer'; readonly body: SetTrainerConfigurationRequest }
   | { readonly kind: 'strategy'; readonly body: SetPlayingStrategyRequest }
   | { readonly kind: 'retry-bot'; readonly body: RetryBotRequest }
@@ -50,7 +51,7 @@ export const useSession = create<SessionState>()(persist(set => ({
   },
 }));
 
-function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAcknowledgement> {
+function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAcknowledgement | TrainerConfigurationAcknowledgement> {
   if (attempt.kind === 'create') return api.createSession(attempt.body);
   const { tableId } = attempt;
   switch (attempt.kind) {
@@ -58,7 +59,7 @@ function execute(attempt: Attempt): Promise<CreationAcknowledgement | MutationAc
     case 'act': return api.act(tableId, attempt.body);
     case 'seat': return api.seatParticipant(tableId, attempt.body);
     case 'manage': return api.manageParticipant(tableId, attempt.operation, attempt.body);
-    case 'trainer': return api.setTrainerConfiguration(tableId, attempt.body);
+    case 'trainer': return api.setTrainerConfiguration(attempt.body);
     case 'strategy': return api.setPlayingStrategy(tableId, attempt.body);
     case 'retry-bot': return api.retryBot(tableId, attempt.body);
     case 'add-bot': return api.addBot(tableId, attempt.body);
@@ -79,8 +80,14 @@ export function useCommand() {
   const mutation = useMutation({
     mutationFn: execute,
     retry: false,
-    onSuccess: async (result, attempt) => {
+    onSuccess: async (acknowledgement, attempt) => {
       setPending(null);
+      // The Guest's own change: every table view presents it, this one included.
+      if (attempt.kind === 'trainer') {
+        await Promise.all([queryClient.invalidateQueries({ queryKey: ['trainer-configuration'] }), queryClient.invalidateQueries({ queryKey: ['table-session'] })]);
+        return;
+      }
+      const result = acknowledgement as CreationAcknowledgement | MutationAcknowledgement;
       if (attempt.kind === 'create') {
         const setup = useSession.getState().setup;
         if (setup?.requestId === attempt.body.requestId) useSession.getState().setSetup({ ...setup, tableId: result.tableSessionId });
