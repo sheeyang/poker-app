@@ -806,11 +806,13 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     }
     /**
      * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
-     * Reference Strategy their Guest has now. It follows the same rule as reading the history, so it loads nothing.
-     * `undefined` for a Guest who may not read the table; `null` for a decision that is not their own accepted one.
+     * Reference Strategy their Guest has now, or under the supported `strategy` the request names (Counterfactual
+     * Comparison: only the Strategy in the identity differs, so the frozen view and the seeds are the same). It follows
+     * the same rule as reading the history, so it loads nothing. `undefined` for a Guest who may not read the table;
+     * `null` for a decision that is not their own accepted one.
      */
-    async function captureHistoryEvaluation(id: string, userId: string, decisionId: string): Promise<FrozenEvaluationInput | null | undefined> {
-      const { referenceStrategy } = await trainerConfigurations.current(userId);
+    async function captureHistoryEvaluation(id: string, userId: string, decisionId: string, strategy?: StrategyDescriptor): Promise<FrozenEvaluationInput | null | undefined> {
+      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
       const table = await readableTable(id, userId);
       if (!table) return undefined;
       const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
@@ -1388,16 +1390,18 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     captureSessionSummary: (id: string, userId: string) => captureScoreSummary(id, userId, { scope: 'table-session' }),
     /**
      * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
-     * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed.
+     * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed. A named
+     * supported `strategy` replaces the Guest's Reference Strategy, and only for an accepted decision (`null` otherwise).
      */
-    captureEvaluation: (id: string, userId: string, decisionId: string) => asMember(id, userId, async () => {
-      const { referenceStrategy } = await trainerConfigurations.current(userId);
+    captureEvaluation: (id: string, userId: string, decisionId: string, strategy?: StrategyDescriptor) => asMember(id, userId, async () => {
+      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
       return enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
       const session = tables.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
       const input = captureEvaluation(session, participantId, decisionId, referenceStrategy);
+      if (strategy) return input?.acceptedAction ? input : null;
       if (!input || input.acceptedAction) return input;
       const window = session.aggregate.schedule.actionWindow;
       const disallowed = window?.decisionId === decisionId ? !!window.liveAnalysisDisallowed : !session.aggregate.options.allowLiveAnalysis;

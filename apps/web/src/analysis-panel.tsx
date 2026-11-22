@@ -125,12 +125,15 @@ export function DecisionScores({ scores }: { scores: NonNullable<Extract<Decisio
   return <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>;
 }
 
-/** The Reference Policy distribution, its sizings and the Reference action, with the player's own action marked. */
-export function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
+/**
+ * A Policy's distribution, its sizings and its selected action, with the player's own action marked. `reference` is false
+ * for a Strategy compared beside the Reference Strategy, which then isn't called the Reference.
+ */
+export function DecisionResult({ data, reference = true }: { data: Extract<DecisionAnalysis, { status: 'complete' }>; reference?: boolean }) {
   const accepted = data.scoredDecision?.acceptedAction;
   return <>
-    <div className="distribution-heading"><h3>Reference actions</h3><span>Probability</span></div>
-    <ul className="probability-tree" aria-label="Reference Policy distribution">{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
+    <div className="distribution-heading"><h3>{reference ? 'Reference actions' : 'Policy actions'}</h3><span>Probability</span></div>
+    <ul className="probability-tree" aria-label={reference ? 'Reference Policy distribution' : 'Policy distribution'}>{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
       {(parent.type === 'raise' || parent.type === 'bet') && <ul>{data.evaluation.policyResult.choices.filter(c => c.action.type === parent.type).map(choice => <li key={actionLabel(choice.action)}><span>{actionLabel(choice.action)}{accepted && JSON.stringify(accepted) === JSON.stringify(choice.action) && <span className="you-marker">You</span>}</span><strong>{choice.probability.toFixed(2)}</strong></li>)}</ul>}
     </li>)}</ul>
     <div className="reference-selected"><span>{data.referenceStrategy.selector.id === 'seeded-sampling' ? 'Sampled action' : 'Selected action'}</span><strong>{actionLabel(data.evaluation.selectedAction)}</strong></div>
