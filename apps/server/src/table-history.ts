@@ -1,4 +1,4 @@
-import type { TableHandReplay, TableHistory, TableHistoryHand } from '@poker/contracts';
+import type { ObservableHandReplay, TableHandReplay, TableHistory, TableHistoryHand } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
 import { findBinding, type PersistedTableSession } from './aggregate.js';
 
@@ -40,7 +40,7 @@ export function handsOf(aggregate: PersistedTableSession, game: CashGame, partic
  * row and the names of everyone seated in it; `undefined` when `handId` is not a completed Hand of the table.
  */
 export function handReplay(aggregate: PersistedTableSession, game: CashGame, participantId: string, handId: string): TableHandReplay | undefined {
-  let replay;
+  let replay: ObservableHandReplay;
   try { replay = game.forParticipant(participantId).getReplay(handId); } catch (error) { if (error instanceof RangeError) return undefined; throw error; }
   const hand = handsOf(aggregate, game, participantId).find(row => row.handId === handId);
   if (!hand) return undefined;

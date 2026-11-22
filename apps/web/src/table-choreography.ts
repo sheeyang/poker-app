@@ -203,13 +203,14 @@ export interface StackRoll { readonly from: number; readonly id: string }
 
 /**
  * Plays the table's motion. Returns the stage's ref, and the stack figures that roll in this render: chips added to a
- * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows.
+ * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows. A `still` table
+ * (a Replay Step, drawn instantly) plays no motion and leaves the live table's remembered scene alone.
  */
-export function useTableMotion(table: ObservableTableSession, serverNow: number) {
+export function useTableMotion(table: ObservableTableSession, serverNow: number, still = false) {
   const stage = useRef<HTMLElement>(null);
-  const kept = remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
+  const kept = still ? undefined : remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
   const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>());
-  const cues = planMotion(scene.current, table).filter(cue => serverNow - cue.at < lasts(cue));
+  const cues = still ? [] : planMotion(scene.current, table).filter(cue => serverNow - cue.at < lasts(cue));
   useLayoutEffect(() => {
     const node = stage.current, fx = node?.querySelector<HTMLElement>('[data-motion-layer="over"]'), under = node?.querySelector<HTMLElement>('[data-motion-layer="under"]');
     scene.current = sceneOf(table);
@@ -227,7 +228,7 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number)
       resting.set(key, old && moving ? old : value);
     }
     last.current = resting;
-    remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
+    if (!still) remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
   });
   useEffect(() => () => { for (const animation of running.current) animation.cancel(); }, []);
   const rolls = new Map<string, StackRoll>();

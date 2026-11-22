@@ -1329,3 +1329,72 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
 a.text-button { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
 a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .history-link { margin-bottom: 8px; }
+/* ==========================================================================
+   Replay: one Hand of Table History on the table's own felt, a step at a
+   time, above the list. The step dock under the felt is the table's action
+   tray in replay: what this step shows, then Back, the streets, your next
+   decision and Next. On a phone the dock rides the bottom of the screen
+   while the felt is in view, so the cards and the controls are seen together.
+   ========================================================================== */
+.history-hand { position: relative; transition: background-color 150ms; }
+.history-hand:hover { background: var(--surface); }
+.history-hand-link { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
+.history-hand-link::after { content: ""; position: absolute; inset: 0; }
+.history-hand-link svg { color: var(--gold); transition: translate 150ms cubic-bezier(.16,1,.3,1); }
+.history-hand:hover .history-hand-link { color: var(--gold-hover); }
+.history-hand:hover .history-hand-link svg { translate: 2px 0; }
+.history-hand-link:focus-visible { outline: none; }
+.history-hand:has(.history-hand-link:focus-visible) { outline: 2px solid var(--gold); outline-offset: -2px; }
+.replay { margin: 0 0 36px; scroll-margin-top: 16px; }
+.replay-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; min-height: 32px; }
+.replay-head h2 { font-size: 1.25rem; }
+.replay-close { margin-left: auto; color: var(--gold); font-size: .86rem; font-weight: 600; text-decoration: none; }
+.replay-close:hover { color: var(--gold-hover); text-decoration: underline; text-underline-offset: 4px; }
+.replay .table-stage { margin: 0 auto 6px; }
+.replay-dock { position: sticky; bottom: 0; z-index: 8; display: grid; gap: 12px; max-width: 980px; margin: 0 auto; padding: 14px 20px 16px; border: 1px solid #3e4d3d; border-radius: 12px; background: #1e2c24; }
+.replay-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; max-width: none; line-height: 1.4; }
+.replay-step strong { font-size: 1.05rem; color: var(--text); }
+.replay-acted { color: #c1cfb9; font-size: .9rem; }
+.replay-count { margin-left: auto; color: var(--muted); font-size: .82rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.replay-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "back streets mine next"; align-items: center; gap: 10px; }
+.replay-back { grid-area: back; }
+.replay-streets { grid-area: streets; }
+.replay-mine { grid-area: mine; }
+.replay-next { grid-area: next; min-width: 116px; }
+.replay-controls:not(:has(.replay-mine)) { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "back streets next"; }
+.replay-back-arrow { display: inline-flex; rotate: 180deg; }
+.replay-back:not(:disabled):hover .replay-back-arrow { translate: -2px 0; }
+.replay-next:not(:disabled):hover svg { translate: 2px 0; }
+.replay-back-arrow, .replay-next svg { transition: translate 150ms cubic-bezier(.16,1,.3,1); }
+.replay-streets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; min-width: 0; padding: 0; justify-self: center; width: 100%; max-width: 440px; border: 1px solid var(--control-line); border-radius: 8px; overflow: hidden; }
+.replay-street { min-height: 38px; padding: 7px 6px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: .86rem; }
+.replay-street + .replay-street { border-left: 1px solid var(--line); }
+.replay-street:not(:disabled):hover { background: var(--control-hover); color: var(--text); border-color: var(--line); }
+.replay-street[aria-current] { background: #2c382b; color: var(--gold); box-shadow: inset 0 -2px 0 var(--gold); }
+.replay-street:focus-visible { outline-offset: -4px; }
+.replay-street:disabled { opacity: .38; }
+.replay-skeleton .loading-oval { margin: 32px auto 28px; width: 82%; max-width: 760px; height: clamp(220px, 38vh, 380px); }
+.replay-skeleton .replay-dock { min-height: 104px; align-content: center; }
+.replay-missing { padding: 28px 0 12px; color: var(--muted); }
+@media (max-width: 860px) {
+  .replay-controls, .replay-controls:not(:has(.replay-mine)) { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "streets streets streets" "back mine next"; }
+  .replay-controls:not(:has(.replay-mine)) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "streets streets" "back next"; }
+  .replay-streets { max-width: none; }
+}
+@media (max-width: 650px) {
+  .replay { margin-bottom: 24px; }
+  .replay-head { gap: 4px 10px; }
+  .replay-head h2 { font-size: 1.1rem; }
+  .replay .table-stage { margin-bottom: 0; }
+  /* The dock spans the screen, flush with its bottom edge, its controls tall enough for a thumb. */
+  .replay-dock { margin-inline: calc(-1 * var(--gutter)); padding: 10px var(--gutter) max(10px, env(safe-area-inset-bottom)); gap: 8px; border-width: 1px 0 0; border-radius: 0; box-shadow: 0 -10px 18px -14px #050d09; }
+  .replay-step { gap: 0 10px; }
+  .replay-step strong { font-size: .98rem; }
+  .replay-acted { font-size: .84rem; }
+  .replay-count { font-size: .76rem; }
+  .replay-controls { gap: 8px; }
+  .replay-controls > button { min-height: 48px; padding-inline: 12px; }
+  .replay-street { min-height: 40px; font-size: .82rem; }
+  .replay-mine { font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .replay-next { min-width: 0; }
+}

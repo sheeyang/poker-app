@@ -129,6 +129,17 @@ describe('a table’s Table History address', () => {
     expect(historySearch({ hand: 'hand-12', other: 1 })).toEqual({ hand: 'hand-12' });
     for (const bad of ['', 'hand-', 'hand-0x', 'Hand-1', 12, undefined, ['hand-1']]) expect(historySearch({ hand: bad })).toEqual({});
   });
+  it('holds the Replay Step beside its Hand, so a reload reopens both', () => {
+    for (const step of ['decision-4', 'flop', 'turn', 'river', 'result']) {
+      const address = historyPath('online', id, 'hand-37', step);
+      expect(address).toBe(`/online/${id}/history?hand=hand-37&step=${step}`);
+      expect(historySearch(Object.fromEntries(new URL(address, 'https://trainer.test').searchParams))).toEqual({ hand: 'hand-37', step });
+    }
+    // A step means nothing without its Hand, and an unknown step is dropped.
+    expect(historySearch({ step: 'flop' })).toEqual({});
+    for (const bad of ['', 'preflop', 'decision-', 'decision-x', 'Flop', 3, ['flop']]) expect(historySearch({ hand: 'hand-1', step: bad })).toEqual({ hand: 'hand-1' });
+    expect(historyPath('practice', id, undefined, 'flop')).toBe(`/practice/${id}/history`);
+  });
   it('titles its page by the table’s format and stakes', () => {
     expect(pageTitle({ page: 'history', seatCount: 6, smallBlind: 10, bigBlind: 20 })).toBe('Table History · 6-max Hold’em · 10 / 20 · Poker Trainer');
   });
