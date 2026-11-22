@@ -641,3 +641,4 @@ export interface ScoreAverages { readonly decisionScore: number; readonly action
 
 export * from './presentation.js';
 export * from './history.js';
+export * from './overall-history.js';
