@@ -1,5 +1,6 @@
-import { defaultTrainerConfiguration, type ObservableHistoryEntry, type ObservableTableSession, type ReplayStep, type Street, type TableHandReplay } from '@poker/contracts';
+import { defaultTrainerConfiguration, type ConcreteAction, type DecisionAnalysis, type ObservableHistoryEntry, type ObservableTableSession, type ReplayStep, type StrategyDescriptor, type Street, type TableHandReplay } from '@poker/contracts';
 import { chips } from './table-model.js';
+import { identity } from './analysis-identity.js';
 
 /**
  * Replay of one completed Hand of Table History (ADR-0041), as pure model: where each Replay Step lives in the address,
@@ -95,3 +96,29 @@ export function actedLabel(replay: TableHandReplay, step: ReplayStep): string | 
 
 /** A street's name as the controls show it. */
 export const streetName = (street: Street) => streetNames[street];
+
+/** The analysis a Replay Step offers: the reader's own decision there, the action they took, under one Reference Strategy. */
+export interface ReplayAnalysisTarget {
+  readonly decisionId: string;
+  readonly action: ConcreteAction;
+  /** Names the decision, the action and the Strategy together: a new Reference Strategy is a new target. */
+  readonly key: string;
+  /** Whether `data` is the analysis of exactly this target. */
+  accepts(data: DecisionAnalysis): boolean;
+}
+
+/**
+ * The analysis to show at the step at `index` under `referenceStrategy`: only at one of the reader's own decisions,
+ * which the server marks, and never at anyone else's or in a Hand they only watched. The action they took there is the
+ * one the next step's transition records.
+ */
+export function replayAnalysisTarget(replay: TableHandReplay, index: number, referenceStrategy: StrategyDescriptor): ReplayAnalysisTarget | undefined {
+  const decisionId = replay.steps[index]?.viewerDecisionId;
+  const acted = replay.steps[index + 1]?.transition.acted;
+  if (!decisionId || acted?.participantId !== replay.viewerParticipantId) return undefined;
+  const key = identity([replay.tableSessionId, decisionId, referenceStrategy, acted.action]);
+  return {
+    decisionId, action: acted.action, key,
+    accepts: data => identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === key,
+  };
+}

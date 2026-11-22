@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, type ConcreteAction, type ObservableCashGameState, type ReplayStep, type ReplayTransition, type Street, type TableHandReplay } from '@poker/contracts';
-import { actedLabel, openStep, replayControls, replayTable, stepKey, stepLabel } from '../src/replay.js';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ConcreteAction, type DecisionAnalysis, type ObservableCashGameState, type ReplayStep, type ReplayTransition, type Street, type TableHandReplay } from '@poker/contracts';
+import { actedLabel, openStep, replayAnalysisTarget, replayControls, replayTable, stepKey, stepLabel } from '../src/replay.js';
 
 // One Hand as the server replays it for "you": you call, Rex checks; on the flop Rex checks and you check; on the turn Rex bets and you fold.
 function state(street: Street, actorId: string | null, decision: number | null, change: Partial<ObservableCashGameState> = {}): ObservableCashGameState {
@@ -89,5 +89,33 @@ describe('what a Replay Step’s transition did', () => {
     expect(steps.map(step => actedLabel(replay, step))).toEqual([undefined, 'You called', 'Rex checked', undefined, 'Rex checked', 'You checked', undefined, 'Rex bet 40', 'You folded']);
     expect(actedLabel(replay, { ...steps[1]!, transition: acted('rex', { type: 'raise', raiseTo: 1200 }) })).toBe('Rex raised to 1,200');
     expect(actedLabel(watched, steps[1]!)).toBe('Alex called');
+  });
+});
+
+describe('analysis at a Replay Step', () => {
+  const reference = defaultTrainerConfiguration.referenceStrategy;
+  /** A result for "your" decision `n`, as the server would answer it. */
+  const result = (n: number, action: ConcreteAction, referenceStrategy = reference): DecisionAnalysis => ({
+    ok: true, tableSessionId: 'table-1', participantId: 'you', handId: 'hand-3', decisionId: 'hand-3/decision-' + n, referenceStrategy, inputFingerprint: 'f', evaluationSeed: 's', selectionSeed: 's', engineVersion: 'v1', randomVersion: 'v1', evaluationVersion: 'v1',
+    scoredDecision: { acceptedAction: action, scoringMethodVersion: 'v1' }, requestId: 'r', attemptId: 'a', status: 'pending',
+  });
+  it('is offered only at the reader’s own decisions, with the action they took there', () => {
+    expect(steps.map((_, index) => replayAnalysisTarget(replay, index, reference)?.decisionId)).toEqual(['hand-3/decision-1', undefined, undefined, undefined, 'hand-3/decision-4', undefined, undefined, 'hand-3/decision-6', undefined]);
+    expect([0, 4, 7].map(index => replayAnalysisTarget(replay, index, reference)?.action)).toEqual([{ type: 'call' }, { type: 'check' }, { type: 'fold' }]);
+  });
+  it('is never offered to someone who watched the Hand', () => {
+    expect(steps.map((_, index) => replayAnalysisTarget(watched, index, reference))).toEqual(steps.map(() => undefined));
+  });
+  it('accepts only the result for that decision, the action taken and the current Reference Strategy', () => {
+    const target = replayAnalysisTarget(replay, 4, reference)!;
+    expect(target.accepts(result(4, { type: 'check' }))).toBe(true);
+    expect(target.accepts(result(6, { type: 'check' }))).toBe(false);
+    expect(target.accepts(result(4, { type: 'fold' }))).toBe(false);
+    expect(target.accepts(result(4, { type: 'check' }, baselinePlayingStrategy))).toBe(false);
+    expect(target.accepts({ ...result(4, { type: 'check' }), tableSessionId: 'table-2' })).toBe(false);
+  });
+  it('is a different target once the Reference Strategy changes, so the decision is analyzed again', () => {
+    expect(replayAnalysisTarget(replay, 4, baselinePlayingStrategy)!.key).not.toBe(replayAnalysisTarget(replay, 4, reference)!.key);
+    expect(replayAnalysisTarget(replay, 4, { ...reference })!.key).toBe(replayAnalysisTarget(replay, 4, reference)!.key);
   });
 });

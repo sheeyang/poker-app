@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api, RequestFailure, retainNewestTable } from '@poker/client';
-import type { Street, TableMode } from '@poker/contracts';
+import type { ReplayStep, Street, TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { Card } from './cards.js';
 import { SeatGlyph } from './felt.js';
@@ -13,7 +13,11 @@ import { handRows, returnBar, type HandRow } from './table-history.js';
 import { historyPath, historySearch, listPath } from './table-address.js';
 import { PokerTable } from './poker-table.js';
 import { actedLabel, openStep, replayControls, replayTable, stepLabel, streetName } from './replay.js';
-import { blindsLabel, modeLabel, tableFormat } from './table-model.js';
+import { actionLabel, blindsLabel, modeLabel, tableFormat } from './table-model.js';
+import { AnalysisDetails, DecisionResult, DecisionScores } from './analysis-panel.js';
+import { AnalysisSkeleton, ScoreSkeleton } from './loading-skeleton.js';
+import { strategyName } from './strategy-select.js';
+import { useReplayAnalysis } from './replay-analysis.js';
 
 /** A link back to a table's own page. */
 function TableLink({ mode, tableSessionId, className, children }: { mode: TableMode; tableSessionId: string; className?: string; children: React.ReactNode }) {
@@ -53,6 +57,40 @@ const streets: readonly Street[] = ['preflop', 'flop', 'turn', 'river'];
 const ignore = () => {};
 
 /**
+ * The analysis of the reader's own decision at the step on show, under their current Reference Strategy: the scores
+ * and their action beside the Reference Policy's distribution, sizings and action. It sits under the step dock, so
+ * stepping never moves the felt or the controls. Only numbers: nothing here calls a decision good or bad.
+ */
+function ReplayAnalysis({ analysis, step }: { analysis: ReturnType<typeof useReplayAnalysis>; step: ReplayStep }) {
+  const { decision, display } = analysis;
+  const data = display?.data;
+  const complete = data?.status === 'complete' ? data : undefined;
+  const failed = data?.status === 'error' ? data : undefined;
+  const reference = data?.referenceStrategy ?? analysis.reference;
+  const street = streetName(step.state.street ?? 'preflop');
+  const waiting = !complete && !failed && !display?.error && !analysis.configurationError;
+  return <section className="replay-analysis" aria-labelledby="replay-analysis-title" aria-busy={waiting || undefined}>
+    <header className="replay-analysis-head">
+      <h3 id="replay-analysis-title">Your {street.toLowerCase()} decision</h3>
+      {reference && <span className="replay-analysis-reference">Reference: <strong>{strategyName(reference)}</strong></span>}
+    </header>
+    {analysis.configurationError ? <div className="notice-error" role="alert"><p>Your Trainer Configuration couldn’t be read, so this decision can’t be analyzed yet.</p><button type="button" onClick={analysis.retryConfiguration}>Try again</button></div>
+      : display?.error ? <div className="notice-error" role="alert"><p>{display.error}</p><button type="button" onClick={analysis.request}>Retry analysis</button></div>
+      : failed ? <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{failed.error.message}</p><button type="button" disabled={display?.retrying} onClick={analysis.retry}>{display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>
+      : <div className="replay-analysis-body">
+        <div className="replay-analysis-mine">
+          {complete?.scores ? <DecisionScores scores={complete.scores} /> : <div className="decision-scores" role="status" aria-label="Loading your scores"><div className="score-main"><span>Decision Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div></div>}
+          {decision && <p className="replay-your-action"><span>Your action</span><strong>{actionLabel(decision.action)}</strong></p>}
+          {complete && <AnalysisDetails data={complete} />}
+        </div>
+        <div className="replay-analysis-reference-side">
+          {complete ? <DecisionResult data={complete} /> : <AnalysisSkeleton actions={step.state.legalActions} scores={false} sampled={reference?.selector.id === 'seeded-sampling'} />}
+        </div>
+      </div>}
+  </section>;
+}
+
+/**
  * One completed Hand, replayed one Replay Step at a time on the table's own felt, each step drawn at once. The address
  * holds the Hand and the step, so a reload reopens both. Under the felt, the step dock: what the step shows and what led
  * to it, Back and Next, a jump to each street the Hand reached, and to the reader's next decision. On a phone the dock
@@ -85,6 +123,8 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
   const notFound = read.error instanceof RequestFailure && read.error.code === 'hand-not-found';
   const row = replay && handRows([replay.hand], replay.viewerParticipantId)[0];
   const current = replay?.steps[index];
+  const analysis = useReplayAnalysis(replay, index);
+  const felt = useMemo(() => replay?.steps[index] ? replayTable(replay, index) : undefined, [replay, index]);
   // What led to this step, and at the result who won.
   const happened = replay && current ? [actedLabel(replay, current), current.kind === 'result' ? row?.result : undefined].filter(Boolean).join(' · ') : '';
   return <section ref={section} className="replay" aria-labelledby="replay-title">
@@ -96,9 +136,9 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
     </header>
     {notFound ? <div className="replay-missing"><p>This hand isn’t in the table’s history yet. A hand can be replayed once it is complete.</p></div>
       : read.isError ? <div className="notice-error" role="alert"><p>{read.error.message}</p><button type="button" onClick={() => void read.refetch()}>Retry</button></div>
-      : !replay || !current || !controls ? <div className="replay-skeleton" role="status" aria-label="Loading the replay"><div className="loading-oval" aria-hidden="true" /><div className="replay-dock" aria-hidden="true"><Skeleton className="skeleton-action" /></div></div>
+      : !replay || !current || !controls || !felt ? <div className="replay-skeleton" role="status" aria-label="Loading the replay"><div className="loading-oval" aria-hidden="true" /><div className="replay-dock" aria-hidden="true"><Skeleton className="skeleton-action" /></div></div>
       : <>
-        <PokerTable replay table={replayTable(replay, index)} serverNow={Date.now()} actorWindowOpen={current.kind === 'decision'} handOpen={false} choosing={false} openSeat={ignore} openParticipant={ignore} />
+        <PokerTable replay table={felt} serverNow={Date.now()} actorWindowOpen={current.kind === 'decision'} handOpen={false} choosing={false} openSeat={ignore} openParticipant={ignore} />
         <div className="replay-dock">
           <p className="replay-step" aria-live="polite">
             <strong>{stepLabel(replay, current)}</strong>
@@ -115,6 +155,7 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
             <button type="button" className="primary replay-next" disabled={!controls.next} onClick={() => go(controls.next)} aria-keyshortcuts="ArrowRight">Next<Icon name="arrow" size={18} /></button>
           </div>
         </div>
+        {analysis.offered && <ReplayAnalysis key={index} analysis={analysis} step={current} />}
       </>}
   </section>;
 }

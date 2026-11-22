@@ -1376,6 +1376,29 @@ a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .replay-skeleton .loading-oval { margin: 32px auto 28px; width: 82%; max-width: 760px; height: clamp(220px, 38vh, 380px); }
 .replay-skeleton .replay-dock { min-height: 104px; align-content: center; }
 .replay-missing { padding: 28px 0 12px; color: var(--muted); }
+/* The reader's own decision, under the dock: their scores and action beside the Reference's distribution, in the analysis panel's own language. */
+.replay-analysis { max-width: 980px; margin: 16px auto 0; padding: 18px 24px 20px; border: 1px solid var(--line); border-radius: 12px; background: #1a2721; }
+.replay-analysis-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.replay-analysis-head h3 { font-size: 1rem; font-weight: 600; }
+.replay-analysis-reference { color: var(--muted); font-size: .84rem; }
+.replay-analysis-reference strong { color: var(--text); font-weight: 600; }
+.replay-analysis-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 0 40px; }
+.replay-analysis-mine .decision-scores { padding: 24px 0 18px; }
+.replay-your-action { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; max-width: none; padding: 12px 0; border-block: 1px solid var(--line); }
+.replay-your-action > span { font-size: .74rem; color: #e6cca0; }
+.replay-your-action > strong { font-size: .93rem; font-weight: 600; color: #f1e4c3; }
+.replay-analysis-reference-side .distribution-heading { margin-top: 26px; }
+.replay-analysis-reference-side .reference-selected { margin-bottom: 0; }
+.replay-analysis-mine .analysis-provenance { margin-top: 4px; font-size: .8rem; }
+.replay-analysis-mine .analysis-provenance > summary { padding: 10px 0; min-height: 40px; color: var(--text); }
+.replay-analysis-mine .analysis-provenance .details-content { padding: 0 0 4px; line-height: 1.5; }
+.replay-analysis .notice-error { margin-top: 16px; }
+.replay-analysis .notice-error strong { display: block; margin-bottom: 4px; color: #f6dcc8; }
+@media (max-width: 760px) {
+  .replay-analysis-body { grid-template-columns: minmax(0, 1fr); }
+  .replay-analysis-mine .decision-scores { padding: 18px 0 14px; }
+  .replay-analysis-reference-side .distribution-heading { margin-top: 22px; }
+}
 @media (max-width: 860px) {
   .replay-controls, .replay-controls:not(:has(.replay-mine)) { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "streets streets streets" "back mine next"; }
   .replay-controls:not(:has(.replay-mine)) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "streets streets" "back next"; }
@@ -1397,4 +1420,6 @@ a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
   .replay-street { min-height: 40px; font-size: .82rem; }
   .replay-mine { font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .replay-next { min-width: 0; }
+  /* Full width under the full-width dock. */
+  .replay-analysis { margin: 0 calc(-1 * var(--gutter)); padding: 16px var(--gutter) 18px; border-width: 0 0 1px; border-radius: 0; }
 }
