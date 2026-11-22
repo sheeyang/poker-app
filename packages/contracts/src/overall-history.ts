@@ -173,9 +173,10 @@ export interface HistorySummaryProgress { readonly succeeded: number; readonly t
 /**
  * One Score Summary over a frozen set of the Guest's own decisions, with the ordinary rules: complete only once every
  * analysis has succeeded, Error ahead of Analyzing (`pending`), never a partial mean, and `empty` (no score) for a set
- * with no decisions.
+ * with no decisions. With score ranges, `progress` counts the analyses of the set the other filters admit, and the
+ * ranges then decide which of those decisions the summary covers: `decisionCount` is absent until they are decided.
  */
-export type HistoryScoreSummary = { readonly decisionCount: number; readonly progress: HistorySummaryProgress } & (
+export type HistoryScoreSummary = { readonly decisionCount?: number; readonly progress: HistorySummaryProgress } & (
   | { readonly status: 'empty' | 'pending' }
   | { readonly status: 'complete'; readonly averages: ScoreAverages }
   | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
@@ -183,7 +184,7 @@ export type HistoryScoreSummary = { readonly decisionCount: number; readonly pro
 export interface HistorySummaryBucket { readonly value: string; readonly summary: HistoryScoreSummary }
 /**
  * `POST /api/overall-history/summaries`: a Score Summary over the decisions `filter` declares (its flat encoding,
- * `historyFilterParams`), optionally broken down by one dimension.
+ * `historyFilterParams`), score ranges included, optionally broken down by one dimension and under a named Strategy.
  */
 export interface OverallHistorySummaryRequest { readonly filter?: Readonly<Record<string, string>>; readonly breakdown?: HistoryBreakdown; readonly strategy?: StrategyDescriptor }
 /**
@@ -204,7 +205,7 @@ export interface OverallHistorySummary {
 
 /**
  * `POST /api/overall-history/scored`: the decisions `filter` declares, score ranges included, under the Guest's Reference
- * Strategy. A score range is decided by analysis, so nothing is listed until every analysis of the non-score set has
+ * Strategy or the supported `strategy` named. A score range is decided by analysis, so nothing is listed until every analysis of the non-score set has
  * succeeded: Analyzing (`pending`) reports how many have, Error stays until a Retry succeeds, and a partial list is never
  * returned. `GET` (and the page of a complete one) takes `limit` and `offset`, as the plain list does.
  */

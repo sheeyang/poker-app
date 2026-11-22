@@ -154,7 +154,8 @@ function ListSkeleton() {
  * Overall History (ADR-0041): the Guest's own decisions from every Hand they were dealt into, at every table they can
  * read. The filters apply at once and live in the address, so a reload keeps them; each decision opens at its Replay
  * Step in its table's Table History. A Score Summary over the decisions shown, and its breakdown, sits above them;
- * the breakdown lives in the address too. A score range waits on the analyses of the decisions the other filters admit.
+ * the breakdown lives in the address too. A score range, in the list and in every summary, waits on the analyses of the
+ * decisions the other filters admit.
  */
 export function OverallHistoryScreen() {
   const { identity } = useShell();
@@ -193,7 +194,7 @@ export function OverallHistoryScreen() {
       <p>Your decisions in every Hand you were dealt into, at every table you can read: Practice, tables you left, and Closed Tables.</p>
     </header>
     <Filters filter={filter} onChange={apply} shown={rows?.length} total={total} waiting={scoreFilter ? figures.state : undefined} />
-    <OverallHistorySummaryPanel filter={plain} breakdown={breakdown} compared={compared} total={setSize} scoreRanges={scoreFilter} asked={summarized} onAsk={() => setSummarized(true)} onBreakdown={by => show(filter, by)} onCompare={strategies => show(filter, breakdown, strategies)} />
+    <OverallHistorySummaryPanel filter={filter} breakdown={breakdown} compared={compared} total={total} scoreRanges={scoreFilter} asked={summarized} onAsk={() => setSummarized(true)} onBreakdown={by => show(filter, by)} onCompare={strategies => show(filter, breakdown, strategies)} />
     {scoreFilter && !scoredList && <ScoredState scored={scored} />}
     {!scoreFilter && list.isError && <div className="notice-error" role="alert"><p>{list.error.message}</p><button type="button" onClick={() => void list.refetch()}>Retry</button></div>}
     {!rows && !scoreFilter && !list.isError && <ListSkeleton />}
