@@ -200,7 +200,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
           </div></div>
         </>}
       </div>
-      {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} />}
+      {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} historyLink={handId => <HistoryLink className="text-button history-link" mode={current.mode} tableSessionId={current.tableSessionId} handId={handId}>Open in Table History <Icon name="arrow" size={15} /></HistoryLink>} />}
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
       {(current || analysisOpen) && <button type="button" className="analysis-tab" aria-expanded={analysisOpen} aria-controls="analysis-panel" aria-label={analysisOpen ? 'Close analysis' : handDecisions.length ? 'Open analysis, review decisions' : 'Open analysis'} onClick={() => analysisOpen ? closeAnalysis() : review()}><Icon name="chart" size={18} /><span>Analysis</span><Icon name="chevron" size={14} /></button>}
     </main>

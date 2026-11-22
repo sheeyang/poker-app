@@ -1326,3 +1326,6 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
   .history-return .live-strip-actions { justify-content: flex-end; }
   .history-return .live-strip-back { min-height: 44px; }
 }
+a.text-button { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
+.history-link { margin-bottom: 8px; }
