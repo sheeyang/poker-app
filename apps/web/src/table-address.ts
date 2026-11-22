@@ -12,7 +12,8 @@ export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/
  */
 export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string, step?: string, compare?: readonly StrategyDescriptor[]) => {
   const compared = compareParam(compare ?? []);
-  return `${tablePath(mode, tableSessionId)}/history${handId ? `?hand=${handId}${step ? `&step=${step}` : ''}${compared ? `&compare=${compared}` : ''}` : ''}`;
+  const query = [handId ? `hand=${handId}` : '', handId && step ? `step=${step}` : '', compared ? `compare=${compared}` : ''].filter(Boolean).join('&');
+  return `${tablePath(mode, tableSessionId)}/history${query ? `?${query}` : ''}`;
 };
 /**
  * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
@@ -113,11 +114,12 @@ export function comparedStrategies(compare: unknown): StrategyDescriptor[] {
 /**
  * The search a Table History route accepts: `hand=hand-N`, the Hand to replay, and with it `step`, the Replay Step to open
  * it at: `decision-N` (before that decision), `flop`, `turn`, `river` (after that street's reveal) or `result`; and
- * `compare`, the Strategies compared at the reader's decisions (`compareParam`). Both need their Hand.
+ * `compare`, the Strategies compared beside the Reference Strategy (`compareParam`), at the reader's decisions and in the
+ * table's Score Summary. Only the step needs its Hand.
  */
 export function historySearch(search: Record<string, unknown>): { hand?: string; step?: string; compare?: string } {
-  if (typeof search.hand !== 'string' || !/^hand-[0-9]+$/.test(search.hand)) return {};
   const compare = compareParam(comparedStrategies(search.compare));
+  if (typeof search.hand !== 'string' || !/^hand-[0-9]+$/.test(search.hand)) return compare ? { compare } : {};
   return {
     hand: search.hand,
     ...(typeof search.step === 'string' && /^(?:decision-[0-9]+|flop|turn|river|result)$/.test(search.step) ? { step: search.step } : {}),

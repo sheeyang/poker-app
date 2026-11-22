@@ -150,16 +150,19 @@ describe('a table’s Table History address', () => {
     // The comparison survives a Hand with no step named, and stepping away from it.
     expect(historyPath('practice', id, 'hand-2', undefined, compared)).toBe(`/practice/${id}/history?hand=hand-2&compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability`);
     expect(historyPath('practice', id, 'hand-2', 'flop', [])).toBe(`/practice/${id}/history?hand=hand-2&step=flop`);
-    expect(historyPath('practice', id, undefined, undefined, compared)).toBe(`/practice/${id}/history`);
+    // It is also the table's own comparison, held without a Hand.
+    expect(historyPath('practice', id, undefined, undefined, compared)).toBe(`/practice/${id}/history?compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability`);
+    expect(historySearch({ compare: 'uniform-choice:seeded-sampling', step: 'flop' })).toEqual({ compare: 'uniform-choice:seeded-sampling' });
   });
-  it('compares only supported Strategies, each once, at most 3, and only beside a Hand', () => {
+  it('compares only supported Strategies, each once, at most 3', () => {
     const token = (strategy: StrategyDescriptor) => `${strategy.policy.id}:${strategy.selector.id}`;
     const [a, b, c, d] = supportedStrategies;
     const all = [a!, b!, c!, d!].map(token);
     expect(historySearch({ hand: 'hand-1', compare: all.join(',') })).toEqual({ hand: 'hand-1', compare: all.slice(0, 3).join(',') });
     expect(historySearch({ hand: 'hand-1', compare: `${all[1]},nonsense,${all[1]},uniform-choice:unknown,${all[0]}` })).toEqual({ hand: 'hand-1', compare: `${all[1]},${all[0]}` });
     for (const bad of ['', 'nonsense', 7, ['uniform-choice:seeded-sampling'], undefined]) expect(historySearch({ hand: 'hand-1', compare: bad })).toEqual({ hand: 'hand-1' });
-    expect(historySearch({ compare: all[0] })).toEqual({});
+    expect(historySearch({ compare: all[0] })).toEqual({ compare: all[0] });
+    expect(historySearch({ compare: 'nonsense' })).toEqual({});
     expect(comparedStrategies(undefined)).toEqual([]);
     expect(comparedStrategies(7)).toEqual([]);
   });

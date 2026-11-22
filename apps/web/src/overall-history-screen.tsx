@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api } from '@poker/client';
-import { decisionActionTypes, decisionStreets, historyFilterSize, historyModes, positions, type DecisionActionType, type HistoryBreakdown, type HistoryFilter, type Position, type Street, type TableMode } from '@poker/contracts';
+import { decisionActionTypes, decisionStreets, historyFilterSize, historyModes, positions, type DecisionActionType, type HistoryBreakdown, type HistoryFilter, type StrategyDescriptor, type Position, type Street, type TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { Card } from './cards.js';
 import { Skeleton } from './loading-skeleton.js';
 import { SeatGlyph } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { HistoryLink } from './table-history-screen.js';
-import { breakdownOfSearch, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, rangedBy, searchOfFilter, toggled, withBreakdown, type DecisionRow } from './overall-history.js';
+import { breakdownOfSearch, compareOfSearch, withCompare, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, rangedBy, searchOfFilter, toggled, withBreakdown, type DecisionRow } from './overall-history.js';
 import { OverallHistorySummaryPanel } from './overall-history-summary.js';
 import { streetName } from './replay.js';
 import { modeLabel } from './table-model.js';
@@ -116,6 +116,8 @@ export function OverallHistoryScreen() {
   const search = useSearch({ strict: false });
   const filter = useMemo(() => filterOfSearch(search), [search]);
   const breakdown = breakdownOfSearch(search);
+  // The Strategies compared side by side beside the Reference Strategy live in the address, never in the Trainer Configuration.
+  const compared = useMemo(() => compareOfSearch(search), [search]);
   // A summary is asked for explicitly; once asked, a new filter or breakdown asks again.
   const [summarized, setSummarized] = useState(false);
   const key = JSON.stringify(searchOfFilter(filter));
@@ -127,7 +129,7 @@ export function OverallHistoryScreen() {
   });
   const rows = useMemo(() => list.data?.pages.flatMap(page => page.decisions.map(decisionRow)), [list.data]);
   const total = list.data?.pages[0]?.total;
-  const show = (next: HistoryFilter, by: HistoryBreakdown | undefined) => void navigate({ to: '/history', search: withBreakdown(searchOfFilter(next), by), replace: true });
+  const show = (next: HistoryFilter, by: HistoryBreakdown | undefined, strategies: readonly StrategyDescriptor[] = compared) => void navigate({ to: '/history', search: withCompare(withBreakdown(searchOfFilter(next), by), strategies), replace: true });
   const apply = (next: HistoryFilter) => show(next, breakdown);
   const filtered = historyFilterSize(filter) > 0;
   return <main id="main-table" className="history-page og-page">
@@ -136,7 +138,7 @@ export function OverallHistoryScreen() {
       <p>Your decisions in every Hand you were dealt into, at every table you can read: Practice, tables you left, and Closed Tables.</p>
     </header>
     <Filters filter={filter} onChange={apply} shown={rows?.length} total={total} />
-    <OverallHistorySummaryPanel filter={filter} breakdown={breakdown} total={total} asked={summarized} onAsk={() => setSummarized(true)} onBreakdown={by => show(filter, by)} />
+    <OverallHistorySummaryPanel filter={filter} breakdown={breakdown} compared={compared} total={total} asked={summarized} onAsk={() => setSummarized(true)} onBreakdown={by => show(filter, by)} onCompare={strategies => show(filter, breakdown, strategies)} />
     {list.isError && <div className="notice-error" role="alert"><p>{list.error.message}</p><button type="button" onClick={() => void list.refetch()}>Retry</button></div>}
     {!rows && !list.isError && <ListSkeleton />}
     {rows?.length === 0 && (filtered

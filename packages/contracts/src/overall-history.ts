@@ -167,7 +167,7 @@ export interface HistorySummaryBucket { readonly value: string; readonly summary
  * `POST /api/overall-history/summaries`: a Score Summary over the decisions `filter` declares (its flat encoding,
  * `historyFilterParams`), optionally broken down by one dimension.
  */
-export interface OverallHistorySummaryRequest { readonly filter?: Readonly<Record<string, string>>; readonly breakdown?: HistoryBreakdown }
+export interface OverallHistorySummaryRequest { readonly filter?: Readonly<Record<string, string>>; readonly breakdown?: HistoryBreakdown; readonly strategy?: StrategyDescriptor }
 /**
  * A transient Overall History summary request: the whole filtered set's summary and, with a breakdown, one ordinary
  * summary per bucket, for the values the set has, in declared order. Each analysis it needs runs as `history-analysis`.

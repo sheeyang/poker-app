@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, historyFilterParams, type ConcreteAction, type HistoryBreakdown, type HistoryFilter, type ObservableGameView, type ObservableTableSession, type OverallHistorySummary, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, supportedStrategies, historyFilterParams, type ConcreteAction, type HistoryBreakdown, type HistoryFilter, type ObservableGameView, type ObservableTableSession, type OverallHistorySummary, type StrategyDescriptor } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
@@ -33,7 +33,8 @@ async function fixture(concurrency = 2) {
   const schema = 'test_' + randomUUID().replaceAll('-', '');
   await administration.query('CREATE SCHEMA "' + schema + '"');
   const evaluations: Evaluation[] = [];
-  let holding = false, failing = 0;
+  let holding = false, failing = 0, failingUnder: StrategyDescriptor | undefined, holdingUnder: StrategyDescriptor | undefined;
+  const is = (a: StrategyDescriptor | undefined, b: StrategyDescriptor) => !!a && a.policy.id === b.policy.id && a.selector.id === b.selector.id;
   let controller!: TableSessionControllerCommands;
   const answer = (evaluation: Evaluation) => { evaluation.answered = true; evaluation.result.resolve(settle(evaluation.view)); };
   const server = await createServer({ clock, databaseUrl: databaseUrl!, schema, automaticBots: false, jobRunnerOptions: { concurrency, maximumQueued: 16 },
@@ -41,8 +42,9 @@ async function fixture(concurrency = 2) {
     strategyFactory: descriptor => ({ policy: { checkCompatibility: () => ({ compatible: true }), evaluate: view => {
       const evaluation: Evaluation = { decisionId: view.state.decisionId!, descriptor, view, result: Promise.withResolvers<PolicyResult>(), answered: false };
       evaluations.push(evaluation);
-      if (failing > 0) { failing--; evaluation.answered = true; evaluation.result.reject(new Error('Controlled Strategy failure.')); }
-      else if (!holding) answer(evaluation);
+      if (is(failingUnder, descriptor)) { evaluation.answered = true; evaluation.result.reject(new Error('Controlled Strategy failure.')); }
+      else if (failing > 0) { failing--; evaluation.answered = true; evaluation.result.reject(new Error('Controlled Strategy failure.')); }
+      else if (!holding && !is(holdingUnder, descriptor)) answer(evaluation);
       return evaluation.result.promise;
     } }, actionSelector: new HighestProbabilitySelector() }) });
   const base = await server.listen({ host: '127.0.0.1', port: 0 });
@@ -89,9 +91,9 @@ async function fixture(concurrency = 2) {
   }
   const configure = async (cookie: string, referenceStrategy: StrategyDescriptor) => expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy } }) })).status).toBe(200);
   /** Asks for a Score Summary over the decisions `filter` declares, broken down by `breakdown` when it is given. */
-  const request = (cookie: string, filter: HistoryFilter = {}, breakdown?: HistoryBreakdown) => post('/overall-history/summaries', cookie, { filter: historyFilterParams(filter), ...(breakdown ? { breakdown } : {}) });
-  async function summarize(cookie: string, filter: HistoryFilter = {}, breakdown?: HistoryBreakdown): Promise<OverallHistorySummary> {
-    const response = await request(cookie, filter, breakdown);
+  const request = (cookie: string, filter: HistoryFilter = {}, breakdown?: HistoryBreakdown, strategy?: unknown) => post('/overall-history/summaries', cookie, { filter: historyFilterParams(filter), ...(breakdown ? { breakdown } : {}), ...(strategy !== undefined ? { strategy } : {}) });
+  async function summarize(cookie: string, filter: HistoryFilter = {}, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<OverallHistorySummary> {
+    const response = await request(cookie, filter, breakdown, strategy);
     expect(response.status).toBe(200);
     return response.json();
   }
@@ -105,8 +107,10 @@ async function fixture(concurrency = 2) {
   const waiting = (descriptor: StrategyDescriptor) => under(descriptor).filter(evaluation => !evaluation.answered);
   return { base, evaluations, guest, practice, read, checkDown, foldPreflop, configure, request, summarize, readSummary, current, retry, idle, under, waiting, answer,
     hold() { holding = true; },
-    release() { holding = false; for (const evaluation of evaluations) if (!evaluation.answered) answer(evaluation); },
+    release() { holding = false; holdingUnder = undefined; for (const evaluation of evaluations) if (!evaluation.answered) answer(evaluation); },
     fail(count: number) { failing = count; },
+    failUnder(descriptor: StrategyDescriptor | undefined) { failingUnder = descriptor; },
+    holdUnder(descriptor: StrategyDescriptor | undefined) { holdingUnder = descriptor; },
     async close() { holding = false; await server.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); },
   };
 }
@@ -244,7 +248,7 @@ test("a summary is only its Guest's: another Guest can't read or retry it, and a
   expect((await f.retry(other, asked.requestId)).status).toBe(404);
   expect((await fetch(f.base + '/api/overall-history/summaries/' + asked.requestId)).status).toBe(401);
   expect((await fetch(f.base + '/api/overall-history/summaries', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(401);
-  for (const body of [{ breakdown: 'hand' }, { filter: { street: ['flop'] } }, { filter: 'street=flop' }, { strategy: highestProbabilityPlayingStrategy }])
+  for (const body of [{ breakdown: 'hand' }, { filter: { street: ['flop'] } }, { filter: 'street=flop' }, { other: 1 }])
     expect((await fetch(f.base + '/api/overall-history/summaries', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) })).status).toBe(400);
   await completed(f, cookie, asked.requestId);
 });
@@ -281,4 +285,73 @@ test('a large summary never has more than 8 history-analysis jobs outstanding fo
   await completed(g, heavy, large.requestId);
   await completed(g, light, small.requestId);
   expect((await g.current(heavy, large.requestId)).summary).toMatchObject({ progress: { succeeded: 24, total: 24 }, averages: { decisionScore: 1, actionRankScore: 1 } });
+});
+
+test('a summary names a supported Strategy, and an unsupported one is refused', async () => {
+  const { cookie } = await twoTables();
+  const uniform = supportedStrategies[2]!;
+  const asked = await f.summarize(cookie, {}, undefined, uniform);
+  expect(asked).toMatchObject({ ok: true, referenceStrategy: uniform, summary: { decisionCount: 5 } });
+  await completed(f, cookie, asked.requestId);
+  // Naming the Reference Strategy is asking for none: the same request.
+  const evaluated = f.evaluations.length;
+  expect((await f.summarize(cookie, {}, undefined, highestProbabilityPlayingStrategy)).referenceStrategy).toEqual(highestProbabilityPlayingStrategy);
+  await completed(f, cookie, (await f.summarize(cookie)).requestId);
+  expect(f.evaluations.length - evaluated).toBe(5);
+  for (const strategy of [{}, null, 'uniform-choice', { ...uniform, policy: { ...uniform.policy, id: 'unknown' } }, { policy: uniform.policy }]) {
+    const refused = await f.request(cookie, {}, undefined, strategy);
+    expect(refused.status, JSON.stringify(strategy)).toBe(400);
+    expect(await refused.json()).toMatchObject({ ok: false, rejection: { code: 'unsupported-strategy' } });
+  }
+});
+
+test('one set summarized under several Strategies uses the same frozen decisions, completes independently and leaves the Trainer Configuration unchanged', async () => {
+  // Enough runner capacity that the held Reference Strategy's evaluations don't occupy every slot.
+  const g = await fixture(8);
+  fixtures.push(g);
+  const { cookie } = await twoTables(g);
+  const configuration = async () => (await (await fetch(g.base + '/api/trainer-configuration', { headers: { cookie } })).json());
+  const before = await configuration();
+  const compared = [highestProbabilityPlayingStrategy, supportedStrategies[1]!, supportedStrategies[2]!];
+  g.holdUnder(compared[0]);
+  const asked: OverallHistorySummary[] = [];
+  try {
+    for (const strategy of compared) asked.push(await g.summarize(cookie, {}, 'street', strategy));
+    expect(new Set(asked.map(summary => summary.requestId)).size).toBe(3);
+    expect(asked.map(summary => summary.referenceStrategy)).toEqual(compared);
+    expect(asked.map(summary => summary.summary.decisionCount)).toEqual([5, 5, 5]);
+    // The others complete while the Reference Strategy's evaluations are held.
+    await completed(g, cookie, asked[1]!.requestId);
+    await completed(g, cookie, asked[2]!.requestId);
+    expect((await g.current(cookie, asked[0]!.requestId)).summary.status).toBe('pending');
+  } finally { g.release(); }
+  await completed(g, cookie, asked[0]!.requestId);
+  // Every Strategy analyzed the same five frozen decisions.
+  const decisionIds = (strategy: StrategyDescriptor) => g.under(strategy).map(evaluation => evaluation.decisionId).sort();
+  const ids = decisionIds(compared[1]!);
+  expect(ids).toHaveLength(5);
+  expect(decisionIds(compared[2]!)).toEqual(ids);
+  expect(decisionIds(compared[0]!)).toEqual(ids);
+  expect(await configuration()).toEqual(before);
+});
+
+test("one Strategy's Error and Retry don't touch the summaries under other Strategies", async () => {
+  const { cookie } = await twoTables();
+  // Not the default Strategy, which post-action analysis already ran under.
+  const failing = supportedStrategies[2]!;
+  f.failUnder(failing);
+  try {
+    const bad = await f.summarize(cookie, {}, undefined, failing);
+    const good = await f.summarize(cookie);
+    await completed(f, cookie, good.requestId);
+    await expect.poll(async () => (await f.current(cookie, bad.requestId)).summary.status).toBe('error');
+    expect((await f.current(cookie, bad.requestId)).summary).not.toHaveProperty('averages');
+    const evaluated = f.under(highestProbabilityPlayingStrategy).length;
+    f.failUnder(undefined);
+    expect((await f.retry(cookie, bad.requestId)).status).toBe(200);
+    await completed(f, cookie, bad.requestId);
+    expect((await f.current(cookie, bad.requestId)).summary).toMatchObject({ averages: { decisionScore: 0.8 } });
+    expect((await f.current(cookie, good.requestId)).summary).toMatchObject({ status: 'complete', averages: { decisionScore: 0.8 } });
+    expect(f.under(highestProbabilityPlayingStrategy).length).toBe(evaluated);
+  } finally { f.failUnder(undefined); }
 });

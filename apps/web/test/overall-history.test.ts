@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
-import type { OverallHistoryDecision } from '@poker/contracts';
-import { breakdownOfSearch, bucketLabel, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, rangedBy, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
+import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type OverallHistoryDecision } from '@poker/contracts';
+import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, rangedBy, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
 import { parseAddress } from '../src/table-address.js';
 
 const decision = (override: Partial<OverallHistoryDecision> = {}): OverallHistoryDecision => ({
@@ -109,4 +109,19 @@ test('a summary shows both means only once complete, its progress while Analyzin
   // Error takes precedence over Analyzing: no partial mean, however many succeeded.
   expect(summaryFigures({ status: 'error', decisionCount: 1, progress: { succeeded: 0, total: 1 }, error: { code: 'failed', message: 'x' } }))
     .toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Error' });
+});
+
+test('the address holds the compared Strategies beside the filters and breakdown, in the order chosen, and a reload gives the same comparison', () => {
+  const compared = [baselinePlayingStrategy, highestProbabilityPlayingStrategy];
+  const address = overallHistoryPath({ street: ['flop'] }, 'street', compared);
+  expect(address).toBe('/history?street=flop&breakdown=street&compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability');
+  const search = overallHistorySearch(Object.fromEntries(new URL(address, 'https://trainer.test').searchParams));
+  expect(search).toEqual({ street: 'flop', breakdown: 'street', compare: 'uniform-choice:seeded-sampling,uniform-choice:highest-probability' });
+  expect(compareOfSearch(search)).toEqual(compared);
+  expect(withCompare(search, [])).toEqual({ street: 'flop', breakdown: 'street' });
+  expect(withCompare({}, [highestProbabilityPlayingStrategy])).toEqual({ compare: 'uniform-choice:highest-probability' });
+  // Unsupported, repeated and surplus Strategies are dropped; changing the filters keeps the comparison.
+  expect(overallHistorySearch({ compare: 'nonsense,uniform-choice:highest-probability,uniform-choice:highest-probability' })).toEqual({ compare: 'uniform-choice:highest-probability' });
+  expect(overallHistorySearch({ compare: 'nonsense' })).toEqual({});
+  expect(overallHistoryPath({}, undefined, compared)).toBe('/history?compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability');
 });

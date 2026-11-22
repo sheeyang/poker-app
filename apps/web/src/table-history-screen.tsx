@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api, RequestFailure, retainNewestTable } from '@poker/client';
@@ -19,6 +19,7 @@ import { AnalysisDetails, DecisionResult, DecisionScores } from './analysis-pane
 import { AnalysisSkeleton, ScoreSkeleton } from './loading-skeleton.js';
 import { strategyName } from './strategy-select.js';
 import { useReplayComparison, useStrategyAnalysis } from './replay-analysis.js';
+import { TableHistorySummaryPanel } from './table-history-summary.js';
 import { addableStrategies, comparisonOrder, type ComparisonTarget } from './comparison.js';
 
 /** A link back to a table's own page. */
@@ -221,6 +222,10 @@ export function TableHistoryScreen({ mode, tableSessionId }: { mode: TableMode; 
   const { identity } = useShell();
   const navigate = useNavigate();
   const { hand: selectedHand, step, compare } = historySearch(useSearch({ strict: false }));
+  // The table's Score Summary is asked for explicitly; the Strategies compared in it live in the address.
+  const [summarized, setSummarized] = useState(false);
+  const comparedSummaries = useMemo(() => comparedStrategies(compare), [compare]);
+  const compareSummaries = (strategies: readonly StrategyDescriptor[]) => void navigate({ href: historyPath(mode, tableSessionId, selectedHand, step, strategies), replace: true });
   // The shell's live connection keeps this table current; its view tells the viewer's turn and names the table.
   const read = useQuery({ queryKey: ['table-session', tableSessionId], queryFn: ({ signal }) => api.readSession(tableSessionId, signal), enabled: identity.isSuccess, structuralSharing: retainNewestTable });
   const table = read.data;
@@ -264,6 +269,7 @@ export function TableHistoryScreen({ mode, tableSessionId }: { mode: TableMode; 
       </header>
       {standing && <div className={`history-standing is-${standing.kind}`} role="note"><Icon name={standing.kind === 'closed' ? 'lock' : 'exit'} size={18} /><div><strong>{standing.title}</strong><p>{standing.detail}</p></div></div>}
       {selectedHand && <HandReplay key={selectedHand} mode={mode} tableSessionId={tableSessionId} handId={selectedHand} step={step} compare={compare} />}
+      {rows && rows.length > 0 && facts?.hands.some(hand => hand.viewerDealtIn) && <TableHistorySummaryPanel tableSessionId={tableSessionId} completedHands={completedHands} compared={comparedSummaries} onCompare={compareSummaries} asked={summarized} onAsk={() => setSummarized(true)} />}
       {list.isError && !missing && <div className="notice-error" role="alert"><p>{list.error.message}</p><button onClick={() => { if (read.isError) void read.refetch(); void list.refetch(); }}>Retry</button></div>}
       {!rows && !list.isError && <HistorySkeleton />}
       {rows?.length === 0 && <div className="ledger-empty"><SeatGlyph seats={format?.seatCount ?? 6} /><div><h3>No completed hands yet</h3><p>A Hand appears here as soon as it is complete.</p></div></div>}

@@ -46,7 +46,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
   function connect(t: Table) { const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: t.cookie } }); sockets.push(socket); const messages: ServerLiveMessage[] = []; socket.on('error', () => {}); socket.on('message', data => messages.push(JSON.parse(data.toString()))); return { socket, messages }; }
   async function stop() { for (const socket of sockets) socket.terminate(); const closing = server.close(); await expect.poll(() => [...held].every(evaluation => evaluation.signal?.aborted)).toBe(true); for (const evaluation of held) evaluation.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await closing; }
-  return { table, decision, read, post, command, configure, request, result, summary: (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/summaries/' + requestId, { headers: { cookie } }), connect, evaluations, schema, async restart() { await stop(); evaluations.length = 0; await start(); }, async close() { await stop(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
+  return { base: () => base, table, decision, read, post, command, configure, request, result, summary: (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/summaries/' + requestId, { headers: { cookie } }), connect, evaluations, schema, async restart() { await stop(); evaluations.length = 0; await start(); }, async close() { await stop(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
 }
 
 
@@ -219,5 +219,33 @@ test('cold restart loses the exact session request and an explicit new snapshot 
     await expect.poll(async () => (await (await f.summary(t, fresh.requestId)).json()).status).toBe('complete');
     expect((await (await f.summary(t, fresh.requestId)).json()).averages).toEqual({ decisionScore: .325, actionRankScore: .375 });
     expect(f.evaluations).toHaveLength(0); expect(await f.read(t)).toEqual(before);
+  } finally { await f.close(); }
+});
+
+test('a table summary names a supported Strategy: the same frozen decisions, its own request and result, and the Trainer Configuration is untouched', async () => {
+  const f = await fixture({ automaticBots: true, jobRunnerOptions: { concurrency: 4, maximumQueued: 16 } });
+  try {
+    const t = await twoHands(f);
+    await f.configure(t, reference);
+    const named = baselinePlayingStrategy;
+    const [held, other, hand] = await Promise.all([f.post(t, 'session-summaries', {}), f.post(t, 'session-summaries', { strategy: named }), f.post(t, 'hand-summaries', { handId: 'hand-2', strategy: named })].map(async response => (await response).json()));
+    expect(held).toMatchObject({ scope: 'table-session', status: 'pending', decisionCount: 4, referenceStrategy: reference });
+    expect(other).toMatchObject({ scope: 'table-session', status: 'pending', decisionCount: 4, referenceStrategy: named, decisionIds: held.decisionIds });
+    expect(other.requestId).not.toBe(held.requestId);
+    expect(hand).toMatchObject({ scope: 'hand', referenceStrategy: named });
+    // The Reference Strategy's analyses fail; that is its summary's Error alone, and the named Strategy's summaries complete.
+    const failed = new Set<unknown>();
+    const statuses = () => Promise.all([held, other, hand].map(async summary => (await (await f.summary(t, summary.requestId)).json()).status));
+    await expect.poll(async () => { for (const evaluation of f.evaluations) if (!failed.has(evaluation)) { failed.add(evaluation); evaluation.result.reject(new Error('Controlled Strategy failure.')); } return statuses(); }).toEqual(['error', 'complete', 'complete']);
+    // Naming the Reference Strategy is asking for none.
+    expect((await (await f.post(t, 'session-summaries', { strategy: reference })).json()).referenceStrategy).toEqual(reference);
+    for (const strategy of [{}, null, 'x', { policy: { id: 'unknown', version: 'v1', configuration: {} }, selector: named.selector }]) {
+      const refused = await f.post(t, 'session-summaries', { strategy });
+      expect(refused.status, JSON.stringify(strategy)).toBe(400);
+      expect(await refused.json()).toMatchObject({ rejection: { code: 'unsupported-strategy' } });
+    }
+    expect((await f.post(t, 'session-summaries', { strategy: named, other: 1 })).status).toBe(400);
+    const configuration = await (await fetch(f.base() + '/api/trainer-configuration', { headers: { cookie: t.cookie } })).json();
+    expect(JSON.stringify(configuration)).toContain('"fixture"');
   } finally { await f.close(); }
 });

@@ -183,6 +183,12 @@ set: `{ status, decisionCount, progress: { succeeded, total } }` plus `averages`
 its analyses failed (Error takes precedence over Analyzing; never a partial mean; `empty`, with no score, for no
 decisions). Like every summary, the request is transient.
 
+The body may also carry `strategy`, a complete supported Strategy (otherwise 400 `unsupported-strategy`), to summarize the
+same set under it instead of the Guest's Reference Strategy (side-by-side comparison). Each Strategy is its own request,
+with its own `requestId`, progress, Error and Retry; they share the frozen decisions and the cached analyses, and none
+reads or changes the Guest's Trainer Configuration. `POST /:id/session-summaries` and `POST /:id/hand-summaries` take the
+same optional `strategy` for a table's own summaries (Table History compares those).
+
 Every analysis a summary needs is the Guest's `history-analysis`: matching cached analyses and stored results are
 reused, and the rest are submitted under the per-Guest bound of 8 outstanding jobs, which holds back the remainder
 without a capacity error. `GET /api/overall-history/summaries/:requestId` reads its state and progress; the web app reads

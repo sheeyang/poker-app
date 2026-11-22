@@ -1,4 +1,4 @@
-import type { Card, ObservableTableSession, TableHistory, TableHistoryHand } from '@poker/contracts';
+import type { Card, ObservableTableSession, ScoreSummary, TableHistory, TableHistoryHand } from '@poker/contracts';
 import { actionWindowOpen, deadlineCountdown } from './presentation.js';
 import { chips } from './table-model.js';
 import { tablePath } from './table-address.js';
@@ -63,4 +63,14 @@ export function returnBar(table: ObservableTableSession, serverNow: number): { r
   if (!seated || !actionWindowOpen(table, table.viewerParticipantId, serverNow)) return undefined;
   const countdown = deadlineCountdown(table, serverNow);
   return { href: tablePath(table.mode, table.tableSessionId), ...(countdown !== undefined ? { countdown } : {}) };
+}
+
+/**
+ * What a table's Score Summary shows, one Strategy's column: both means out of 100 once complete and "—" otherwise (never
+ * a partial mean), how many decisions it covers, and its state: "Analyzing" while it runs, "Error" once an analysis failed.
+ */
+export function tableSummaryFigures(summary: ScoreSummary): { decisionScore: string; actionRankScore: string; count: string; state: 'Analyzing' | 'Error' | undefined } {
+  const count = summary.decisionCount ? `${summary.decisionCount.toLocaleString('en')} ${summary.decisionCount === 1 ? 'decision' : 'decisions'}` : 'No decisions';
+  if (summary.status === 'complete') return { decisionScore: (summary.averages.decisionScore * 100).toFixed(1), actionRankScore: (summary.averages.actionRankScore * 100).toFixed(1), count, state: undefined };
+  return { decisionScore: '—', actionRankScore: '—', count, state: summary.status === 'pending' ? 'Analyzing' : summary.status === 'error' ? 'Error' : undefined };
 }
