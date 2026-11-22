@@ -1275,3 +1275,53 @@ fieldset.composer-field { display: block; }
 @keyframes menu-grow { from { opacity: 0; scale: .35; } }
 @keyframes notice-in { from { opacity: 0; translate: 0 -8px; } }
 @keyframes row-open { from { block-size: 0; opacity: 0; padding-block: 0; } }
+
+/* ==========================================================================
+   Table History: a table's completed Hands as a ledger of rows, newest first,
+   and the "Your turn — return" bar that follows a seated viewer onto it.
+   ========================================================================== */
+a.quiet-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 40px; padding: 9px 16px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); font-weight: 600; text-decoration: none; transition: background-color 150ms, border-color 150ms; }
+a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; }
+.history-return { position: sticky; top: 0; z-index: 5; }
+.history-deadline { display: inline-flex; gap: 5px; align-items: baseline; font-size: .86rem; }
+.history-deadline strong { font-size: 1rem; }
+.history-return .deadline-near { color: #5b2a14; }
+.history-page { max-width: 1120px; margin: 0 auto; padding: 32px var(--gutter) 72px; }
+.history-heading { margin-bottom: 24px; }
+.history-heading h1 { font-size: 2rem; font-weight: 600; margin-bottom: 4px; }
+.history-heading p { color: var(--muted); font-size: .95rem; }
+.history-back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; color: var(--gold); font-size: .86rem; font-weight: 600; text-decoration: none; }
+.history-back:hover { color: var(--gold-hover); text-decoration: underline; text-underline-offset: 4px; }
+.history-back-arrow { display: inline-flex; rotate: 180deg; transition: translate 150ms cubic-bezier(.16,1,.3,1); }
+.history-back:hover .history-back-arrow { translate: 2px 0; }
+.history-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.history-hand { display: grid; grid-template-columns: minmax(160px, 200px) auto minmax(0, 1fr) minmax(0, 220px); align-items: center; gap: 12px 28px; padding: 16px 12px; border-bottom: 1px solid var(--line); scroll-margin-block: 80px; }
+.history-hand[data-selected] { background: var(--surface); outline: 1px solid var(--gold); outline-offset: -1px; }
+.history-hand-head { display: grid; gap: 4px; justify-items: start; }
+.history-hand-head h2 { font-size: 1.05rem; font-weight: 600; margin: 0; }
+.history-time { color: var(--muted); font-size: .84rem; }
+.history-tag { padding: 1px 8px; border: 1px dashed var(--control-line); border-radius: 4px; font-size: .76rem; font-weight: 600; line-height: 1.5; color: var(--muted); }
+.history-tag.is-dealt-in { border-style: solid; border-color: #4f6a57; background: var(--tag, #2d4031); color: #c1cfb9; }
+.history-board { display: flex; gap: 5px; min-height: 41px; align-items: center; }
+.history-muted { color: var(--muted); font-size: .86rem; }
+.history-players { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.history-players > li { display: inline-flex; align-items: center; gap: 8px; min-height: 41px; }
+.history-player-name { font-size: .9rem; font-weight: 600; }
+.history-player-cards { display: inline-flex; gap: 3px; }
+.history-result { margin: 0; display: grid; gap: 2px; }
+.history-result strong { font-weight: 600; font-size: .92rem; font-variant-numeric: tabular-nums; }
+.history-result span { color: var(--muted); font-size: .8rem; }
+.history-hand-skeleton { grid-template-columns: 1fr 1fr 1fr; min-height: 74px; }
+@media (max-width: 860px) {
+  .history-page { padding-top: 20px; }
+  .history-heading h1 { font-size: 1.6rem; }
+  .history-hand { grid-template-columns: 1fr; gap: 10px; padding: 16px 4px; }
+  .history-hand-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+  .history-players > li { min-height: 33px; }
+  .history-result { grid-template-columns: 1fr auto; align-items: baseline; }
+}
+@media (max-width: 650px) {
+  .history-return { padding-block: 8px; }
+  .history-return .live-strip-actions { justify-content: flex-end; }
+  .history-return .live-strip-back { min-height: 44px; }
+}

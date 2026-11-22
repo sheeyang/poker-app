@@ -40,6 +40,8 @@ export const api = {
   listSessions: () => request<import('@poker/contracts').SavedTables>('/table-sessions'),
   /** Says the Guest opened a table: the server times it, and it orders their saved lists. */
   markOpened: (id: string) => request<{ ok: true }>('/table-sessions/' + encodeURIComponent(id) + '/opened', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
+  /** The table's completed Hands, as this Participant may see them. */
+  readTableHistory: (id: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHistory>('/table-sessions/' + encodeURIComponent(id) + '/history', { signal }),
   readSession: (id: string, signal?: AbortSignal) => request<ObservableTableSession>('/table-sessions/' + encodeURIComponent(id), { signal }),
   createSession: (body: CreateTableSessionRequest) => request<CreationAcknowledgement>('/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   seatParticipant: (id: string, body: SeatParticipantRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/seat-participant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),

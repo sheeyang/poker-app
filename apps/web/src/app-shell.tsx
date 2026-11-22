@@ -69,7 +69,8 @@ export function AppShell() {
     onAnalysisUpdate: (update, lifecycle) => consumers.current?.onAnalysisUpdate?.(update, lifecycle),
   }, currentTable);
   const shell: Shell = { identity, command, live, consumeLive };
-  const atTable = tableSessionId !== null;
+  // Table History is a page of its own: it follows the table live, but is laid out as a page, not as the table.
+  const atTable = tableSessionId !== null && !parseAddress(pathname)?.history;
   // A notice about leaving belongs to the list it returned to, not to the next table.
   useEffect(() => { if (atTable) setNotice(null); }, [atTable]);
   const section = sectionOf(pathname);

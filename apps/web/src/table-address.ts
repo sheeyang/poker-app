@@ -6,14 +6,17 @@ import { formatAndStakes, modeLabel } from './table-model.js';
 export const listPath = (mode: TableMode) => `/${mode}` as const;
 /** A table's one address, under its own mode. */
 export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/${tableSessionId}`;
+/** A table's Table History: its own screen, under its own address and mode. `hand` opens it at that Hand. */
+export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string) => `${tablePath(mode, tableSessionId)}/history${handId ? `?hand=${handId}` : ''}`;
 /**
  * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
  * there is one; undefined outside the two modes. The table ID is as written: whether it names a table is for the server.
  */
-export function parseAddress(pathname: string): { readonly mode: TableMode; readonly tableSessionId?: string } | undefined {
-  const [, first, second] = pathname.split('/');
+export function parseAddress(pathname: string): { readonly mode: TableMode; readonly tableSessionId?: string; readonly history?: true } | undefined {
+  const [, first, second, third] = pathname.split('/');
   if (first !== 'practice' && first !== 'online') return undefined;
-  return second ? { mode: first, tableSessionId: second } : { mode: first };
+  if (!second) return { mode: first };
+  return third === 'history' ? { mode: first, tableSessionId: second, history: true } : { mode: first, tableSessionId: second };
 }
 
 /** An Online Table's Join Link: its own address, which never changes and which anyone at the table can pass on (ADR-0033). */
@@ -84,10 +87,16 @@ export function tableSearch(search: Record<string, unknown>): { analysis?: Analy
   return analysis ? { analysis } : {};
 }
 
+/** The search a Table History route accepts: `hand=hand-N`, the Hand to open. */
+export function historySearch(search: Record<string, unknown>): { hand?: string } {
+  return typeof search.hand === 'string' && /^hand-[0-9]+$/.test(search.hand) ? { hand: search.hand } : {};
+}
+
 const app = 'Poker Trainer';
 export type Page =
   | { readonly page: 'list'; readonly mode: TableMode }
   | { readonly page: 'table'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
+  | { readonly page: 'history'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
   | { readonly page: 'join'; readonly ownerName: string }
   | { readonly page: 'missing-table' }
   | { readonly page: 'closed-table' }
@@ -98,6 +107,7 @@ export function pageTitle(page: Page): string {
   switch (page.page) {
     case 'list': return `${modeLabel(page.mode)} · ${app}`;
     case 'table': return `${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
+    case 'history': return `Table History · ${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
     case 'join': return `Join ${page.ownerName}’s table · ${app}`;
     case 'missing-table': return `Table not found · ${app}`;
     case 'closed-table': return `Table closed · ${app}`;

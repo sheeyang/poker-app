@@ -12,6 +12,7 @@ import { sessionSummaryRefreshKey } from './session-summary.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
 import { AnalysisSkeleton, ScoreSkeleton, Skeleton } from './loading-skeleton.js';
 import { liveAnalysisAllowed, tableLiveAnalysisNote } from './live-analysis.js';
+import { HistoryLink } from './table-history-screen.js';
 
 type Analysis = ReturnType<typeof useDecisionAnalysis>;
 type HandSummary = ReturnType<typeof useHandSummary>;
@@ -91,6 +92,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     {tab === 'live' && <div className="analysis-mode-line">{!allowed ? 'Live Analysis isn’t allowed at this table' : !configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn'}</div>}
     <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={tab !== 'live'}>{tab === 'live' && (!allowed ? <div className="analysis-empty"><strong>Live Analysis isn’t allowed at this table.</strong><p>{tableNote ?? 'Your decisions are still analyzed and scored after you act.'}</p></div> : configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
     <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={tab !== 'hand'}>{tab === 'hand' && <>
+    {table.view.state.status === 'completed-hand' && table.view.state.handId && <HistoryLink className="text-button history-link" mode={table.mode} tableSessionId={table.tableSessionId} handId={table.view.state.handId}>Open in Table History <Icon name="arrow" size={15} /></HistoryLink>}
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
     {handDecisions.length === 0 && !handSummary && content}
     {(handDecisions.length > 0 || handSummary) && <section className="decision-section decision-review"><div className={`section-heading${handSummary ? ' hand-summary-heading' : ''}`}><div className="decision-heading-copy"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
