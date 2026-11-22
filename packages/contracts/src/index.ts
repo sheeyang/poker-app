@@ -558,6 +558,22 @@ export interface SetTablePasswordRequest {
   readonly tablePassword: string | null;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
+/**
+ * Every Strategy the server supports: two Policies under two selectors. The browser may offer only these. The server
+ * (`isSupportedStrategy`) remains the authority and refuses anything else.
+ */
+export const supportedStrategies: readonly StrategyDescriptor[] = Object.freeze([
+  simpleHeuristicPlayingStrategy,
+  Object.freeze({ policy: simpleHeuristicPlayingStrategy.policy, selector: highestProbabilityPlayingStrategy.selector }),
+  baselinePlayingStrategy,
+  highestProbabilityPlayingStrategy,
+]);
+/** A Counterfactual Comparison holds the Reference Strategy and at most this many more Strategies (ADR-0041). */
+export const maximumComparedStrategies = 3;
+/** A supported Strategy's name in an address, `policy:selector`; stable, and the same for the same Strategy everywhere. */
+export const strategyToken = (strategy: StrategyDescriptor): string => `${strategy.policy.id}:${strategy.selector.id}`;
+/** The supported Strategy a token names, or undefined for anything else. */
+export const strategyFromToken = (token: unknown): StrategyDescriptor | undefined => typeof token === 'string' ? supportedStrategies.find(strategy => strategyToken(strategy) === token) : undefined;
 
 /** Reproducible evaluation identity; effective seeds never enter a game view. */
 export interface EvaluationIdentity {
@@ -596,7 +612,13 @@ export type DecisionAnalysis = AnalysisRequestIdentity & (
   | { readonly status: 'complete'; readonly evaluation: ReferenceStrategyEvaluation; readonly scores?: DecisionScores }
   | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
 );
-export interface GetOrStartAnalysisRequest { readonly decisionId: string }
+/**
+ * `POST /table-sessions/:id/analysis`. `live` asks for Live Analysis, `history` asks from Table History. `strategy`
+ * (optional, supported Strategies only) names the Strategy to analyze an accepted decision under instead of the Guest's
+ * Reference Strategy, for a Counterfactual Comparison: each Strategy is its own request and its own result, on the same
+ * frozen inputs and seeds. Absent, the Guest's Reference Strategy applies. It cannot be combined with `live`.
+ */
+export interface GetOrStartAnalysisRequest { readonly decisionId: string; readonly live?: true; readonly history?: true; readonly strategy?: StrategyDescriptor }
 
 /** One immutable, explicitly requested set of accepted human decisions. */
 interface ScoreSummaryMetadata {

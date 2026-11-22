@@ -1,4 +1,4 @@
-import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
+import { maximumComparedStrategies, strategyFromToken, strategyToken, type JoinLinkPreview, type OpenJoinLinkPreview, type ProtectedJoinLinkPreview, type SavedTable, type StrategyDescriptor, type TableMode } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
 import { formatAndStakes, modeLabel } from './table-model.js';
 
@@ -10,7 +10,10 @@ export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/
  * A table's Table History: its own screen, under its own address and mode. `hand` opens it at that Hand's replay, and
  * `step` at that Replay Step of it (`stepKey`); a step needs its Hand.
  */
-export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string, step?: string) => `${tablePath(mode, tableSessionId)}/history${handId ? `?hand=${handId}${step ? `&step=${step}` : ''}` : ''}`;
+export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string, step?: string, compare?: readonly StrategyDescriptor[]) => {
+  const compared = compareParam(compare ?? []);
+  return `${tablePath(mode, tableSessionId)}/history${handId ? `?hand=${handId}${step ? `&step=${step}` : ''}${compared ? `&compare=${compared}` : ''}` : ''}`;
+};
 /**
  * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
  * there is one; undefined outside the two modes. The table ID is as written: whether it names a table is for the server.
@@ -91,12 +94,35 @@ export function tableSearch(search: Record<string, unknown>): { analysis?: Analy
 }
 
 /**
- * The search a Table History route accepts: `hand=hand-N`, the Hand to replay, and with it `step`, the Replay Step to open
- * it at: `decision-N` (before that decision), `flop`, `turn`, `river` (after that street's reveal) or `result`.
+ * The Strategies a Counterfactual Comparison holds beside the Reference Strategy, as the address's `compare`: supported
+ * Strategies' tokens (`strategyToken`), comma-separated in the order chosen. Anything unsupported or repeated is dropped,
+ * and no more than the maximum are kept. Undefined when none are left. Selecting Strategies never touches the Guest's
+ * Trainer Configuration: the address is the only place they live.
  */
-export function historySearch(search: Record<string, unknown>): { hand?: string; step?: string } {
+export function compareParam(strategies: readonly StrategyDescriptor[]): string | undefined {
+  const tokens = strategies.map(strategyToken).filter((token, index, all) => strategyFromToken(token) && all.indexOf(token) === index).slice(0, maximumComparedStrategies);
+  return tokens.length ? tokens.join(',') : undefined;
+}
+/** The Strategies a `compare` value names, in order; none for anything that is not a text of supported tokens. */
+export function comparedStrategies(compare: unknown): StrategyDescriptor[] {
+  if (typeof compare !== 'string') return [];
+  const named = compare.split(',').map(strategyFromToken).filter((strategy): strategy is StrategyDescriptor => !!strategy);
+  return named.filter((strategy, index) => named.indexOf(strategy) === index).slice(0, maximumComparedStrategies);
+}
+
+/**
+ * The search a Table History route accepts: `hand=hand-N`, the Hand to replay, and with it `step`, the Replay Step to open
+ * it at: `decision-N` (before that decision), `flop`, `turn`, `river` (after that street's reveal) or `result`; and
+ * `compare`, the Strategies compared at the reader's decisions (`compareParam`). Both need their Hand.
+ */
+export function historySearch(search: Record<string, unknown>): { hand?: string; step?: string; compare?: string } {
   if (typeof search.hand !== 'string' || !/^hand-[0-9]+$/.test(search.hand)) return {};
-  return typeof search.step === 'string' && /^(?:decision-[0-9]+|flop|turn|river|result)$/.test(search.step) ? { hand: search.hand, step: search.step } : { hand: search.hand };
+  const compare = compareParam(comparedStrategies(search.compare));
+  return {
+    hand: search.hand,
+    ...(typeof search.step === 'string' && /^(?:decision-[0-9]+|flop|turn|river|result)$/.test(search.step) ? { step: search.step } : {}),
+    ...(compare ? { compare } : {}),
+  };
 }
 
 const app = 'Poker Trainer';
