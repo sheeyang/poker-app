@@ -8,7 +8,7 @@ import { connectionOf, nextHandLabel, type NextHandStatus } from './online-statu
 import { participantActions } from './participant-actions.js';
 import { currentWindow } from './presentation.js';
 import { bettingOver, heldStacks } from './table-motion.js';
-import { useTableMotion, type StackRoll } from './table-choreography.js';
+import { useTableMotion, type ReplayPlayback, type StackRoll } from './table-choreography.js';
 
 /**
  * `serverNow`: the estimated server time this render shows; motion is timed from it.
@@ -16,10 +16,10 @@ import { useTableMotion, type StackRoll } from './table-choreography.js';
  * `countdown`: whole seconds left before their Action Deadline, shown to everyone; `undefined` without one.
  * `nextHand`: between Hands at an Online Table, the Next-Hand Countdown or why there is none.
  * Seat and Participant actions open beside the object the player points at.
- * `replay`: the table is a Replay Step of Table History, drawn at once with no motion, nothing to act on and no open seats;
- * the acting seat is the one whose decision comes next.
+ * `replay`: the table is a Replay Step of Table History, playing the motion it is given (replay-motion.ts), with nothing
+ * to act on and no open seats; the acting seat is the one whose decision comes next.
  */
-export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextHand, handOpen, choosing, openSeat, openParticipant, replay = false }: { table: ObservableTableSession; serverNow: number; actorWindowOpen: boolean; countdown?: number; nextHand?: NextHandStatus; handOpen: boolean; choosing: boolean; openSeat: (seat: number, anchor: HTMLElement) => void; openParticipant: (participantId: string, anchor: HTMLElement) => void; replay?: boolean }) {
+export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextHand, handOpen, choosing, openSeat, openParticipant, replay }: { table: ObservableTableSession; serverNow: number; actorWindowOpen: boolean; countdown?: number; nextHand?: NextHandStatus; handOpen: boolean; choosing: boolean; openSeat: (seat: number, anchor: HTMLElement) => void; openParticipant: (participantId: string, anchor: HTMLElement) => void; replay?: ReplayPlayback }) {
   const state = table.view.state;
   const humanId = table.viewerParticipantId;
   const viewerSeat = state.participants.find(p => p.participantId === humanId)?.seat ?? null;

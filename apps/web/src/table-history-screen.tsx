@@ -11,8 +11,9 @@ import { usePageTitle, useShell } from './app-shell.js';
 import { usePresentation } from './use-presentation.js';
 import { handRows, returnBar, type HandRow } from './table-history.js';
 import { historyPath, historySearch, listPath } from './table-address.js';
-import { PokerTable } from './poker-table.js';
-import { actedLabel, openStep, replayControls, replayTable, stepLabel, streetName } from './replay.js';
+import { actedLabel, openStep, replayControls, stepKey, stepLabel, streetName } from './replay.js';
+import { ReplayFelt } from './replay-felt.js';
+import type { ReplayMove } from './replay-motion.js';
 import { blindsLabel, modeLabel, tableFormat } from './table-model.js';
 
 /** A link back to a table's own page. */
@@ -50,10 +51,10 @@ function HandEntry({ row, selected, mode, tableSessionId }: { row: HandRow; sele
 }
 
 const streets: readonly Street[] = ['preflop', 'flop', 'turn', 'river'];
-const ignore = () => {};
 
 /**
- * One completed Hand, replayed one Replay Step at a time on the table's own felt, each step drawn at once. The address
+ * One completed Hand, replayed one Replay Step at a time on the table's own felt. Back and Next (and the arrow keys) play
+ * the step's motion, forward or reversed; a jump to a street or a decision, or a new address, draws its step at once. The address
  * holds the Hand and the step, so a reload reopens both. Under the felt, the step dock: what the step shows and what led
  * to it, Back and Next, a jump to each street the Hand reached, and to the reader's next decision. On a phone the dock
  * stays at the bottom of the screen while the felt is in view, so the cards and the controls are seen together.
@@ -67,7 +68,13 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
   const replay = read.data;
   const index = replay ? openStep(replay, step) : 0;
   const controls = replay && replayControls(replay, index);
-  const go = (key: string | undefined) => { if (key) void navigate({ href: historyPath(mode, tableSessionId, handId, key), replace: true }); };
+  // How the reader asked for the step the address goes to next: Back and Next step, anything else jumps.
+  const intent = useRef<{ readonly to: string; readonly how: ReplayMove }>(undefined);
+  const go = (key: string | undefined, how: ReplayMove = 'jump') => {
+    if (!key) return;
+    intent.current = { to: key, how };
+    void navigate({ href: historyPath(mode, tableSessionId, handId, key), replace: true });
+  };
   // Opening a Hand (this replay is keyed by it) brings its felt into view; stepping never scrolls.
   useEffect(() => { section.current?.scrollIntoView({ block: 'nearest' }); }, []);
   // The arrow keys step, unless a field or a menu has them.
@@ -76,8 +83,8 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || (event.target instanceof Element && event.target.closest('input, select, textarea, [role="menu"], dialog'))) return;
-      if (event.key === 'ArrowLeft' && keys.current.previous) { event.preventDefault(); keys.current.go(keys.current.previous); }
-      if (event.key === 'ArrowRight' && keys.current.next) { event.preventDefault(); keys.current.go(keys.current.next); }
+      if (event.key === 'ArrowLeft' && keys.current.previous) { event.preventDefault(); keys.current.go(keys.current.previous, 'step'); }
+      if (event.key === 'ArrowRight' && keys.current.next) { event.preventDefault(); keys.current.go(keys.current.next, 'step'); }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -98,7 +105,7 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
       : read.isError ? <div className="notice-error" role="alert"><p>{read.error.message}</p><button type="button" onClick={() => void read.refetch()}>Retry</button></div>
       : !replay || !current || !controls ? <div className="replay-skeleton" role="status" aria-label="Loading the replay"><div className="loading-oval" aria-hidden="true" /><div className="replay-dock" aria-hidden="true"><Skeleton className="skeleton-action" /></div></div>
       : <>
-        <PokerTable replay table={replayTable(replay, index)} serverNow={Date.now()} actorWindowOpen={current.kind === 'decision'} handOpen={false} choosing={false} openSeat={ignore} openParticipant={ignore} />
+        <ReplayFelt replay={replay} index={index} move={intent.current?.to === stepKey(current, handId) ? intent.current.how : 'jump'} />
         <div className="replay-dock">
           <p className="replay-step" aria-live="polite">
             <strong>{stepLabel(replay, current)}</strong>
@@ -106,13 +113,13 @@ function HandReplay({ mode, tableSessionId, handId, step }: { mode: TableMode; t
             <span className="replay-count numeric">Step {index + 1} of {replay.steps.length}</span>
           </p>
           <div className="replay-controls">
-            <button type="button" className="replay-back" disabled={!controls.previous} onClick={() => go(controls.previous)} aria-keyshortcuts="ArrowLeft"><span className="replay-back-arrow"><Icon name="arrow" size={18} /></span>Back</button>
+            <button type="button" className="replay-back" disabled={!controls.previous} onClick={() => go(controls.previous, 'step')} aria-keyshortcuts="ArrowLeft"><span className="replay-back-arrow"><Icon name="arrow" size={18} /></span>Back</button>
             <fieldset className="replay-streets" aria-label="Jump to a street">{streets.map(street => {
               const open = controls.streets.find(s => s.street === street);
               return <button type="button" key={street} className="replay-street" disabled={!open} aria-current={open?.current ? 'step' : undefined} onClick={() => go(open?.step)}>{streetName(street)}</button>;
             })}</fieldset>
             {replay.hand.viewerDealtIn && <button type="button" className="replay-mine" disabled={!controls.nextDecision} onClick={() => go(controls.nextDecision)}>{controls.nextDecision ? 'Your next decision' : 'No more decisions'}</button>}
-            <button type="button" className="primary replay-next" disabled={!controls.next} onClick={() => go(controls.next)} aria-keyshortcuts="ArrowRight">Next<Icon name="arrow" size={18} /></button>
+            <button type="button" className="primary replay-next" disabled={!controls.next} onClick={() => go(controls.next, 'step')} aria-keyshortcuts="ArrowRight">Next<Icon name="arrow" size={18} /></button>
           </div>
         </div>
       </>}
