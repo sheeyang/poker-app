@@ -3,12 +3,8 @@ import { useQueries } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource, type LiveConsumers } from '@poker/client';
 import { liveAnalysisOn } from './live-analysis.js';
+import { identity } from './analysis-identity.js';
 
-function identity(value: unknown): string {
-  if (Array.isArray(value)) return '[' + value.map(identity).join(',') + ']';
-  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + identity((value as Record<string, unknown>)[key])).join(',') + '}';
-  return JSON.stringify(value);
-}
 /** The analysis tab kept in the table's address: `tab` is what the address names, `choose` replaces it. */
 export type AnalysisAddress = { tab: 'live' | 'hand' | 'session' | undefined; choose: (tab: 'live' | 'hand' | 'session') => void };
 export function useDecisionAnalysis(table: ObservableTableSession | undefined, address?: AnalysisAddress) {

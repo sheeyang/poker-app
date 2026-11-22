@@ -804,6 +804,18 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const table = await readableTable(id, userId);
       return table && (handReplay(table.aggregate, table.game, table.participantId, handId) ?? 'hand-not-found');
     }
+    /**
+     * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
+     * Reference Strategy their Guest has now. It follows the same rule as reading the history, so it loads nothing.
+     * `undefined` for a Guest who may not read the table; `null` for a decision that is not their own accepted one.
+     */
+    async function captureHistoryEvaluation(id: string, userId: string, decisionId: string): Promise<FrozenEvaluationInput | null | undefined> {
+      const { referenceStrategy } = await trainerConfigurations.current(userId);
+      const table = await readableTable(id, userId);
+      if (!table) return undefined;
+      const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
+      return input?.acceptedAction ? input : null;
+    }
     async function read(id: string, userId: string) {
       return asMember(id, userId, async () => {
         const trainerConfiguration = await trainerConfigurations.current(userId);
@@ -1403,6 +1415,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     read,
     readHistory,
     readReplay,
+    captureHistoryEvaluation,
     subscribe,
     configure,
     setTablePassword,

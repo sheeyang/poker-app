@@ -70,7 +70,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
   const street = context.street ?? 'decision';
   const handSummary = summary.handId === table.view.state.handId ? summary : undefined;
   const content = <>
-    {data?.status === 'complete' && data.scores && <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
+    {data?.status === 'complete' && data.scores && <DecisionScores scores={data.scores} />}
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
     {loadingAnalysis && <AnalysisSkeleton actions={context.legalActions} scores={!!selected} sampled={reference.selector.id === 'seeded-sampling'} />}
     {analysisError && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{analysisError.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
@@ -120,7 +120,13 @@ export function AnalysisPanelSkeleton({ close }: { close: () => void }) {
   return <aside id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis" aria-busy="true"><div className="panel-heading"><Skeleton className="skeleton-panel-title" /><div className="panel-actions"><button className="icon-button" disabled aria-label="Analysis settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Close analysis" onClick={close}><Icon name="close" size={18} /></button></div></div><div className="analysis-meta"><span>Reference: <Skeleton className="skeleton-reference" /></span><span>Amounts in chips</span></div><div className="analysis-view-tabs" role="tablist" aria-label="Analysis view"><button role="tab" aria-selected="false" disabled>Live</button><button role="tab" aria-selected="false" disabled>This hand</button></div><section className="decision-section"><AnalysisSkeleton actions={[]} scores sampled={false} /></section></aside>;
 }
 
-function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
+/** A scored decision's two scores, the Decision Score the larger. */
+export function DecisionScores({ scores }: { scores: NonNullable<Extract<DecisionAnalysis, { status: 'complete' }>['scores']> }) {
+  return <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>;
+}
+
+/** The Reference Policy distribution, its sizings and the Reference action, with the player's own action marked. */
+export function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
   const accepted = data.scoredDecision?.acceptedAction;
   return <>
     <div className="distribution-heading"><h3>Reference actions</h3><span>Probability</span></div>
@@ -131,7 +137,7 @@ function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'c
   </>;
 }
 
-function AnalysisDetails({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
+export function AnalysisDetails({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
   return <details className="analysis-provenance"><summary>Analysis details</summary><div className="details-content"><p>{data.referenceStrategy.selector.id === 'seeded-sampling' ? 'The sampled action is a reproducible draw from the full distribution. It may differ from the most likely action.' : 'The selected action is chosen by the configured Action Selector.'}</p><p>Policy: {data.referenceStrategy.policy.id} · {data.referenceStrategy.policy.version}<br />Selector: {data.referenceStrategy.selector.id} · {data.referenceStrategy.selector.version}</p></div></details>;
 }
 
