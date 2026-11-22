@@ -73,7 +73,7 @@ function projectSchedule(schedule: TableSchedule): TableSchedule {
  * `serverTime` is the injected clock's time at projection; `connected` lists the human Participants with a live
  * connection to the table at that time, which an Online Table's view shows.
  */
-export function projectTableSession(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame | undefined, serverTime: number, adminMode = true, connected: readonly string[] = []): ObservableTableSession {
+export function projectTableSession(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame | undefined, serverTime: number, adminMode = false, connected: readonly string[] = []): ObservableTableSession {
   const viewer = findBinding(aggregate, participantId);
   if (!isHuman(viewer)) throw new Error('Table views are projected only for a human Participant.');
   if (!game) {
@@ -110,7 +110,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     },
   };
 }
-export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = true, connected: readonly string[] = []): ObservableTableUpdate {
+export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = false, connected: readonly string[] = []): ObservableTableUpdate {
   // biome-ignore lint/suspicious/useIterableCallbackReturn: exhaustive switch over the event union; the compiler rejects a missing case.
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {

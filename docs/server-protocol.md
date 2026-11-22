@@ -85,7 +85,9 @@ the request gave none) and 403 `wrong-table-password` (see [Table Password](#tab
 remembered per request ID, so retry with a new one after fixing the cause. The two password rejections are the
 exception: they are definitive but never remembered, so the same request ID can be tried again with the right password. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
-command, so it advances both revisions and the Participant observes from that point.
+command, so it advances both revisions and the Participant observes the live table from that point. The view's
+history covers the whole Table Session, including Hands from before they joined and the earlier actions of a Hand in
+progress ([ADR-0040](adr/0040-cover-the-whole-table-session-in-observable-session-history.md)).
 
 A Guest is at no more than one open Online Table at a time, their Current Table, watching
 included; Practice Tables don't count. Creating an Online Table, and joining or returning to

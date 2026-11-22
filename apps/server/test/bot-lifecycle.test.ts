@@ -21,7 +21,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   const start = async (automaticBots = true) => {
-    server = await createServer({ clock, databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
+    server = await createServer({ clock, adminMode: true, databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
       supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: configured => {
         if (configured.policy.id !== 'fixture') return createStrategy(configured);
@@ -104,6 +104,41 @@ test.each([['incompatible', 'incompatible'], ['throw', 'failed'], ['invalid', 'i
     expect(JSON.stringify(live.messages)).not.toMatch(/untrusted|private cards|diagnostic|evaluationSeed|selectionSeed/);
     const reconnect = f.connect(t); try { await expect.poll(() => reconnect.messages.find(m => m.type === 'table-status')).toMatchObject({ status: { phase: 'failed', code } }); } finally { reconnect.socket.terminate(); }
   } finally { socket?.terminate(); await f.close(); }
+});
+
+test('a Bot added after earlier Hands receives the whole Table Session in its Policy input, and its recorded action replays without new Policy work', async () => {
+  const f = await fixture();
+  try {
+    // Hand 1: the human calls and the first Bot folds.
+    const t = await f.table(); await f.botDecision(t);
+    await expect.poll(() => f.evaluations.length).toBe(1);
+    f.evaluations[0]!.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(async () => (await f.read(t)).view.state.status).toBe('completed-hand');
+    await f.command(t, 'add-bot', { name: 'Late', playingStrategy: descriptor() });
+    const late = (await f.read(t)).bindings.find(binding => binding.name === 'Late')!.participantId;
+    await f.command(t, 'start-hand');
+    // Hand 2: the first Bot, on the button, calls; then the newcomer decides.
+    await expect.poll(() => f.evaluations.length).toBe(2);
+    expect(f.evaluations[1]!.view.state.actorId).toBe(t.bot);
+    f.evaluations[1]!.result.resolve(answer({ type: 'call' }));
+    await expect.poll(() => f.evaluations.length).toBe(3);
+    const input = f.evaluations[2]!.view;
+    expect(input.state.actorId).toBe(late);
+    expect(input.history.map(hand => [hand.handId, hand.result?.status])).toEqual([['hand-1', 'completed-hand'], ['hand-2', undefined]]);
+    expect(input.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.human, action: { type: 'call' } }, { participantId: t.bot, action: { type: 'fold' } }]);
+    // Nobody's hole cards from Hand 1 reach the newcomer: no showdown revealed them.
+    expect(JSON.stringify(input.history[0])).not.toContain('holeCards');
+    expect(input.history[1]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.bot, action: { type: 'call' } }]);
+    f.evaluations[2]!.result.resolve(answer({ type: 'fold' }));
+    await expect.poll(async () => (await f.read(t)).view.history[1]?.decisions.at(-1)?.action).toEqual({ participantId: late, action: { type: 'fold' } });
+    const accepted = await f.commands.readPersistedSession(t.id);
+    expect(accepted?.pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: late, action: { type: 'fold' } });
+    await f.restart();
+    // Restoration replays the recorded actions as commands; no Bot decides again.
+    expect(f.evaluations).toEqual([]);
+    expect(await f.commands.readPersistedSession(t.id)).toMatchObject({ pokerRecord: accepted?.pokerRecord, botProvenance: accepted?.botProvenance });
+    expect((await f.read(t)).view.history[1]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.bot, action: { type: 'call' } }, { participantId: late, action: { type: 'fold' } }]);
+  } finally { await f.close(); }
 });
 
 test('retry installs a fresh request identity with identical inputs/seeds and discards the older result and failure', async () => {
