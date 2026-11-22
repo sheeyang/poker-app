@@ -21,7 +21,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   const start = async (automaticBots = true) => {
-    server = await createServer({ clock, databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
+    server = await createServer({ clock, adminMode: true, databaseUrl, schema, automaticBots, jobRunnerOptions: { timeoutMs: 2000 },
       supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: configured => {
         if (configured.policy.id !== 'fixture') return createStrategy(configured);
