@@ -2,14 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api } from '@poker/client';
-import { decisionActionTypes, decisionStreets, historyFilterSize, historyModes, positions, type DecisionActionType, type HistoryFilter, type Position, type Street, type TableMode } from '@poker/contracts';
+import { decisionActionTypes, decisionStreets, historyFilterSize, historyModes, positions, type DecisionActionType, type HistoryBreakdown, type HistoryFilter, type Position, type Street, type TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { Card } from './cards.js';
 import { Skeleton } from './loading-skeleton.js';
 import { SeatGlyph } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { HistoryLink } from './table-history-screen.js';
-import { clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, rangedBy, searchOfFilter, toggled, type DecisionRow } from './overall-history.js';
+import { breakdownOfSearch, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, rangedBy, searchOfFilter, toggled, withBreakdown, type DecisionRow } from './overall-history.js';
+import { OverallHistorySummaryPanel } from './overall-history-summary.js';
 import { streetName } from './replay.js';
 import { modeLabel } from './table-model.js';
 
@@ -106,13 +107,17 @@ function ListSkeleton() {
 /**
  * Overall History (ADR-0041): the Guest's own decisions from every Hand they were dealt into, at every table they can
  * read. The filters apply at once and live in the address, so a reload keeps them; each decision opens at its Replay
- * Step in its table's Table History. Score filters and Score Summaries join in later tickets.
+ * Step in its table's Table History. A Score Summary over the decisions shown, and its breakdown, sits above them;
+ * the breakdown lives in the address too. Score filters join in a later ticket.
  */
 export function OverallHistoryScreen() {
   const { identity } = useShell();
   const navigate = useNavigate();
   const search = useSearch({ strict: false });
   const filter = useMemo(() => filterOfSearch(search), [search]);
+  const breakdown = breakdownOfSearch(search);
+  // A summary is asked for explicitly; once asked, a new filter or breakdown asks again.
+  const [summarized, setSummarized] = useState(false);
   const key = JSON.stringify(searchOfFilter(filter));
   usePageTitle({ page: 'overall-history' });
   const list = useInfiniteQuery({
@@ -122,7 +127,8 @@ export function OverallHistoryScreen() {
   });
   const rows = useMemo(() => list.data?.pages.flatMap(page => page.decisions.map(decisionRow)), [list.data]);
   const total = list.data?.pages[0]?.total;
-  const apply = (next: HistoryFilter) => void navigate({ to: '/history', search: searchOfFilter(next), replace: true });
+  const show = (next: HistoryFilter, by: HistoryBreakdown | undefined) => void navigate({ to: '/history', search: withBreakdown(searchOfFilter(next), by), replace: true });
+  const apply = (next: HistoryFilter) => show(next, breakdown);
   const filtered = historyFilterSize(filter) > 0;
   return <main id="main-table" className="history-page og-page">
     <header className="history-heading">
@@ -130,6 +136,7 @@ export function OverallHistoryScreen() {
       <p>Your decisions in every Hand you were dealt into, at every table you can read: Practice, tables you left, and Closed Tables.</p>
     </header>
     <Filters filter={filter} onChange={apply} shown={rows?.length} total={total} />
+    <OverallHistorySummaryPanel filter={filter} breakdown={breakdown} total={total} asked={summarized} onAsk={() => setSummarized(true)} onBreakdown={by => show(filter, by)} />
     {list.isError && <div className="notice-error" role="alert"><p>{list.error.message}</p><button type="button" onClick={() => void list.refetch()}>Retry</button></div>}
     {!rows && !list.isError && <ListSkeleton />}
     {rows?.length === 0 && (filtered

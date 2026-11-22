@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import type { OverallHistoryDecision } from '@poker/contracts';
-import { clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, rangedBy, searchOfFilter, toggled } from '../src/overall-history.js';
+import { breakdownOfSearch, bucketLabel, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, rangedBy, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
 import { parseAddress } from '../src/table-address.js';
 
 const decision = (override: Partial<OverallHistoryDecision> = {}): OverallHistoryDecision => ({
@@ -77,4 +77,36 @@ test('a decision reads as a row: the table it was at, its Hand, when it complete
 test('a listed decision opens at its Replay Step of its table, whichever mode the table has', () => {
   expect(decisionRow(decision()).link).toEqual({ mode: 'practice', tableSessionId: '11111111-1111-4111-8111-111111111111', handId: 'hand-12', step: 'decision-4' });
   expect(decisionRow(decision({ mode: 'online', decisionId: 'hand-3/decision-1', handId: 'hand-3' })).link).toMatchObject({ mode: 'online', handId: 'hand-3', step: 'decision-1' });
+});
+
+test('the address holds the breakdown beside the filters, and reading it back gives the same view; anything else is no breakdown', () => {
+  const search = withBreakdown(searchOfFilter({ street: ['flop'] }), 'position');
+  expect(search).toEqual({ street: 'flop', breakdown: 'position' });
+  expect(breakdownOfSearch(search)).toBe('position');
+  expect(filterOfSearch(search)).toEqual({ street: ['flop'] });
+  expect(overallHistorySearch({ action: 'call', breakdown: 'mode' })).toEqual({ action: 'call', breakdown: 'mode' });
+  expect(overallHistorySearch({ breakdown: 'hand' })).toEqual({});
+  expect(breakdownOfSearch({ breakdown: 'hand' })).toBeUndefined();
+  expect(withBreakdown({ street: 'flop', breakdown: 'action' }, undefined)).toEqual({ street: 'flop' });
+  expect(overallHistoryPath({ street: ['flop'] }, 'street')).toBe('/history?street=flop&breakdown=street');
+  expect(overallHistoryPath({}, 'action')).toBe('/history?breakdown=action');
+});
+
+test('a bucket is named the way the filters name it', () => {
+  expect(bucketLabel('street', 'preflop')).toBe('Preflop');
+  expect(bucketLabel('action', 'raise')).toBe('Raise');
+  expect(bucketLabel('mode', 'online')).toBe('Online');
+  expect(bucketLabel('position', 'BTN/SB')).toBe('BTN/SB');
+});
+
+test('a summary shows both means only once complete, its progress while Analyzing, and "—" with "No decisions" when empty', () => {
+  expect(summaryFigures({ status: 'complete', decisionCount: 2000, progress: { succeeded: 2000, total: 2000 }, averages: { decisionScore: 0.6125, actionRankScore: 0.5 } }))
+    .toEqual({ decisionScore: '61.3', actionRankScore: '50.0', count: '2,000 decisions', state: undefined });
+  expect(summaryFigures({ status: 'pending', decisionCount: 2000, progress: { succeeded: 340, total: 2000 } }))
+    .toEqual({ decisionScore: '—', actionRankScore: '—', count: '2,000 decisions', state: 'Analyzing 340 / 2,000', fraction: 0.17 });
+  expect(summaryFigures({ status: 'empty', decisionCount: 0, progress: { succeeded: 0, total: 0 } }))
+    .toEqual({ decisionScore: '—', actionRankScore: '—', count: 'No decisions', state: undefined });
+  // Error takes precedence over Analyzing: no partial mean, however many succeeded.
+  expect(summaryFigures({ status: 'error', decisionCount: 1, progress: { succeeded: 0, total: 1 }, error: { code: 'failed', message: 'x' } }))
+    .toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Error' });
 });

@@ -1,4 +1,4 @@
-import type { Card, ChipAmount, ConcreteAction, DecisionId, HandId, Street, TableMode, TableSessionId } from './index.js';
+import type { AnalysisFailureCode, Card, ChipAmount, ConcreteAction, DecisionId, HandId, ScoreAverages, StrategyDescriptor, Street, TableMode, TableSessionId } from './index.js';
 
 /**
  * Overall History (ADR-0041): the Guest's own decisions across every table they can read. The filter below is the
@@ -137,3 +137,49 @@ export interface OverallHistory {
 }
 /** The Replay Step address of a decision: `decision-N`, from a `hand-M/decision-N` Decision ID. */
 export const decisionStep = (decisionId: DecisionId): string => decisionId.slice(decisionId.indexOf('/') + 1);
+
+/**
+ * The dimensions a Score Summary over Overall History can be broken down by, one at a time (ADR-0041): street,
+ * Position, the action taken (its type) and table mode. Each bucket is one value of the dimension.
+ */
+export const historyBreakdowns = ['street', 'position', 'action', 'mode'] as const;
+export type HistoryBreakdown = typeof historyBreakdowns[number];
+export const isHistoryBreakdown = (value: unknown): value is HistoryBreakdown => (historyBreakdowns as readonly unknown[]).includes(value);
+/** Every value a breakdown can have a bucket for, in declared order. */
+export const historyBreakdownValues: Readonly<Record<HistoryBreakdown, readonly string[]>> = { street: decisionStreets, position: positions, action: decisionActionTypes, mode: historyModes };
+/** The bucket a decision falls in under a breakdown. */
+export const historyBreakdownValue = (breakdown: HistoryBreakdown, facts: DecisionFacts): string => breakdown === 'action' ? facts.action.type : facts[breakdown];
+
+/** How far a summary has got: how many of the analyses it needs have succeeded, out of all of them. */
+export interface HistorySummaryProgress { readonly succeeded: number; readonly total: number }
+/**
+ * One Score Summary over a frozen set of the Guest's own decisions, with the ordinary rules: complete only once every
+ * analysis has succeeded, Error ahead of Analyzing (`pending`), never a partial mean, and `empty` (no score) for a set
+ * with no decisions.
+ */
+export type HistoryScoreSummary = { readonly decisionCount: number; readonly progress: HistorySummaryProgress } & (
+  | { readonly status: 'empty' | 'pending' }
+  | { readonly status: 'complete'; readonly averages: ScoreAverages }
+  | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
+);
+export interface HistorySummaryBucket { readonly value: string; readonly summary: HistoryScoreSummary }
+/**
+ * `POST /api/overall-history/summaries`: a Score Summary over the decisions `filter` declares (its flat encoding,
+ * `historyFilterParams`), optionally broken down by one dimension.
+ */
+export interface OverallHistorySummaryRequest { readonly filter?: Readonly<Record<string, string>>; readonly breakdown?: HistoryBreakdown }
+/**
+ * A transient Overall History summary request: the whole filtered set's summary and, with a breakdown, one ordinary
+ * summary per bucket, for the values the set has, in declared order. Each analysis it needs runs as `history-analysis`.
+ * `attemptId` changes when a Retry starts.
+ */
+export interface OverallHistorySummary {
+  readonly ok: true;
+  readonly requestId: string;
+  readonly attemptId: string;
+  readonly filter: HistoryFilter;
+  readonly breakdown?: HistoryBreakdown;
+  readonly referenceStrategy: StrategyDescriptor;
+  readonly summary: HistoryScoreSummary;
+  readonly buckets?: readonly HistorySummaryBucket[];
+}

@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, ScoreSummary, ScoreSummaryScope, ScoreSummaryIdentity, StrategyDescriptor } from '@poker/contracts';
+import type { AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistorySummary, ScoreAverages, ScoreSummary, ScoreSummaryScope, StrategyDescriptor } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
 import { calculateScoreSummary } from '@poker/research';
-import type { createAnalysis, FrozenEvaluationInput } from './analysis.js';
-import type { JobRunner } from './job-runner.js';
+import type { AnalysisSchedule, createAnalysis, FrozenEvaluationInput } from './analysis.js';
+import type { JobHandle, JobRunner } from './job-runner.js';
 import type { AcceptTableJobResult } from './mutations.js';
+import type { HistoryAnalysisScheduler } from './history-analysis.js';
 /** `participantId` keys the summary: only that Participant's Human Controller reads or retries it. */
 interface FrozenSummaryMetadata {
   readonly participantId: string; readonly tableSessionId: string;
@@ -12,42 +13,101 @@ interface FrozenSummaryMetadata {
   readonly members: readonly FrozenEvaluationInput[];
 }
 export type FrozenScoreSummary = FrozenSummaryMetadata & ScoreSummaryScope;
+/**
+ * An Overall History summary request, frozen (ADR-0041): the Guest's own decisions across every table they may read, as
+ * `filter` declared them under one Strategy, and, with a breakdown, the same decisions in one set per bucket. Only that
+ * Guest reads or retries it. Its members may come from many tables: each carries its own table and Participant.
+ */
+export interface FrozenHistorySummary {
+  readonly guestId: string;
+  readonly filter: HistoryFilter;
+  readonly breakdown?: HistoryBreakdown;
+  readonly referenceStrategy: StrategyDescriptor;
+  readonly members: readonly FrozenEvaluationInput[];
+  readonly buckets?: readonly { readonly value: string; readonly members: readonly FrozenEvaluationInput[] }[];
+}
 interface Failure { readonly code: AnalysisFailureCode; readonly message: string }
-interface Dependency { readonly input: FrozenEvaluationInput; readonly consumers: Set<Entry>; state?: DecisionAnalysis; failure?: Failure; running: boolean; queued: boolean; retryRequested: boolean; starting: boolean; observedAttempt?: string; readonly settlements: Map<string, Promise<void>>; readonly settledAttempts: Set<string> }
-interface Entry { readonly input: FrozenScoreSummary; identity: ScoreSummaryIdentity; state: ScoreSummary; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string }
-/** All scopes/owners share this one bounded coordinator and the application's existing runner. */
-export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>, runner: JobRunner, publish: (participantId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
-  const requests = new Map<string, Entry>();
+interface Dependency {
+  readonly input: FrozenEvaluationInput; readonly consumers: Set<Entry>; state?: DecisionAnalysis; failure?: Failure;
+  running: boolean; queued: boolean; retryRequested: boolean; starting: boolean; observedAttempt?: string;
+  readonly settlements: Map<string, Promise<void>>; readonly settledAttempts: Set<string>;
+  /** Set once a history summary needs it: then it runs as that Guest's `history-analysis`, outside this coordinator's bound. */
+  guestId?: string;
+  /** Whether it holds one of this coordinator's own admission places. */
+  counted: boolean;
+}
+type Outcome = { readonly status: 'empty' | 'pending' } | { readonly status: 'complete'; readonly averages: ScoreAverages } | { readonly status: 'error'; readonly error: Failure };
+/** Where a summary's results are accepted, whose bound its jobs run under, and whom its terminal state is told. */
+interface Owner {
+  /** Applies `change` when the summary's results may still be accepted; whether it was applied. */
+  accept(change: () => boolean): Promise<boolean>;
+  /** The Guest whose `history-analysis` bound a history summary's jobs run under; absent for a table's own summary. */
+  readonly guestId?: string;
+  notify(entry: Entry): void;
+}
+/** One ordinary Score Summary over a frozen set: a table's Hand or Session summary, or one set of a history request. */
+interface Entry { readonly owner: Owner; attempt: string; outcome: Outcome; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string }
+interface TableRequest { readonly input: FrozenScoreSummary; identity: Omit<ScoreSummary, 'status'>; readonly entry: Entry }
+interface HistoryRequest { readonly input: FrozenHistorySummary; requestId: string; attemptId: string; readonly whole: Entry; readonly buckets: readonly { readonly value: string; readonly entry: Entry }[] }
+/**
+ * All scopes/owners share this one coordinator and the application's existing runner. A table's summaries are admitted
+ * under this coordinator's own small bound as `summary-analysis`. An Overall History summary's analyses are submitted
+ * at once as the Guest's `history-analysis`, whose per-Guest bound (`history`) holds back the rest of a large set
+ * without a capacity error, so its progress covers the whole set.
+ */
+export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>, runner: JobRunner, publish: (participantId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult, history?: HistoryAnalysisScheduler) {
+  const requests = new Map<string, TableRequest>();
+  const historyRequests = new Map<string, HistoryRequest>();
   const dependencies = new Map<string, Dependency>();
   const waiting: (Dependency | Entry)[] = [];
+  /** Each Guest's history admissions, one at a time, so a large set never floods the database. */
+  const admissions = new Map<string, Promise<void>>();
   const maximumOutstanding = 2;
   const batchSize = 2;
   let outstanding = 0;
   let stopped = false;
   let pumping: Promise<void> | undefined;
   function terminal(entry: Entry) {
-    if (stopped || entry.state.status === 'pending' || entry.state.status === 'empty' || entry.notified === entry.state.attemptId) return;
-    entry.notified = entry.state.attemptId;
-    try { publish(entry.input.participantId, { type: 'analysis-update', resource: 'summary', tableSessionId: entry.state.tableSessionId, requestId: entry.state.requestId, attemptId: entry.state.attemptId, status: entry.state.status }); } catch { /* HTTP state remains readable. */ }
+    if (stopped || entry.outcome.status === 'pending' || entry.outcome.status === 'empty' || entry.notified === entry.attempt) return;
+    entry.notified = entry.attempt;
+    try { entry.owner.notify(entry); } catch { /* HTTP state remains readable. */ }
   }
+  const failed = (member: Dependency) => member.retryRequested || member.starting ? undefined : member.failure ?? (member.state?.status === 'error' ? member.state.error : undefined);
+  const succeeded = (member: Dependency) => !member.retryRequested && !member.starting && member.state?.status === 'complete';
+  /** What a pending summary can do next: wait, fail, or take its mean. */
+  const next = (entry: Entry) => entry.members.some(member => failed(member)) ? 'error' : entry.members.every(succeeded) ? 'aggregate' : 'wait';
   async function reduce(entry: Entry) {
-    const attemptId = entry.state.attemptId;
-    await acceptJobResult(entry.input.tableSessionId, entry.input.participantId, () => {
-      if (stopped || entry.state.attemptId !== attemptId || entry.state.status !== 'pending') return false;
-      const failure = entry.members.map(member => member.retryRequested || member.starting ? undefined : member.failure ?? (member.state?.status === 'error' ? member.state.error : undefined)).find(Boolean);
-      if (failure) { entry.state = immutableData({ ...entry.identity, status: 'error', error: failure }); terminal(entry); return true; }
-      if (entry.members.some(member => member.retryRequested || member.starting || member.state?.status !== 'complete')) return true;
-      if (!entry.aggregating) { entry.aggregating = true; waiting.push(entry); schedule(); }
+    const attempt = entry.attempt;
+    if (stopped || entry.outcome.status !== 'pending' || next(entry) === 'wait' || entry.aggregating) return;
+    await entry.owner.accept(() => {
+      if (stopped || entry.attempt !== attempt || entry.outcome.status !== 'pending') return false;
+      const failure = entry.members.map(failed).find(Boolean);
+      if (failure) { entry.outcome = immutableData({ status: 'error', error: failure }); terminal(entry); return true; }
+      if (next(entry) !== 'aggregate' || entry.aggregating) return true;
+      entry.aggregating = true;
+      if (entry.owner.guestId) aggregate(entry, false); else { waiting.push(entry); schedule(); }
       return true;
     });
   }
   function changed(dependency: Dependency) { for (const entry of dependency.consumers) void reduce(entry); }
   function schedule() { if (!stopped) queueMicrotask(() => { void pump(); }); }
+  /** Asks for a dependency's analysis: as its Guest's `history-analysis` at once, otherwise in this coordinator's turn. */
+  function ask(dependency: Dependency) {
+    if (stopped || dependency.running) return;
+    const guestId = dependency.guestId;
+    if (!guestId) { if (!dependency.queued) { dependency.queued = true; waiting.push(dependency); schedule(); } return; }
+    if (dependency.queued) { waiting.splice(waiting.indexOf(dependency), 1); dependency.queued = false; }
+    dependency.running = true;
+    const admission = (admissions.get(guestId) ?? Promise.resolve()).then(() => admit(dependency, false));
+    admissions.set(guestId, admission);
+    void admission.finally(() => { if (admissions.get(guestId) === admission) admissions.delete(guestId); });
+  }
   async function release(dependency: Dependency, state?: DecisionAnalysis) {
     await Promise.all(dependency.settlements.values());
     if (state && dependency.observedAttempt !== state.attemptId || !dependency.running) return;
-    dependency.running = false; outstanding--;
-    if (dependency.retryRequested && !stopped && !dependency.queued) { dependency.queued = true; waiting.push(dependency); }
+    dependency.running = false;
+    if (dependency.counted) { dependency.counted = false; outstanding--; }
+    if (dependency.retryRequested && !stopped) ask(dependency);
     schedule();
   }
   function watch(dependency: Dependency, state: DecisionAnalysis) {
@@ -62,35 +122,39 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       if (result.attemptId !== initial.attemptId) { watch(dependency, result); return; }
       if (result.status === 'complete' && dependency.input.acceptedAction && !result.scores) {
         dependency.state = undefined;
-        if (!dependency.running && !dependency.queued) { dependency.queued = true; waiting.push(dependency); schedule(); }
+        if (!dependency.running) ask(dependency);
       } else dependency.state = result;
       changed(dependency);
     } catch { dependency.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be read.' }; changed(dependency); }
     finally { await release(dependency, initial); }
   }
-  async function admit(dependency: Dependency) {
-    dependency.queued = false; dependency.running = true; dependency.starting = true;
+  async function admit(dependency: Dependency, counted: boolean) {
+    if (stopped) { dependency.running = false; return; }
+    dependency.queued = false; dependency.running = true; dependency.counted = counted; dependency.starting = true;
     const retry = dependency.retryRequested;
     const previous = dependency.state;
     // A failed attempt discovered through another consumer must settle before this coordinator retries it.
     if (retry && previous?.status === 'error' && !dependency.settledAttempts.has(previous.attemptId)) { dependency.starting = false; watch(dependency, previous); return; }
     dependency.retryRequested = false;
+    const schedule: AnalysisSchedule = dependency.guestId ? { purpose: 'history-analysis', guestId: dependency.guestId } : 'summary-analysis';
     try {
       if (retry && previous?.status === 'error') await analysis.retry(previous.tableSessionId, previous.requestId, dependency.input.identity.participantId);
-      const state = await analysis.getOrStart(dependency.input, 'summary-analysis');
+      const state = await analysis.getOrStart(dependency.input, schedule);
       dependency.failure = undefined; dependency.starting = false; watch(dependency, state);
     }
     catch { dependency.starting = false; dependency.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be loaded.' }; changed(dependency); await release(dependency); }
   }
-  async function aggregate(entry: Entry) {
-    const attemptId = entry.state.attemptId;
+  /** Takes the mean once every analysis has succeeded: in this coordinator's turn for a table, as `history-analysis` for a Guest. */
+  function aggregate(entry: Entry, counted: boolean) {
+    const attempt = entry.attempt;
     const scores = entry.members.flatMap(member => member.state?.status === 'complete' && member.state.scores ? [member.state.scores] : []);
-    const handle = runner.submit('summary-analysis', scores, calculateScoreSummary);
-    const completion = handle.result.then(result => acceptJobResult(entry.input.tableSessionId, entry.input.participantId, () => {
-      if (stopped || entry.state.attemptId !== attemptId || entry.state.status !== 'pending') return false;
-      entry.state = immutableData(result.ok && result.value ? { ...entry.identity, status: 'complete', averages: result.value } : { ...entry.identity, status: 'error', error: { code: result.ok ? 'failed' : result.code, message: 'The summary could not complete.' } });
+    const guestId = entry.owner.guestId;
+    const handle: JobHandle<ScoreAverages | undefined> = guestId && history ? history.submit(guestId, scores, calculateScoreSummary) : runner.submit('summary-analysis', scores, calculateScoreSummary);
+    const completion = handle.result.then(result => entry.owner.accept(() => {
+      if (stopped || entry.attempt !== attempt || entry.outcome.status !== 'pending') return false;
+      entry.outcome = immutableData(result.ok && result.value ? { status: 'complete', averages: result.value } : { status: 'error', error: { code: result.ok ? 'failed' : result.code, message: 'The summary could not complete.' } });
       terminal(entry); return true;
-    })).finally(async () => { await handle.settled; outstanding--; schedule(); });
+    })).finally(async () => { await handle.settled; if (counted) outstanding--; schedule(); });
     void completion;
   }
   async function pump(): Promise<void> {
@@ -98,22 +162,58 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
     const operation = (async () => {
       for (let admitted = 0; !stopped && outstanding < maximumOutstanding && waiting.length && admitted < batchSize; admitted++) {
         const task = waiting.shift()!; outstanding++;
-        if ('consumers' in task) await admit(task); else await aggregate(task);
+        if ('consumers' in task) await admit(task, true); else aggregate(task, true);
       }
     })();
     pumping = operation;
     try { await operation; } finally { if (pumping === operation) pumping = undefined; if (waiting.length && outstanding < maximumOutstanding) schedule(); }
   }
+  /** The shared dependencies for a set's members; a history summary's are run as its Guest's `history-analysis` from now on. */
+  function dependenciesOf(members: readonly FrozenEvaluationInput[], guestId?: string): Dependency[] {
+    return members.map(member => {
+      const key = analysis.matchingKey(member);
+      let dependency = dependencies.get(key);
+      if (!dependency) { dependency = { input: member, consumers: new Set(), running: false, queued: false, retryRequested: false, starting: false, settlements: new Map(), settledAttempts: new Set(), counted: false }; dependencies.set(key, dependency); }
+      if (guestId) dependency.guestId ??= guestId;
+      return dependency;
+    });
+  }
+  function entryOf(owner: Owner, members: readonly Dependency[]): Entry {
+    const entry: Entry = { owner, attempt: randomUUID(), outcome: { status: members.length ? 'pending' : 'empty' }, members, aggregating: false };
+    for (const member of members) member.consumers.add(entry);
+    return entry;
+  }
+  /** Starts a Retry of a failed summary: a new attempt, and every failed analysis it needs asked for again. */
+  function retryEntry(entry: Entry) {
+    if (entry.outcome.status !== 'error') return false;
+    entry.attempt = randomUUID(); entry.outcome = { status: 'pending' }; entry.aggregating = false;
+    for (const member of entry.members) {
+      if (member.failure || member.state?.status === 'error') { member.retryRequested = true; ask(member); }
+    }
+    return true;
+  }
+  const tableSummary = (request: TableRequest): ScoreSummary => immutableData({ ...request.identity, attemptId: request.entry.attempt, ...request.entry.outcome } as ScoreSummary);
+  const historySummary = (entry: Entry): HistoryScoreSummary => {
+    const total = entry.members.length;
+    return immutableData({ decisionCount: total, progress: { succeeded: entry.outcome.status === 'complete' ? total : entry.members.filter(succeeded).length, total }, ...entry.outcome } as HistoryScoreSummary);
+  };
+  const overallSummary = (request: HistoryRequest): OverallHistorySummary => immutableData({
+    ok: true as const, requestId: request.requestId, attemptId: request.attemptId, filter: request.input.filter,
+    ...(request.input.breakdown ? { breakdown: request.input.breakdown } : {}), referenceStrategy: request.input.referenceStrategy,
+    summary: historySummary(request.whole),
+    ...(request.input.breakdown ? { buckets: request.buckets.map(bucket => ({ value: bucket.value, summary: historySummary(bucket.entry) })) } : {}),
+  });
   return {
     async create(input: FrozenScoreSummary): Promise<ScoreSummary> {
       const { participantId: _participant, members: _members, ...metadata } = input;
-      const identity = immutableData({ ok: true as const, ...metadata, requestId: randomUUID(), attemptId: randomUUID(), decisionCount: input.decisionIds.length });
-      const members = input.members.map(member => {
-        const key = analysis.matchingKey(member);
-        let dependency = dependencies.get(key);
-        if (!dependency) { dependency = { input: member, consumers: new Set(), running: false, queued: false, retryRequested: false, starting: false, settlements: new Map(), settledAttempts: new Set() }; dependencies.set(key, dependency); }
-        return dependency;
-      });
+      const requestId = randomUUID();
+      const owner: Owner = {
+        accept: change => acceptJobResult(input.tableSessionId, input.participantId, change),
+        notify: entry => publish(input.participantId, { type: 'analysis-update', resource: 'summary', tableSessionId: input.tableSessionId, requestId, attemptId: entry.attempt, status: entry.outcome.status as 'complete' | 'error' }),
+      };
+      const members = dependenciesOf(input.members);
+      const entry = entryOf(owner, members);
+      const request: TableRequest = { input, identity: immutableData({ ok: true as const, ...metadata, requestId, attemptId: entry.attempt, decisionCount: input.decisionIds.length }), entry };
       // Inspect every existing match without submitting missing work or changing its purpose.
       // Passive observations also expose failures beyond the globally bounded admission batch.
       for (const member of members) {
@@ -122,31 +222,62 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
           member.failure = undefined;
           if (current) {
             if (!member.state || current.attemptId !== member.state.attemptId || current.status !== member.state.status) watch(member, current);
-          } else if (!member.running && !member.queued) { member.state = undefined; member.queued = true; waiting.push(member); }
+          } else if (!member.running && !member.queued) { member.state = undefined; ask(member); }
         } catch { member.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be loaded.' }; }
       }
-      const entry: Entry = { input, identity, state: immutableData({ ...identity, status: input.members.length ? 'pending' as const : 'empty' as const }), members, aggregating: false };
-      requests.set(identity.requestId, entry); for (const member of members) member.consumers.add(entry);
+      requests.set(requestId, request);
       if (members.length) { await reduce(entry); await pump(); await reduce(entry); }
-      return entry.state;
+      return tableSummary(request);
     },
     async retry(tableSessionId: string, requestId: string, participantId: string): Promise<ScoreSummary | undefined> {
-      const entry = requests.get(requestId);
-      if (!entry || entry.input.participantId !== participantId || entry.state.tableSessionId !== tableSessionId) return undefined;
-      if (entry.state.status !== 'error') return entry.state;
-      entry.identity = immutableData({ ...entry.identity, attemptId: randomUUID() });
-      entry.state = immutableData({ ...entry.identity, status: 'pending' }); entry.aggregating = false;
-      for (const member of entry.members) {
-        if (member.failure || member.state?.status === 'error') {
-          member.retryRequested = true;
-          if (!member.running && !member.queued) { member.queued = true; waiting.push(member); }
-        }
-      }
-      await reduce(entry); await pump(); await reduce(entry); return entry.state;
+      const request = requests.get(requestId);
+      if (!request || request.input.participantId !== participantId || request.input.tableSessionId !== tableSessionId) return undefined;
+      if (!retryEntry(request.entry)) return tableSummary(request);
+      await reduce(request.entry); await pump(); await reduce(request.entry); return tableSummary(request);
     },
     read(tableSessionId: string, requestId: string, participantId: string) {
-      const entry = requests.get(requestId);
-      return entry?.input.participantId === participantId && entry.state.tableSessionId === tableSessionId ? entry.state : undefined;
+      const request = requests.get(requestId);
+      return request?.input.participantId === participantId && request.input.tableSessionId === tableSessionId ? tableSummary(request) : undefined;
+    },
+    /**
+     * Starts an Overall History summary request. Every analysis it needs is asked for as the Guest's `history-analysis`,
+     * reusing any matching analysis or stored result; the per-Guest bound holds back the rest. It answers at once, and
+     * `readHistory` reports its progress. Its results are accepted only while every table its decisions come from still
+     * accepts its Participant's results, each checked as `acceptJobResult` checks one table's.
+     */
+    createHistory(input: FrozenHistorySummary): OverallHistorySummary {
+      const memberships = new Map(input.members.map(member => [member.identity.tableSessionId + '\n' + member.identity.participantId, member.identity] as const));
+      const owner: Owner = {
+        guestId: input.guestId,
+        async accept(change) {
+          for (const { tableSessionId, participantId } of memberships.values()) if (!await acceptJobResult(tableSessionId, participantId, () => true)) return false;
+          return change();
+        },
+        notify: () => {},
+      };
+      const members = dependenciesOf(input.members, input.guestId);
+      const request: HistoryRequest = {
+        input, requestId: randomUUID(), attemptId: randomUUID(), whole: entryOf(owner, members),
+        buckets: (input.buckets ?? []).map(bucket => ({ value: bucket.value, entry: entryOf(owner, dependenciesOf(bucket.members, input.guestId)) })),
+      };
+      historyRequests.set(request.requestId, request);
+      for (const member of members) if (!succeeded(member)) ask(member);
+      // Members another summary already holds may have settled: those summaries can complete now.
+      for (const entry of [request.whole, ...request.buckets.map(bucket => bucket.entry)]) void reduce(entry);
+      return overallSummary(request);
+    },
+    readHistory(requestId: string, guestId: string): OverallHistorySummary | undefined {
+      const request = historyRequests.get(requestId);
+      return request?.input.guestId === guestId ? overallSummary(request) : undefined;
+    },
+    /** Retries every failed summary of the request, asking again for each failed analysis it needs. */
+    retryHistory(requestId: string, guestId: string): OverallHistorySummary | undefined {
+      const request = historyRequests.get(requestId);
+      if (request?.input.guestId !== guestId) return undefined;
+      const entries = [request.whole, ...request.buckets.map(bucket => bucket.entry)];
+      if (entries.map(retryEntry).some(Boolean)) request.attemptId = randomUUID();
+      for (const entry of entries) void reduce(entry);
+      return overallSummary(request);
     },
     stop() { stopped = true; waiting.length = 0; },
   };
