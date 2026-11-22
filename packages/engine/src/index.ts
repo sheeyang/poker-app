@@ -181,7 +181,6 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
   const current = state.hands.at(-1);
   if (current && !current.completed) {
     for (const p of current.participants) bankroll += BigInt(p.contribution);
-    if (current.observerParticipantIds.some(id => !state.participants.some(p => p.participantId === id && p.joined))) throw new Error('Observer membership invariant failed.');
   }
   for (const hand of state.hands) {
     if (hand.deck.length !== 52 || new Set(hand.deck).size !== 52) throw new Error('Deck uniqueness invariant failed.');
@@ -265,7 +264,6 @@ export class CashGame {
       const bigBlind = eligible.length === 2 ? order[0]! : order[1]!;
       const sequence = draft.hands.length + 1;
       const hand: HandState = { handId: 'hand-' + sequence, sequence, completed: false, buttonSeat: button.seat!, smallBlindParticipantId: smallBlind.participantId, bigBlindParticipantId: bigBlind.participantId,
-        observerParticipantIds: draft.participants.filter(p => p.joined).map(p => p.participantId),
         participants: eligible.map(p => ({ participantId: p.participantId, seat: p.seat!, holeCards: [], contribution: 0, anteContribution: 0, wager: 0, folded: false, allIn: false, revealed: false, actedAtPrice: null })),
         deck: shuffledDeck(c.seed, sequence), drawnCardCount: 0, burns: [], board: [], street: 'preflop', actorId: null, decisionSequence: 0, decisionId: null, price: c.bigBlind, lastFullIncrement: c.bigBlind, pots: [], returns: [], payouts: [], actions: [] };
       draft.hands.push(hand); draft.status = 'active-hand'; draft.buttonSeat = button.seat!; draft.nextButtonSeat = null;
@@ -381,7 +379,7 @@ export class CashGame {
       return [{ type: 'participant-seated', participantId, seat, buyIn }];
     });
   }
-  /** Join the table unseated. A joined Participant observes public facts from this point. */
+  /** Join the table unseated. A joined Participant observes the live table; every Participant sees the whole Table Session's history. */
   joinTable(participantId: ParticipantId): CashGameResult {
     if (typeof participantId !== 'string' || participantId.trim().length === 0) return { ok: false, rejection: { code: 'invalid-participant', message: 'Supply a nonempty ParticipantId.', field: 'participantId' } };
     if (this.#state.participants.some(p => p.participantId === participantId && p.joined)) return { ok: false, rejection: { code: 'participant-already-joined', message: 'This Participant has already joined the table.' } };
@@ -390,15 +388,13 @@ export class CashGame {
       return [{ type: 'participant-joined', participantId }];
     });
   }
-  /** Leave Table: stop observing until rejoining with the same ParticipantId. Requires being unseated. */
+  /** Leave Table: stop observing the live table until rejoining with the same ParticipantId. Requires being unseated. */
   leaveTable(participantId: ParticipantId): CashGameResult {
     const participant = this.#state.participants.find(p => p.participantId === participantId);
     if (!participant?.joined) return { ok: false, rejection: { code: 'participant-not-joined', message: 'Choose a Participant who has joined the table.', field: 'participantId' } };
     if (participant.seat !== null) return { ok: false, rejection: { code: 'participant-seated', message: 'Stand Up before leaving the table.', field: 'participantId' } };
     return this.#mutate({ type: 'leave-table', participantId }, draft => {
       draft.participants.find(p => p.participantId === participantId)!.joined = false;
-      const hand = draft.hands.at(-1);
-      if (hand && !hand.completed) hand.observerParticipantIds = hand.observerParticipantIds.filter(id => id !== participantId);
       return [{ type: 'participant-left', participantId }];
     });
   }
@@ -407,9 +403,6 @@ export class CashGame {
     if (existing?.joined) return;
     if (existing) existing.joined = true;
     else draft.participants.push({ participantId, joined: true, seat: null, stack: 0, sittingOut: false });
-    // A Participant joining during a Hand observes the rest of it, including its result.
-    const hand = draft.hands.at(-1);
-    if (hand && !hand.completed) hand.observerParticipantIds.push(participantId);
   }
   setButton(seat: number): CashGameResult {
     if (this.#state.status === 'active-hand') return { ok: false, rejection: { code: 'active-hand', message: 'Choose the next button between Hands.' } };
@@ -505,10 +498,9 @@ export class CashGame {
     return result;
   }
   forParticipant(participantId: ParticipantId): ParticipantCashGame {
-    const observes = (handId: string) => this.#state.participants.some(p => p.participantId === participantId && p.joined)
-      && !!this.#state.hands.find(hand => hand.handId === handId)?.observerParticipantIds.includes(participantId);
+    // Presentation events animate the live table, which only a joined Participant observes.
     // biome-ignore lint/suspicious/useIterableCallbackReturn: exhaustive switch over the event union; the compiler rejects a missing case.
-    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || observes(event.handId)).map(event => {
+    return new ParticipantCashGame(options => this.#readView(participantId, options), events => immutable(events.filter(event => !('handId' in event) || this.#joined(participantId)).map(event => {
       switch (event.type) {
         case 'participant-joined': case 'participant-left': return { type: event.type, participantId: event.participantId };
         case 'participant-seated': return { type: event.type, participantId: event.participantId, seat: event.seat, buyIn: event.buyIn };
@@ -530,34 +522,49 @@ export class CashGame {
       }
     })));
   }
+  /**
+   * Observable Session History covers the whole Table Session (ADR-0040): public information for every Hand, whenever
+   * the viewer joined, plus their own hole cards in the Hands they were dealt. Each historical view is projected as of
+   * its own point in the Hand, so a later showdown never exposes earlier hidden facts.
+   *
+   * The live table is different: only a joined Participant observes it. The Hand in progress is withheld from anyone
+   * else, history included, and the latest completed Hand stays on the live table only for those joined when it completed.
+   */
   #readView(participantId: ParticipantId, options?: ParticipantViewOptions): ObservableGameView {
     // Rebuild derived observations from replay inputs. They never enter toRecord().
     const replay = new CashGame(this.#configuration);
     const history: { handId: string; description: string; decisions: ObservableHistoryEntry['decisions'][number][]; result?: ObservableHistoryEntry['result'] }[] = [];
+    const joined = this.#joined(participantId);
+    const live = this.#state.hands.at(-1);
+    const withheldHandId = live && !live.completed && !joined ? live.handId : undefined;
+    let joinedAtLatestCompletion = false;
     for (const command of this.#state.commands) {
       const before = replay.#state.hands.at(-1);
-      if (options && before?.decisionId === options.at.decisionId && before.observerParticipantIds.includes(participantId)) return replay.#snapshot(participantId, history);
-      const observes = before?.observerParticipantIds.includes(participantId);
-      const decision = command.type === 'act' && before?.decisionId && observes
-        ? { decisionId: before.decisionId, state: replay.#snapshot(participantId, []).state, action: { participantId: command.participantId, action: projectAction(command.action) } } : undefined;
+      if (options && before?.decisionId === options.at.decisionId && before.handId !== withheldHandId) return replay.#snapshot(participantId, history, true);
+      const decision = command.type === 'act' && before?.decisionId
+        ? { decisionId: before.decisionId, state: replay.#snapshot(participantId, [], true).state, action: { participantId: command.participantId, action: projectAction(command.action) } } : undefined;
       if (!replayCommand(replay, command)?.ok) throw new Error('Accepted history could not be reconstructed.');
       const hand = replay.#state.hands.at(-1);
-      if (hand?.observerParticipantIds.includes(participantId) && (decision || hand.completed && (hand.handId !== before?.handId || !before.completed))) {
+      const completed = !!hand?.completed && (hand.handId !== before?.handId || !before.completed);
+      if (completed) joinedAtLatestCompletion = replay.#joined(participantId);
+      if (hand && hand.handId !== withheldHandId && (decision || completed)) {
         let entry = history.find(h => h.handId === hand.handId);
         if (!entry) { entry = { handId: hand.handId, description: 'Hand ' + hand.sequence, decisions: [] }; history.push(entry); }
         if (decision) entry.decisions.push(decision);
-        if (hand.completed) { entry.description = 'Completed Hand ' + hand.sequence; entry.result = replay.#snapshot(participantId, []).state; }
+        if (hand.completed) { entry.description = 'Completed Hand ' + hand.sequence; entry.result = replay.#snapshot(participantId, [], true).state; }
       }
     }
     const hand = replay.#state.hands.at(-1);
-    if (options && (hand?.decisionId !== options.at.decisionId || !hand.observerParticipantIds.includes(participantId))) throw new RangeError('This DecisionId was not observed by this Participant.');
-    return replay.#snapshot(participantId, history);
+    if (options && (!hand?.decisionId || hand.decisionId !== options.at.decisionId || hand.handId === withheldHandId)) throw new RangeError('This DecisionId is not in this Participant\'s Observable Session History.');
+    return replay.#snapshot(participantId, history, !!options || joined && (!hand?.completed || joinedAtLatestCompletion));
   }
-  #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[]): ObservableGameView {
+  #joined(participantId: ParticipantId): boolean {
+    return this.#state.participants.some(p => p.participantId === participantId && p.joined);
+  }
+  /** `showsHand`: every historical view shows its Hand; a live view shows it only to those observing the live table. */
+  #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[], showsHand: boolean): ObservableGameView {
     const c = this.#configuration;
-    const current = this.#state.hands.at(-1);
-    const joined = this.#state.participants.some(p => p.participantId === participantId && p.joined);
-    const hand = joined && current?.observerParticipantIds.includes(participantId) ? current : undefined;
+    const hand = showsHand ? this.#state.hands.at(-1) : undefined;
     return immutable({
       configuration: {
         seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,

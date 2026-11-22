@@ -169,8 +169,9 @@ test('each human acts, manages and studies only through their own Participant, a
   const ben = { ...owner, cookie: otherCookie };
 
   const seen = await read(ben);
-  // Joining after the Hand, Ben observes none of it.
-  expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [] } });
+  // Joining after the Hand, Ben reads it in the table's history, with nobody's hole cards.
+  expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [{ handId: 'hand-1', result: { status: 'completed-hand' } }] } });
+  expect(JSON.stringify(seen.view.history)).not.toContain('holeCards');
   expect(seen.view.state.participants).toEqual(expect.arrayContaining([{ participantId: owner.human, seat: 1, stack: 990, sittingOut: false }, { participantId: owner.bot, seat: 2, stack: 1010, sittingOut: false }]));
   expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
   for (const cookie of [leftCookie, removedCookie]) {
