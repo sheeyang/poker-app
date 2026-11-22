@@ -1441,8 +1441,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
     return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members });
   }
-  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
-    return studying(id, userId, undefined, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
+  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope, strategy?: StrategyDescriptor) {
+    return studying(id, userId, strategy, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
       const binding = session && memberBinding(session.aggregate, userId);
       if (!session || !binding) return undefined;
@@ -1466,8 +1466,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const aggregate = row && upgradeTableSession(row.aggregate);
       return !stopped && !!aggregate && isHuman(findBinding(aggregate, participantId)) && accept();
     },
-    captureHandSummary: (id: string, userId: string, handId: string) => captureScoreSummary(id, userId, { scope: 'hand', handId }),
-    captureSessionSummary: (id: string, userId: string) => captureScoreSummary(id, userId, { scope: 'table-session' }),
+    captureHandSummary: (id: string, userId: string, handId: string, strategy?: StrategyDescriptor) => captureScoreSummary(id, userId, { scope: 'hand', handId }, strategy),
+    captureSessionSummary: (id: string, userId: string, strategy?: StrategyDescriptor) => captureScoreSummary(id, userId, { scope: 'table-session' }, strategy),
     /**
      * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
      * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed. A named

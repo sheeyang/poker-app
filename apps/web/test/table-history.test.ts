@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type TableHistoryHand, type TableSchedule } from '@poker/contracts';
-import { completedLabel, handRows, historyStanding, returnBar } from '../src/table-history.js';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type TableHistoryHand, type TableSchedule } from '@poker/contracts';
+import { completedLabel, handRows, historyStanding, returnBar, tableSummaryFigures } from '../src/table-history.js';
 
 const hand = (change: Partial<TableHistoryHand> = {}): TableHistoryHand => ({
   handId: 'hand-37', handNumber: 37, completedAt: Date.UTC(2026, 10, 22, 14, 5), viewerDealtIn: true, showdown: true, board: ['As', 'Kd', '7c', '2h', 'Tc'],
@@ -74,5 +74,15 @@ describe('the "Your turn — return" bar', () => {
     expect(returnBar(table({ window: window(now + 100) }), now + 200)).toBeUndefined();
     expect(returnBar(table(), now)).toBeUndefined();
     expect(returnBar(table({ window: window(), seat: null }), now)).toBeUndefined();
+  });
+});
+
+describe('a table’s Score Summary figures', () => {
+  const base = { ok: true, tableSessionId: 't', requestId: 'r', attemptId: 'a', capturedPokerRevision: 1, decisionIds: [], referenceStrategy: baselinePlayingStrategy, scope: 'table-session' } as const;
+  it('gives both means out of 100 only once complete, and never a partial mean', () => {
+    expect(tableSummaryFigures({ ...base, decisionCount: 4, status: 'complete', averages: { decisionScore: 0.325, actionRankScore: 0.375 } })).toEqual({ decisionScore: '32.5', actionRankScore: '37.5', count: '4 decisions', state: undefined });
+    expect(tableSummaryFigures({ ...base, decisionCount: 1, status: 'pending' })).toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Analyzing' });
+    expect(tableSummaryFigures({ ...base, decisionCount: 3, status: 'error', error: { code: 'failed', message: 'x' } })).toMatchObject({ decisionScore: '—', state: 'Error' });
+    expect(tableSummaryFigures({ ...base, decisionCount: 0, status: 'empty' })).toEqual({ decisionScore: '—', actionRankScore: '—', count: 'No decisions', state: undefined });
   });
 });

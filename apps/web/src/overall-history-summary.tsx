@@ -1,8 +1,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@poker/client';
-import { historyBreakdowns, historyFilterParams, type HistoryBreakdown, type HistoryFilter, type HistoryScoreSummary, type OverallHistorySummary } from '@poker/contracts';
+import { historyBreakdowns, historyFilterParams, strategyToken, type HistoryBreakdown, type HistoryFilter, type HistoryScoreSummary, type OverallHistorySummary, type StrategyDescriptor } from '@poker/contracts';
 import { bucketLabel, summaryFigures } from './overall-history.js';
 import { strategyName } from './strategy-select.js';
+import { ColumnHead, CompareBar, useSummaryStrategies } from './summary-comparison.js';
 
 const breakdownNames: Readonly<Record<HistoryBreakdown, string>> = { street: 'Street', position: 'Position', action: 'Action', mode: 'Table' };
 const running = (summary: OverallHistorySummary | undefined) => !!summary && [summary.summary, ...summary.buckets?.map(bucket => bucket.summary) ?? []].some(each => each.status === 'pending');
@@ -11,14 +12,15 @@ const failed = (summary: OverallHistorySummary | undefined) => !!summary && [sum
 /**
  * An Overall History Score Summary over `filter`, broken down by `breakdown`, once `asked`. A new filter or breakdown
  * asks again (matching analyses are reused). While any of its summaries is Analyzing it is read again each second, for
- * its progress; Retry asks again only for the failed analyses.
+ * its progress; Retry asks again only for the failed analyses. `strategy` names the Strategy to summarize under; without
+ * one it is the Guest's current Reference Strategy. Each Strategy is its own request, with its own progress and Error.
  */
-function useOverallHistorySummary(filter: HistoryFilter, breakdown: HistoryBreakdown | undefined, asked: boolean) {
+function useOverallHistorySummary(filter: HistoryFilter, breakdown: HistoryBreakdown | undefined, asked: boolean, strategy: StrategyDescriptor | undefined) {
   const queryClient = useQueryClient();
-  const key = JSON.stringify([historyFilterParams(filter), breakdown ?? null]);
+  const key = JSON.stringify([historyFilterParams(filter), breakdown ?? null, strategy ? strategyToken(strategy) : null]);
   const created = useQuery({
     queryKey: ['overall-history-summary', key], enabled: asked, staleTime: Number.POSITIVE_INFINITY, gcTime: 0, retry: false, placeholderData: keepPreviousData,
-    queryFn: () => api.requestOverallHistorySummary(filter, breakdown),
+    queryFn: () => api.requestOverallHistorySummary(filter, breakdown, strategy),
   });
   const requestId = created.data?.requestId;
   const current = useQuery({
@@ -74,32 +76,16 @@ function BucketRow({ breakdown, value, summary }: { breakdown: HistoryBreakdown;
 }
 
 /**
- * The Score Summary over the decisions the filters show (ADR-0041): explicitly asked for, under the Guest's Reference
- * Strategy, with its progress while it runs, Error and Retry when an analysis fails, and no score for an empty set.
- * A breakdown, one dimension at a time and held in the address, gives one ordinary summary per bucket.
+ * One Strategy's Score Summary of the set: its means, its progress while Analyzing, its own Error and Retry, and its
+ * breakdown. Another Strategy failing or still running never touches it.
  */
-export function OverallHistorySummaryPanel({ filter, breakdown, total, asked, scoreRanges, onAsk, onBreakdown }: { filter: HistoryFilter; scoreRanges?: boolean; breakdown: HistoryBreakdown | undefined; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void }) {
-  const summary = useOverallHistorySummary(filter, breakdown, asked);
+function SummaryColumn({ filter, breakdown, asked, strategy, reference, onRemove }: { filter: HistoryFilter; breakdown: HistoryBreakdown | undefined; asked: boolean; strategy: StrategyDescriptor | undefined; reference: boolean; onRemove: () => void }) {
+  const summary = useOverallHistorySummary(filter, breakdown, asked, strategy);
   const data = summary.data;
-  return <section className="ogs" aria-labelledby="ogs-title" aria-busy={summary.stale || summary.loading || undefined}>
-    <div className="ogs-head">
-      <div className="ogs-title">
-        <h2 id="ogs-title">Score Summary</h2>
-        <p>{data ? <>Against <strong>{strategyName(data.referenceStrategy)}</strong>, your Reference Strategy when you asked.</> : 'Mean scores of the decisions shown here, against your Reference Strategy.'}</p>
-      </div>
-      <fieldset className="ogs-breakdown">
-        <legend>Break down by</legend>
-        <div className="og-chips">
-          <button type="button" className="og-chip" aria-pressed={!breakdown} onClick={() => onBreakdown(undefined)}>None</button>
-          {historyBreakdowns.map(each => <button key={each} type="button" className="og-chip" aria-pressed={breakdown === each} onClick={() => onBreakdown(each)}>{breakdownNames[each]}</button>)}
-        </div>
-      </fieldset>
-    </div>
-    {scoreRanges && <p className="ogs-note">Score ranges do not narrow this summary: it covers the decisions the other filters admit.</p>}
-    {!asked && <div className="ogs-ask">
-      <p>Large sets are analyzed in the background, with a running count. Analyses already done are reused.</p>
-      <button type="button" className="primary" disabled={total === undefined} onClick={onAsk}>{total === undefined ? 'Summarize' : total === 0 ? 'Summarize' : `Summarize ${total.toLocaleString('en')} ${total === 1 ? 'decision' : 'decisions'}`}</button>
-    </div>}
+  const named = data?.referenceStrategy ?? strategy;
+  const headingId = `ogs-column-${strategy ? strategyToken(strategy) : 'reference'}`;
+  return <article className="ogs-column" aria-labelledby={headingId} aria-busy={summary.stale || summary.loading || undefined}>
+    <ColumnHead headingId={headingId} name={named ? strategyName(named) : 'Reference Strategy'} reference={reference} onRemove={onRemove} />
     {asked && summary.error && !data && <div className="notice-error" role="alert"><p>{summary.error.message}</p><button type="button" onClick={summary.again}>Request summary again</button></div>}
     {asked && summary.loading && <div className="ogs-means" role="status" aria-label="Requesting the summary"><div className="ogs-mean"><span>Mean Decision Score</span><strong className="numeric">—<small>/100</small></strong></div><div className="ogs-mean is-secondary"><span>Mean Action Rank Score</span><strong className="numeric">—<small>/100</small></strong></div></div>}
     {asked && data && <>
@@ -112,10 +98,44 @@ export function OverallHistorySummaryPanel({ filter, breakdown, total, asked, sc
       </div>}
       {!failed(data) && summary.error && <div className="notice-error" role="alert"><p>{summary.error.message}</p><button type="button" onClick={summary.again}>Request summary again</button></div>}
       {data.breakdown && data.buckets && data.buckets.length > 0 && <table className="ogs-table">
-        <caption className="visually-hidden">Score Summary by {breakdownNames[data.breakdown].toLowerCase()}</caption>
+        <caption className="visually-hidden">Score Summary by {breakdownNames[data.breakdown].toLowerCase()}, under {strategyName(data.referenceStrategy)}</caption>
         <thead><tr><th scope="col">{breakdownNames[data.breakdown]}</th><th scope="col">Decisions</th><th scope="col">Decision Score</th><th scope="col">Action Rank Score</th></tr></thead>
         <tbody>{data.buckets.map(bucket => <BucketRow key={bucket.value} breakdown={data.breakdown!} value={bucket.value} summary={bucket.summary} />)}</tbody>
       </table>}
     </>}
+  </article>;
+}
+
+/**
+ * The Score Summary over the decisions the filters show (ADR-0041): explicitly asked for, under the Guest's Reference
+ * Strategy and, side by side, up to 3 more the address names, each column with its progress, Error and Retry, and no score
+ * for an empty set. A breakdown, one dimension at a time and held in the address, gives one ordinary summary per bucket.
+ */
+export function OverallHistorySummaryPanel({ filter, breakdown, compared, total, asked, scoreRanges, onAsk, onBreakdown, onCompare }: { filter: HistoryFilter; scoreRanges?: boolean; breakdown: HistoryBreakdown | undefined; compared: readonly StrategyDescriptor[]; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void; onCompare: (next: readonly StrategyDescriptor[]) => void }) {
+  const { reference, shown } = useSummaryStrategies(compared);
+  return <section className="ogs" aria-labelledby="ogs-title">
+    <div className="ogs-head">
+      <div className="ogs-title">
+        <h2 id="ogs-title">Score Summary</h2>
+        <p>Mean scores of the decisions shown here, against your Reference Strategy{reference ? <> (<strong>{strategyName(reference)}</strong>)</> : null}, or side by side with others.</p>
+      </div>
+      <fieldset className="ogs-breakdown">
+        <legend>Break down by</legend>
+        <div className="og-chips">
+          <button type="button" className="og-chip" aria-pressed={!breakdown} onClick={() => onBreakdown(undefined)}>None</button>
+          {historyBreakdowns.map(each => <button key={each} type="button" className="og-chip" aria-pressed={breakdown === each} onClick={() => onBreakdown(each)}>{breakdownNames[each]}</button>)}
+        </div>
+      </fieldset>
+    </div>
+    {scoreRanges && <p className="ogs-note">Score ranges do not narrow this summary: it covers the decisions the other filters admit.</p>}
+    <CompareBar id="ogs-compare" reference={reference} shown={shown} onCompare={onCompare} />
+    {!asked && <div className="ogs-ask">
+      <p>Large sets are analyzed in the background, with a running count. Analyses already done are reused.</p>
+      <button type="button" className="primary" disabled={total === undefined} onClick={onAsk}>{total === undefined ? 'Summarize' : total === 0 ? 'Summarize' : `Summarize ${total.toLocaleString('en')} ${total === 1 ? 'decision' : 'decisions'}`}</button>
+    </div>}
+    {asked && <div className="ogs-columns" data-count={shown.length + 1}>
+      <SummaryColumn key="reference" filter={filter} breakdown={breakdown} asked={asked} strategy={undefined} reference onRemove={() => {}} />
+      {shown.map(strategy => <SummaryColumn key={strategyToken(strategy)} filter={filter} breakdown={breakdown} asked={asked} strategy={strategy} reference={false} onRemove={() => onCompare(shown.filter(other => strategyToken(other) !== strategyToken(strategy)))} />)}
+    </div>}
   </section>;
 }

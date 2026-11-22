@@ -1,4 +1,5 @@
-import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type Position, type ScoredOverallHistory, type TableMode, type Street } from '@poker/contracts';
+import { compareParam, comparedStrategies } from './table-address.js';
+import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type StrategyDescriptor, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type Position, type ScoredOverallHistory, type TableMode, type Street } from '@poker/contracts';
 import { completedLabel } from './table-history.js';
 import { streetName } from './replay.js';
 import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.js';
@@ -7,7 +8,7 @@ import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.
  * Overall History's model (ADR-0041), pure. The address holds the filters in the one encoding the server's query uses
  * (`historyFilterParams`): choices as comma-separated lists, ranges as numbers. A date is the Guest's own calendar day.
  */
-export type OverallHistorySearch = { street?: string; position?: string; action?: string; mode?: string; completedFrom?: number; completedTo?: number; potMin?: number; potMax?: number; decisionScoreMin?: number; decisionScoreMax?: number; actionRankScoreMin?: number; actionRankScoreMax?: number; breakdown?: HistoryBreakdown };
+export type OverallHistorySearch = { street?: string; position?: string; action?: string; mode?: string; completedFrom?: number; completedTo?: number; potMin?: number; potMax?: number; decisionScoreMin?: number; decisionScoreMax?: number; actionRankScoreMin?: number; actionRankScoreMax?: number; breakdown?: HistoryBreakdown; compare?: string };
 
 /** The filter an address holds, as `decodeHistoryFilter` reads it. */
 export const filterOfSearch = (search: Readonly<Record<string, unknown>>): HistoryFilter => decodeHistoryFilter(search);
@@ -24,11 +25,20 @@ export function withBreakdown(search: OverallHistorySearch, breakdown: HistoryBr
   const { breakdown: _previous, ...rest } = search;
   return breakdown ? { ...rest, breakdown } : rest;
 }
-/** The route's search validation: whatever the address held, as its normalized filter and breakdown. */
-export const overallHistorySearch = (search: Record<string, unknown>): OverallHistorySearch => withBreakdown(searchOfFilter(filterOfSearch(search)), breakdownOfSearch(search));
-/** The History tab's address, holding `filter` and the Score Summary's `breakdown`. Commas stay readable. */
-export function overallHistoryPath(filter: HistoryFilter, breakdown?: HistoryBreakdown): string {
-  const query = Object.entries({ ...historyFilterParams(filter), ...(breakdown ? { breakdown } : {}) }).map(([key, value]) => `${key}=${encodeURIComponent(value).replaceAll('%2C', ',')}`).join('&');
+/** The Strategies a side-by-side Score Summary compares beside the Reference Strategy, as the address holds them (`compare`). */
+export const compareOfSearch = (search: Readonly<Record<string, unknown>>): StrategyDescriptor[] => comparedStrategies(search.compare);
+/** `search` holding `compare` in place of whatever it held, or none. */
+export function withCompare(search: OverallHistorySearch, compared: readonly StrategyDescriptor[]): OverallHistorySearch {
+  const { compare: _previous, ...rest } = search;
+  const compare = compareParam(compared);
+  return compare ? { ...rest, compare } : rest;
+}
+/** The route's search validation: whatever the address held, as its normalized filter, breakdown and compared Strategies. */
+export const overallHistorySearch = (search: Record<string, unknown>): OverallHistorySearch => withCompare(withBreakdown(searchOfFilter(filterOfSearch(search)), breakdownOfSearch(search)), compareOfSearch(search));
+/** The History tab's address, holding `filter`, the Score Summary's `breakdown` and its compared Strategies. Commas stay readable. */
+export function overallHistoryPath(filter: HistoryFilter, breakdown?: HistoryBreakdown, compared: readonly StrategyDescriptor[] = []): string {
+  const compare = compareParam(compared);
+  const query = Object.entries({ ...historyFilterParams(filter), ...(breakdown ? { breakdown } : {}), ...(compare ? { compare } : {}) }).map(([key, value]) => `${key}=${encodeURIComponent(value).replaceAll('%2C', ',').replaceAll('%3A', ':')}`).join('&');
   return '/history' + (query ? '?' + query : '');
 }
 
