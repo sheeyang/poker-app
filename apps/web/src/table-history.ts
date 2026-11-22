@@ -1,4 +1,4 @@
-import type { Card, ObservableTableSession, TableHistoryHand } from '@poker/contracts';
+import type { Card, ObservableTableSession, TableHistory, TableHistoryHand } from '@poker/contracts';
 import { actionWindowOpen, deadlineCountdown } from './presentation.js';
 import { chips } from './table-model.js';
 import { tablePath } from './table-address.js';
@@ -41,6 +41,16 @@ export function handRows(hands: readonly TableHistoryHand[], viewerParticipantId
       dealtIn: hand.viewerDealtIn,
     };
   });
+}
+
+/**
+ * Why the reader of a Table History cannot play at its table, if they cannot: they are a former Participant, or it is a
+ * Closed Table, which nobody can join or play at again (ADR-0041). Either way they still read every Hand.
+ */
+export function historyStanding(history: TableHistory): { readonly kind: 'left' | 'closed'; readonly title: string; readonly detail: string } | undefined {
+  if (history.closed) return { kind: 'closed', title: 'This table is closed.', detail: 'Nobody can join or play here again. Its hands stay here for everyone who played.' };
+  if (history.left) return { kind: 'left', title: 'You’re no longer at this table.', detail: 'Every hand stays here for you, including hands played after you left. Its Join Link returns you to play.' };
+  return undefined;
 }
 
 /**

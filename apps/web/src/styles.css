@@ -1043,8 +1043,10 @@ fieldset.composer-field { display: block; }
 .ledger-row:has(.ledger-open:hover) { background: var(--surface); }
 .ledger-row:has(button.ledger-open:disabled) { opacity: .6; }
 .ledger-row.is-seated { background: #1f2c24; }
-/* A Closed Table: kept as a record, muted, with a dashed tag rather than colour alone, and nothing to open. */
+/* A Closed Table: kept as a record, muted, with a dashed tag rather than colour alone. It opens only its Table History. */
 .ledger-row.is-closed > * { color: var(--muted); }
+.ledger-row.is-closed .ledger-open { color: var(--muted); transition: color 150ms; }
+.ledger-row.is-closed:has(.ledger-open:hover) .ledger-open { color: var(--text); }
 .ledger-closed-name { font-weight: 600; }
 .ledger-closed-tag { display: inline-block; padding: 1px 8px; border: 1px dashed var(--control-line); border-radius: 4px; font-size: .76rem; font-weight: 600; line-height: 1.5; color: var(--muted); }
 .ledger-row.is-seated:has(.ledger-open:hover) { background: #243429; }
@@ -1054,8 +1056,13 @@ fieldset.composer-field { display: block; }
 .ledger-opened { color: var(--muted); white-space: nowrap; }
 .ledger-row > .ledger-action { text-align: right; color: var(--gold); font-size: .82rem; font-weight: 600; white-space: nowrap; }
 .ledger-action > span { margin-right: 6px; }
-.ledger-action svg { vertical-align: -3px; transition: transform 150ms; }
-.ledger-row:has(.ledger-open:hover) .ledger-action svg { transform: translateX(3px); }
+.ledger-action > svg { vertical-align: -3px; transition: transform 150ms; }
+.ledger-row:has(.ledger-open:hover) .ledger-action > svg { transform: translateX(3px); }
+/* The row's second way in: its Table History, a real link above the row's own. Quiet until it is the one pointed at. */
+.ledger-history { position: relative; z-index: 1; display: inline-block; margin-right: 20px; padding: 4px 2px; border-radius: 4px; color: var(--muted); text-decoration: none; transition: color 150ms; }
+.ledger-history:hover { color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
+.ledger-history:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.ledger-history svg { margin-right: 6px; vertical-align: -3px; }
 .seat-glyph-felt { fill: var(--felt); stroke: #51826a; stroke-width: 1; }
 .seat-glyph-seat { fill: #7d9686; }
 .seat-glyph-you { fill: var(--gold); }
@@ -1101,6 +1108,9 @@ fieldset.composer-field { display: block; }
   .ledger-row > .ledger-opened::before { content: "Opened "; }
   .ledger-row > .ledger-action { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
   .ledger-action > span { display: none; }
+  .ledger-row > .ledger-action { display: flex; align-items: center; }
+  .ledger-history { display: inline-flex; align-items: center; min-height: 36px; margin-right: 12px; padding: 6px 10px; border: 1px solid var(--control-line); border-radius: 8px; color: var(--text); }
+  .ledger-history:hover { background: var(--control-hover); text-decoration: none; }
   .address-missing { padding-top: 56px; }
 }
 
@@ -1295,6 +1305,11 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
 .history-back:hover { color: var(--gold-hover); text-decoration: underline; text-underline-offset: 4px; }
 .history-back-arrow { display: inline-flex; rotate: 180deg; transition: translate 150ms cubic-bezier(.16,1,.3,1); }
 .history-back:hover .history-back-arrow { translate: 2px 0; }
+/* Why a former Participant reads but cannot play: a dashed edge, like every record of a table no longer in play. */
+.history-standing { display: flex; gap: 12px; align-items: flex-start; max-width: 72ch; margin: -6px 0 24px; padding: 12px 16px; border: 1px dashed var(--control-line); border-radius: 8px; color: var(--muted); }
+.history-standing > svg { flex: none; margin-top: 1px; color: var(--gold); }
+.history-standing strong { display: block; color: var(--text); font-size: .95rem; font-weight: 600; }
+.history-standing p { margin: 2px 0 0; font-size: .88rem; line-height: 1.5; }
 .history-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
 .history-hand { display: grid; grid-template-columns: minmax(160px, 200px) auto minmax(0, 1fr) minmax(0, 220px); align-items: center; gap: 12px 28px; padding: 16px 12px; border-bottom: 1px solid var(--line); scroll-margin-block: 80px; }
 .history-hand[data-selected] { background: var(--surface); outline: 1px solid var(--gold); outline-offset: -1px; }

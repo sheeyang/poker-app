@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type TableHistoryHand, type TableSchedule } from '@poker/contracts';
-import { completedLabel, handRows, returnBar } from '../src/table-history.js';
+import { completedLabel, handRows, historyStanding, returnBar } from '../src/table-history.js';
 
 const hand = (change: Partial<TableHistoryHand> = {}): TableHistoryHand => ({
   handId: 'hand-37', handNumber: 37, completedAt: Date.UTC(2026, 10, 22, 14, 5), viewerDealtIn: true, showdown: true, board: ['As', 'Kd', '7c', '2h', 'Tc'],
@@ -24,6 +24,19 @@ describe('the Table History rows', () => {
     expect(row!.result).toBe('You won 70 · Rex won 70');
     expect(row!.ending).toBe('Showdown');
     expect(row!.dealtIn).toBe(false);
+  });
+});
+
+describe('why a reader of Table History cannot play there', () => {
+  const list = { tableSessionId: 't', viewerParticipantId: 'you', mode: 'online' as const, seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 }, hands: [] };
+  it('says nothing to a Participant still at the table', () => {
+    expect(historyStanding(list)).toBeUndefined();
+  });
+  it('tells a former Participant that every Hand stays readable, those after they left included, and the Join Link returns them', () => {
+    expect(historyStanding({ ...list, left: true })).toEqual({ kind: 'left', title: 'You’re no longer at this table.', detail: 'Every hand stays here for you, including hands played after you left. Its Join Link returns you to play.' });
+  });
+  it('makes clear that nobody can join or play at a Closed Table', () => {
+    expect(historyStanding({ ...list, left: true, closed: true })).toEqual({ kind: 'closed', title: 'This table is closed.', detail: 'Nobody can join or play here again. Its hands stay here for everyone who played.' });
   });
 });
 

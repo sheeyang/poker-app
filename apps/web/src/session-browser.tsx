@@ -15,6 +15,7 @@ import { Skeleton } from './loading-skeleton.js';
 import { FeltPreview, SeatGlyph, type SeatMark } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { CurrentTableRefusal } from './current-table-refusal.js';
+import { HistoryLink } from './table-history-screen.js';
 import { usePresentation } from './use-presentation.js';
 
 const copy = {
@@ -55,7 +56,7 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
       {tables?.length === 0 && <div className="ledger-empty"><SeatGlyph seats={mode === 'practice' ? 6 : 9} /><div><h3>{text.empty}</h3><p>{text.emptyHint}</p></div></div>}
       {!!tables?.length && <table className="ledger">
         <thead><tr><th scope="col">Table</th><th scope="col">Blinds</th><th scope="col">Status</th><th scope="col">Opened</th><th scope="col"><span className="visually-hidden">Action</span></th></tr></thead>
-        <tbody>{tables.map(row => <LedgerRow key={row.tableSessionId} row={row} now={Date.now()} retry={() => void sessions.refetch()} />)}</tbody>
+        <tbody>{tables.map(row => <LedgerRow key={row.tableSessionId} mode={mode} row={row} now={Date.now()} retry={() => void sessions.refetch()} />)}</tbody>
       </table>}
     </section>
     {awaitingName && <DisplayNamePrompt close={() => setAwaitingName(null)} onSaved={() => { const request = awaitingName; setAwaitingName(null); command.launch(request); }} />}
@@ -64,18 +65,19 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
 
 /**
  * One saved table. The whole row opens it: a real link to its address, so it can open in a new browser tab. An
- * Online Table the Guest is not at opens at its address too, which is its Join Link: its join form returns them. A
- * Closed Table's row opens nothing.
+ * Online Table the Guest is not at opens at its address too, which is its Join Link: its join form returns them. Each
+ * row also links to the table's Table History, which stays open after leaving. A Closed Table's whole row opens its
+ * Table History, the only thing left to open there.
  */
-function LedgerRow({ row, now, retry }: { row: SavedRow; now: number; retry: () => void }) {
+function LedgerRow({ mode, row, now, retry }: { mode: TableMode; row: SavedRow; now: number; retry: () => void }) {
   if (row.kind === 'unreadable') return <tr className="ledger-row is-unreadable"><th scope="row" colSpan={4}><span className="muted">This saved table couldn’t be read.</span></th><td className="ledger-action"><button className="text-button" onClick={retry}>Retry</button></td></tr>;
-  // Nobody can open a Closed Table until replay arrives, so its row is kept as a record, with no link.
+  // Nobody can play at a Closed Table again: its row is a record that opens into its Table History.
   if (row.kind === 'closed') return <tr className="ledger-row is-closed">
-    <th scope="row"><span className="ledger-name"><SeatGlyph seats={row.seatCount} dim /><span className="ledger-closed-name">{row.name}</span></span></th>
+    <th scope="row"><span className="ledger-name"><SeatGlyph seats={row.seatCount} dim /><HistoryLink className="ledger-open ledger-closed-name" mode={mode} tableSessionId={row.tableSessionId} label={`${row.action}: ${row.name}, ${row.blinds} blinds, closed`}>{row.name}</HistoryLink></span></th>
     <td className="numeric">{row.blinds}{row.ante ? <span className="ledger-ante"> · ante {row.ante}</span> : null}</td>
     <td><span className="ledger-closed-tag">{row.status}</span></td>
     <td className="ledger-opened numeric">{openedLabel(row.openedAt, now)}</td>
-    <td className="ledger-action"><span className="visually-hidden">Can’t be opened</span></td>
+    <td className="ledger-action" aria-hidden="true"><span>{row.action}</span><Icon name="arrow" size={15} /></td>
   </tr>;
   const { kind, seatCount, name, blinds, action, live } = row;
   const label = `${action}: ${name}, ${blinds} blinds`;
@@ -90,7 +92,7 @@ function LedgerRow({ row, now, retry }: { row: SavedRow; now: number; retry: () 
     <td className="numeric">{blinds}{row.ante ? <span className="ledger-ante"> · ante {row.ante}</span> : null}</td>
     <td>{status}</td>
     <td className="ledger-opened numeric">{openedLabel(row.openedAt, now)}</td>
-    <td className="ledger-action" aria-hidden="true"><span>{action}</span><Icon name="arrow" size={15} /></td>
+    <td className="ledger-action"><HistoryLink className="ledger-history" mode={mode} tableSessionId={row.tableSessionId} label={`Table History: ${name}, ${blinds} blinds`}><Icon name="cards" size={15} /><span>History</span></HistoryLink><span aria-hidden="true">{action}</span><Icon name="arrow" size={15} /></td>
   </tr>;
 }
 
