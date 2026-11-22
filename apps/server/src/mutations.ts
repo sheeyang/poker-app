@@ -622,7 +622,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const connected = connectedParticipants(id);
     // Every complete update carries who is connected, so it publishes the current list too.
     presence.set(id, connected.join(','));
-    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode !== false, connected));
+    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode === true, connected));
   }
   /**
    * The joined human Participants whose Guest has at least one live connection subscribed to the table. Transient:
@@ -762,7 +762,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const session = tables.get(id);
         const participantId = viewer(session, userId);
         if (!session || !participantId) return undefined;
-        const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode !== false, connectedParticipants(id, session));
+        const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode === true, connectedParticipants(id, session));
         return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
       });
     }
@@ -783,7 +783,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode !== false, connectedParticipants(id, session)), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
+        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode === true, connectedParticipants(id, session)), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
