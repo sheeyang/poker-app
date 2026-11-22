@@ -1,6 +1,7 @@
 import type { ObservableHandReplay, TableHandReplay, TableHistory, TableHistoryHand } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
-import { findBinding, type PersistedTableSession } from './aggregate.js';
+import { findBinding, isHuman, type PersistedTableSession } from './aggregate.js';
+import { recordedConfiguration } from './projection.js';
 
 /**
  * The Table History list for one Participant: every completed Hand of the Table Session, oldest first (ADR-0040).
@@ -12,7 +13,15 @@ import { findBinding, type PersistedTableSession } from './aggregate.js';
  * Later reads of a Hand (its Replay Steps) take their rows from the same place: `handsOf`.
  */
 export function tableHistory(aggregate: PersistedTableSession, game: CashGame, participantId: string): TableHistory {
-  return { tableSessionId: aggregate.tableSessionId, viewerParticipantId: participantId, hands: handsOf(aggregate, game, participantId) };
+  const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
+  const binding = findBinding(aggregate, participantId);
+  const left = aggregate.closed || isHuman(binding) && binding.membership !== 'joined';
+  return {
+    tableSessionId: aggregate.tableSessionId, viewerParticipantId: participantId,
+    mode: aggregate.mode, seatCount, stakes: { smallBlind, bigBlind, ante },
+    ...(left ? { left: true as const } : {}), ...(aggregate.closed ? { closed: true as const } : {}),
+    hands: handsOf(aggregate, game, participantId),
+  };
 }
 export function handsOf(aggregate: PersistedTableSession, game: CashGame, participantId: string): TableHistoryHand[] {
   const numbers = new Map(game.getCompletedHands().map(hand => [hand.handId, hand.sequence]));
