@@ -3,12 +3,12 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type TableHandReplay, type TableHistory, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type HistoryFilter, type OverallHistoryDecision, type TableHandReplay, type TableHistory, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
 import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { afterHandRequestsScheduled, currentTable, membership, participantGuest, participation, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { afterHandRequestsScheduled, currentTable, membership, participantGuest, participation, participations, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
 import { createGuestQueue, type GuestQueue } from './guest-queue.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
@@ -23,6 +23,7 @@ import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
 import { handReplay, tableHistory } from './table-history.js';
+import { filtered, newestFirst, ownDecisions } from './overall-history.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -808,6 +809,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return table && tableHistory(table.aggregate, table.game, table.participantId);
     }
     /**
+     * The Guest-scoped Overall History (ADR-0041): every decision the Guest made, in a Hand they were dealt into, at any table
+     * they may read, passing the non-score restrictions of `filter`, the newest Hand first. The tables are those of the
+     * membership index in any status, and each is read through `readableTable`, the one rule for reading a table's history,
+     * so it never loads a table and shows no decision of anyone else's.
+     */
+    async function readOverallHistory(userId: string, filter: HistoryFilter): Promise<OverallHistoryDecision[]> {
+      const decisions: OverallHistoryDecision[] = [];
+      for (const { tableSessionId } of await participations(db, userId)) {
+        const table = await readableTable(tableSessionId, userId);
+        if (table) decisions.push(...ownDecisions(table.aggregate, table.game, table.participantId));
+      }
+      return newestFirst(filtered(decisions, filter));
+    }
+    /**
      * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
      * table, `'hand-not-found'` when the Hand is not a completed Hand of it.
      */
@@ -1456,6 +1471,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     },
     read,
     readHistory,
+    readOverallHistory,
     readReplay,
     captureHistoryEvaluation,
     subscribe,

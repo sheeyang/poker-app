@@ -27,9 +27,9 @@ export function useShell(): Shell {
   return shell;
 }
 
-/** The section an address belongs to: each mode's list and tables, an Online Table's Join Link included. */
-function sectionOf(pathname: string): TableMode | undefined {
-  return parseAddress(pathname)?.mode;
+/** The section an address belongs to: each mode's list and tables (an Online Table's Join Link included), or Overall History. */
+function sectionOf(pathname: string): TableMode | 'history' | undefined {
+  return pathname === '/history' ? 'history' : parseAddress(pathname)?.mode;
 }
 
 /** Sets the browser-tab title while a page is shown. */
@@ -82,6 +82,7 @@ export function AppShell() {
         <nav aria-label="Sections">
           <Link to="/practice" className={section === 'practice' ? 'nav-active' : undefined} aria-current={pathname === '/practice' ? 'page' : section === 'practice' ? 'location' : undefined}><Icon name="cards" size={18} /><span>Practice</span></Link>
           <Link to="/online" className={section === 'online' ? 'nav-active' : undefined} aria-current={pathname === '/online' ? 'page' : section === 'online' ? 'location' : undefined}><Icon name="tables" size={18} /><span>Online</span></Link>
+          <Link to="/history" className={section === 'history' ? 'nav-active' : undefined} aria-current={section === 'history' ? 'page' : undefined}><Icon name="history" size={18} /><span>History</span></Link>
         </nav>
         <span className="identity-status">{!identity.isSuccess && <span className="identity-text">{identity.isError ? 'Connection unavailable' : 'Connecting…'}</span>}{identity.isSuccess && <MySettings />}</span>
       </header>

@@ -130,6 +130,7 @@ export type Page =
   | { readonly page: 'list'; readonly mode: TableMode }
   | { readonly page: 'table'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
   | { readonly page: 'history'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
+  | { readonly page: 'overall-history' }
   | { readonly page: 'join'; readonly ownerName: string }
   | { readonly page: 'missing-table' }
   | { readonly page: 'closed-table' }
@@ -141,6 +142,7 @@ export function pageTitle(page: Page): string {
     case 'list': return `${modeLabel(page.mode)} · ${app}`;
     case 'table': return `${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
     case 'history': return `Table History · ${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
+    case 'overall-history': return `History · ${app}`;
     case 'join': return `Join ${page.ownerName}’s table · ${app}`;
     case 'missing-table': return `Table not found · ${app}`;
     case 'closed-table': return `Table closed · ${app}`;

@@ -117,7 +117,7 @@ One point in a Replay: before each decision, after each street reveal including 
 _Avoid_: Frame, event, Beat
 
 **Overall History**:
-Every Table History a Guest can read, with its filters and Score Summaries across Table Sessions.
+Every Table History a Guest can read, with its filters and Score Summaries across Table Sessions. It lists only the Guest's own decisions, from Hands they were dealt into; its non-score filters (street, Position, action type, table mode, completion date, pot in big blinds) apply at once.
 _Avoid_: Session summary, account history
 
 **Seat**:

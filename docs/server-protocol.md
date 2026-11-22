@@ -147,6 +147,30 @@ allowed to make that request:
 At a Practice Table the owner is the only human, so neither applies there. Acting
 for a Bot remains the definitive rejection 403 `actor-not-authorized`.
 
+### Overall History
+
+`GET /api/overall-history` is Guest-scoped, not table-scoped ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+It answers `{ filter, total, offset, decisions }`: every decision the Guest made in a Hand they were dealt into, at
+every table they have ever been a Participant at (Practice Tables, tables they left, Closed Tables), newest Hand first
+(Hands without a completion time last), decisions in the order they were made. The tables come from the membership
+index in any status, and each is read through the same rule as Table History, so the list loads no table and shows no
+decision of anyone else's. 401 for a stranger to the service; a Guest with no tables gets an empty list.
+
+The query holds the filter in the one flat encoding the browser's address uses (`historyFilterParams` /
+`decodeHistoryFilter` in contracts), plus `limit` (1–200, default 50) and `offset`. Unknown values are dropped and `filter`
+echoes what was applied:
+
+| Parameter | Meaning |
+| --- | --- |
+| `street`, `position`, `action`, `mode` | Comma-separated values; a decision passes when it has any of them. Positions are BTN, SB, BB, UTG, UTG+1, UTG+2, LJ, HJ, CO and (heads-up) BTN/SB. |
+| `completedFrom`, `completedTo` | Server milliseconds, inclusive. A Hand with no completion time passes neither side, so it is excluded whenever either is set. |
+| `potMin`, `potMax` | Pot in big blinds as the actor faced it before deciding: every chip committed to the Hand so far, antes, blinds and current-street wagers included. Inclusive. |
+
+Each decision carries the table (`tableSessionId`, `mode`, `seatCount`, `stakes`), the Hand (`handId`, `handNumber`,
+`completedAt?`), `decisionId`, the facts the filters read (`street`, `position`, `action`, `pot`, `potBigBlinds`) and the
+reader's own `holeCards` and the `board` as it was. A listed decision opens at `step=decision-N` of its Hand's Replay.
+Position is derived in Research from the dealt-in Participants and the button; the browser receives the label.
+
 ### Table History
 
 Table History belongs to the table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).

@@ -1,3 +1,4 @@
+import { historyFilterParams } from '@poker/contracts';
 import type { SetPlayingStrategyRequest, SetTrainerConfigurationRequest, TrainerConfigurationAcknowledgement, RetryBotRequest, ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest } from '@poker/contracts';
 export class RequestFailure extends Error {
   /** With `current-table-elsewhere`: the Guest's Current Table, which they must leave first. */
@@ -46,6 +47,8 @@ export const api = {
   /** Says the Guest opened a table: the server times it, and it orders their saved lists. */
   markOpened: (id: string) => request<{ ok: true }>('/table-sessions/' + encodeURIComponent(id) + '/opened', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
   /** The table's completed Hands, as this Participant may see them. */
+  /** Overall History: the Guest's own decisions across every table they can read, filtered by the declared non-score set and paged. */
+  readOverallHistory: (filter: import('@poker/contracts').HistoryFilter, page: { readonly limit?: number; readonly offset?: number } = {}, signal?: AbortSignal) => request<import('@poker/contracts').OverallHistory>('/overall-history?' + new URLSearchParams({ ...historyFilterParams(filter), ...(page.limit !== undefined ? { limit: String(page.limit) } : {}), ...(page.offset !== undefined ? { offset: String(page.offset) } : {}) }), { signal }),
   readTableHistory: (id: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHistory>('/table-sessions/' + encodeURIComponent(id) + '/history', { signal }),
   /** One completed Hand's Replay Steps, as this Guest may see them. */
   readHandReplay: (id: string, handId: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHandReplay>('/table-sessions/' + encodeURIComponent(id) + '/history/' + encodeURIComponent(handId), { signal }),

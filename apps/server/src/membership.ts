@@ -111,3 +111,11 @@ export async function recordOpened(db: Database, userId: string, tableSessionId:
     .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId))).returning({ id: tableMemberships.tableSessionId });
   return rows.length > 0;
 }
+/**
+ * Every table the Guest has ever been a Participant at, with that Participant, however their membership ended and
+ * Closed Tables included: the tables whose history they may read (ADR-0041). From the index alone, so it loads nothing.
+ */
+export async function participations(db: Database, userId: string): Promise<{ tableSessionId: string; participantId: string }[]> {
+  return db.select({ tableSessionId: tableMemberships.tableSessionId, participantId: tableMemberships.participantId }).from(tableMemberships)
+    .where(eq(tableMemberships.userId, userId));
+}

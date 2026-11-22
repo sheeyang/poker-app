@@ -9,6 +9,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
+import { decodeHistoryFilter, type OverallHistory } from '@poker/contracts';
 import type { AnalysisUpdate, GetOrStartAnalysisRequest, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest, SetTableOptionsRequest, SetTablePasswordRequest } from '@poker/contracts';
 import { createTrainerConfigurations, TrainerConfigurationRestorationError } from './trainer-configuration.js';
 import { openDatabase, initializeDatabase } from './db/database.js';
@@ -323,6 +324,25 @@ export async function createServer(options: ServerOptions) {
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The Table History is unavailable. Refresh to try reading it again.' } });
+    }
+  });
+  /**
+   * Overall History: the Guest's own decisions across every table they may read, filtered by the declared non-score set
+   * (`decodeHistoryFilter`: the same encoding as the browser's address) and paged by `limit` (1–200, default 50) and `offset`.
+   */
+  app.get<{ Querystring: Record<string, unknown> }>('/api/overall-history', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    const filter = decodeHistoryFilter(request.query);
+    const count = (value: unknown, fallback: number, minimum: number, maximum: number) => { const number = typeof value === 'string' && /^[0-9]{1,9}$/.test(value) ? Number(value) : fallback; return Math.min(maximum, Math.max(minimum, number)); };
+    const limit = count(request.query.limit, 50, 1, 200), offset = count(request.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+    try {
+      const decisions = await mutations.readOverallHistory(userId, filter);
+      const history: OverallHistory = { filter, total: decisions.length, offset, decisions: decisions.slice(offset, offset + limit) };
+      return history;
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Overall History is unavailable. Refresh to try reading it again.' } });
     }
   });
   /** One completed Hand of Table History, replayed: its Replay Steps as the reader may see them (ADR-0041). */

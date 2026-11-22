@@ -1,4 +1,6 @@
 import { CashGame } from '@poker/engine';
+export { handPositions } from './position.js';
+export { decisionSituation, type DecisionSituation } from './decision-facts.js';
 import type { ActionProbability, CompletedHandInspectionOutcome, ConcreteAction, DecisionScores, ObservableGameView, ReferenceStrategyEvaluation } from '@poker/contracts';
 
 /** v1 treats aggregate probabilities within 1e-12 of a rank representative as tied. */
