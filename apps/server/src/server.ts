@@ -9,7 +9,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { decodeHistoryFilter, type OverallHistory } from '@poker/contracts';
+import { decodeHistoryFilter, isHistoryBreakdown, type HistoryBreakdown, type OverallHistory, type OverallHistorySummaryRequest } from '@poker/contracts';
 import type { AnalysisUpdate, GetOrStartAnalysisRequest, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest, SetTableOptionsRequest, SetTablePasswordRequest } from '@poker/contracts';
 import { createTrainerConfigurations, TrainerConfigurationRestorationError } from './trainer-configuration.js';
 import { openDatabase, initializeDatabase } from './db/database.js';
@@ -100,7 +100,7 @@ export async function createServer(options: ServerOptions) {
   // Every analysis a Table History or Overall History request schedules shares one per-Guest bound.
   const historyAnalysis = createHistoryAnalysisScheduler(jobRunner);
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
-  const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult);
+  const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
@@ -344,6 +344,37 @@ export async function createServer(options: ServerOptions) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Overall History is unavailable. Refresh to try reading it again.' } });
     }
+  });
+  /**
+   * A Score Summary over Overall History's filtered decisions (ADR-0041), optionally broken down by one dimension. The
+   * body is `{ filter?, breakdown? }`, `filter` in the list's flat encoding. Every analysis it needs runs as the Guest's
+   * `history-analysis`; the answer comes at once and `GET` reports its progress. Transient, like every summary.
+   */
+  app.post<{ Body: OverallHistorySummaryRequest }>('/api/overall-history/summaries', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    const body: unknown = request.body ?? {};
+    const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+    if (!plain(body) || Object.keys(body).some(key => key !== 'filter' && key !== 'breakdown') || body.filter !== undefined && (!plain(body.filter) || Object.values(body.filter).some(value => typeof value !== 'string' && typeof value !== 'number' || String(value).length > 512)) || body.breakdown !== undefined && !isHistoryBreakdown(body.breakdown))
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply an optional filter, in the Overall History address encoding, and an optional breakdown: street, position, action or mode.' } });
+    try {
+      const input = await mutations.captureOverallHistorySummary(userId, decodeHistoryFilter(body.filter ?? {}), body.breakdown as HistoryBreakdown | undefined);
+      return summaries.createHistory(input);
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } });
+    }
+  });
+  app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    return summaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+  });
+  app.post<{ Params: { requestId: string }; Body: Record<string, never> }>('/api/overall-history/summaries/:requestId/retry', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
+    return summaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
   /** One completed Hand of Table History, replayed: its Replay Steps as the reader may see them (ADR-0041). */
   app.get<{ Params: { id: string; handId: string } }>('/api/table-sessions/:id/history/:handId', async (request, reply) => {

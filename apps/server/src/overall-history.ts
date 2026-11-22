@@ -1,5 +1,6 @@
 import { decisionSituation } from '@poker/research';
-import { matchesHistoryFilter, type HistoryFilter, type OverallHistoryDecision } from '@poker/contracts';
+import { historyBreakdownValue, historyBreakdownValues, matchesHistoryFilter, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision } from '@poker/contracts';
+import type { FrozenEvaluationInput } from './analysis.js';
 import type { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
 import { recordedConfiguration } from './projection.js';
@@ -44,3 +45,21 @@ export function newestFirst(decisions: readonly OverallHistoryDecision[]): Overa
 }
 /** The decisions that pass every non-score restriction of `filter`. */
 export const filtered = (decisions: readonly OverallHistoryDecision[], filter: HistoryFilter): OverallHistoryDecision[] => decisions.filter(decision => matchesHistoryFilter(filter, decision));
+
+/** One of the Guest's listed decisions, frozen for analysis under the summary's Strategy. */
+export interface StudiedDecision { readonly decision: OverallHistoryDecision; readonly input: FrozenEvaluationInput }
+/**
+ * The frozen sets of an Overall History summary: every decision, in the list's order, and with a breakdown one set per
+ * value of that dimension the decisions have, in declared order. Each decision is in exactly one bucket.
+ */
+export function summarySets(decisions: readonly StudiedDecision[], breakdown?: HistoryBreakdown) {
+  const inputs = new Map(decisions.map(studied => [studied.decision, studied.input]));
+  const ordered = newestFirst(decisions.map(studied => studied.decision));
+  const members = ordered.map(decision => inputs.get(decision)!);
+  if (!breakdown) return { members };
+  const buckets = historyBreakdownValues[breakdown].flatMap(value => {
+    const inBucket = ordered.filter(decision => historyBreakdownValue(breakdown, decision) === value);
+    return inBucket.length ? [{ value, members: inBucket.map(decision => inputs.get(decision)!) }] : [];
+  });
+  return { members, buckets };
+}

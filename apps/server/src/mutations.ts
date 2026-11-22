@@ -3,7 +3,7 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type HistoryFilter, type OverallHistoryDecision, type TableHandReplay, type TableHistory, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
+import { defaultTrainerConfiguration, normalizeHistoryFilter, onlineTableCapacity, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision, type TableHandReplay, type TableHistory, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
 import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
@@ -17,13 +17,13 @@ import type { AcceptanceTransactions, AcceptanceFaults } from './db/acceptance.j
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { FrozenScoreSummary } from './summaries.js';
+import type { FrozenHistorySummary, FrozenScoreSummary } from './summaries.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
 import { handReplay, tableHistory } from './table-history.js';
-import { filtered, newestFirst, ownDecisions } from './overall-history.js';
+import { filtered, newestFirst, ownDecisions, summarySets, type StudiedDecision } from './overall-history.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -587,12 +587,14 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   function viewer(session: CommittedSession | undefined, userId: string) {
     return session && memberBinding(session.aggregate, userId)?.participantId;
   }
-  /** The frozen inputs of a human Participant's decision, under the Reference Strategy its Guest has as it is asked. */
-  function captureEvaluation(session: CommittedSession, participantId: string, decisionId: string, referenceStrategy: StrategyDescriptor): FrozenEvaluationInput | null {
+  /**
+   * The frozen inputs of a human Participant's decision, under the Reference Strategy its Guest has as it is asked.
+   * `current` is the Participant's current view, when the caller already has it for many decisions.
+   */
+  function captureEvaluation(session: CommittedSession, participantId: string, decisionId: string, referenceStrategy: StrategyDescriptor, current = session.game.forParticipant(participantId).getView()): FrozenEvaluationInput | null {
     const binding = findBinding(session.aggregate, participantId);
     if (!isHuman(binding)) return null;
     const participant = session.game.forParticipant(participantId);
-    const current = participant.getView();
     const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
     let view: ObservableGameView;
     try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
@@ -821,6 +823,26 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         if (table) decisions.push(...ownDecisions(table.aggregate, table.game, table.participantId));
       }
       return newestFirst(filtered(decisions, filter));
+    }
+    /**
+     * An Overall History Score Summary request, frozen (ADR-0041): the decisions `readOverallHistory` lists for `filter`,
+     * each frozen for analysis under the Guest's Reference Strategy now, or under the supported `strategy` named instead,
+     * and with `breakdown` the same decisions in one set per bucket. Each table is read as its history is, so it loads
+     * nothing.
+     */
+    async function captureOverallHistorySummary(userId: string, filter: HistoryFilter, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<FrozenHistorySummary> {
+      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+      const decisions: StudiedDecision[] = [];
+      for (const { tableSessionId } of await participations(db, userId)) {
+        const table = await readableTable(tableSessionId, userId);
+        if (!table) continue;
+        const current = table.game.forParticipant(table.participantId).getView();
+        for (const decision of filtered(ownDecisions(table.aggregate, table.game, table.participantId), filter)) {
+          const input = captureEvaluation(table, table.participantId, decision.decisionId, referenceStrategy, current);
+          if (input?.acceptedAction) decisions.push({ decision, input });
+        }
+      }
+      return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), ...(breakdown ? { breakdown } : {}), referenceStrategy, ...summarySets(decisions, breakdown) });
     }
     /**
      * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
@@ -1472,6 +1494,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     read,
     readHistory,
     readOverallHistory,
+    captureOverallHistorySummary,
     readReplay,
     captureHistoryEvaluation,
     subscribe,

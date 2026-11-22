@@ -171,6 +171,26 @@ Each decision carries the table (`tableSessionId`, `mode`, `seatCount`, `stakes`
 reader's own `holeCards` and the `board` as it was. A listed decision opens at `step=decision-N` of its Hand's Replay.
 Position is derived in Research from the dealt-in Participants and the button; the browser receives the label.
 
+#### Overall History Score Summaries
+
+`POST /api/overall-history/summaries` `{ filter?, breakdown? }` asks for a Score Summary over the decisions the list
+gives for `filter` (the same flat encoding, as an object of strings), under the Guest's Reference Strategy at request
+time. `breakdown` is one of `street`, `position`, `action` (the action type taken) or `mode`. Anything else is 400
+`invalid-summary-request`. It answers at once with `OverallHistorySummary { ok, requestId, attemptId, filter,
+breakdown?, referenceStrategy, summary, buckets? }`. `summary` covers the whole set; with a breakdown, `buckets` holds one
+`{ value, summary }` per value the set has, in declared order. Each is an ordinary Score Summary over its own frozen
+set: `{ status, decisionCount, progress: { succeeded, total } }` plus `averages` when `complete` or `error` when one of
+its analyses failed (Error takes precedence over Analyzing; never a partial mean; `empty`, with no score, for no
+decisions). Like every summary, the request is transient.
+
+Every analysis a summary needs is the Guest's `history-analysis`: matching cached analyses and stored results are
+reused, and the rest are submitted under the per-Guest bound of 8 outstanding jobs, which holds back the remainder
+without a capacity error. `GET /api/overall-history/summaries/:requestId` reads its state and progress; the web app reads
+it each second while any summary in it is `pending`. `POST /api/overall-history/summaries/:requestId/retry` (empty body)
+asks again for every failed analysis and starts a new `attemptId`. Both answer 404 to any other Guest and 401 to a
+stranger. A result is accepted only while every table its decisions come from still accepts its Participant's results
+(the same check each table's own results pass); reading the tables loads none of them.
+
 ### Table History
 
 Table History belongs to the table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
