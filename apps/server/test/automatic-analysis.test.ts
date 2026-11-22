@@ -2,7 +2,7 @@ import { afterAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
 import { randomUUID } from 'node:crypto';
 import { Client, Pool } from 'pg';
-import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type TrainerConfiguration } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer, type ServerOptions } from '../src/server.js';
 import { InstantClock } from './fixtures/clock.js';
@@ -59,12 +59,13 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const submit = (t: Table, kind: string, body: unknown) => post(t.cookie, '/table-sessions/' + t.id + '/' + kind, body);
+  const configure = (t: Table, trainerConfiguration: TrainerConfiguration) => fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration }) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); return response.json(); }
   async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
   const request = async (t: Table, decisionId = 'hand-1/decision-1'): Promise<DecisionAnalysis> => (await submit(t, 'analysis', { decisionId })).json();
   const result = async (t: Table, requestId: string): Promise<DecisionAnalysis> => (await fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie: t.cookie } })).json();
   async function stop() { const closing = server.close(); await expect.poll(() => [...held].every(evaluation => evaluation.signal?.aborted)).toBe(true); for (const evaluation of held) evaluation.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await closing; }
-  return { table, decision, read, submit, command, request, result, evaluations, schema,
+  return { table, decision, read, submit, configure, command, request, result, evaluations, schema,
     hold(requestId: string) { heldId = requestId; },
     async resolve(sql: 'COMMIT' | 'ROLLBACK') { terminal!.resolve(sql); await Promise.all([...targets]); heldId = undefined; },
     async restart() { await stop(); evaluations.length = 0; await start(); },
@@ -78,10 +79,10 @@ test('accepted human play starts analysis with Live Analysis off and no browser 
     const t = await f.decision();
     const before = await f.read(t);
     expect(before.trainerConfiguration.liveAnalysis).toBe(true);
-    expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { ...before.trainerConfiguration, liveAnalysis: false } })).status).toBe(200);
+    expect((await f.configure(t, { ...before.trainerConfiguration, liveAnalysis: false })).status).toBe(200);
     expect(f.evaluations).toHaveLength(0);
     await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
-    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 5, view: { state: { status: 'completed-hand' } } });
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, view: { state: { status: 'completed-hand' } } });
     await expect.poll(() => f.evaluations.length).toBe(1);
     const pending = await f.request(t);
     expect(pending).toMatchObject({ status: 'pending', scoredDecision: { acceptedAction: { type: 'fold' }, scoringMethodVersion: 'v1' } });
@@ -107,8 +108,7 @@ test('live recovery starts one accepted analysis after proving COMMIT without a 
     expect(automatic).toMatchObject({ scoredDecision: { acceptedAction: { type: 'fold' } }, referenceStrategy: defaultPlayingStrategy });
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await f.result(t, automatic.requestId)).status).toBe('complete');
-    const before = await f.read(t);
-    expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false } })).status).toBe(200);
+    expect((await f.configure(t, { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false })).status).toBe(200);
     expect(await (await f.submit(t, 'act', body)).json()).toMatchObject({ ok: true, pokerRevision: 4, sessionRevision: 4 });
     expect(f.evaluations).toHaveLength(1);
     expect(await f.result(t, automatic.requestId)).toMatchObject({ referenceStrategy: defaultPlayingStrategy, status: 'complete' });
@@ -245,8 +245,7 @@ test('explicit Retry preserves automatic dependency priority, accepted action, o
     await expect.poll(() => f.evaluations.length).toBe(1); const original = f.evaluations[0]!;
     const pending = await f.request(t); original.result.resolve({ choices: [{ action: { type: 'fold' }, probability: .2 }] });
     await expect.poll(async () => (await f.result(t, pending.requestId)).status).toBe('error');
-    const before = await f.read(t);
-    expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false } })).status).toBe(200);
+    expect((await f.configure(t, { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false })).status).toBe(200);
     const blocker = await f.decision(); await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(2);
     const retried: DecisionAnalysis = await (await f.submit(t, 'analysis/' + pending.requestId + '/retry', {})).json();
     expect(retried).toMatchObject({ status: 'pending', requestId: pending.requestId, referenceStrategy: defaultPlayingStrategy, scoredDecision: { acceptedAction: { type: 'fold' }, scoringMethodVersion: 'v1' } });
@@ -267,8 +266,8 @@ test('explicit Retry preserves automatic dependency priority, accepted action, o
 test('an automatic accepted score shares a running Live Analysis evaluation and accepts its valid late historical result', async () => {
   const f = await fixture();
   try {
-    const t = await f.decision(); const before = await f.read(t);
-    expect((await f.submit(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy: baselinePlayingStrategy, liveAnalysis: true } })).status).toBe(200);
+    const t = await f.decision();
+    expect((await f.configure(t, { referenceStrategy: baselinePlayingStrategy, liveAnalysis: true })).status).toBe(200);
     const live: DecisionAnalysis = await (await f.submit(t, 'analysis', { decisionId: 'hand-1/decision-1', live: true })).json();
     await expect.poll(() => f.evaluations.length).toBe(1);
     await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });

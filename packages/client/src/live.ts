@@ -7,9 +7,19 @@ export function retainNewestTable(previous: unknown, incoming: unknown): Observa
   const current = previous as ObservableTableSession | undefined;
   const next = incoming as ObservableTableSession;
   if (current?.tableSessionId === next.tableSessionId && current.sessionRevision > next.sessionRevision) return current;
-  if (current?.tableSessionId === next.tableSessionId && current.sessionRevision === next.sessionRevision)
-    return Object.hasOwn(next, 'runtimeStatus') ? { ...current, runtimeStatus: next.runtimeStatus } : current;
+  if (current?.tableSessionId === next.tableSessionId && current.sessionRevision === next.sessionRevision) {
+    // The Guest's Trainer Configuration changes without a table revision, so a read at the same revision says it.
+    const configuration = sameValue(current.trainerConfiguration, next.trainerConfiguration) ? {} : { trainerConfiguration: next.trainerConfiguration };
+    const status = Object.hasOwn(next, 'runtimeStatus') ? { runtimeStatus: next.runtimeStatus } : {};
+    return Object.keys(configuration).length || Object.keys(status).length ? { ...current, ...configuration, ...status } : current;
+  }
   return next;
+}
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key => sameValue((left as Record<string, unknown>)[key], (right as Record<string, unknown>)[key]));
 }
 
 type Connection = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -19,6 +29,8 @@ export interface LiveConsumers {
   readonly onAnalysisUpdate?: (update: AnalysisUpdate, lifecycle: UserChannelLifecycle) => void;
   /** A followed table no longer includes this Guest's Participant: they left it (or were removed). */
   readonly onMembershipEnded?: (ended: TableMembershipEnded) => void;
+  /** The Guest's Trainer Configuration changed, in this tab or another. Their table views are read again already. */
+  readonly onTrainerConfigurationChanged?: () => void;
 }
 /** Per followed table, the latest word of the current connection. */
 type PerTable<T> = { readonly generation: number; readonly tables: Readonly<Record<string, T>> };
@@ -127,6 +139,13 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
         }
         if (message.type === 'analysis-update') {
           if (lifecycle) callbacks.current.onAnalysisUpdate?.(message, lifecycle);
+          return;
+        }
+        if (message.type === 'trainer-configuration-changed') {
+          // It belongs to the Guest, so every table view presents it, and it advances no table revision: read them again.
+          void queryClient.invalidateQueries({ queryKey: ['trainer-configuration'] });
+          void queryClient.invalidateQueries({ queryKey: ['table-session'] });
+          callbacks.current.onTrainerConfigurationChanged?.();
           return;
         }
         const tableId = message.tableSessionId;

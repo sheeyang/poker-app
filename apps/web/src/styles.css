@@ -239,7 +239,8 @@ body:has(.table-active) { overflow: hidden; }
 .analysis-settings-trigger { anchor-name: --analysis-settings; }
 .analysis-settings { position: fixed; position-anchor: --analysis-settings; position-area: bottom span-left; position-try-fallbacks: flip-block, flip-inline; inset: auto; width: min(360px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 20px; margin: 8px 0; border: 1px solid var(--line); border-radius: 12px; gap: 16px; background: var(--raised); color: var(--text); }
 .analysis-settings:popover-open { display: grid; }
-.analysis-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.analysis-settings-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.analysis-settings-heading > div { display: grid; gap: 4px; padding-top: 6px; }
 .analysis-settings-heading h3 { font-size: 1rem; }
 .analysis-settings .live-toggle { margin-top: 0; }
 .reference-settings { border-bottom: 1px solid var(--line); padding-bottom: 22px; }

@@ -101,7 +101,10 @@ export interface StrategyDescriptor {
   readonly policy: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
   readonly selector: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
 }
-/** One human Participant's study preferences, independent of other Participants and every Bot's Playing Strategy. */
+/**
+ * A Guest's study preferences, chosen once and used at every table, in review and in every summary (ADR-0041).
+ * Independent of every Bot's Playing Strategy. An Online Table's Allow Live Analysis can still refuse Live Analysis.
+ */
 export interface TrainerConfiguration {
   readonly referenceStrategy: StrategyDescriptor;
   readonly liveAnalysis: boolean;
@@ -410,7 +413,10 @@ export interface ObservableTableSession {
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
-  /** The viewing Participant's own Trainer configuration. */
+  /**
+   * The viewing Guest's current Trainer Configuration, presented beside the table's Allow Live Analysis. It belongs to
+   * the Guest, not the table: changing it advances no revision (see `TrainerConfigurationChanged`).
+   */
   readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
   /** The committed schedule, durable with the revisions above. */
@@ -462,6 +468,11 @@ export interface AnalysisUpdate {
   readonly status: 'complete' | 'error';
 }
 export interface UserChannelReady { readonly type: 'user-channel-ready' }
+/**
+ * The Guest's Trainer Configuration changed, sent on their user channel to every one of their connections once the
+ * change is readable. It carries nothing: each tab reads the configuration and its analysis state again over HTTP.
+ */
+export interface TrainerConfigurationChanged { readonly type: 'trainer-configuration-changed' }
 export interface SubscribeTable { readonly type: 'subscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
 export interface UnsubscribeTable { readonly type: 'unsubscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
 export type ClientLiveMessage = SubscribeTable | UnsubscribeTable;
@@ -487,7 +498,7 @@ export interface TableMembershipEnded {
  */
 export interface TablePresence { readonly type: 'table-presence'; readonly tableSessionId: TableSessionId; readonly connectedParticipantIds: readonly ParticipantId[] }
 export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate | TableMembershipEnded | TablePresence;
-export type ServerLiveMessage = UserChannelReady | TableSubscriptionResult | TableLiveMessage;
+export type ServerLiveMessage = UserChannelReady | TrainerConfigurationChanged | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
   minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,
@@ -507,12 +518,17 @@ export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
 export interface RetryBotRequest extends ControllerMutationMetadata {}
-/** Sets the requesting Guest's own Participant's Trainer configuration. */
+/**
+ * Sets the requesting Guest's Trainer Configuration, for every table. A Guest-scoped request, not a table mutation: it
+ * carries no revision, and repeating it with the same request ID applies it once.
+ */
 export interface SetTrainerConfigurationRequest {
   readonly requestId: string;
-  readonly expectedSessionRevision: Revision;
   readonly trainerConfiguration: TrainerConfiguration;
 }
+/** The Guest's Trainer Configuration, as read or as a change left it. */
+export interface TrainerConfigurationAcknowledgement { readonly ok: true; readonly trainerConfiguration: TrainerConfiguration }
+export type TrainerConfigurationOutcome = TrainerConfigurationAcknowledgement | ApplicationRejection;
 /**
  * The options the Table Owner can change at an Online Table, between Hands. Each is optional; the request names only
  * what it changes. There is no way to turn the Action Time Limit off: an Online Table always has one.

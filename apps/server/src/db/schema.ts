@@ -1,4 +1,4 @@
-import type { CreationOutcome, MutationOutcome } from '@poker/contracts';
+import type { CreationOutcome, MutationOutcome, TrainerConfiguration, TrainerConfigurationAcknowledgement } from '@poker/contracts';
 import { bigint, boolean, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
 import type { MembershipStatus, StoredTableSession } from '../aggregate.js';
 export const localUsers = pgTable('local_users', {
@@ -7,7 +7,16 @@ export const localUsers = pgTable('local_users', {
   displayName: text('display_name'),
   /** When the Guest last made a request, by the server's clock; written at most once a day. */
   lastSeenAt: bigint('last_seen_at', { mode: 'number' }).notNull(),
+  /** The Guest's Trainer Configuration (ADR-0041); null until they first change it, which means the default. */
+  trainerConfiguration: jsonb('trainer_configuration').$type<TrainerConfiguration>(),
 });
+/** Each Guest-scoped change already applied, so that repeating its request ID applies it once. */
+export const guestRequests = pgTable('guest_requests', {
+  userId: uuid('user_id').notNull().references(() => localUsers.id, { onDelete: 'cascade' }),
+  requestId: text('request_id').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  outcome: jsonb('outcome').$type<TrainerConfigurationAcknowledgement>().notNull(),
+}, table => [primaryKey({ columns: [table.userId, table.requestId] })]);
 export const tableSessions = pgTable('table_sessions', {
   id: uuid('id').primaryKey(),
   ownerUserId: uuid('owner_user_id').notNull().references(() => localUsers.id),

@@ -1,4 +1,5 @@
 import { expect, test } from 'vitest';
+import { highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy } from '@poker/contracts';
 import { completedHandCount, sessionSummaryRefreshKey } from '../src/session-summary.js';
 
 const decision = (id: string) => ({ decisionId: id });
@@ -38,4 +39,12 @@ test('completing a Hand refreshes an open tab, and another table does not share 
   const completed = table([{ handId: 'hand-1', decisions: 2, completed: true }]);
   expect(sessionSummaryRefreshKey(completed, true)).not.toBe(sessionSummaryRefreshKey(midHand, true));
   expect(sessionSummaryRefreshKey(table([], 'table-2'), true)).not.toBe(sessionSummaryRefreshKey(table([], 'table-1'), true));
+});
+
+test('changing the Guest’s Reference Strategy, in this tab or another, refreshes an open tab, and Live Analysis alone does not', () => {
+  const history = [{ handId: 'hand-1', decisions: 1, completed: true }];
+  const configured = (trainerConfiguration: object) => ({ ...table(history), trainerConfiguration }) as never as Parameters<typeof sessionSummaryRefreshKey>[0] & object;
+  const before = configured({ referenceStrategy: simpleHeuristicPlayingStrategy, liveAnalysis: true });
+  expect(sessionSummaryRefreshKey(configured({ referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true }), true)).not.toBe(sessionSummaryRefreshKey(before, true));
+  expect(sessionSummaryRefreshKey(configured({ referenceStrategy: simpleHeuristicPlayingStrategy, liveAnalysis: false }), true)).toBe(sessionSummaryRefreshKey(before, true));
 });

@@ -193,7 +193,6 @@ test('a Guest who left returns through the same Join Link as the same Participan
   expect((await command(table, ben, 'leave-table', { participantId: benId })).status).toBe(200);
   expect(await refusal(await get('/api/table-sessions/' + table.id, ben))).toEqual({ status: 404, code: 'not-found' });
   expect(await refusal(await post('/api/table-sessions/' + table.id + '/set-sitting-out', ben, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: benId, sittingOut: true }))).toEqual({ status: 404, code: 'not-found' });
-  expect(await refusal(await post('/api/table-sessions/' + table.id + '/set-trainer-configuration', ben, { requestId: randomUUID(), expectedSessionRevision: 0, trainerConfiguration: {} }))).toEqual({ status: 404, code: 'not-found' });
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: ben } });
   const messages: { type: string; status?: string; code?: string }[] = [];
   socket.on('message', data => messages.push(JSON.parse(data.toString())));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, defaultTrainerConfiguration, type ObservableCashGameState, type ObservableTableSession } from '@poker/contracts';
+import { defaultConfiguration, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, type ObservableCashGameState, type ObservableTableSession } from '@poker/contracts';
 import { retainNewestTable } from '@poker/client';
 import { blindsLabel, formatAndStakes, potTotal, presetTotal } from '../src/table-model.js';
 
@@ -22,6 +22,15 @@ describe('poker presentation boundaries', () => {
     expect(retainNewestTable(table, { ...table, sessionRevision: 4, pokerRevision: 3 })).toBe(table);
     expect(retainNewestTable(table, { ...table, runtimeStatus: { phase: 'recovering' } }).runtimeStatus?.phase).toBe('recovering');
     expect(retainNewestTable(table, { ...table, sessionRevision: 6, pokerRevision: 5 }).pokerRevision).toBe(5);
+  });
+  it('presents the Guest’s changed Trainer Configuration from a read at the same revision, since changing it advances none', () => {
+    const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 4, sessionRevision: 5, bindings: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { status: 'between-hands', buttonSeat: 1, participants: [], board: [], pots: [], actorId: null, legalActions: [] }, history: [] } };
+    const changed = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false };
+    const reread = retainNewestTable(table, { ...table, trainerConfiguration: changed });
+    expect(reread.trainerConfiguration).toEqual(changed);
+    expect(reread.view).toBe(table.view);
+    // A read from before the latest revision says nothing newer about anything.
+    expect(retainNewestTable(table, { ...table, sessionRevision: 4, trainerConfiguration: changed })).toBe(table);
   });
 });
 
