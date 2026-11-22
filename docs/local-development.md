@@ -78,8 +78,11 @@ The build includes the SQL initialization asset. Compiled startup requires
 Each development run picks free ports for the API (`PORT`) and the Trainer (`POKER_WEB_PORT`) and points the Vite proxy (`POKER_API_TARGET`) at the API it chose. Set any of the three yourself to pin it, or run `pnpm --filter @poker/web dev` alone for the default 5174.
 
 
-Admin Mode defaults on locally. Set `POKER_ADMIN_MODE=false` before starting the
-server to disable completed-Hand hidden-information reveal.
+Admin Mode (completed-Hand hidden-information reveal) is development-only. It
+defaults off: with `POKER_ADMIN_MODE` unset the inspect-Hand route refuses and table
+views report inspection as unavailable. `pnpm dev` and `pnpm dev:trainer` set
+`POKER_ADMIN_MODE=true`; set it to `false` before them to turn it off, or to `true`
+when starting the server another way. Hosted deployments leave it off.
 
 Per-IP rate limits on table creation, joining and Table Password attempts are on
 in production and off locally, so repeated manual checks from one machine are not

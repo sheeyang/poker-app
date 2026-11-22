@@ -12,14 +12,14 @@ type Environment = Readonly<Record<string, string | undefined>>;
  *   no proxy is trusted, and every client's address is the connection's own.
  * - `POKER_RATE_LIMITS`: `true` or `false`. Per-address limits on table creation, joining and Table
  *   Password attempts. Unset: on in production and off elsewhere, so that development on one machine is not limited.
- * - `POKER_ADMIN_MODE`: `false` disables completed-Hand inspection.
+ * - `POKER_ADMIN_MODE`: `true` enables completed-Hand inspection (Admin Mode). Unset: off, so nobody can reveal hidden cards. Only the development run command turns it on.
  */
 export function hostingOptionsFromEnvironment(environment: Environment): Pick<HostedServerOptions, 'secureCookies' | 'adminMode' | 'singleAuthority' | 'trustedProxies' | 'rateLimits'> {
   const production = environment.NODE_ENV === 'production';
   const trustedProxies = (environment.TRUSTED_PROXIES ?? '').split(',').map(entry => entry.trim()).filter(Boolean);
   return {
     secureCookies: production,
-    adminMode: environment.POKER_ADMIN_MODE !== 'false',
+    adminMode: environment.POKER_ADMIN_MODE === 'true',
     singleAuthority: production || environment.SINGLE_SERVER_GUARD === 'true',
     ...(trustedProxies.length ? { trustedProxies } : {}),
     ...((environment.POKER_RATE_LIMITS ?? String(production)) === 'true' ? { rateLimits: defaultRateLimits } : {}),
