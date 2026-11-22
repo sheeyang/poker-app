@@ -78,7 +78,7 @@ function BucketRow({ breakdown, value, summary }: { breakdown: HistoryBreakdown;
  * Strategy, with its progress while it runs, Error and Retry when an analysis fails, and no score for an empty set.
  * A breakdown, one dimension at a time and held in the address, gives one ordinary summary per bucket.
  */
-export function OverallHistorySummaryPanel({ filter, breakdown, total, asked, onAsk, onBreakdown }: { filter: HistoryFilter; breakdown: HistoryBreakdown | undefined; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void }) {
+export function OverallHistorySummaryPanel({ filter, breakdown, total, asked, scoreRanges, onAsk, onBreakdown }: { filter: HistoryFilter; scoreRanges?: boolean; breakdown: HistoryBreakdown | undefined; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void }) {
   const summary = useOverallHistorySummary(filter, breakdown, asked);
   const data = summary.data;
   return <section className="ogs" aria-labelledby="ogs-title" aria-busy={summary.stale || summary.loading || undefined}>
@@ -95,6 +95,7 @@ export function OverallHistorySummaryPanel({ filter, breakdown, total, asked, on
         </div>
       </fieldset>
     </div>
+    {scoreRanges && <p className="ogs-note">Score ranges do not narrow this summary: it covers the decisions the other filters admit.</p>}
     {!asked && <div className="ogs-ask">
       <p>Large sets are analyzed in the background, with a running count. Analyses already done are reused.</p>
       <button type="button" className="primary" disabled={total === undefined} onClick={onAsk}>{total === undefined ? 'Summarize' : total === 0 ? 'Summarize' : `Summarize ${total.toLocaleString('en')} ${total === 1 ? 'decision' : 'decisions'}`}</button>
