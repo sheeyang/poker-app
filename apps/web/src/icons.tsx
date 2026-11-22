@@ -12,6 +12,7 @@ const paths = {
   plus: 'M12 5v14M5 12h14',
   exit: 'M9 4H4v16h5m5-13 5 5-5 5m-5-5h13',
   lock: 'M6 11h12v9H6zm2.5 0V8a3.5 3.5 0 0 1 7 0v3',
+  history: 'M3 12a9 9 0 1 0 3-6.7M3 4v5h5m4-2v5l3 2',
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
 } as const;
 export function Icon({ name, size = 20 }: { name: keyof typeof paths; size?: number }) {

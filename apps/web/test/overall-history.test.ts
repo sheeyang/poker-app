@@ -1,0 +1,80 @@
+import { expect, test } from 'vitest';
+import type { OverallHistoryDecision } from '@poker/contracts';
+import { clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, rangedBy, searchOfFilter, toggled } from '../src/overall-history.js';
+import { parseAddress } from '../src/table-address.js';
+
+const decision = (override: Partial<OverallHistoryDecision> = {}): OverallHistoryDecision => ({
+  tableSessionId: '11111111-1111-4111-8111-111111111111', mode: 'practice', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 },
+  handId: 'hand-12', handNumber: 12, completedAt: Date.UTC(2026, 10, 22, 14, 5), decisionId: 'hand-12/decision-4', street: 'turn', position: 'UTG+1',
+  action: { type: 'raise', raiseTo: 300 }, holeCards: ['Ah', 'Kd'], board: ['2c', '7d', 'Js', 'Qh'], pot: 250, potBigBlinds: 12.5, ...override,
+});
+
+test('an address holds the filters, and reading it back gives the same filter: choices as lists, ranges as numbers, nothing else', () => {
+  const filter = { street: ['flop', 'river'], position: ['UTG+1', 'BTN/SB'], action: ['raise'], mode: ['online'], completed: { min: 1763769600000, max: 1763855999999 }, pot: { min: 2.5, max: 10 } } as const;
+  const search = searchOfFilter(filter);
+  expect(search).toEqual({ street: 'flop,river', position: 'UTG+1,BTN/SB', action: 'raise', mode: 'online', completedFrom: 1763769600000, completedTo: 1763855999999, potMin: 2.5, potMax: 10 });
+  expect(filterOfSearch(search)).toEqual(filter);
+  // The router hands over whatever the address held, parsed as JSON where it can be; a number or a string both read.
+  expect(overallHistorySearch({ street: 'turn,flop', potMin: '4', potMax: 'nope', completedFrom: '5', junk: 1 })).toEqual({ street: 'flop,turn', potMin: 4, completedFrom: 5 });
+  expect(overallHistorySearch({})).toEqual({});
+});
+
+test('the History tab is an address of its own, and a filtered one opens to the same place after a reload', () => {
+  expect(overallHistoryPath({})).toBe('/history');
+  expect(overallHistoryPath({ street: ['flop'], pot: { min: 3 } })).toBe('/history?street=flop&potMin=3');
+  expect(overallHistoryPath({ position: ['UTG+1'] })).toBe('/history?position=UTG%2B1');
+  // The History address belongs to no table's mode, so the Practice and Online tabs are not active on it.
+  expect(parseAddress('/history')).toBeUndefined();
+});
+
+test('choosing and unchoosing a value changes only that dimension, keeps choices in declared order, and drops a dimension left empty', () => {
+  let filter = toggled({}, 'street', 'river');
+  filter = toggled(filter, 'street', 'flop');
+  expect(filter).toEqual({ street: ['flop', 'river'] });
+  filter = toggled(toggled(filter, 'action', 'bet'), 'street', 'flop');
+  expect(filter).toEqual({ street: ['river'], action: ['bet'] });
+  expect(toggled(filter, 'street', 'river')).toEqual({ action: ['bet'] });
+  expect(toggled({}, 'position', 'BTN/SB')).toEqual({ position: ['BTN/SB'] });
+});
+
+test('a range edge sets and clears on its own, and a range left with no edge is no restriction', () => {
+  expect(rangedBy({}, 'pot', 'min', 2)).toEqual({ pot: { min: 2 } });
+  expect(rangedBy({ pot: { min: 2 } }, 'pot', 'max', 9)).toEqual({ pot: { min: 2, max: 9 } });
+  expect(rangedBy({ pot: { min: 2, max: 9 } }, 'pot', 'min', undefined)).toEqual({ pot: { max: 9 } });
+  expect(rangedBy({ pot: { min: 2 }, street: ['flop'] }, 'pot', 'min', undefined)).toEqual({ street: ['flop'] });
+  expect(rangedBy({ completed: { min: 5 } }, 'pot', 'max', 3)).toEqual({ completed: { min: 5 }, pot: { max: 3 } });
+  expect(clearedFilter()).toEqual({});
+});
+
+test('a date is the Guest\'s own calendar day: it runs from midnight to the last millisecond, and reads back as the same date', () => {
+  const start = dayStartMs('2026-11-22'), end = dayEndMs('2026-11-22');
+  expect(new Date(start).getHours()).toBe(0);
+  expect(new Date(start).getDate()).toBe(22);
+  expect(new Date(end + 1).getDate()).toBe(23);
+  expect(new Date(end + 1).getHours()).toBe(0);
+  expect(dateInputValue(start)).toBe('2026-11-22');
+  expect(dateInputValue(end)).toBe('2026-11-22');
+  expect(dayStartMs('')).toBeUndefined();
+  expect(dayStartMs('not a date')).toBeUndefined();
+  expect(dateInputValue(undefined)).toBe('');
+});
+
+test('a decision reads as a row: the table it was at, its Hand, when it completed, the situation, the action and the pot in big blinds', () => {
+  const row = decisionRow(decision());
+  expect(row).toMatchObject({ handLabel: 'Hand 12', table: 'Practice · 6-max · 10 / 20', street: 'Turn', position: 'UTG+1', action: 'Raise-to 300', pot: '12.5 BB' });
+  expect(row.completed).toMatch(/Nov 22/);
+  expect(row.holeCards).toEqual(['Ah', 'Kd']);
+  expect(row.board).toEqual(['2c', '7d', 'Js', 'Qh']);
+  // A whole number shows no decimals; a Hand with no completion time shows none.
+  expect(decisionRow(decision({ potBigBlinds: 3 })).pot).toBe('3 BB');
+  expect(decisionRow(decision({ potBigBlinds: 1.5 })).pot).toBe('1.5 BB');
+  expect(decisionRow(decision({ potBigBlinds: 0.75 })).pot).toBe('0.8 BB');
+  const { completedAt: _undated, ...undated } = decision();
+  expect(decisionRow(undated).completed).toBeUndefined();
+  expect(decisionRow(decision({ mode: 'online', seatCount: 2 })).table).toBe('Online · Heads-up · 10 / 20');
+});
+
+test('a listed decision opens at its Replay Step of its table, whichever mode the table has', () => {
+  expect(decisionRow(decision()).link).toEqual({ mode: 'practice', tableSessionId: '11111111-1111-4111-8111-111111111111', handId: 'hand-12', step: 'decision-4' });
+  expect(decisionRow(decision({ mode: 'online', decisionId: 'hand-3/decision-1', handId: 'hand-3' })).link).toMatchObject({ mode: 'online', handId: 'hand-3', step: 'decision-1' });
+});
