@@ -1365,7 +1365,8 @@ a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .replay-head h2 { font-size: 1.25rem; }
 .replay-close { margin-left: auto; color: var(--gold); font-size: .86rem; font-weight: 600; text-decoration: none; }
 .replay-close:hover { color: var(--gold-hover); text-decoration: underline; text-underline-offset: 4px; }
-.replay .table-stage { margin: 0 auto 6px; }
+/* The far seat's cards stand above the felt's box: room for them, so they never cover the Hand's heading. */
+.replay .table-stage { margin: 32px auto 6px; }
 .replay-dock { position: sticky; bottom: 0; z-index: 8; display: grid; gap: 12px; max-width: 980px; margin: 0 auto; padding: 14px 20px 16px; border: 1px solid #3e4d3d; border-radius: 12px; background: #1e2c24; }
 .replay-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; max-width: none; line-height: 1.4; }
 .replay-step strong { font-size: 1.05rem; color: var(--text); }
