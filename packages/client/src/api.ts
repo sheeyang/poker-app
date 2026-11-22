@@ -55,6 +55,12 @@ export const api = {
   readOverallHistorySummary: (requestId: string, signal?: AbortSignal) => request<import('@poker/contracts').OverallHistorySummary>('/overall-history/summaries/' + encodeURIComponent(requestId), { signal }),
   /** Retries every failed analysis of an Overall History summary request. */
   retryOverallHistorySummary: (requestId: string) => request<import('@poker/contracts').OverallHistorySummary>('/overall-history/summaries/' + encodeURIComponent(requestId) + '/retry', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
+  /** Overall History with score ranges: asks for the decisions they admit under the Reference Strategy; it answers at once (Analyzing, with progress) and the list follows once every analysis has succeeded. */
+  askScoredOverallHistory: (filter: import('@poker/contracts').HistoryFilter, page: { readonly limit?: number } = {}) => request<import('@poker/contracts').ScoredOverallHistory>('/overall-history/scored' + (page.limit ? '?limit=' + page.limit : ''), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filter: historyFilterParams(filter) }) }),
+  /** A score-filtered request's current state: its progress, Error, or the first `limit` decisions. */
+  readScoredOverallHistory: (requestId: string, page: { readonly limit?: number } = {}, signal?: AbortSignal) => request<import('@poker/contracts').ScoredOverallHistory>('/overall-history/scored/' + encodeURIComponent(requestId) + (page.limit ? '?limit=' + page.limit : ''), { signal }),
+  /** Retries the failed analyses of a score-filtered request. */
+  retryScoredOverallHistory: (requestId: string, page: { readonly limit?: number } = {}) => request<import('@poker/contracts').ScoredOverallHistory>('/overall-history/scored/' + encodeURIComponent(requestId) + '/retry' + (page.limit ? '?limit=' + page.limit : ''), { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
   readTableHistory: (id: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHistory>('/table-sessions/' + encodeURIComponent(id) + '/history', { signal }),
   /** One completed Hand's Replay Steps, as this Guest may see them. */
   readHandReplay: (id: string, handId: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHandReplay>('/table-sessions/' + encodeURIComponent(id) + '/history/' + encodeURIComponent(handId), { signal }),

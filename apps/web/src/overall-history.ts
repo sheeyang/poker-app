@@ -1,5 +1,5 @@
 import { compareParam, comparedStrategies } from './table-address.js';
-import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type StrategyDescriptor, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type Position, type TableMode, type Street } from '@poker/contracts';
+import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type StrategyDescriptor, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type Position, type ScoredOverallHistory, type TableMode, type Street } from '@poker/contracts';
 import { completedLabel } from './table-history.js';
 import { streetName } from './replay.js';
 import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.js';
@@ -8,14 +8,14 @@ import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.
  * Overall History's model (ADR-0041), pure. The address holds the filters in the one encoding the server's query uses
  * (`historyFilterParams`): choices as comma-separated lists, ranges as numbers. A date is the Guest's own calendar day.
  */
-export type OverallHistorySearch = { street?: string; position?: string; action?: string; mode?: string; completedFrom?: number; completedTo?: number; potMin?: number; potMax?: number; breakdown?: HistoryBreakdown; compare?: string };
+export type OverallHistorySearch = { street?: string; position?: string; action?: string; mode?: string; completedFrom?: number; completedTo?: number; potMin?: number; potMax?: number; decisionScoreMin?: number; decisionScoreMax?: number; actionRankScoreMin?: number; actionRankScoreMax?: number; breakdown?: HistoryBreakdown; compare?: string };
 
 /** The filter an address holds, as `decodeHistoryFilter` reads it. */
 export const filterOfSearch = (search: Readonly<Record<string, unknown>>): HistoryFilter => decodeHistoryFilter(search);
 /** A filter as address search parameters: strings for choices, numbers for ranges, so the router writes them plainly. */
 export function searchOfFilter(filter: HistoryFilter): OverallHistorySearch {
   const search: Record<string, string | number> = {};
-  for (const [key, value] of Object.entries(historyFilterParams(filter))) search[key] = /^(?:completed|pot)/.test(key) ? Number(value) : value;
+  for (const [key, value] of Object.entries(historyFilterParams(filter))) search[key] = /^(?:completed|pot|decisionScore|actionRankScore)/.test(key) ? Number(value) : value;
   return search as OverallHistorySearch;
 }
 /** The Score Summary breakdown an address holds: one dimension, or none. */
@@ -43,7 +43,7 @@ export function overallHistoryPath(filter: HistoryFilter, breakdown?: HistoryBre
 }
 
 type ChoiceField = 'street' | 'position' | 'action' | 'mode';
-type RangeField = 'completed' | 'pot';
+type RangeField = 'completed' | 'pot' | 'decisionScore' | 'actionRankScore';
 /** `filter` with one more value chosen in a dimension, or one fewer; a dimension left with none is dropped. */
 export function toggled(filter: HistoryFilter, field: 'street', value: Street): HistoryFilter;
 export function toggled(filter: HistoryFilter, field: 'position', value: Position): HistoryFilter;
@@ -135,4 +135,18 @@ export function summaryFigures(summary: HistoryScoreSummary): { decisionScore: s
   const none = { decisionScore: '—', actionRankScore: '—', count };
   if (summary.status === 'pending') return { ...none, state: `Analyzing ${summary.progress.succeeded.toLocaleString('en')} / ${summary.progress.total.toLocaleString('en')}`, fraction: summary.progress.total ? summary.progress.succeeded / summary.progress.total : 0 };
   return { ...none, state: summary.status === 'error' ? 'Error' : undefined };
+}
+
+/** A score (0 to 1) as a field shows it: a percentage, without float noise; empty for none. */
+export const scorePercent = (score: number | undefined): string => score === undefined ? '' : String(Number((score * 100).toFixed(4)));
+/** The score (0 to 1) a percentage field holds, kept within 0 to 100; nothing for text that is not a number. */
+export function percentScore(text: string): number | undefined {
+  if (text.trim() === '' || !Number.isFinite(Number(text)) || Number(text) < 0) return undefined;
+  return Number((Math.min(100, Number(text)) / 100).toFixed(6));
+}
+/** What a score-filtered list reports until it can list anything: its Analyzing count, or Error. Nothing once complete. */
+export function scoredFigures(scored: Pick<ScoredOverallHistory, 'status' | 'progress'> | undefined): { state: string | undefined; fraction?: number } {
+  if (!scored) return { state: 'Starting analysis…' };
+  if (scored.status === 'pending') return { state: `Analyzing ${scored.progress.succeeded.toLocaleString('en')} / ${scored.progress.total.toLocaleString('en')}`, fraction: scored.progress.total ? Math.round(scored.progress.succeeded / scored.progress.total * 100) / 100 : 0 };
+  return { state: scored.status === 'error' ? 'Error' : undefined };
 }

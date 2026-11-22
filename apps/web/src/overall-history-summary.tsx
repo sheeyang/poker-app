@@ -111,7 +111,7 @@ function SummaryColumn({ filter, breakdown, asked, strategy, reference, onRemove
  * Strategy and, side by side, up to 3 more the address names, each column with its progress, Error and Retry, and no score
  * for an empty set. A breakdown, one dimension at a time and held in the address, gives one ordinary summary per bucket.
  */
-export function OverallHistorySummaryPanel({ filter, breakdown, compared, total, asked, onAsk, onBreakdown, onCompare }: { filter: HistoryFilter; breakdown: HistoryBreakdown | undefined; compared: readonly StrategyDescriptor[]; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void; onCompare: (next: readonly StrategyDescriptor[]) => void }) {
+export function OverallHistorySummaryPanel({ filter, breakdown, compared, total, asked, scoreRanges, onAsk, onBreakdown, onCompare }: { filter: HistoryFilter; scoreRanges?: boolean; breakdown: HistoryBreakdown | undefined; compared: readonly StrategyDescriptor[]; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void; onCompare: (next: readonly StrategyDescriptor[]) => void }) {
   const { reference, shown } = useSummaryStrategies(compared);
   return <section className="ogs" aria-labelledby="ogs-title">
     <div className="ogs-head">
@@ -127,6 +127,7 @@ export function OverallHistorySummaryPanel({ filter, breakdown, compared, total,
         </div>
       </fieldset>
     </div>
+    {scoreRanges && <p className="ogs-note">Score ranges do not narrow this summary: it covers the decisions the other filters admit.</p>}
     <CompareBar id="ogs-compare" reference={reference} shown={shown} onCompare={onCompare} />
     {!asked && <div className="ogs-ask">
       <p>Large sets are analyzed in the background, with a running count. Analyses already done are reused.</p>

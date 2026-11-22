@@ -1487,6 +1487,13 @@ a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .og-chip[aria-pressed="true"] { background: #2b382c; border-color: var(--gold); color: var(--gold); font-weight: 600; }
 .og-chip:focus-visible { outline-offset: 2px; }
 .og-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 360px; }
+.og-group.og-scores { grid-column: span 12; }
+.og-scores .og-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 720px; }
+.og-analyzing { display: grid; gap: 8px; padding: 16px 0; max-width: 560px; }
+.og-analyzing strong { color: var(--gold); font-size: .95rem; }
+.og-analyzing progress { appearance: none; width: 100%; height: 4px; border: 0; border-radius: 2px; background: var(--line); overflow: hidden; }
+.og-analyzing progress::-webkit-progress-bar { background: var(--line); }
+.og-analyzing progress::-webkit-progress-value { background: var(--gold); transition: inline-size 300ms cubic-bezier(.16,1,.3,1); }
 .og-field { gap: 6px; font-weight: 500; color: var(--muted); }
 .og-input { position: relative; display: block; }
 .og-input input { padding-right: 38px; }
@@ -1523,7 +1530,8 @@ a.og-row:hover .og-hand strong { color: var(--gold-hover); }
 @media (max-width: 860px) {
   .og-filters-grid { grid-template-columns: 1fr; gap: 16px; padding: 16px; }
   .og-group, .og-group:nth-child(n), .og-group.og-range { grid-column: 1 / -1; }
-  .og-fields { max-width: none; }
+  .og-fields, .og-scores .og-fields { max-width: none; }
+  .og-scores .og-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .og-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "hand decision" "cards cards" "situation open"; gap: 10px 12px; padding: 14px 4px; }
   .og-hand { grid-area: hand; }
   .og-decision { grid-area: decision; text-align: right; }

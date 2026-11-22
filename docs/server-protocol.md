@@ -197,6 +197,12 @@ asks again for every failed analysis and starts a new `attemptId`. Both answer 4
 stranger. A result is accepted only while every table its decisions come from still accepts its Participant's results
 (the same check each table's own results pass); reading the tables loads none of them.
 
+#### Overall History score filters
+
+A Decision Score or Action Rank Score range (`decisionScoreMin`/`decisionScoreMax`, `actionRankScoreMin`/`actionRankScoreMax`, on a 0 to 1 scale, inclusive) is part of the filter encoding but is decided only by analysis. `GET /api/overall-history` therefore answers 400 `score-filter-needs-analysis` for a filter holding one, and a summary request ignores them (its echoed `filter` omits them): both cover the non-score set.
+
+`POST /api/overall-history/scored` `{ filter }` (a filter with at least one score range, else 400 `invalid-scored-request`) freezes the decisions the non-score restrictions admit, under the Guest's Reference Strategy, and asks for each one's analysis as `history-analysis` (cached and stored results reused, under the per-Guest bound). It answers at once with `ScoredOverallHistory { ok, requestId, attemptId, filter, referenceStrategy, progress: { succeeded, total } }` and a `status`: `pending` (Analyzing), `error` (an analysis failed; it stays until a Retry succeeds) or `complete` with `total`, `offset` and the page of `decisions` the ranges admit, in the list's order. Nothing is listed before every analysis has succeeded. `GET /api/overall-history/scored/:requestId?limit&offset` reads it (the web app reads each second while `pending`); `POST …/:requestId/retry` (empty body) asks again only for the failed analyses and starts a new `attemptId`. 404 to another Guest, 401 to a stranger. Transient, like a summary.
+
 ### Table History
 
 Table History belongs to the table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).

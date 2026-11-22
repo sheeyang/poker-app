@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type OverallHistoryDecision } from '@poker/contracts';
-import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, rangedBy, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
+import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
 import { parseAddress } from '../src/table-address.js';
 
 const decision = (override: Partial<OverallHistoryDecision> = {}): OverallHistoryDecision => ({
@@ -109,6 +109,31 @@ test('a summary shows both means only once complete, its progress while Analyzin
   // Error takes precedence over Analyzing: no partial mean, however many succeeded.
   expect(summaryFigures({ status: 'error', decisionCount: 1, progress: { succeeded: 0, total: 1 }, error: { code: 'failed', message: 'x' } }))
     .toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Error' });
+});
+
+test('score ranges live in the address as 0 to 1 numbers, edit like any range, and show as percentages in their fields', () => {
+  const filter = rangedBy(rangedBy({ street: ['river'] }, 'decisionScore', 'min', 0.35), 'actionRankScore', 'max', 0.8);
+  expect(filter).toEqual({ street: ['river'], decisionScore: { min: 0.35 }, actionRankScore: { max: 0.8 } });
+  expect(searchOfFilter(filter)).toEqual({ street: 'river', decisionScoreMin: 0.35, actionRankScoreMax: 0.8 });
+  expect(overallHistorySearch({ decisionScoreMin: '0.35', actionRankScoreMax: '0.8', street: 'river' })).toEqual(searchOfFilter(filter));
+  expect(filterOfSearch(searchOfFilter(filter))).toEqual(filter);
+  expect(overallHistoryPath(filter)).toBe('/history?street=river&decisionScoreMin=0.35&actionRankScoreMax=0.8');
+  expect(rangedBy(filter, 'decisionScore', 'min', undefined)).toEqual({ street: ['river'], actionRankScore: { max: 0.8 } });
+  expect(scorePercent(0.35)).toBe('35');
+  expect(scorePercent(0.07)).toBe('7');
+  expect(scorePercent(undefined)).toBe('');
+  expect(percentScore('35')).toBe(0.35);
+  expect(percentScore('7.5')).toBe(0.075);
+  expect(percentScore('150')).toBe(1);
+  expect(percentScore('')).toBeUndefined();
+  expect(percentScore('x')).toBeUndefined();
+});
+
+test('a score-filtered list shows Analyzing with its count, Error, or the list, and never a partial list', () => {
+  expect(scoredFigures({ status: 'pending', progress: { succeeded: 340, total: 2000 } })).toEqual({ state: 'Analyzing 340 / 2,000', fraction: 0.17 });
+  expect(scoredFigures({ status: 'error', progress: { succeeded: 4, total: 5 } })).toEqual({ state: 'Error' });
+  expect(scoredFigures({ status: 'complete', progress: { succeeded: 5, total: 5 } })).toEqual({ state: undefined });
+  expect(scoredFigures(undefined)).toEqual({ state: 'Starting analysis…' });
 });
 
 test('the address holds the compared Strategies beside the filters and breakdown, in the order chosen, and a reload gives the same comparison', () => {

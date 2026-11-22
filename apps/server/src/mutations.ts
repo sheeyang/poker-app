@@ -17,7 +17,7 @@ import type { AcceptanceTransactions, AcceptanceFaults } from './db/acceptance.j
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { FrozenHistorySummary, FrozenScoreSummary } from './summaries.js';
+import type { FrozenHistorySummary, FrozenScoredHistory, FrozenScoreSummary } from './summaries.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
@@ -830,8 +830,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * and with `breakdown` the same decisions in one set per bucket. Each table is read as its history is, so it loads
      * nothing.
      */
-    async function captureOverallHistorySummary(userId: string, filter: HistoryFilter, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<FrozenHistorySummary> {
-      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    async function studiedDecisions(userId: string, filter: HistoryFilter, referenceStrategy: StrategyDescriptor): Promise<StudiedDecision[]> {
       const decisions: StudiedDecision[] = [];
       for (const { tableSessionId } of await participations(db, userId)) {
         const table = await readableTable(tableSessionId, userId);
@@ -842,7 +841,23 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
           if (input?.acceptedAction) decisions.push({ decision, input });
         }
       }
+      return decisions;
+    }
+    async function captureOverallHistorySummary(userId: string, filter: HistoryFilter, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<FrozenHistorySummary> {
+      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+      const decisions = await studiedDecisions(userId, filter, referenceStrategy);
       return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), ...(breakdown ? { breakdown } : {}), referenceStrategy, ...summarySets(decisions, breakdown) });
+    }
+    /**
+     * A score-filtered Overall History request, frozen: every decision the non-score restrictions of `filter` admit, in the
+     * list's order, each frozen for analysis under the Guest's Reference Strategy now (or the supported `strategy`). The
+     * score ranges are applied afterwards, to the finished analyses, by the coordinator.
+     */
+    async function captureScoredHistory(userId: string, filter: HistoryFilter, strategy?: StrategyDescriptor): Promise<FrozenScoredHistory> {
+      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+      const decisions = await studiedDecisions(userId, filter, referenceStrategy);
+      const order = new Map(newestFirst(decisions.map(studied => studied.decision)).map((decision, index) => [decision, index] as const));
+      return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), referenceStrategy, decisions: decisions.toSorted((a, b) => order.get(a.decision)! - order.get(b.decision)!) });
     }
     /**
      * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
@@ -1495,6 +1510,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     readHistory,
     readOverallHistory,
     captureOverallHistorySummary,
+    captureScoredHistory,
     readReplay,
     captureHistoryEvaluation,
     subscribe,

@@ -9,7 +9,7 @@ import cookie from '@fastify/cookie';
 import websocket from '@fastify/websocket';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { decodeHistoryFilter, isHistoryBreakdown, type HistoryBreakdown, type OverallHistory, type OverallHistorySummaryRequest } from '@poker/contracts';
+import { decodeHistoryFilter, hasScoreFilter, isHistoryBreakdown, withoutScoreFilter, type HistoryBreakdown, type OverallHistory, type OverallHistorySummaryRequest } from '@poker/contracts';
 import type { AnalysisUpdate, GetOrStartAnalysisRequest, ServerLiveMessage, ClientLiveMessage, TableLiveMessage, CreateTableSessionRequest, JoinTableRequest, PokerMutationRequest, StrategyDescriptor, SetPlayingStrategyRequest, RetryBotRequest, SetTableOptionsRequest, SetTablePasswordRequest } from '@poker/contracts';
 import { createTrainerConfigurations, TrainerConfigurationRestorationError } from './trainer-configuration.js';
 import { openDatabase, initializeDatabase } from './db/database.js';
@@ -330,12 +330,14 @@ export async function createServer(options: ServerOptions) {
    * Overall History: the Guest's own decisions across every table they may read, filtered by the declared non-score set
    * (`decodeHistoryFilter`: the same encoding as the browser's address) and paged by `limit` (1–200, default 50) and `offset`.
    */
+  const count = (value: unknown, fallback: number, minimum: number, maximum: number) => { const number = typeof value === 'string' && /^[0-9]{1,9}$/.test(value) ? Number(value) : fallback; return Math.min(maximum, Math.max(minimum, number)); };
+  const pageOf = (query: Record<string, unknown>) => ({ limit: count(query.limit, 50, 1, 200), offset: count(query.offset, 0, 0, Number.MAX_SAFE_INTEGER) });
   app.get<{ Querystring: Record<string, unknown> }>('/api/overall-history', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
     const filter = decodeHistoryFilter(request.query);
-    const count = (value: unknown, fallback: number, minimum: number, maximum: number) => { const number = typeof value === 'string' && /^[0-9]{1,9}$/.test(value) ? Number(value) : fallback; return Math.min(maximum, Math.max(minimum, number)); };
-    const limit = count(request.query.limit, 50, 1, 200), offset = count(request.query.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+    if (hasScoreFilter(filter)) return reply.code(400).send({ ok: false, rejection: { code: 'score-filter-needs-analysis', message: 'A score range is decided by analysis. Ask for it with POST /api/overall-history/scored.' } });
+    const { limit, offset } = pageOf(request.query);
     try {
       const decisions = await mutations.readOverallHistory(userId, filter);
       const history: OverallHistory = { filter, total: decisions.length, offset, decisions: decisions.slice(offset, offset + limit) };
@@ -360,12 +362,44 @@ export async function createServer(options: ServerOptions) {
     // A named Strategy summarizes the same set under it instead of the Guest's Reference Strategy, and never changes their Trainer Configuration.
     if ('strategy' in body && !(options.supportsStrategy ?? isSupportedStrategy)(body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      const input = await mutations.captureOverallHistorySummary(userId, decodeHistoryFilter(body.filter ?? {}), body.breakdown as HistoryBreakdown | undefined, body.strategy as StrategyDescriptor | undefined);
+      const input = await mutations.captureOverallHistorySummary(userId, withoutScoreFilter(decodeHistoryFilter(body.filter ?? {})), body.breakdown as HistoryBreakdown | undefined, body.strategy as StrategyDescriptor | undefined);
       return summaries.createHistory(input);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } });
     }
+  });
+  /**
+   * Overall History with score ranges (ADR-0041): the body is `{ filter }`, in the list's flat encoding, holding at least
+   * one score range. A score range is decided by analysis under the Guest's Reference Strategy, so the answer is Analyzing
+   * (with progress) or Error until every analysis of the non-score set has succeeded, and only then the decisions the
+   * ranges admit, paged by `limit` and `offset` on the `GET`. Transient, like a summary.
+   */
+  app.post<{ Body: { filter?: Record<string, unknown> }; Querystring: Record<string, unknown> }>('/api/overall-history/scored', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    const body: unknown = request.body ?? {};
+    const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+    const filter = plain(body) && plain(body.filter) && Object.values(body.filter).every(value => (typeof value === 'string' || typeof value === 'number') && String(value).length <= 512) ? decodeHistoryFilter(body.filter) : undefined;
+    if (!plain(body) || Object.keys(body).some(key => key !== 'filter') || !filter || !hasScoreFilter(filter))
+      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Supply a filter, in the Overall History address encoding, with a Decision Score or Action Rank Score range.' } });
+    try {
+      return summaries.createScored(await mutations.captureScoredHistory(userId, filter), pageOf(request.query));
+    } catch (error) {
+      if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
+      return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Overall History is unavailable. Refresh to try reading it again.' } });
+    }
+  });
+  app.get<{ Params: { requestId: string }; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    return summaries.readScored(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+  });
+  app.post<{ Params: { requestId: string }; Body: Record<string, never>; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId/retry', async (request, reply) => {
+    const userId = await authenticatedUser(request);
+    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Retry uses the captured request. Supply an empty request.' } });
+    return summaries.retryScored(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
   });
   app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
