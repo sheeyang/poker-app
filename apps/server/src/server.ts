@@ -1,6 +1,7 @@
 import { createScoreSummaries } from './summaries.js';
 import { createAnalysis } from './analysis.js';
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
+import { createHistoryAnalysisScheduler } from './history-analysis.js';
 import { loadCompletedHandInspection, inspectCompletedHand } from '@poker/research';
 import { isSupportedStrategy, type Strategy } from '@poker/strategies';
 import Fastify, { type FastifyInstance, type FastifyRequest, type FastifyReply } from 'fastify';
@@ -95,7 +96,9 @@ export async function createServer(options: ServerOptions) {
   const trainerConfigurations = createTrainerConfigurations(db, userId => { for (const deliver of userChannels.get(userId) ?? []) deliver({ type: 'trainer-configuration-changed' }); }, options.supportsStrategy ?? isSupportedStrategy);
   const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis'), trainerConfigurations }, options.clock, guests);
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession, loadedTables: mutations.loadedTables });
-  const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult);
+  // Every analysis a Table History or Overall History request schedules shares one per-Guest bound.
+  const historyAnalysis = createHistoryAnalysisScheduler(jobRunner);
+  const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
   const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult);
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
@@ -103,8 +106,8 @@ export async function createServer(options: ServerOptions) {
   // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
   // reaching only its Human Controller, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
-  function publishUserUpdate(participantId: string, message: AnalysisUpdate) {
-    const userId = mutations.controllerOf(message.tableSessionId, participantId);
+  function publishUserUpdate(participantId: string, message: AnalysisUpdate, guestId?: string) {
+    const userId = guestId ?? mutations.controllerOf(message.tableSessionId, participantId);
     for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message);
   }
   /** The requesting Guest's own joined Participant: the only one whose study results they may read or retry. */
@@ -419,12 +422,21 @@ export async function createServer(options: ServerOptions) {
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
-  app.post<{ Params: { id: string }; Body: { decisionId: string; live?: true } }>('/api/table-sessions/:id/analysis', async (request, reply) => {
+  // `history: true` asks from Table History: the reader's own accepted decision, read like the history itself and
+  // scheduled as `history-analysis`, behind all play and live study, under the reader's per-Guest bound.
+  app.post<{ Params: { id: string }; Body: { decisionId: string; live?: true; history?: true } }>('/api/table-sessions/:id/analysis', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || Object.keys(request.body).some(key => !['decisionId', 'live'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and an optional Live Analysis request.' } });
+    if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || request.body.history !== undefined && request.body.history !== true || request.body.live && request.body.history || Object.keys(request.body).some(key => !['decisionId', 'live', 'history'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and either an optional Live Analysis request or an optional history request.' } });
     try {
+      if (request.body.history) {
+        const input = await mutations.captureHistoryEvaluation(request.params.id, userId, request.body.decisionId);
+        if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+        if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose one of your own accepted decisions.' } });
+        const state = await analysis.getOrStart(input, { purpose: 'history-analysis', guestId: userId });
+        return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
+      }
       const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });

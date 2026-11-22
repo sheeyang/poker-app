@@ -1,6 +1,6 @@
 import { immutableData } from '@poker/strategies';
 
-export type JobPurpose = 'bot-decision' | 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis' | 'bulk-research' | 'simulation';
+export type JobPurpose = 'bot-decision' | 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis' | 'history-analysis' | 'bulk-research' | 'simulation';
 /** Server-owned scheduling policy. Lower numeric priorities dispatch first; starvation is permitted. */
 const jobPriorities: Readonly<Record<JobPurpose, number>> = Object.freeze({
   'bot-decision': 0,
@@ -8,8 +8,10 @@ const jobPriorities: Readonly<Record<JobPurpose, number>> = Object.freeze({
   'interactive-analysis': 1,
   'automatic-analysis': 2,
   'summary-analysis': 2,
+  // Table History and Overall History reanalysis (ADR-0041), behind all play and live study.
+  'history-analysis': 3,
   'bulk-research': 3,
-  simulation: 3,
+  simulation: 4,
 });
 
 export type JobFailureCode = 'capacity' | 'cancelled' | 'timeout' | 'failed' | 'incompatible' | 'invalid-policy' | 'selection-failed';
@@ -20,11 +22,17 @@ export interface JobHandle<T> { readonly admitted: boolean; readonly result: Pro
 /** A Bot decision advances play, so analysis must never delay or refuse it (ADR-0019, as amended by ADR-0032). */
 const advancesPlay = (purpose: JobPurpose) => purpose === 'bot-decision';
 /**
+ * Purposes bounded before they reach the JobRunner, so its queue never refuses them and they never fill it for anyone
+ * else: a table has at most one outstanding Bot decision, and a Guest at most 8 outstanding `history-analysis` jobs,
+ * which only the history-analysis scheduler submits (`createHistoryAnalysisScheduler`).
+ */
+const boundedElsewhere = (purpose: JobPurpose) => advancesPlay(purpose) || purpose === 'history-analysis';
+/**
  * One bounded owner for server computation. Logical timeout never releases running capacity.
  *
  * Every purpose shares `concurrency` running slots by priority, and one more slot is reserved for Bot decisions, so
- * analysis filling the others never delays one. Bot decisions are also admitted whatever the queue holds: a table has
- * at most one outstanding Bot decision, which bounds them, while `maximumQueued` bounds everything else.
+ * analysis filling the others never delays one. Bot decisions and `history-analysis` jobs are admitted whatever the
+ * queue holds and never count towards it (see `boundedElsewhere`), while `maximumQueued` bounds everything else.
  */
 export class JobRunner {
   private readonly concurrency: number;
@@ -47,7 +55,7 @@ export class JobRunner {
     if (![this.concurrency, this.maximumQueued, this.timeoutMs].every(Number.isSafeInteger) || this.concurrency < 1 || this.maximumQueued < 0 || this.timeoutMs < 1) throw new Error('Invalid JobRunner limits.');
   }
   submit<I, O>(purpose: JobPurpose, input: I, execute: (input: I, options: { readonly signal: AbortSignal }) => O | Promise<O>): JobHandle<O> {
-    const full = !advancesPlay(purpose) && !this.canStart(purpose) && this.waiting.filter(job => !advancesPlay(job.purpose)).length >= this.maximumQueued;
+    const full = !boundedElsewhere(purpose) && !this.canStart(purpose) && this.waiting.filter(job => !boundedElsewhere(job.purpose)).length >= this.maximumQueued;
     if (this.stopped || full) return { admitted: false, result: Promise.resolve({ ok: false, code: this.stopped ? 'cancelled' : 'capacity' }), settled: Promise.resolve(), cancel() {} };
     const snapshot = immutableData(input);
     const output = Promise.withResolvers<JobResult<O>>();
