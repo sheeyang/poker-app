@@ -3,7 +3,7 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type TableHistory, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill } from '@poker/contracts';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
@@ -21,6 +21,7 @@ import { nameKey, participantName, participantNameRules, validateTableOptionChan
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
+import { tableHistory } from './table-history.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -757,6 +758,22 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     promote(id, session);
     if (!stopped) queueMicrotask(() => queueSchedule(id));
   }
+    /**
+     * A table a Guest may read the history of, with their Participant there: a loaded table's committed copy, otherwise
+     * its stored record restored read-only. A read never loads the table, so it holds no handle, schedules nothing and
+     * subscribes to nothing. Today only a joined Participant may read; the rule for former Participants lives here.
+     */
+    async function readableTable(id: string, userId: string): Promise<{ participantId: string; aggregate: PersistedTableSession; game: CashGame } | undefined> {
+      const member = await access(id, userId);
+      if (!member) return undefined;
+      const session = tables.get(id) ?? await readCommitted(id);
+      return session && { participantId: member.participantId, aggregate: session.aggregate, game: session.game };
+    }
+    /** The Table History list for a Guest who may read this table's history; `undefined` for anyone else. */
+    async function readHistory(id: string, userId: string): Promise<TableHistory | undefined> {
+      const table = await readableTable(id, userId);
+      return table && tableHistory(table.aggregate, table.game, table.participantId);
+    }
     async function read(id: string, userId: string) {
       return asMember(id, userId, async () => {
         const session = tables.get(id);
@@ -792,6 +809,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       }
       connectionChanged(id);
       return () => { end(); connectionChanged(id); };
+    }
+    /** Each Hand these events complete is stamped with the server time of this commit (Table History), beside the poker record. */
+    function completionTimes(aggregate: PersistedTableSession, events: readonly CashGameEvent[]): Pick<PersistedTableSession, 'handCompletedAt'> {
+      const completed = events.flatMap(event => event.type === 'hand-completed' ? [event.handId] : []);
+      return completed.length ? { handCompletedAt: { ...aggregate.handCompletedAt, ...Object.fromEntries(completed.map(handId => [handId, clock.now()])) } } : {};
     }
     async function accept(id: string, authority: MutationAuthority, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> {
         // The caller holds the table: a request's handle, or the scheduled work that runs this.
@@ -921,6 +943,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 const sitsOutAfterHand = kind === 'act' && authority.kind === 'server' && session.aggregate.mode === 'online' ? (request as ActRequest).participantId : undefined;
                 const aggregate: PersistedTableSession = { ...session.aggregate, pokerRecord, pokerRevision: session.aggregate.pokerRevision + (accepted.events.length ? 1 : 0), sessionRevision: session.aggregate.sessionRevision + 1,
                   ...(provenance ? { botProvenance: [...(session.aggregate.botProvenance ?? []), provenance] } : {}), ...(timedOutWindow ? { timedOutWindow } : {}), schedule,
+                  ...completionTimes(session.aggregate, accepted.events),
                   ...(sitsOutAfterHand ? { pendingChanges: recordAfterHandRequest(session.aggregate.pendingChanges, sitsOutAfterHand, 'sit-out') } : {}),
                   ...(addedBot ? { bindings: [...session.aggregate.bindings, addedBot] } : {}),
                   ...(removedBot ? { pendingChanges: session.aggregate.pendingChanges.filter(entry => entry.participantId !== removedBot),
@@ -1348,6 +1371,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return isHuman(binding) && binding.membership === 'joined' ? binding.userId : undefined;
     },
     read,
+    readHistory,
     subscribe,
     configure,
     setTablePassword,
