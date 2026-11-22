@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, type JoinLinkPreview, type SavedTable } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
-import { analysisTabParam, currentTableRefusal, joinLink, joinPreviewWanted, listPath, pageTitle, parseAddress, tableAddress, tablePath, tableSearch } from '../src/table-address.js';
+import { analysisTabParam, currentTableRefusal, historyPath, historySearch, joinLink, joinPreviewWanted, listPath, pageTitle, parseAddress, tableAddress, tablePath, tableSearch } from '../src/table-address.js';
 
 describe('the analysis tab kept in a table address', () => {
   it('accepts live, hand and session, and ignores anything else', () => {
@@ -111,5 +111,25 @@ describe('reading an address', () => {
   });
   it('names nothing outside the two modes', () => {
     for (const path of ['/', '/somewhere', '/somewhere/' + id, '/join/token']) expect(parseAddress(path)).toBeUndefined();
+  });
+});
+
+describe('a table’s Table History address', () => {
+  it('lives under the table’s own address, under its own mode, and names the Hand to open when it has one', () => {
+    expect(historyPath('practice', id)).toBe(`/practice/${id}/history`);
+    expect(historyPath('online', id)).toBe(`/online/${id}/history`);
+    expect(historyPath('online', id, 'hand-37')).toBe(`/online/${id}/history?hand=hand-37`);
+  });
+  it('is read back as the table’s history section, so the table’s own page is not mistaken for it', () => {
+    expect(parseAddress(`/online/${id}/history`)).toEqual({ mode: 'online', tableSessionId: id, history: true });
+    expect(parseAddress(`/practice/${id}`)).toEqual({ mode: 'practice', tableSessionId: id });
+    expect(parseAddress(`/practice/${id}/elsewhere`)).toEqual({ mode: 'practice', tableSessionId: id });
+  });
+  it('keeps a valid Hand in the route search and drops anything else', () => {
+    expect(historySearch({ hand: 'hand-12', other: 1 })).toEqual({ hand: 'hand-12' });
+    for (const bad of ['', 'hand-', 'hand-0x', 'Hand-1', 12, undefined, ['hand-1']]) expect(historySearch({ hand: bad })).toEqual({});
+  });
+  it('titles its page by the table’s format and stakes', () => {
+    expect(pageTitle({ page: 'history', seatCount: 6, smallBlind: 10, bigBlind: 20 })).toBe('Table History · 6-max Hold’em · 10 / 20 · Poker Trainer');
   });
 });

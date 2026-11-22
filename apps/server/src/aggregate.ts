@@ -52,6 +52,11 @@ export interface PersistedTableSession {
   readonly adminMode: boolean;
   readonly botProvenance?: readonly BotActionProvenance[];
   /**
+   * The server time (ms) each completed Hand was completed, by HandId (Table History, ADR-0040). Recorded beside the
+   * poker record, never in it. A Hand completed before this was recorded has no entry and shows no time.
+   */
+  readonly handCompletedAt?: Readonly<Record<string, number>>;
+  /**
    * Server-owned play timing, written in the same transaction as the commit that produced it
    * (`schedule.ts`). Never part of `pokerRecord`.
    */

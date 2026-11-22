@@ -1,5 +1,5 @@
 import { useOverlayScrollbar } from './overlay-scroll.js';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { hashKey } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
 import { policyName, strategyName, StrategySelect } from './strategy-select.js';
@@ -17,7 +17,8 @@ type Analysis = ReturnType<typeof useDecisionAnalysis>;
 type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
-export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void }) {
+/** `historyLink`: the link into the table's Table History, offered beside the review of its latest completed Hand. */
+export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close, historyLink }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void; historyLink?: (handId: string) => ReactNode }) {
   const panel = useRef<HTMLElement>(null), panelThumb = useRef<HTMLDivElement>(null), viewTabs = useRef<HTMLDivElement>(null);
   // The Session summary tab is part of the address, so a refresh keeps it.
   const sessionTab = analysis.addressTab === 'session';
@@ -92,6 +93,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     {tab === 'live' && <div className="analysis-mode-line">{!allowed ? 'Live Analysis isn’t allowed at this table' : !configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn'}</div>}
     <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={tab !== 'live'}>{tab === 'live' && (!allowed ? <div className="analysis-empty"><strong>Live Analysis isn’t allowed at this table.</strong><p>{tableNote ?? 'Your decisions are still analyzed and scored after you act.'}</p></div> : configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
     <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={tab !== 'hand'}>{tab === 'hand' && <>
+    {table.view.state.status === 'completed-hand' && table.view.state.handId && historyLink?.(table.view.state.handId)}
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
     {handDecisions.length === 0 && !handSummary && content}
     {(handDecisions.length > 0 || handSummary) && <section className="decision-section decision-review"><div className={`section-heading${handSummary ? ' hand-summary-heading' : ''}`}><div className="decision-heading-copy"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>

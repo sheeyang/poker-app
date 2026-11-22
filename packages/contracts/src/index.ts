@@ -618,3 +618,4 @@ export type TableSessionScoreSummary = ScoreSummary & { readonly scope: 'table-s
 export interface ScoreAverages { readonly decisionScore: number; readonly actionRankScore: number }
 
 export * from './presentation.js';
+export * from './history.js';
