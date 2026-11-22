@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type ObservableTableUpdate, type ScoreSummary, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type ObservableTableUpdate, type OverallHistorySummary, type ScoreSummary, type StrategyDescriptor } from '@poker/contracts';
 import { createStrategy, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
@@ -225,6 +225,15 @@ test('an Online Timeout Action is scored as the humanâ€™s own decision, in 
     expect(summary).toMatchObject({ decisionIds: [decisionId], decisionCount: 1 });
     await expect.poll(async () => (await t.summaryResult(cookieOf(actor), summary.requestId)).status).toBe('complete');
   }
+  // Overall History agrees with the Session summary: the Timeout Action is listed as the Guest's own decision, and
+  // counted in an Overall History Score Summary (ADR-0041, story 65).
+  await expect.poll(async () => (await (await get('/api/overall-history', cookieOf(actor))).json()).decisions.map((listed: { decisionId: string; action: { type: string } }) => [listed.decisionId, listed.action.type])).toEqual([[decisionId, 'fold']]);
+  const history: OverallHistorySummary = await (await post('/api/overall-history/summaries', cookieOf(actor), {})).json();
+  expect(history.summary).toMatchObject({ decisionCount: 1 });
+  await expect.poll(async () => (await (await get('/api/overall-history/summaries/' + history.requestId, cookieOf(actor))).json()).summary.status).toBe('complete');
+  // The other Guest made no decision in that Hand, so it is not in their Overall History.
+  const other = hand.view.state.participants.map(participant => participant.participantId).find(participantId => participantId !== actor)!;
+  expect((await (await get('/api/overall-history', cookieOf(other))).json()).decisions).toEqual([]);
 });
 
 test('held analysis never delays an action, an Action Deadline or the next deal', async () => {

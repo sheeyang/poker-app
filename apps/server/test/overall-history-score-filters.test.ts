@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, historyFilterParams, type ConcreteAction, type HistoryFilter, type ObservableGameView, type ObservableTableSession, type ScoredOverallHistory, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, historyFilterParams, type ConcreteAction, type HistoryFilter, type OverallHistorySummary, type ObservableGameView, type ObservableTableSession, type ScoredOverallHistory, type StrategyDescriptor } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
@@ -213,4 +213,89 @@ test('the list route does not answer a score range from recorded facts, and anot
   expect((await f.post('/overall-history/scored', cookie, { filter: {}, other: 1 })).status).toBe(400);
   // A filter without a score range is not what this operation is for.
   expect((await f.post('/overall-history/scored', cookie, { filter: { street: 'flop' } })).status).toBe(400);
+});
+
+/** Asks for an Overall History Score Summary, optionally broken down and under a named Strategy. */
+async function summarize(fixture: Fixture, cookie: string, filter: HistoryFilter, breakdown?: string, strategy?: StrategyDescriptor): Promise<OverallHistorySummary> {
+  const response = await fixture.post('/overall-history/summaries', cookie, { filter: historyFilterParams(filter), ...(breakdown ? { breakdown } : {}), ...(strategy ? { strategy } : {}) });
+  expect(response.status).toBe(200);
+  return response.json();
+}
+const summaryNow = async (fixture: Fixture, cookie: string, requestId: string): Promise<OverallHistorySummary> => (await fixture.get('/overall-history/summaries/' + requestId, cookie)).json();
+const summarized = (fixture: Fixture, cookie: string, requestId: string) => expect.poll(async () => (await summaryNow(fixture, cookie, requestId)).summary.status).not.toBe('pending');
+
+test('score ranges narrow a Score Summary and each of its buckets, once every analysis of the set has succeeded', async () => {
+  const { cookie } = await twoTables();
+  // The four check/call decisions score 1, the fold 0, so the summary of the good ones is 100 / 100 over 4 decisions.
+  const good = await summarize(f, cookie, { decisionScore: { min: 0.5 } });
+  expect(good.filter).toEqual({ decisionScore: { min: 0.5 } });
+  await summarized(f, cookie, good.requestId);
+  expect((await summaryNow(f, cookie, good.requestId)).summary).toEqual({ status: 'complete', decisionCount: 4, progress: { succeeded: 5, total: 5 }, averages: { decisionScore: 1, actionRankScore: 1 } });
+  // Below half: only the fold, scoring 0.
+  const bad = await summarize(f, cookie, { actionRankScore: { max: 0.5 } });
+  await summarized(f, cookie, bad.requestId);
+  expect((await summaryNow(f, cookie, bad.requestId)).summary).toEqual({ status: 'complete', decisionCount: 1, progress: { succeeded: 5, total: 5 }, averages: { decisionScore: 0, actionRankScore: 0 } });
+  // A range nothing falls in is an empty summary, with no score.
+  const none = await summarize(f, cookie, { decisionScore: { min: 0.2, max: 0.8 } });
+  await summarized(f, cookie, none.requestId);
+  expect((await summaryNow(f, cookie, none.requestId)).summary).toEqual({ status: 'empty', decisionCount: 0, progress: { succeeded: 5, total: 5 } });
+  // By action: the good calls and checks are in their buckets; the fold's bucket is empty, with no score.
+  const byAction = await summarize(f, cookie, { decisionScore: { min: 0.5 } }, 'action');
+  await summarized(f, cookie, byAction.requestId);
+  const buckets = (await summaryNow(f, cookie, byAction.requestId)).buckets!;
+  expect(Object.fromEntries(buckets.map(bucket => [bucket.value, bucket.summary.status === 'complete' ? [bucket.summary.decisionCount, bucket.summary.averages.decisionScore] : [bucket.summary.status, bucket.summary.decisionCount]]))).toEqual({ fold: ['empty', 0], check: [3, 1], call: [1, 1] });
+  // Combined with a street filter, only the preflop set is analyzed and summarized.
+  const preflopBad = await summarize(f, cookie, { street: ['preflop'], decisionScore: { max: 0.5 } });
+  await summarized(f, cookie, preflopBad.requestId);
+  expect((await summaryNow(f, cookie, preflopBad.requestId)).summary).toEqual({ status: 'complete', decisionCount: 1, progress: { succeeded: 2, total: 2 }, averages: { decisionScore: 0, actionRankScore: 0 } });
+});
+
+test('a score-filtered Score Summary is Analyzing with no decision count or mean until every analysis succeeds, and an Error until Retry', async () => {
+  const { cookie } = await twoTables();
+  f.hold();
+  let asked: OverallHistorySummary;
+  try {
+    asked = await summarize(f, cookie, { decisionScore: { min: 0.5 } });
+    expect(asked.summary).toEqual({ status: 'pending', progress: { succeeded: 0, total: 5 } });
+    for (let answered = 0; answered < 4; answered++) {
+      await expect.poll(() => f.waiting(highestProbabilityPlayingStrategy).length).toBeGreaterThan(0);
+      f.answer(f.waiting(highestProbabilityPlayingStrategy)[0]!);
+    }
+    await expect.poll(async () => (await summaryNow(f, cookie, asked.requestId)).summary).toEqual({ status: 'pending', progress: { succeeded: 4, total: 5 } });
+  } finally { f.release(); }
+  await summarized(f, cookie, asked.requestId);
+  expect((await summaryNow(f, cookie, asked.requestId)).summary).toMatchObject({ status: 'complete', decisionCount: 4 });
+
+  const other = await twoTables();
+  f.fail(1);
+  const failing = await summarize(f, other.cookie, { decisionScore: { min: 0.5 } });
+  await summarized(f, other.cookie, failing.requestId);
+  await f.idle();
+  await expect.poll(async () => (await summaryNow(f, other.cookie, failing.requestId)).summary.progress).toEqual({ succeeded: 4, total: 5 });
+  const failed = await summaryNow(f, other.cookie, failing.requestId);
+  expect(failed.summary.status).toBe('error');
+  expect(failed.summary).not.toHaveProperty('decisionCount');
+  expect(failed.summary).not.toHaveProperty('averages');
+  expect((await f.post('/overall-history/summaries/' + failing.requestId + '/retry', other.cookie, {})).status).toBe(200);
+  await summarized(f, other.cookie, failing.requestId);
+  expect((await summaryNow(f, other.cookie, failing.requestId)).summary).toMatchObject({ status: 'complete', decisionCount: 4, averages: { decisionScore: 1, actionRankScore: 1 } });
+});
+
+test('a score-filtered list and its summary can be decided under a named Strategy, without touching the Trainer Configuration', async () => {
+  const { cookie } = await twoTables();
+  const response = await f.post('/overall-history/scored', cookie, { filter: historyFilterParams({ decisionScore: { min: 0.5 } }), strategy: baselinePlayingStrategy });
+  expect(response.status).toBe(200);
+  const asked: ScoredOverallHistory = await response.json();
+  expect(asked.referenceStrategy).toEqual(baselinePlayingStrategy);
+  await completed(f, cookie, asked.requestId);
+  expect(await f.current(cookie, asked.requestId)).toMatchObject({ status: 'complete', total: 4 });
+  expect(f.under(baselinePlayingStrategy).length).toBeGreaterThan(0);
+  const summary = await summarize(f, cookie, { decisionScore: { min: 0.5 } }, undefined, baselinePlayingStrategy);
+  expect(summary.referenceStrategy).toEqual(baselinePlayingStrategy);
+  await summarized(f, cookie, summary.requestId);
+  expect((await summaryNow(f, cookie, summary.requestId)).summary).toMatchObject({ status: 'complete', decisionCount: 4 });
+  expect((await (await f.get('/trainer-configuration', cookie)).json()).trainerConfiguration.referenceStrategy).toEqual(highestProbabilityPlayingStrategy);
+  const unsupported = await f.post('/overall-history/scored', cookie, { filter: historyFilterParams({ decisionScore: { min: 0.5 } }), strategy: { policy: { id: 'nope' } } });
+  expect(unsupported.status).toBe(400);
+  expect((await unsupported.json()).rejection.code).toBe('unsupported-strategy');
 });

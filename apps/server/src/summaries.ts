@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { matchesScoreFilter, type AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistoryDecision, OverallHistorySummary, ScoredOverallHistory, ScoreAverages, ScoreSummary, ScoreSummaryScope, StrategyDescriptor } from '@poker/contracts';
+import { hasScoreFilter, matchesScoreFilter, type AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistoryDecision, OverallHistorySummary, ScoredOverallHistory, ScoreAverages, ScoreSummary, ScoreSummaryScope, StrategyDescriptor } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
 import { calculateScoreSummary } from '@poker/research';
 import type { AnalysisSchedule, createAnalysis, FrozenEvaluationInput } from './analysis.js';
@@ -56,7 +56,13 @@ interface Owner {
   notify(entry: Entry): void;
 }
 /** One ordinary Score Summary over a frozen set: a table's Hand or Session summary, or one set of a history request. */
-interface Entry { readonly owner: Owner; attempt: string; outcome: Outcome; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string }
+interface Entry {
+  readonly owner: Owner; attempt: string; outcome: Outcome; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string;
+  /** A score-filtered summary's ranges: once every member has succeeded, the mean covers only the members they admit. */
+  readonly admits?: (scores: ScoreAverages) => boolean;
+  /** How many members `admits` let in, once decided. */
+  admitted?: number;
+}
 interface TableRequest { readonly input: FrozenScoreSummary; identity: Omit<ScoreSummary, 'status'>; readonly entry: Entry }
 interface HistoryRequest { readonly input: FrozenHistorySummary; requestId: string; attemptId: string; readonly whole: Entry; readonly buckets: readonly { readonly value: string; readonly entry: Entry }[] }
 /** Which decisions of a complete score-filtered list to return. */
@@ -98,6 +104,10 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       const failure = entry.members.map(failed).find(Boolean);
       if (failure) { entry.outcome = immutableData({ status: 'error', error: failure }); terminal(entry); return true; }
       if (next(entry) !== 'aggregate' || entry.aggregating) return true;
+      if (entry.admits) {
+        entry.admitted = scoresOf(entry).length;
+        if (!entry.admitted) { entry.outcome = { status: 'empty' }; return true; }
+      }
       entry.aggregating = true;
       if (entry.owner.guestId) aggregate(entry, false); else { waiting.push(entry); schedule(); }
       return true;
@@ -159,9 +169,11 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
     catch { dependency.starting = false; dependency.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be loaded.' }; changed(dependency); await release(dependency); }
   }
   /** Takes the mean once every analysis has succeeded: in this coordinator's turn for a table, as `history-analysis` for a Guest. */
+  /** The scores a summary's mean is taken over: every member's, or with score ranges those the ranges admit. */
+  const scoresOf = (entry: Entry) => entry.members.flatMap(member => member.state?.status === 'complete' && member.state.scores && (!entry.admits || entry.admits(member.state.scores)) ? [member.state.scores] : []);
   function aggregate(entry: Entry, counted: boolean) {
     const attempt = entry.attempt;
-    const scores = entry.members.flatMap(member => member.state?.status === 'complete' && member.state.scores ? [member.state.scores] : []);
+    const scores = scoresOf(entry);
     const guestId = entry.owner.guestId;
     const handle: JobHandle<ScoreAverages | undefined> = guestId && history ? history.submit(guestId, scores, calculateScoreSummary) : runner.submit('summary-analysis', scores, calculateScoreSummary);
     const completion = handle.result.then(result => entry.owner.accept(() => {
@@ -192,15 +204,15 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       return dependency;
     });
   }
-  function entryOf(owner: Owner, members: readonly Dependency[]): Entry {
-    const entry: Entry = { owner, attempt: randomUUID(), outcome: { status: members.length ? 'pending' : 'empty' }, members, aggregating: false };
+  function entryOf(owner: Owner, members: readonly Dependency[], admits?: (scores: ScoreAverages) => boolean): Entry {
+    const entry: Entry = { owner, attempt: randomUUID(), outcome: { status: members.length ? 'pending' : 'empty' }, members, aggregating: false, ...(admits ? { admits } : {}), ...(admits && !members.length ? { admitted: 0 } : {}) };
     for (const member of members) member.consumers.add(entry);
     return entry;
   }
   /** Starts a Retry of a failed summary: a new attempt, and every failed analysis it needs asked for again. */
   function retryEntry(entry: Entry) {
     if (entry.outcome.status !== 'error') return false;
-    entry.attempt = randomUUID(); entry.outcome = { status: 'pending' }; entry.aggregating = false;
+    entry.attempt = randomUUID(); entry.outcome = { status: 'pending' }; entry.aggregating = false; entry.admitted = undefined;
     for (const member of entry.members) {
       if (member.failure || member.state?.status === 'error') { member.retryRequested = true; ask(member); }
     }
@@ -209,7 +221,9 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
   const tableSummary = (request: TableRequest): ScoreSummary => immutableData({ ...request.identity, attemptId: request.entry.attempt, ...request.entry.outcome } as ScoreSummary);
   const historySummary = (entry: Entry): HistoryScoreSummary => {
     const total = entry.members.length;
-    return immutableData({ decisionCount: total, progress: { succeeded: entry.outcome.status === 'complete' ? total : entry.members.filter(succeeded).length, total }, ...entry.outcome } as HistoryScoreSummary);
+    const decided = entry.outcome.status === 'complete' || entry.outcome.status === 'empty';
+    const decisionCount = entry.admits ? entry.admitted : total;
+    return immutableData({ ...(decisionCount === undefined ? {} : { decisionCount }), progress: { succeeded: decided ? total : entry.members.filter(succeeded).length, total }, ...entry.outcome } as HistoryScoreSummary);
   };
   /** The state of a score-filtered request: Error ahead of Analyzing, and a list only when every analysis has succeeded. */
   const scoredHistory = (request: ScoredRequest, page: ScoredPage): ScoredOverallHistory => {
@@ -268,9 +282,11 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
      * Starts an Overall History summary request. Every analysis it needs is asked for as the Guest's `history-analysis`,
      * reusing any matching analysis or stored result; the per-Guest bound holds back the rest. It answers at once, and
      * `readHistory` reports its progress. Its results are accepted only while every table its decisions come from still
-     * accepts its Participant's results, each checked as `acceptJobResult` checks one table's.
+     * accepts its Participant's results, each checked as `acceptJobResult` checks one table's. With score ranges, every
+     * summary of it waits for all of its set's analyses and then covers only the decisions the ranges admit.
      */
     createHistory(input: FrozenHistorySummary): OverallHistorySummary {
+      const admits = hasScoreFilter(input.filter) ? (scores: ScoreAverages) => matchesScoreFilter(input.filter, scores) : undefined;
       const memberships = new Map(input.members.map(member => [member.identity.tableSessionId + '\n' + member.identity.participantId, member.identity] as const));
       const owner: Owner = {
         guestId: input.guestId,
@@ -282,8 +298,8 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
       };
       const members = dependenciesOf(input.members, input.guestId);
       const request: HistoryRequest = {
-        input, requestId: randomUUID(), attemptId: randomUUID(), whole: entryOf(owner, members),
-        buckets: (input.buckets ?? []).map(bucket => ({ value: bucket.value, entry: entryOf(owner, dependenciesOf(bucket.members, input.guestId)) })),
+        input, requestId: randomUUID(), attemptId: randomUUID(), whole: entryOf(owner, members, admits),
+        buckets: (input.buckets ?? []).map(bucket => ({ value: bucket.value, entry: entryOf(owner, dependenciesOf(bucket.members, input.guestId), admits) })),
       };
       historyRequests.set(request.requestId, request);
       for (const member of members) if (!succeeded(member)) ask(member);

@@ -109,6 +109,9 @@ test('a summary shows both means only once complete, its progress while Analyzin
   // Error takes precedence over Analyzing: no partial mean, however many succeeded.
   expect(summaryFigures({ status: 'error', decisionCount: 1, progress: { succeeded: 0, total: 1 }, error: { code: 'failed', message: 'x' } }))
     .toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Error' });
+  // With score ranges, how many decisions a summary covers is unknown until every analysis of the set has succeeded.
+  expect(summaryFigures({ status: 'pending', progress: { succeeded: 3, total: 5 } }))
+    .toEqual({ decisionScore: '—', actionRankScore: '—', count: '—', state: 'Analyzing 3 / 5', fraction: 0.6 });
 });
 
 test('score ranges live in the address as 0 to 1 numbers, edit like any range, and show as percentages in their fields', () => {

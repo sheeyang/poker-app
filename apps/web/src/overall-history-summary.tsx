@@ -49,7 +49,7 @@ function Means({ summary }: { summary: HistoryScoreSummary }) {
   return <div className="ogs-means" aria-live="polite" aria-atomic="true">
     <div className="ogs-mean"><span>Mean Decision Score</span><strong className="numeric">{figures.decisionScore}<small>/100</small></strong></div>
     <div className="ogs-mean is-secondary"><span>Mean Action Rank Score</span><strong className="numeric">{figures.actionRankScore}<small>/100</small></strong></div>
-    <div className="ogs-mean is-count"><span>Decisions</span><strong className="numeric">{summary.decisionCount ? summary.decisionCount.toLocaleString('en') : 'No decisions'}</strong></div>
+    <div className="ogs-mean is-count"><span>Decisions</span><strong className="numeric">{summary.decisionCount === undefined ? '—' : summary.decisionCount ? summary.decisionCount.toLocaleString('en') : 'No decisions'}</strong></div>
   </div>;
 }
 
@@ -68,7 +68,7 @@ function BucketRow({ breakdown, value, summary }: { breakdown: HistoryBreakdown;
   const figures = summaryFigures(summary);
   return <tr className={`ogs-bucket is-${summary.status}`}>
     <th scope="row">{bucketLabel(breakdown, value)}</th>
-    <td className="numeric">{summary.decisionCount.toLocaleString('en')}</td>
+    <td className="numeric">{summary.decisionCount?.toLocaleString('en') ?? '—'}</td>
     {summary.status === 'complete'
       ? <><td className="numeric ogs-score">{figures.decisionScore}</td><td className="numeric ogs-score is-secondary">{figures.actionRankScore}</td></>
       : <td colSpan={2} className="ogs-waiting numeric">{figures.state ?? '—'}</td>}
@@ -91,7 +91,7 @@ function SummaryColumn({ filter, breakdown, asked, strategy, reference, onRemove
     {asked && data && <>
       <Means summary={data.summary} />
       <Progress summary={data.summary} />
-      {data.summary.status === 'empty' && <p className="ogs-note">No decisions match these filters, so there is no score.</p>}
+      {data.summary.status === 'empty' && <p className="ogs-note">{data.summary.progress.total ? 'No decisions fall in these score ranges, so there is no score.' : 'No decisions match these filters, so there is no score.'}</p>}
       {failed(data) && <div className="notice-error" role="alert">
         <p>{summary.error ? summary.error.message : `Some analyses failed, so ${data.summary.status === 'error' ? 'this summary has' : 'some buckets have'} no score. ${data.summary.progress.succeeded.toLocaleString('en')} of ${data.summary.progress.total.toLocaleString('en')} succeeded; Retry analyzes only the failed ones again.`}</p>
         <button type="button" disabled={summary.retrying} onClick={summary.retry}>{summary.retrying ? 'Retrying…' : 'Retry'}</button>
@@ -110,6 +110,8 @@ function SummaryColumn({ filter, breakdown, asked, strategy, reference, onRemove
  * The Score Summary over the decisions the filters show (ADR-0041): explicitly asked for, under the Guest's Reference
  * Strategy and, side by side, up to 3 more the address names, each column with its progress, Error and Retry, and no score
  * for an empty set. A breakdown, one dimension at a time and held in the address, gives one ordinary summary per bucket.
+ * Score ranges narrow every summary, each under its own column's Strategy, once all of the set's analyses have succeeded;
+ * until then the count of decisions they cover is unknown, so `total` may be absent.
  */
 export function OverallHistorySummaryPanel({ filter, breakdown, compared, total, asked, scoreRanges, onAsk, onBreakdown, onCompare }: { filter: HistoryFilter; scoreRanges?: boolean; breakdown: HistoryBreakdown | undefined; compared: readonly StrategyDescriptor[]; total: number | undefined; asked: boolean; onAsk: () => void; onBreakdown: (next: HistoryBreakdown | undefined) => void; onCompare: (next: readonly StrategyDescriptor[]) => void }) {
   const { reference, shown } = useSummaryStrategies(compared);
@@ -127,11 +129,10 @@ export function OverallHistorySummaryPanel({ filter, breakdown, compared, total,
         </div>
       </fieldset>
     </div>
-    {scoreRanges && <p className="ogs-note">Score ranges do not narrow this summary: it covers the decisions the other filters admit.</p>}
     <CompareBar id="ogs-compare" reference={reference} shown={shown} onCompare={onCompare} />
     {!asked && <div className="ogs-ask">
-      <p>Large sets are analyzed in the background, with a running count. Analyses already done are reused.</p>
-      <button type="button" className="primary" disabled={total === undefined} onClick={onAsk}>{total === undefined ? 'Summarize' : total === 0 ? 'Summarize' : `Summarize ${total.toLocaleString('en')} ${total === 1 ? 'decision' : 'decisions'}`}</button>
+      <p>{scoreRanges ? 'Score ranges apply once every decision the other filters admit is analyzed, under each Strategy shown. ' : ''}Large sets are analyzed in the background, with a running count. Analyses already done are reused.</p>
+      <button type="button" className="primary" disabled={total === undefined && !scoreRanges} onClick={onAsk}>{total === undefined ? 'Summarize' : total === 0 ? 'Summarize' : `Summarize ${total.toLocaleString('en')} ${total === 1 ? 'decision' : 'decisions'}`}</button>
     </div>}
     {asked && <div className="ogs-columns" data-count={shown.length + 1}>
       <SummaryColumn key="reference" filter={filter} breakdown={breakdown} asked={asked} strategy={undefined} reference onRemove={() => {}} />
