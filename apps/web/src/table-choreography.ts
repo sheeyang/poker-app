@@ -202,15 +202,49 @@ const REMEMBER_FOR = 30_000;
 export interface StackRoll { readonly from: number; readonly id: string }
 
 /**
- * Plays the table's motion. Returns the stage's ref, and the stack figures that roll in this render: chips added to a
- * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows. A `still` table
- * (a Replay Step, drawn instantly) plays no motion and leaves the live table's remembered scene alone.
+ * A replay felt's motion (replay-motion.ts), played as given on the client clock rather than planned from the view. Each
+ * step input has its own `key`: a new one snaps whatever is still playing to its end state before its own cues play.
  */
-export function useTableMotion(table: ObservableTableSession, serverNow: number, still = false) {
+export interface ReplayPlayback {
+  readonly key: string;
+  /** Cues timed on the client clock: a later phase of the step waits for its moment. */
+  readonly cues: readonly Cue[];
+  /**
+   * Play the cues backward: the felt draws the later step, and its own motion runs back to where the earlier step
+   * begins. The resting places it starts from are the previous render's, so draw the earlier step just before.
+   */
+  readonly reverse: boolean;
+  /** Called once this key's motion is over, at once when it has none; never for a motion a later key snapped. */
+  readonly settled: () => void;
+}
+
+/**
+ * Runs `animations`, all started together, backward as one: each shows at every moment what it showed that long before
+ * the end of the whole motion, so the last thing to happen is undone first.
+ */
+function reverseAll(animations: readonly Animation[]) {
+  const time = (value: CSSNumberish | null | undefined) => Number(value ?? 0);
+  // Each one's end, in the time since they started together (one timed later started at a negative time).
+  const ends = animations.map(animation => time(animation.effect?.getComputedTiming().endTime) - time(animation.currentTime));
+  const total = Math.max(0, ...ends);
+  animations.forEach((animation, i) => {
+    animation.playbackRate = -1;
+    animation.currentTime = time(animation.effect?.getComputedTiming().endTime) + total - ends[i]!;
+  });
+}
+
+/**
+ * Plays the table's motion. Returns the stage's ref, and the stack figures that roll in this render: chips added to a
+ * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows. A `replay`
+ * felt plays the motion it is given instead of planning it, and leaves the live table's remembered scene alone.
+ */
+export function useTableMotion(table: ObservableTableSession, serverNow: number, replay?: ReplayPlayback) {
   const stage = useRef<HTMLElement>(null);
-  const kept = still ? undefined : remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
+  const kept = replay ? undefined : remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
   const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>());
-  const cues = still ? [] : planMotion(scene.current, table).filter(cue => serverNow - cue.at < lasts(cue));
+  // The replay key whose motion has been played.
+  const played = useRef<string>(undefined);
+  const cues = replay ? (replay.key === played.current ? [] : replay.cues) : planMotion(scene.current, table).filter(cue => serverNow - cue.at < lasts(cue));
   useLayoutEffect(() => {
     const node = stage.current, fx = node?.querySelector<HTMLElement>('[data-motion-layer="over"]'), under = node?.querySelector<HTMLElement>('[data-motion-layer="under"]');
     scene.current = sceneOf(table);
@@ -220,7 +254,26 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number,
       const done = () => running.current.delete(animation);
       animation.addEventListener('finish', done); animation.addEventListener('cancel', done);
     } };
-    for (const cue of cues) perform(cue, ctx, Math.max(0, serverNow - cue.at));
+    const fresh = replay && replay.key !== played.current;
+    if (fresh) {
+      // A new step input: whatever still plays snaps to its end state, which is the felt as this render draws it. That
+      // includes a step back's finished motion, which still holds the earlier step's look until this render replaced it.
+      played.current = replay.key;
+      const snapped = new Set([...running.current, ...node.getAnimations({ subtree: true })]);
+      running.current.clear();
+      for (const animation of snapped) animation.cancel();
+      // Its travelling copies go with it now, not when their cancel event comes.
+      fx.replaceChildren(); under.replaceChildren();
+    }
+    // A replay's later phases wait for their moment; a live view joins motion part-way and never ahead of it.
+    for (const cue of cues) perform(cue, ctx, replay ? serverNow - cue.at : Math.max(0, serverNow - cue.at));
+    if (fresh) {
+      const started = Array.from(running.current), { settled } = replay;
+      if (replay.reverse) reverseAll(started);
+      if (!started.length) settled();
+      // A motion a later input snapped is cancelled, and its finish never comes.
+      else void Promise.all(started.map(animation => animation.finished)).then(settled, () => {});
+    }
     // Where things rest now, for the next change. Things still moving keep where they rested before.
     const now = snapshot(node, SNAPSHOT), resting = new Map<string, { box: Box; html: string }>();
     for (const [key, value] of now) {
@@ -228,7 +281,7 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number,
       resting.set(key, old && moving ? old : value);
     }
     last.current = resting;
-    if (!still) remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
+    if (!replay) remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
   });
   useEffect(() => () => { for (const animation of running.current) animation.cancel(); }, []);
   const rolls = new Map<string, StackRoll>();
