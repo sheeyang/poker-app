@@ -24,12 +24,6 @@ export interface HandState {
   buttonSeat: number;
   smallBlindParticipantId: ParticipantId;
   bigBlindParticipantId: ParticipantId;
-  /**
-   * Joined Participants currently observing this Hand, seated or not. Joining during the
-   * Hand adds one and leaving removes one; at completion the set freezes as the Participants
-   * who observed its result. Absent identities gain no history.
-   */
-  observerParticipantIds: ParticipantId[];
   participants: HandParticipantState[];
   deck: string[];
   drawnCardCount: number;

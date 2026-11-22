@@ -111,21 +111,21 @@ test('admitted completed-Hand inspection replays once from immutable durable inp
   expect(await controllers.readPersistedSession(t.id)).toEqual(before);
 });
 
-test('owner selection lists completed Bot-only Hands outside the filtered Participant history, including reconnect', async () => {
+test('owner selection lists completed Bot-only Hands, which the owner\'s whole-session history also holds, including reconnect', async () => {
   const t = await table(2);
   for (let i = 0; i < 2; i++) await command(t, 'seat-participant', { participantId: t.bots[i], seat: i + 1 });
   await command(t, 'start-hand');
   expect(await read(t)).toMatchObject({ inspection: { adminMode: true, completedHands: [] } });
   await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: 3, participantId: t.bots[0]!, action: { type: 'fold' } });
   const view = await read(t);
-  expect(view.view.history).toEqual([]);
+  expect(view.view.history.map(hand => [hand.handId, hand.result?.status])).toEqual([['hand-1', 'completed-hand']]);
   expect(view.inspection).toEqual({ adminMode: true, completedHands: [{ handId: 'hand-1', sequence: 1 }] });
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/table-sessions/' + t.id + '/live', { headers: { cookie: t.cookie } });
   const frames: TableLiveMessage[] = [];
   socket.on('message', data => frames.push(JSON.parse(data.toString())));
   try {
     await expect.poll(() => frames.find(f => f.type === 'table-update')).toBeDefined();
-    expect(frames[0]).toMatchObject({ inspection: view.inspection, view: { history: [] } });
+    expect(frames[0]).toMatchObject({ inspection: view.inspection, view: { history: view.view.history } });
     expect((await inspect(t)).status).toBe(200);
     expect(JSON.stringify(frames)).not.toMatch(/"(?:deck|burns|seed|pokerRecord)"\s*:/);
   } finally { socket.terminate(); }
