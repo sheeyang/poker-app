@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type ObservableTableUpdate, type ScoreSummary, type StrategyDescriptor } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultPlayingStrategy, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type ObservableTableUpdate, type ScoreSummary, type StrategyDescriptor } from '@poker/contracts';
 import { createStrategy, type Strategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
@@ -54,6 +54,8 @@ async function guest(name: string) {
 }
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
+/** Sets the Guest's own Trainer Configuration, which applies at every table. */
+const study = (cookie: string, trainerConfiguration: object) => fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration }) });
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000 };
 
@@ -175,6 +177,8 @@ test('Live Analysis of a decision whose Action Window opened while the table dis
 
   // Disallowed between Hands: from the next decision on, every window captures it, and everyone sees that.
   expect((await t.options({ allowLiveAnalysis: false })).status).toBe(200);
+  // Whatever each Guest's own setting: both have Live Analysis on.
+  for (const cookie of [t.ann, ben.cookie]) expect((await study(cookie, { referenceStrategy: defaultPlayingStrategy, liveAnalysis: true })).status).toBe(200);
   hand = await dealt(t, 'hand-2');
   const actor = hand.view.state.actorId!, decisionId = hand.view.state.decisionId!;
   expect(hand.schedule.actionWindow).toMatchObject({ participantId: actor, decisionId, liveAnalysisDisallowed: true });
@@ -264,11 +268,7 @@ test('held analysis never delays an action, an Action Deadline or the next deal'
 test('two humans in one Hand study privately, from what each observed at the decision: later streets, the showdown and later Hands never reach the analysis', async () => {
   const { t, ben, cookieOf } = await headsUp();
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
-  const study = async (cookie: string, referenceStrategy: StrategyDescriptor) => {
-    const response = await post('/api/table-sessions/' + t.id + '/set-trainer-configuration', cookie, { requestId: randomUUID(), expectedSessionRevision: (await t.view(cookie)).sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis: true } });
-    expect(response.status).toBe(200);
-  };
-  await study(ben.cookie, baselinePlayingStrategy);
+  expect((await study(ben.cookie, { referenceStrategy: baselinePlayingStrategy, liveAnalysis: true })).status).toBe(200);
   // Both humans check Hand 1 down to a showdown, each recording the view they had at each of their decisions.
   await dealt(t, 'hand-1');
   const seen = new Map<string, { participantId: string; view: ObservableGameView }>();
@@ -292,7 +292,7 @@ test('two humans in one Hand study privately, from what each observed at the dec
 
   // A new Reference Strategy analyzes each Hand 1 decision afresh, for its own human only.
   const reference = { [t.annId]: highestProbabilityPlayingStrategy, [ben.participantId]: simpleHeuristicPlayingStrategy };
-  await study(t.ann, reference[t.annId]!); await study(ben.cookie, reference[ben.participantId]!);
+  for (const [cookie, referenceStrategy] of [[t.ann, reference[t.annId]!], [ben.cookie, reference[ben.participantId]!]] as const) expect((await study(cookie, { referenceStrategy, liveAnalysis: true })).status).toBe(200);
   const requested: { cookie: string; requestId: string }[] = [];
   for (const [decisionId, { participantId }] of seen) {
     const cookie = cookieOf(participantId), other = participantId === t.annId ? ben.cookie : t.ann;

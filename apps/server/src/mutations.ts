@@ -3,7 +3,8 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type SetTrainerConfigurationRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
+import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
@@ -17,7 +18,7 @@ import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenScoreSummary } from './summaries.js';
-import { nameKey, participantName, participantNameRules, validateTableOptionChanges, validateTrainerConfiguration } from './validation.js';
+import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
@@ -148,6 +149,8 @@ export interface BotRuntimeOptions {
   readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy;
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
+  /** Each Guest's Trainer Configuration: table views present it, and each analysis captures its Reference Strategy. */
+  readonly trainerConfigurations?: Pick<TrainerConfigurations, 'current' | 'known'>;
 }
 export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock, guests: GuestQueue = createGuestQueue()) {
   /** The only way to reach a table in memory: each committed table, while something needs it (ADR-0035). */
@@ -173,6 +176,15 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   const scheduledRecovery = new Set<string>();
   const strategyFactory = bots?.strategyFactory ?? createStrategy;
   const supportsStrategy = bots?.supportsStrategy ?? isSupportedStrategy;
+  const trainerConfigurations = bots?.trainerConfigurations ?? { current: async () => defaultTrainerConfiguration, known: () => defaultTrainerConfiguration };
+  /**
+   * The Trainer Configuration of a viewing Participant's Guest, for a projection that cannot wait. Every read and
+   * subscription reads it first, so a viewer's Guest is always known by then.
+   */
+  function trainerConfigurationOf(session: CommittedSession, participantId: string): TrainerConfiguration {
+    const binding = findBinding(session.aggregate, participantId);
+    return (isHuman(binding) ? trainerConfigurations.known(binding.userId) : undefined) ?? defaultTrainerConfiguration;
+  }
   /**
    * Runs `operation` in the table's FIFO. Queued work on a loaded table holds a handle on it until it has run. Never
    * acquire a table from inside its own FIFO: an unload waits for that FIFO, and an acquire waits for the unload.
@@ -573,7 +585,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   function viewer(session: CommittedSession | undefined, userId: string) {
     return session && memberBinding(session.aggregate, userId)?.participantId;
   }
-  function captureEvaluation(session: CommittedSession, participantId: string, decisionId: string): FrozenEvaluationInput | null {
+  /** The frozen inputs of a human Participant's decision, under the Reference Strategy its Guest has as it is asked. */
+  function captureEvaluation(session: CommittedSession, participantId: string, decisionId: string, referenceStrategy: StrategyDescriptor): FrozenEvaluationInput | null {
     const binding = findBinding(session.aggregate, participantId);
     if (!isHuman(binding)) return null;
     const participant = session.game.forParticipant(participantId);
@@ -585,7 +598,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const masterSeed = session.aggregate.pokerRecord.configuration.seed;
     return immutableData({ view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
       tableSessionId: session.aggregate.tableSessionId, participantId, handId: view.state.handId, decisionId,
-      referenceStrategy: binding.trainerConfiguration.referenceStrategy,
+      referenceStrategy,
       inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
       evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
       selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
@@ -593,11 +606,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     } });
   }
   function analyzeAccepted(session: CommittedSession, participantId: string, decisionId: string) {
-    if (stopped || !bots?.onHumanActionAccepted) return;
-    try {
-      const input = captureEvaluation(session, participantId, decisionId);
-      if (input?.acceptedAction) void Promise.resolve(bots.onHumanActionAccepted(input)).catch(() => {});
-    } catch { /* Derived analysis cannot change a confirmed poker outcome. */ }
+    const onAccepted = bots?.onHumanActionAccepted;
+    const binding = findBinding(session.aggregate, participantId);
+    if (stopped || !onAccepted || !isHuman(binding)) return;
+    // Derived analysis cannot change a confirmed poker outcome.
+    const analyze = (configuration: TrainerConfiguration) => {
+      if (stopped) return;
+      try {
+        const input = captureEvaluation(session, participantId, decisionId, configuration.referenceStrategy);
+        if (input?.acceptedAction) void Promise.resolve(onAccepted(input)).catch(() => {});
+      } catch { /* As above. */ }
+    };
+    const known = trainerConfigurations.known(binding.userId);
+    if (known) analyze(known);
+    else void trainerConfigurations.current(binding.userId).then(analyze, () => {});
   }
   function deliver(id: string, projection: (session: CommittedSession, participantId: string) => TableLiveMessage) {
     const session = tables.get(id);
@@ -622,7 +644,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     const connected = connectedParticipants(id);
     // Every complete update carries who is connected, so it publishes the current list too.
     presence.set(id, connected.join(','));
-    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), events, bots?.adminMode === true, connected));
+    deliver(id, (session, participantId) => projectTableUpdate(session.aggregate, participantId, trainerConfigurationOf(session, participantId), session.game, clock.now(), events, bots?.adminMode === true, connected));
   }
   /**
    * The joined human Participants whose Guest has at least one live connection subscribed to the table. Transient:
@@ -734,11 +756,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   /** Upgrades any stored version and validates it completely, or throws TableSessionRestorationError. */
   function restorable(stored: StoredTableSession): CommittedSession {
     const aggregate = upgradeTableSession(stored);
-    if (!aggregate || humanBindings(aggregate).some(binding => validateTrainerConfiguration(binding.trainerConfiguration, supportsStrategy))) throw new TableSessionRestorationError();
+    if (!aggregate) throw new TableSessionRestorationError();
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new TableSessionRestorationError();
     // Version 1 predates scheduled play; every version-2 row records its schedule.
-    return { aggregate: stored.schemaVersion === 2 ? aggregate : { ...aggregate, schedule: unscheduledWindow(aggregate, restored.game) }, game: restored.game };
+    return { aggregate: stored.schemaVersion !== 1 ? aggregate : { ...aggregate, schedule: unscheduledWindow(aggregate, restored.game) }, game: restored.game };
   }
   /** The committed table as its record stands, restored completely; `undefined` when there is no such table. */
   async function readCommitted(id: string): Promise<CommittedSession | undefined> {
@@ -759,10 +781,11 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   }
     async function read(id: string, userId: string) {
       return asMember(id, userId, async () => {
+        const trainerConfiguration = await trainerConfigurations.current(userId);
         const session = tables.get(id);
         const participantId = viewer(session, userId);
         if (!session || !participantId) return undefined;
-        const projected = projectTableSession(session.aggregate, participantId, session.game, clock.now(), bots?.adminMode === true, connectedParticipants(id, session));
+        const projected = projectTableSession(session.aggregate, participantId, trainerConfiguration, session.game, clock.now(), bots?.adminMode === true, connectedParticipants(id, session));
         return { ...projected, runtimeStatus: statuses.get(id) ?? { phase: 'idle' as const } };
       });
     }
@@ -771,6 +794,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * holds a handle on the table until the returned function ends it, or until the Guest's membership ends.
      */
     async function subscribe(id: string, userId: string, publish: (update: TableLiveMessage) => void) {
+      // Read first, so every update this subscription receives can present it.
+      await trainerConfigurations.current(userId);
       const handle = await acquireMember(id, userId);
       if (!handle) return undefined;
       const session = tables.get(id);
@@ -783,7 +808,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       subscribers.set(id, entries);
       // No facade is retained: each projection binds the current committed game.
       try {
-        publish({ ...projectTableUpdate(session.aggregate, participantId, session.game, clock.now(), [], bots?.adminMode === true, connectedParticipants(id, session)), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
+        publish({ ...projectTableUpdate(session.aggregate, participantId, trainerConfigurationOf(session, participantId), session.game, clock.now(), [], bots?.adminMode === true, connectedParticipants(id, session)), runtimeStatus: statuses.get(id) ?? { phase: 'idle' } });
         const status = statuses.get(id);
         if (status) publish({ type: 'table-status', tableSessionId: id, status });
       } catch (error) {
@@ -950,16 +975,16 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return enqueue(id, () => accept(id, authority, kind, request));
     }
     /**
-     * Bot controller changes and table options require Table Ownership; a Trainer
-     * configuration change is the requester's own. Table options change only at an Online Table, between Hands.
+     * Bot controller changes and table options require Table Ownership. Table options change only at an Online Table,
+     * between Hands. A Trainer Configuration is the Guest's, not the table's (`trainer-configuration.ts`).
      */
-    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-trainer-configuration' | 'set-table-options', request: SetPlayingStrategyRequest | RetryBotRequest | SetTrainerConfigurationRequest | SetTableOptionsRequest): Promise<MutationOutcome> {
+    async function configure(id: string, userId: string, kind: 'set-playing-strategy' | 'retry-bot' | 'set-table-options', request: SetPlayingStrategyRequest | RetryBotRequest | SetTableOptionsRequest): Promise<MutationOutcome> {
       return await asMember(id, userId, () => enqueue(id, async (): Promise<MutationOutcome> => {
         let session = tables.get(id);
         const requester = session && memberBinding(session.aggregate, userId);
         if (!session || !requester) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
-        if (kind !== 'set-trainer-configuration' && session.aggregate.ownerUserId !== userId) return ownerRequired();
+        if (session.aggregate.ownerUserId !== userId) return ownerRequired();
         // Explicit Bot recovery is Practice's: an Online Table retries a failed decision once, then plays its Timeout Action.
         if (kind === 'retry-bot' && session.aggregate.mode === 'online') return unavailableOnline('At an Online Table the server retries a failed Bot decision itself, then plays its Timeout Action.');
         const { requestId, ...contents } = request;
@@ -969,10 +994,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         let proposed: CommittedSession | undefined;
         let optionEvents: readonly CashGameEvent[] = [];
         const { outcome, committed: next, decided } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, (): TableDecision<MutationOutcome> => {
-            const trainer = kind === 'set-trainer-configuration', bot = kind === 'set-playing-strategy' || kind === 'retry-bot', tableOptions = kind === 'set-table-options';
-            const fields = ['requestId', 'expectedSessionRevision', ...(trainer ? ['trainerConfiguration'] : tableOptions ? ['options'] : bot ? ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])] : [])];
+            const bot = kind === 'set-playing-strategy' || kind === 'retry-bot', tableOptions = kind === 'set-table-options';
+            const fields = ['requestId', 'expectedSessionRevision', ...(tableOptions ? ['options'] : ['participantId', ...(kind === 'set-playing-strategy' ? ['playingStrategy'] : [])])];
             let result: MutationOutcome | undefined;
-            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(trainer ? 'invalid-trainer-configuration' : tableOptions ? 'invalid-table-options' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
+            if (Object.keys(request).some(key => !fields.includes(key)) || !Number.isSafeInteger(request.expectedSessionRevision) || request.expectedSessionRevision < 0) result = reject(tableOptions ? 'invalid-table-options' : 'invalid-controller-request', 'Supply supported configuration fields and a nonnegative expectedSessionRevision.');
             if (!result && tableOptions) result = validateTableOptionChanges((request as SetTableOptionsRequest).options);
             if (!result && request.expectedSessionRevision !== session.aggregate.sessionRevision) result = reject('stale-session-revision', 'The table changed. Refresh before submitting a new configuration request.');
             if (!result && tableOptions) {
@@ -999,15 +1024,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (!result && bot && (findBinding(session.aggregate, (request as RetryBotRequest).participantId) as PersistedBotBinding).removed) result = reject('bot-removed', 'The Table Owner removed this Bot from the table.');
             if (!result && kind === 'set-playing-strategy' && !supportsStrategy((request as SetPlayingStrategyRequest).playingStrategy)) result = reject('unsupported-strategy', 'Choose a supported complete Playing Strategy.');
             if (!result && kind === 'retry-bot' && capture(session, '')?.identity.participantId !== (request as RetryBotRequest).participantId) result = reject('bot-not-current', 'Retry is available only for the current Bot decision.');
-            if (!result && trainer) {
-              const configuration = (request as SetTrainerConfigurationRequest).trainerConfiguration;
-              result = validateTrainerConfiguration(configuration, supportsStrategy);
-              if (!result) {
-                const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
-                  bindings: session.aggregate.bindings.map(item => item.participantId === requester.participantId ? { ...requester, trainerConfiguration: immutableData(configuration) } : item) };
-                proposed = { aggregate, game: session.game };
-              }
-            }
             if (!result && kind === 'set-playing-strategy') {
               const aggregate: PersistedTableSession = { ...session.aggregate, sessionRevision: session.aggregate.sessionRevision + 1,
                 bindings: session.aggregate.bindings.map(item => isBot(item) && item.participantId === (request as SetPlayingStrategyRequest).participantId ? { ...item, assignmentId: randomUUID(), controller: { kind: 'bot', playingStrategy: immutableData((request as SetPlayingStrategyRequest).playingStrategy) } } : item) };
@@ -1127,7 +1143,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1,
                   ...(joined.ok ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
                   bindings: binding ? aggregate.bindings.map(candidate => candidate.participantId === participantId ? { ...binding, membership: 'joined' as const } : candidate)
-                    : [...aggregate.bindings, { participantId, name: guest!, controller: { kind: 'human' }, userId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) }] };
+                    : [...aggregate.bindings, { participantId, name: guest!, controller: { kind: 'human' }, userId, membership: 'joined' }] };
                 proposed = { aggregate: next, game: working };
                 result = acknowledged(participantId, next);
               }
@@ -1294,7 +1310,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await Promise.allSettled([...queue.values(), sweeping]);
     }
   function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
-    return asMember(id, userId, () => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
+    return asMember(id, userId, async () => {
+      const { referenceStrategy } = await trainerConfigurations.current(userId);
+      return enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
       const binding = session && memberBinding(session.aggregate, userId);
       if (!session || !binding) return undefined;
@@ -1303,9 +1321,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
       const view = session.game.forParticipant(participantId).getView();
       const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
-      const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId)!);
-      return immutableData({ participantId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy: binding.trainerConfiguration.referenceStrategy, decisionIds, members });
-    }));
+      const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
+      return immutableData({ participantId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members });
+      });
+    });
   }
   return {
     // A job result is not a request, a subscription or scheduled work, so it holds no handle on its table (ADR-0035).
@@ -1328,17 +1347,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
      * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed.
      */
-    captureEvaluation: (id: string, userId: string, decisionId: string) => asMember(id, userId, () => enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
+    captureEvaluation: (id: string, userId: string, decisionId: string) => asMember(id, userId, async () => {
+      const { referenceStrategy } = await trainerConfigurations.current(userId);
+      return enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
       const session = tables.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      const input = captureEvaluation(session, participantId, decisionId);
+      const input = captureEvaluation(session, participantId, decisionId, referenceStrategy);
       if (!input || input.acceptedAction) return input;
       const window = session.aggregate.schedule.actionWindow;
       const disallowed = window?.decisionId === decisionId ? !!window.liveAnalysisDisallowed : !session.aggregate.options.allowLiveAnalysis;
       return disallowed ? liveAnalysisRefused() : input;
-    })),
+      });
+    }),
     /** The requesting Guest's joined Participant at a table, and whether they own it; undefined means not-found. */
     access,
     /** The Guest to notify for a joined human Participant of a loaded table. */

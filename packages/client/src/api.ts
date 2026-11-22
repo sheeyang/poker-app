@@ -1,4 +1,4 @@
-import type { SetPlayingStrategyRequest, SetTrainerConfigurationRequest, RetryBotRequest, ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest } from '@poker/contracts';
+import type { SetPlayingStrategyRequest, SetTrainerConfigurationRequest, TrainerConfigurationAcknowledgement, RetryBotRequest, ActRequest, StartHandRequest, CreateTableSessionRequest, CreationAcknowledgement, ApplicationRejection, ObservableTableSession, SeatParticipantRequest, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest } from '@poker/contracts';
 export class RequestFailure extends Error {
   /** With `current-table-elsewhere`: the Guest's Current Table, which they must leave first. */
   readonly currentTableId?: string;
@@ -31,7 +31,10 @@ export const api = {
   setTableOptions: (id: string, body: import('@poker/contracts').SetTableOptionsRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-table-options', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   /** The Table Owner sets, changes or removes (`null`) an Online Table's Table Password. */
   setTablePassword: (id: string, body: import('@poker/contracts').SetTablePasswordRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-table-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-  setTrainerConfiguration: (id: string, body: SetTrainerConfigurationRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-trainer-configuration', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  /** The Guest's Trainer Configuration, which applies at every table. */
+  readTrainerConfiguration: (signal?: AbortSignal) => request<TrainerConfigurationAcknowledgement>('/trainer-configuration', { signal }),
+  /** Changes the Guest's Trainer Configuration for every table; repeating the same request applies it once. */
+  setTrainerConfiguration: (body: SetTrainerConfigurationRequest) => request<TrainerConfigurationAcknowledgement>('/trainer-configuration', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   inspectHand: (id: string, handId: string) => request<Extract<import('@poker/contracts').CompletedHandInspectionOutcome, { ok: true }>>('/table-sessions/' + encodeURIComponent(id) + '/inspect-hand', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handId }) }),
   setPlayingStrategy: (id: string, body: SetPlayingStrategyRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/set-playing-strategy', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   retryBot: (id: string, body: RetryBotRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/retry-bot', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),

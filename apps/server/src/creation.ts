@@ -2,7 +2,7 @@ import { isSupportedStrategy } from '@poker/strategies';
 import { nameKey, participantName, validateCreationRequest } from './validation.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { defaultConfiguration, defaultOnlineActionTimeLimitSeconds, defaultTrainerConfiguration, type CreateTableSessionRequest, type CreationOutcome, type TableOptions } from '@poker/contracts';
+import { defaultConfiguration, defaultOnlineActionTimeLimitSeconds, type CreateTableSessionRequest, type CreationOutcome, type TableOptions } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import type { PersistedTableSession } from './aggregate.js';
 import { creationRequests, localUsers } from './db/schema.js';
@@ -80,7 +80,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         const tableSessionId = randomUUID();
         const ownerParticipantId = randomUUID();
         const bindings: PersistedTableSession['bindings'] = [
-          { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined', trainerConfiguration: structuredClone(defaultTrainerConfiguration) },
+          { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined' },
           ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: participantName(b.name)!, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
         ];
         // The Online owner joins unseated, without the Join Link, and observes from creation. A Practice human joins by sitting down.
@@ -91,7 +91,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           allowLiveAnalysis: request.options?.allowLiveAnalysis ?? true,
         };
         const aggregate: PersistedTableSession = {
-          schemaVersion: 2, tableSessionId, ownerUserId, mode, options,
+          schemaVersion: 3, tableSessionId, ownerUserId, mode, options,
           pokerRecord: created.game.toRecord(), bindings,
           pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
           ...(tablePasswordHash ? { tablePasswordHash } : {}),

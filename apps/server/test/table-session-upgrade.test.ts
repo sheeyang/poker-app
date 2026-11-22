@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { nameGuest } from './fixtures/guest.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, defaultConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { CashGame } from '@poker/engine';
 import { createServer } from '../src/server.js';
 import { InstantClock } from './fixtures/clock.js';
@@ -63,14 +63,14 @@ const get = (path: string, cookie: string) => fetch(base + path, { headers: { co
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 const read = async (t: Table): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, t.cookie)).json();
 
-test('a version-1 table loads as a Practice Table whose human keeps the table-level Trainer configuration and analysis', async () => {
+test('a version-1 table loads as a Practice Table whose human keeps their analysis, and whose table-level Trainer configuration gives way to their Guest\'s', async () => {
   await revertToPreM4Schema();
   const t = await legacyTable();
   await start();
   const upgraded = await read(t);
   expect(upgraded).toMatchObject({
     tableSessionId: t.id, mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, pokerRevision: 4, sessionRevision: 5,
-    trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true },
+    trainerConfiguration: defaultTrainerConfiguration,
     bindings: [{ participantId: t.human, name: 'You', controller: { kind: 'human' } }, { participantId: t.bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { state: { status: 'completed-hand', handId: 'hand-1', participants: [{ participantId: t.human, stack: 990 }, { participantId: t.bot, stack: 1010 }] } },
   });
@@ -83,7 +83,7 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   expect((await get('/api/table-sessions/' + t.id, stranger)).status).toBe(404);
 
   const requested = await (await post('/api/table-sessions/' + t.id + '/analysis', t.cookie, { decisionId: 'hand-1/decision-1' })).json();
-  expect(requested).toMatchObject({ ok: true, participantId: t.human, referenceStrategy: highestProbabilityPlayingStrategy });
+  expect(requested).toMatchObject({ ok: true, participantId: t.human, referenceStrategy: defaultTrainerConfiguration.referenceStrategy });
   const analysis = () => get('/api/table-sessions/' + t.id + '/analysis/' + requested.requestId, t.cookie);
   await expect.poll(async () => (await (await analysis()).json()).status, { timeout: 10000 }).toBe('complete');
   const completed = await (await analysis()).json();
@@ -97,17 +97,18 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   expect((await get('/api/table-sessions/' + t.id + '/analysis/' + requested.requestId, stranger)).status).toBe(404);
 
   const trainerConfiguration = { referenceStrategy: simpleHeuristicPlayingStrategy, liveAnalysis: false };
-  expect((await post('/api/table-sessions/' + t.id + '/set-trainer-configuration', t.cookie, { requestId: randomUUID(), expectedSessionRevision: 5, trainerConfiguration })).status).toBe(200);
+  expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { 'content-type': 'application/json', cookie: t.cookie }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration }) })).status).toBe(200);
   expect((await post('/api/table-sessions/' + t.id + '/start-hand', t.cookie, { requestId: randomUUID(), expectedPokerRevision: 4 })).status).toBe(200);
   const resumed = await read(t);
-  expect(resumed).toMatchObject({ mode: 'practice', pokerRevision: 5, sessionRevision: 7, trainerConfiguration, view: { state: { status: 'active-hand', handId: 'hand-2' } } });
+  expect(resumed).toMatchObject({ mode: 'practice', pokerRevision: 5, sessionRevision: 6, trainerConfiguration, view: { state: { status: 'active-hand', handId: 'hand-2' } } });
   await stop();
   await start();
   expect(await read(t)).toEqual(resumed);
   expect(await (await get('/api/table-sessions', t.cookie)).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
-  // Version 2 names one format: a version-2 row without a part of it is not guessed at, but fails restoration.
+  // Version 3 names one format: a version-3 row without a part of it is not guessed at, but fails restoration.
   const intact = (await administration.query(`SELECT aggregate FROM "${schema}".table_sessions WHERE id = $1`, [t.id])).rows[0].aggregate;
-  expect(intact.schemaVersion).toBe(2);
+  expect(intact.schemaVersion).toBe(3);
+  expect(JSON.stringify(intact)).not.toContain('trainerConfiguration');
   for (const part of ['options', 'schedule', 'pendingChanges', 'mode']) {
     await stop();
     await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = aggregate - $2::text WHERE id = $1`, [t.id, part]);
@@ -121,13 +122,11 @@ test('a version-1 table loads as a Practice Table whose human keeps the table-le
   expect(await read(t)).toEqual(resumed);
 });
 
-test('a version-1 table without its Trainer configuration fails restoration instead of receiving a default', async () => {
+test('a version-1 table without its Trainer configuration still loads: the Guest\'s configuration applies either way', async () => {
   await stop();
   const t = await legacyTable({ trainerConfiguration: false });
   await start();
-  const response = await get('/api/table-sessions/' + t.id, t.cookie);
-  expect(response.status).toBe(503);
-  expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'record-restoration-failed' } });
+  expect(await read(t)).toMatchObject({ tableSessionId: t.id, trainerConfiguration: defaultTrainerConfiguration });
   const stranger = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!;
   expect((await get('/api/table-sessions/' + t.id, stranger)).status).toBe(404);
 });

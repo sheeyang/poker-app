@@ -16,6 +16,21 @@ DO $$ BEGIN
     ALTER TABLE local_users ALTER COLUMN last_seen_at SET DEFAULT 0;
   END IF;
 END $$;
+-- The Guest's Trainer Configuration (ADR-0041), null until they first change it: the default. Configurations kept per
+-- Participant before it are discarded, so every existing Guest starts from the default. Check first, as for display_name.
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'local_users' AND column_name = 'trainer_configuration') THEN
+    ALTER TABLE local_users ADD COLUMN trainer_configuration jsonb;
+  END IF;
+END $$;
+-- Guest-scoped changes already applied, by request ID. They go with their Guest when an idle Guest is purged.
+CREATE TABLE IF NOT EXISTS guest_requests (
+  user_id uuid NOT NULL REFERENCES local_users(id) ON DELETE CASCADE,
+  request_id text NOT NULL,
+  fingerprint text NOT NULL,
+  outcome jsonb NOT NULL,
+  PRIMARY KEY(user_id, request_id)
+);
 CREATE TABLE IF NOT EXISTS table_sessions (
   id uuid PRIMARY KEY,
   owner_user_id uuid NOT NULL REFERENCES local_users(id),
