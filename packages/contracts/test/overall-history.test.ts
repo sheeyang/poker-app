@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { decisionStep, decodeHistoryFilter, historyFilterParams, historyFilterSize, matchesHistoryFilter, normalizeHistoryFilter, type DecisionFacts } from '../src/index.js';
+import { decisionStep, decodeHistoryFilter, historyFilterParams, historyFilterSize, hasScoreFilter, matchesHistoryFilter, matchesScoreFilter, normalizeHistoryFilter, withoutScoreFilter, type DecisionFacts } from '../src/index.js';
 
 const facts = (override: Partial<DecisionFacts> = {}): DecisionFacts => ({ street: 'flop', position: 'CO', action: { type: 'raise', raiseTo: 60 }, mode: 'practice', completedAt: 1_000, potBigBlinds: 4.5, ...override });
 
@@ -42,4 +42,21 @@ test('each restriction narrows a decision on its own recorded facts, and a date 
 
 test('a decision opens its Replay Step from its Decision ID', () => {
   expect(decisionStep('hand-12/decision-3')).toBe('decision-3');
+});
+
+test('score ranges join the declared filter and its encoding, and are evaluated apart from the recorded facts', () => {
+  const filter = { street: ['flop'], decisionScore: { min: 0.25, max: 0.75 }, actionRankScore: { max: 0.5 } } as const;
+  expect(historyFilterParams(filter)).toEqual({ street: 'flop', decisionScoreMin: '0.25', decisionScoreMax: '0.75', actionRankScoreMax: '0.5' });
+  expect(decodeHistoryFilter(historyFilterParams(filter))).toEqual(filter);
+  expect(decodeHistoryFilter({ decisionScoreMin: '0.9', decisionScoreMax: 0.1 })).toEqual({ decisionScore: { min: 0.1, max: 0.9 } });
+  expect(historyFilterSize(filter)).toBe(3);
+  // The recorded facts never decide a score range.
+  expect(matchesHistoryFilter(filter, facts())).toBe(true);
+  expect(hasScoreFilter(filter)).toBe(true);
+  expect(hasScoreFilter({ street: ['flop'] })).toBe(false);
+  expect(withoutScoreFilter(filter)).toEqual({ street: ['flop'] });
+  expect(matchesScoreFilter(filter, { decisionScore: 0.5, actionRankScore: 0.5 })).toBe(true);
+  expect(matchesScoreFilter(filter, { decisionScore: 0.75, actionRankScore: 0.51 })).toBe(false);
+  expect(matchesScoreFilter(filter, { decisionScore: 0.2, actionRankScore: 0 })).toBe(false);
+  expect(matchesScoreFilter({}, { decisionScore: 0, actionRankScore: 0 })).toBe(true);
 });

@@ -21,7 +21,9 @@ export interface NumberRange { readonly min?: number; readonly max?: number }
  * The non-score filters. Every field is a restriction that applies when present; a choice field lists the values it
  * admits. `completed` is in server milliseconds and excludes Hands that carry no completion time whenever it is set.
  * `pot` is in big blinds, as the decision's actor faced it: every chip committed to the Hand so far, wagers on the
- * current street included. Score ranges (#110) join this declaration.
+ * current street included. The score ranges are on a 0 to 1 scale, under the Strategy the request names: a decision's
+ * Decision Score and Action Rank Score. They are not recorded facts, so only an analysis can decide them
+ * (`matchesScoreFilter`); the list and the summaries of the non-score set ignore them.
  */
 export interface HistoryFilter {
   readonly street?: readonly Street[];
@@ -30,6 +32,8 @@ export interface HistoryFilter {
   readonly mode?: readonly TableMode[];
   readonly completed?: NumberRange;
   readonly pot?: NumberRange;
+  readonly decisionScore?: NumberRange;
+  readonly actionRankScore?: NumberRange;
 }
 
 /** The recorded facts a non-score filter reads. */
@@ -52,6 +56,8 @@ const choiceDimensions = [
 const rangeDimensions = [
   { field: 'completed', min: 'completedFrom', max: 'completedTo', integer: true },
   { field: 'pot', min: 'potMin', max: 'potMax', integer: false },
+  { field: 'decisionScore', min: 'decisionScoreMin', max: 'decisionScoreMax', integer: false },
+  { field: 'actionRankScore', min: 'actionRankScoreMin', max: 'actionRankScoreMax', integer: false },
 ] as const;
 /** Every address and query parameter a filter uses, in encoding order. */
 export const historyFilterParameters: readonly string[] = [...choiceDimensions.map(d => d.param), ...rangeDimensions.flatMap(d => [d.min, d.max])];
@@ -107,6 +113,18 @@ export function matchesHistoryFilter(filter: HistoryFilter, facts: DecisionFacts
     && (!filter.completed || facts.completedAt !== undefined && within(filter.completed, facts.completedAt))
     && within(filter.pot, facts.potBigBlinds);
 }
+
+const scoreFields = ['decisionScore', 'actionRankScore'] as const;
+/** Whether the filter restricts either score, so that only a finished analysis can say what it admits. */
+export const hasScoreFilter = (filter: HistoryFilter): boolean => scoreFields.some(field => filter[field] !== undefined);
+/** The filter without its score ranges: the recorded-facts part, which the list and the analyses to be run are chosen by. */
+export function withoutScoreFilter(filter: HistoryFilter): HistoryFilter {
+  const { decisionScore: _decision, actionRankScore: _rank, ...rest } = filter;
+  return rest;
+}
+/** Whether a decision's two scores pass the filter's score ranges (inclusive); a filter with none admits everything. */
+export const matchesScoreFilter = (filter: HistoryFilter, scores: { readonly decisionScore: number; readonly actionRankScore: number }): boolean =>
+  within(filter.decisionScore, scores.decisionScore) && within(filter.actionRankScore, scores.actionRankScore);
 
 /**
  * One of the reader's own decisions as Overall History lists it: from a Hand they were dealt into, at any table they
@@ -183,3 +201,23 @@ export interface OverallHistorySummary {
   readonly summary: HistoryScoreSummary;
   readonly buckets?: readonly HistorySummaryBucket[];
 }
+
+/**
+ * `POST /api/overall-history/scored`: the decisions `filter` declares, score ranges included, under the Guest's Reference
+ * Strategy. A score range is decided by analysis, so nothing is listed until every analysis of the non-score set has
+ * succeeded: Analyzing (`pending`) reports how many have, Error stays until a Retry succeeds, and a partial list is never
+ * returned. `GET` (and the page of a complete one) takes `limit` and `offset`, as the plain list does.
+ */
+export type ScoredOverallHistory = {
+  readonly ok: true;
+  readonly requestId: string;
+  readonly attemptId: string;
+  readonly filter: HistoryFilter;
+  readonly referenceStrategy: StrategyDescriptor;
+  /** How many decisions the non-score restrictions admit, each needing an analysis. */
+  readonly progress: HistorySummaryProgress;
+} & (
+  | { readonly status: 'pending' }
+  | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
+  | { readonly status: 'complete'; readonly total: number; readonly offset: number; readonly decisions: readonly OverallHistoryDecision[] }
+);
