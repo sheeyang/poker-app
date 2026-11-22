@@ -1,6 +1,7 @@
 import type { ObservableTableSession, SavedTable, TableMode } from '@poker/contracts';
 import { blindsLabel, chips, gameLabel } from './table-model.js';
 import { handInProgress } from './presentation.js';
+import { historyPath } from './table-address.js';
 
 /** How play stands at the Current Table and the Guest's stack there: read from the copy its subscription already holds. */
 export interface LiveDetails { readonly tableSessionId: string; readonly handInProgress: boolean; readonly stack?: number }
@@ -19,8 +20,10 @@ export type SavedRow =
     /** Only the Current Table's row, and only while its live copy is loaded. */
     readonly live?: Pick<LiveDetails, 'handInProgress' | 'stack'>;
     readonly openedAt?: number;
+    /** The table's Table History: open to everyone who has been a Participant there, whether or not they still are. */
+    readonly history: string;
   }
-  /** A Closed Table: listed, but nobody can open it until replay arrives. */
+  /** A Closed Table: nobody can join or play there again, so it opens only into its Table History (ADR-0041). */
   | {
     readonly kind: 'closed';
     readonly tableSessionId: string;
@@ -29,6 +32,8 @@ export type SavedRow =
     readonly blinds: string;
     readonly ante?: string;
     readonly status: 'Closed';
+    readonly action: 'Table History';
+    readonly history: string;
     readonly openedAt?: number;
   };
 
@@ -46,7 +51,8 @@ export function liveDetails(tableSessionId: string, table: ObservableTableSessio
 /**
  * The rows of one mode's list: what each saved table says and offers, in the order to show them. The server's entries
  * carry only stored facts, among them when the Guest last opened the table; a table is the Current Table when it is an Online
- * Table the Guest has not left, and only that row takes the live details. A Closed Table offers nothing to do. Rows go
+ * Table the Guest has not left, and only that row takes the live details. Every row also offers its Table History, and a
+ * Closed Table offers nothing else. Rows go
  * most recently opened first, then tables never opened, in the order given.
  */
 export function savedRows(saved: readonly SavedTable[], mode: TableMode, live?: LiveDetails): SavedRow[] {
@@ -55,14 +61,15 @@ export function savedRows(saved: readonly SavedTable[], mode: TableMode, live?: 
     if (seatCount === undefined || !stakes) return { kind: 'unreadable', tableSessionId };
     const described = { tableSessionId, seatCount, name: gameLabel(seatCount), blinds: blindsLabel(stakes.smallBlind, stakes.bigBlind),
       ...(stakes.ante ? { ante: chips(stakes.ante) } : {}), ...(entry.openedAt !== undefined ? { openedAt: entry.openedAt } : {}) };
-    if (entry.closed) return { kind: 'closed', ...described, status: 'Closed' };
+    const history = historyPath(entry.mode, tableSessionId);
+    if (entry.closed) return { kind: 'closed', ...described, status: 'Closed', action: 'Table History', history };
     const kind = entry.mode === 'practice' ? 'practice' : entry.left ? 'away' : 'current';
     const details = kind === 'current' && live?.tableSessionId === tableSessionId ? { handInProgress: live.handInProgress, ...(live.stack !== undefined ? { stack: live.stack } : {}) } : undefined;
     return {
       kind, ...described,
       status: kind === 'practice' ? 'Practice' : kind === 'away' ? 'Not at this table' : 'Current Table',
       action: kind === 'practice' ? 'Continue' : kind === 'away' ? 'Return to table' : 'Back to game',
-      ...(details ? { live: details } : {}),
+      ...(details ? { live: details } : {}), history,
     };
   });
   // Array.prototype.sort is stable: tables never opened keep the order the server gave.

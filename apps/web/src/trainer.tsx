@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api, RequestFailure, retainNewestTable } from '@poker/client';
-import type { TableMode } from '@poker/contracts';
+import type { SavedTables, TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { useSession } from './session.js';
@@ -50,6 +50,8 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
     ? preview.error.code === 'not-found' ? 'not-found' : 'closed' : preview.data;
   const outcome = unread ? tableAddress(mode, selected, 'not-found', previewed) : read.data ? tableAddress(mode, selected, read.data) : undefined;
   const missing = outcome?.show === 'missing', closed = outcome?.show === 'closed';
+  // A Closed Table still opens into its Table History for anyone who played there: the shell's saved tables say who did.
+  const playedHere = useQuery<SavedTables>({ queryKey: ['table-sessions'], enabled: false }).data?.tables.some(saved => saved.tableSessionId === selected);
   const correctedTo = outcome?.show === 'corrected' ? outcome.to : undefined;
   // The analysis tab lives in the address; choosing one replaces the history entry so Back still leaves the table.
   const addressTab = analysisTabParam(useSearch({ strict: false }).analysis);
@@ -153,8 +155,10 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   if (closed) return <main id="main-table" className="address-missing address-closed">
     <SeatGlyph seats={0} dim />
     <h1>This table closed.</h1>
-    <p>Nobody can join or play at it any more. An Online Table closes after 24 hours without play, or when its owner leaves with no one else at it. It stays in your Online tables.</p>
-    <Link className="primary address-missing-link" to={listPath('online')}>Go to Online tables <Icon name="arrow" size={18} /></Link>
+    <p>Nobody can join or play at it any more. An Online Table closes after 24 hours without play, or when its owner leaves with no one else at it.{playedHere ? ' Its hands stay in its Table History for everyone who played.' : ''}</p>
+    {playedHere
+      ? <div className="button-row address-missing-link"><HistoryLink className="primary" mode="online" tableSessionId={selected}>Open Table History <Icon name="arrow" size={18} /></HistoryLink><Link className="button-link" to={listPath('online')}>Go to Online tables</Link></div>
+      : <Link className="primary address-missing-link" to={listPath('online')}>Go to Online tables <Icon name="arrow" size={18} /></Link>}
   </main>;
   if (missing) return <main id="main-table" className="address-missing">
     <Icon name="cards" size={34} />

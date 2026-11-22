@@ -9,12 +9,12 @@ const online = (id: string, left = false, openedAt?: number): SavedTable => ({ t
 describe('the saved rows of one mode', () => {
   it('lists only that mode, a Practice Table as Continue', () => {
     const rows = savedRows([practice('p'), online('o')], 'practice');
-    expect(rows).toEqual([{ kind: 'practice', tableSessionId: 'p', seatCount: 6, name: '6-max Hold’em', blinds: '10 / 20', action: 'Continue', status: 'Practice' }]);
+    expect(rows).toEqual([{ kind: 'practice', tableSessionId: 'p', seatCount: 6, name: '6-max Hold’em', blinds: '10 / 20', action: 'Continue', status: 'Practice', history: '/practice/p/history' }]);
   });
 
-  it('shows an Online Table the Guest is not at as "Not at this table", returning them to its address', () => {
+  it('shows an Online Table the Guest is not at as "Not at this table", returning them to its address, with its Table History still open to them', () => {
     const [row] = savedRows([online('o', true)], 'online');
-    expect(row).toMatchObject({ kind: 'away', action: 'Return to table', status: 'Not at this table', tableSessionId: 'o' });
+    expect(row).toMatchObject({ kind: 'away', action: 'Return to table', status: 'Not at this table', tableSessionId: 'o', history: '/online/o/history' });
     expect(row).not.toHaveProperty('live');
   });
 
@@ -25,10 +25,10 @@ describe('the saved rows of one mode', () => {
     expect(rows.find(row => row.tableSessionId === 'left')).not.toHaveProperty('live');
   });
 
-  it('shows a Closed Table as "Closed", with nothing to open it by, and never as the Current Table', () => {
+  it('shows a Closed Table as "Closed", opening only into its Table History, and never as the Current Table', () => {
     const closed: SavedTable = { ...online('c', true, 100), closed: true };
     const [row] = savedRows([closed], 'online', { tableSessionId: 'c', handInProgress: true, stack: 1 });
-    expect(row).toEqual({ kind: 'closed', tableSessionId: 'c', seatCount: 6, name: '6-max Hold’em', blinds: '10 / 20', status: 'Closed', openedAt: 100 });
+    expect(row).toEqual({ kind: 'closed', tableSessionId: 'c', seatCount: 6, name: '6-max Hold’em', blinds: '10 / 20', status: 'Closed', action: 'Table History', history: '/online/c/history', openedAt: 100 });
   });
 
   it('orders a Closed Table by when it was last opened, like any other', () => {
