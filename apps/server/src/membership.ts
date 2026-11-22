@@ -76,6 +76,22 @@ export async function membership(db: Database, tableSessionId: string, userId: s
   return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId, mode: rows[0].mode ?? legacyTableMode };
 }
 /**
+ * The Guest's Participant at a table they have ever joined, however their membership ended (Leave Table, Removal or
+ * the table closing), from the index alone: it loads nothing. Having been a Participant is what reading Table History
+ * and studying one's own decisions require (ADR-0041); play requires `membership`.
+ */
+export async function participation(db: Database, tableSessionId: string, userId: string): Promise<{ participantId: string } | undefined> {
+  const rows = await db.select({ participantId: tableMemberships.participantId }).from(tableMemberships)
+    .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId)));
+  return rows[0] && { participantId: rows[0].participantId };
+}
+/** The Guest who was ever the human Participant `participantId` at a table, from the index alone. */
+export async function participantGuest(db: Database, tableSessionId: string, participantId: string): Promise<string | undefined> {
+  const rows = await db.select({ userId: tableMemberships.userId }).from(tableMemberships)
+    .where(and(eq(tableMemberships.tableSessionId, tableSessionId), eq(tableMemberships.participantId, participantId)));
+  return rows[0]?.userId;
+}
+/**
  * Every table the Guest has joined, with the Guest's Participant at each, however their membership ended (Leave Table
  * or Removal, which are the same, or the table closing). A table they have left is marked `left`: its Join Link
  * returns them. A Closed Table is marked `closed` as well, its memberships all ended. Each carries its stored aggregate,

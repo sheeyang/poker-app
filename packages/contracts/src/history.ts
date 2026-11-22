@@ -1,4 +1,4 @@
-import type { Card, ChipAmount, HandId, ParticipantId, TableSessionId } from './index.js';
+import type { Card, ChipAmount, HandId, ParticipantId, TableMode, TableSessionId } from './index.js';
 
 /** One Participant dealt into a Hand, as the viewer may know them: hole cards only where they are the viewer's own or a showdown revealed them. */
 export interface TableHistoryPlayer {
@@ -22,9 +22,20 @@ export interface TableHistoryHand {
   readonly showdown: boolean;
   readonly payouts: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
 }
-/** The Table History list: every completed Hand of the Table Session, oldest first. */
+/**
+ * The Table History list: every completed Hand of the Table Session, oldest first. Anyone who has ever been a
+ * Participant at the table reads it (ADR-0041), so it names the table itself: a former Participant cannot read the
+ * live table view.
+ */
 export interface TableHistory {
   readonly tableSessionId: TableSessionId;
   readonly viewerParticipantId: ParticipantId;
+  readonly mode: TableMode;
+  readonly seatCount: number;
+  readonly stakes: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  /** The viewer is a former Participant: they left, were removed, or the table closed. They read; they cannot play. */
+  readonly left?: true;
+  /** A Closed Table: nobody can join or play there again. Its memberships have all ended, so it is `left` too. */
+  readonly closed?: true;
   readonly hands: readonly TableHistoryHand[];
 }

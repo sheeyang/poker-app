@@ -8,7 +8,7 @@ import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { afterHandRequestsScheduled, currentTable, membership, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { afterHandRequestsScheduled, currentTable, membership, participantGuest, participation, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
 import { createGuestQueue, type GuestQueue } from './guest-queue.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
@@ -693,6 +693,16 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     return binding && { participantId: binding.participantId, owner: cached.aggregate.ownerUserId === userId, mode: cached.aggregate.mode };
   }
   /**
+   * The Guest's Participant at a table where they have ever been one, joined or not, Closed Tables included: what
+   * reading Table History and studying one's own decisions require (ADR-0041). Like `access`, it loads nothing.
+   */
+  async function participant(id: string, userId: string): Promise<{ participantId: string } | undefined> {
+    const cached = tables.get(id);
+    if (!cached) return participation(db, id, userId);
+    const binding = humanBindings(cached.aggregate).find(human => human.userId === userId);
+    return binding && { participantId: binding.participantId };
+  }
+  /**
    * A handle on a table for a request from a Guest who is joined at it, or `undefined`: anyone else cannot learn
    * that it exists. Membership is checked before loading, against the stored memberships when the table is not in
    * memory, so a request from anyone not at the table never loads it.
@@ -782,11 +792,12 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   }
     /**
      * A table a Guest may read the history of, with their Participant there: a loaded table's committed copy, otherwise
-     * its stored record restored read-only. A read never loads the table, so it holds no handle, schedules nothing and
-     * subscribes to nothing. Today only a joined Participant may read; the rule for former Participants lives here.
+     * its stored record restored read-only. Anyone who has ever been a Participant there may read, after a Leave Table
+     * or Removal and at a Closed Table (ADR-0041). A read never loads the table, so it holds no handle, schedules
+     * nothing and subscribes to nothing.
      */
     async function readableTable(id: string, userId: string): Promise<{ participantId: string; aggregate: PersistedTableSession; game: CashGame } | undefined> {
-      const member = await access(id, userId);
+      const member = await participant(id, userId);
       if (!member) return undefined;
       const session = tables.get(id) ?? await readCommitted(id);
       return session && { participantId: member.participantId, aggregate: session.aggregate, game: session.game };
@@ -1332,47 +1343,60 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await bots?.runner.close();
       await Promise.allSettled([...queue.values(), sweeping]);
     }
+  /**
+   * Study of a Guest's own decisions at a table. A joined Participant's request holds the table and is captured in its
+   * turn, as before. Anyone else who has been a Participant there, after leaving or at a Closed Table, is captured from
+   * the committed record without loading the table (ADR-0041): study outlasts play, and never schedules it.
+   */
+  async function studying<T>(id: string, userId: string, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: CommittedSession & { participantId: string }, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
+    if (await access(id, userId)) return asMember(id, userId, async () => joined((await trainerConfigurations.current(userId)).referenceStrategy));
+    const table = await readableTable(id, userId);
+    if (!table) return undefined;
+    const { referenceStrategy } = await trainerConfigurations.current(userId);
+    if (stopped) throw new Error('Table Session is unavailable.');
+    return former(table, referenceStrategy);
+  }
+  /** A summary of a Participant's own decisions in a scope, frozen from the committed table; null for a Hand it does not have. */
+  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: import('@poker/contracts').ScoreSummaryScope, referenceStrategy: StrategyDescriptor): FrozenScoreSummary | null {
+    if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
+    const view = session.game.forParticipant(participantId).getView();
+    const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+    const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
+    return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members });
+  }
   function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope) {
-    return asMember(id, userId, async () => {
-      const { referenceStrategy } = await trainerConfigurations.current(userId);
-      return enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
+    return studying(id, userId, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
       const binding = session && memberBinding(session.aggregate, userId);
       if (!session || !binding) return undefined;
-      const participantId = binding.participantId;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
-      const view = session.game.forParticipant(participantId).getView();
-      const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
-      const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
-      return immutableData({ participantId, tableSessionId: id, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members });
-      });
-    });
+      return scoreSummaryOf(session, binding.participantId, scope, referenceStrategy);
+    }), (table, referenceStrategy) => scoreSummaryOf(table, table.participantId, scope, referenceStrategy));
   }
   return {
     // A job result is not a request, a subscription or scheduled work, so it holds no handle on its table (ADR-0035).
     // At a loaded table it is accepted in the table's turn, where historical work validates its frozen request/attempt
     // while the live revision may advance, without restarting the unload grace. At a table not in memory the
-    // Participant is checked against the stored record, which loads nothing.
+    // Participant is checked against the stored record, which loads nothing. A former Participant's study, and study at
+    // a Closed Table, is accepted too (ADR-0041): accepting writes only derived analysis, never poker state.
     acceptJobResult: async (id: string, participantId: string, accept: () => boolean) => {
       if (stopped) return false;
       if (tables.get(id)) return inTurn(id, async () => {
         const session = tables.get(id);
         return !stopped && !!session && isHuman(findBinding(session.aggregate, participantId)) && accept();
       });
-      const [row] = await db.select({ aggregate: tableSessions.aggregate, closed: tableSessions.closed }).from(tableSessions).where(eq(tableSessions.id, id));
-      const aggregate = row && !row.closed ? upgradeTableSession(row.aggregate) : undefined;
+      const [row] = await db.select({ aggregate: tableSessions.aggregate }).from(tableSessions).where(eq(tableSessions.id, id));
+      const aggregate = row && upgradeTableSession(row.aggregate);
       return !stopped && !!aggregate && isHuman(findBinding(aggregate, participantId)) && accept();
     },
     captureHandSummary: (id: string, userId: string, handId: string) => captureScoreSummary(id, userId, { scope: 'hand', handId }),
     captureSessionSummary: (id: string, userId: string) => captureScoreSummary(id, userId, { scope: 'table-session' }),
     /**
      * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
-     * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed.
+     * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed. A former
+     * Participant has no current decision, so they study only decisions they made.
      */
-    captureEvaluation: (id: string, userId: string, decisionId: string) => asMember(id, userId, async () => {
-      const { referenceStrategy } = await trainerConfigurations.current(userId);
-      return enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
+    captureEvaluation: (id: string, userId: string, decisionId: string) => studying(id, userId, referenceStrategy => enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
       const session = tables.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
@@ -1382,15 +1406,26 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const window = session.aggregate.schedule.actionWindow;
       const disallowed = window?.decisionId === decisionId ? !!window.liveAnalysisDisallowed : !session.aggregate.options.allowLiveAnalysis;
       return disallowed ? liveAnalysisRefused() : input;
-      });
+    }), (table, referenceStrategy): FrozenEvaluationInput | null => {
+      const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
+      return input?.acceptedAction ? input : null;
     }),
     /** The requesting Guest's joined Participant at a table, and whether they own it; undefined means not-found. */
     access,
-    /** The Guest to notify for a joined human Participant of a loaded table. */
-    controllerOf(id: string, participantId: string): string | undefined {
+    /**
+     * The requesting Guest's Participant at a table where they have ever been one, for reading their own study results;
+     * undefined means not-found.
+     */
+    participant,
+    /**
+     * The Guest to tell of a human Participant's study results, joined or former (ADR-0041): from the loaded table, or
+     * from the membership index, which loads nothing.
+     */
+    async studentOf(id: string, participantId: string): Promise<string | undefined> {
       const session = tables.get(id);
-      const binding = session && findBinding(session.aggregate, participantId);
-      return isHuman(binding) && binding.membership === 'joined' ? binding.userId : undefined;
+      if (!session) return participantGuest(db, id, participantId);
+      const binding = findBinding(session.aggregate, participantId);
+      return isHuman(binding) ? binding.userId : undefined;
     },
     read,
     readHistory,

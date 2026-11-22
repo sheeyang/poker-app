@@ -109,10 +109,11 @@ All table paths below start with `/api/table-sessions`:
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. When the Table Owner's Leave Table takes effect, ownership passes or the table closes in the same transition, see [Ownership](#ownership). Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until the Settle after its payout ends. They are never deferred. |
-| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the Hand ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list. |
+| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the Hand ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the live table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list, and its [Table History](#table-history) stays open to them. |
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
 | `POST /:id/set-table-password` | Table Owner only, Online Tables only, at any time, even during a Hand. Requires `requestId` and `tablePassword`, a string to set or change the password or `null` to remove it; there is no expected revision. See [Table Password](#table-password). |
+| `GET /:id/history` | Table History: `{ tableSessionId, viewerParticipantId, mode, seatCount, stakes, left?, closed?, hands }`, every completed Hand oldest first, as the viewer may see it (see [Table History](#table-history)). Any Guest who has ever been a Participant at the table reads it; anyone else gets 404 `not-found`. |
 | `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
@@ -144,6 +145,22 @@ allowed to make that request:
 
 At a Practice Table the owner is the only human, so neither applies there. Acting
 for a Bot remains the definitive rejection 403 `actor-not-authorized`.
+
+### Table History
+
+Table History belongs to the table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+Anyone who has ever been a Participant there reads all of it, read-only: after a Leave Table or a Removal, Hands
+completed since included, and at a [Closed Table](#closed-tables). That is the one exception to joined-only
+authorization above, and it covers only reading history and studying one's own decisions: `GET /:id/history`, and
+the `analysis`, `hand-summaries` and `session-summaries` routes with their reads and retries. Everything else,
+the live view and subscription included, still needs a joined Participant at a table that is not closed. A former
+Participant studies only decisions they made, never a current one. The response says `left: true` for a former
+Participant and `closed: true` (with `left: true`) at a Closed Table.
+
+Reading never loads a table. A loaded table serves the read from its committed copy; any other table is rebuilt
+read-only from its record, with no handle, subscription, schedule or scheduled work. Study works the same way for a
+former Participant, and accepting an analysis result writes only derived analysis, never poker state, so it is
+accepted at a Closed Table too.
 
 Analysis Results, scores and summaries belong to the Participant whose decisions
 they analyze. Each one uses the Reference Strategy its Guest had when it was requested, and only
@@ -370,10 +387,11 @@ not loaded closes with a database update and is never loaded.
 Closing ends every membership (the bindings and the membership index become `left`),
 clears the After-Hand Requests and `load_at_startup`, and publishes
 `table-membership-ended` with `closed: true` to everyone subscribed. A Closed Table is
-never loaded again. Its reads, subscriptions and every other route answer 404
+never loaded again. Its live reads, subscriptions and every route except Table History and study answer 404
 `not-found`, as to anyone not at a table; its Join Link preview and joining answer 410
 `table-closed`. It stays in the saved lists of everyone who was at it, marked
-`left: true, closed: true`, until replay arrives in M6. Its Guests are free to create or
+`left: true, closed: true`, and its [Table History](#table-history) stays readable to every former
+Participant, who can still study their own decisions there. Its Guests are free to create or
 join another Online Table.
 
 ### Owner controls: Bots and table options

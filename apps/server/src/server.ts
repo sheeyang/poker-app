@@ -104,12 +104,17 @@ export async function createServer(options: ServerOptions) {
   // reaching only its Human Controller, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
   function publishUserUpdate(participantId: string, message: AnalysisUpdate) {
-    const userId = mutations.controllerOf(message.tableSessionId, participantId);
-    for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message);
+    // A former Participant studies too, so their Guest may have to be found in the membership index.
+    void mutations.studentOf(message.tableSessionId, participantId).then(userId => {
+      for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message);
+    }, () => { /* Delivery cannot change a readable result. */ });
   }
-  /** The requesting Guest's own joined Participant: the only one whose study results they may read or retry. */
+  /**
+   * The requesting Guest's own Participant, joined or former (ADR-0041): the only one whose study results they may read
+   * or retry.
+   */
   async function participantAt(tableSessionId: string, userId: string) {
-    return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.access(tableSessionId, userId))?.participantId : undefined;
+    return /^[0-9a-f-]{36}$/.test(tableSessionId) ? (await mutations.participant(tableSessionId, userId))?.participantId : undefined;
   }
   app.get('/api/live', {
     websocket: true,
