@@ -43,7 +43,7 @@ function HandEntry({ row, selected, mode, tableSessionId }: { row: HandRow; sele
     <div className="history-hand-head">
       <h2><HistoryLink className="history-hand-link" mode={mode} tableSessionId={tableSessionId} handId={row.key}>{row.label}<Icon name="chevron" size={14} /></HistoryLink></h2>
       {row.completed && <span className="history-time numeric">{row.completed}</span>}
-      <span className={`history-tag${row.dealtIn ? ' is-dealt-in' : ''}`}>{row.dealtIn ? 'You were dealt in' : 'You watched'}</span>
+      <span className={`history-tag${row.dealtIn ? ' is-dealt-in' : ''}`}>{row.dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>
     </div>
     <div className="history-board" role="group" aria-label={row.board.length ? 'Final board' : 'No board was dealt'}>
       {row.board.length ? row.board.map(card => <Card key={card} card={card} small />) : <span className="history-muted">No board</span>}
@@ -176,7 +176,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
     <header className="replay-head">
       <h2 id="replay-title">{row?.label ?? (handId.startsWith('hand-') ? `Hand ${handId.slice(5)}` : 'Hand')}</h2>
       {row?.completed && <span className="history-time numeric">{row.completed}</span>}
-      {row && <span className={`history-tag${row.dealtIn ? ' is-dealt-in' : ''}`}>{row.dealtIn ? 'You were dealt in' : 'You watched'}</span>}
+      {row && <span className={`history-tag${row.dealtIn ? ' is-dealt-in' : ''}`}>{row.dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>}
       <HistoryLink className="replay-close" mode={mode} tableSessionId={tableSessionId}>All hands</HistoryLink>
     </header>
     {notFound ? <div className="replay-missing"><p>This hand isn’t in the table’s history yet. A hand can be replayed once it is complete.</p></div>
