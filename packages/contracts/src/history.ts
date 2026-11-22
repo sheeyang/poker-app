@@ -1,4 +1,5 @@
-import type { Card, ChipAmount, HandId, ParticipantId, TableSessionId } from './index.js';
+import type { Card, ChipAmount, ConcreteAction, DecisionId, HandId, ObservableCashGameState, ObservableGameConfiguration, ParticipantId, TableMode, TableSessionId } from './index.js';
+import type { DealInputs, PayoutInputs, ShowdownInputs, StreetInputs } from './presentation.js';
 
 /** One Participant dealt into a Hand, as the viewer may know them: hole cards only where they are the viewer's own or a showdown revealed them. */
 export interface TableHistoryPlayer {
@@ -27,4 +28,54 @@ export interface TableHistory {
   readonly tableSessionId: TableSessionId;
   readonly viewerParticipantId: ParticipantId;
   readonly hands: readonly TableHistoryHand[];
+}
+
+/**
+ * What a Replay Step's transition presents: how the table got from the step before to this one. Each part is the
+ * participant-safe shape its Presentation Phase's inputs use (ADR-0039), so the Trainer plays the same motion as at the
+ * live table, timed by the client. Only the parts the transition presents are present.
+ */
+export interface ReplayTransition {
+  /** The decision taken at the step before, which opens this transition. Public once taken. */
+  readonly acted?: { readonly participantId: ParticipantId; readonly action: ConcreteAction };
+  /** The deal, on the Hand's first step. A refill that came with the deal is not replayed: it is always empty. */
+  readonly deal?: DealInputs;
+  /** The street reveal this step follows. */
+  readonly street?: StreetInputs;
+  /** The showdown, on the result step of a Hand that reached one: the only step where it reveals hands. */
+  readonly showdown?: ShowdownInputs;
+  /** The payout, on the result step. */
+  readonly payout?: PayoutInputs;
+}
+/**
+ * One Replay Step of a completed Hand: before a decision (any actor's), after a street reveal (every all-in runout
+ * street included), or the Hand's result. Its state is the table as the viewer could see it at that point, never what a
+ * later showdown revealed: only the viewer's own hole cards before the result, and others' legal actions empty.
+ */
+export interface ReplayStep {
+  readonly kind: 'decision' | 'street' | 'result';
+  /** The table at this step. Before a decision it is the table as that decision opened. */
+  readonly state: ObservableCashGameState;
+  readonly transition: ReplayTransition;
+  /** Present when this step comes before one of the viewer's own decisions: its DecisionId. */
+  readonly viewerDecisionId?: DecisionId;
+}
+/** One completed Hand's Replay Steps for one viewer, in order, and the Game Configuration as it stood during the Hand. */
+export interface ObservableHandReplay {
+  readonly handId: HandId;
+  readonly configuration: ObservableGameConfiguration;
+  readonly steps: readonly ReplayStep[];
+}
+/**
+ * One completed Hand of Table History, replayed: its Replay Steps as the reading Participant may see them, with
+ * everything the Trainer needs to draw them without the live table, which a reader may no longer be at.
+ */
+export interface TableHandReplay extends ObservableHandReplay {
+  readonly tableSessionId: TableSessionId;
+  readonly mode: TableMode;
+  readonly viewerParticipantId: ParticipantId;
+  /** The Hand as the Table History list shows it. */
+  readonly hand: TableHistoryHand;
+  /** Everyone seated at any step, by name, in seat order at their first step: departed Guests and removed Bots included. */
+  readonly players: readonly { readonly participantId: ParticipantId; readonly name: string }[];
 }

@@ -1,4 +1,4 @@
-import type { ConcreteAction, LegalAction, ObservableGameConfiguration, ObservableGameView, ObservableHistoryEntry, ObservablePresentationEvent, ParticipantId } from '@poker/contracts';
+import { dealingOrder, type ConcreteAction, type LegalAction, type ObservableCashGameState, type ObservableGameConfiguration, type ObservableGameView, type ObservableHandReplay, type ObservableHistoryEntry, type ObservablePresentationEvent, type ParticipantId, type ReplayStep, type ReplayTransition } from '@poker/contracts';
 import { draftFaults } from './internal/draft-faults.js';
 import type { CashGameState, HandState } from './internal/state.js';
 import type { DraftEvent, ManagementEvent } from './internal/events.js';
@@ -8,7 +8,7 @@ import { revealLiveHands, settleHand } from './internal/settlement.js';
 export { createRandomSource, deriveSeed } from './internal/random.js';
 export { rankHand, compareHandRanks } from './internal/ranking.js';
 export type { HandRank } from './internal/ranking.js';
-export type { ObservableGameConfiguration, ObservableGameView, ParticipantId } from '@poker/contracts';
+export type { ObservableGameConfiguration, ObservableGameView, ObservableHandReplay, ParticipantId, ReplayStep } from '@poker/contracts';
 export interface HiddenGameConfiguration { readonly seed: string }
 export type GameConfiguration = ObservableGameConfiguration & HiddenGameConfiguration;
 export type CashGameCommand =
@@ -192,14 +192,49 @@ function validateState(state: CashGameState, configuration: GameConfiguration): 
   if (bankroll !== BigInt(state.bankroll)) throw new Error('Chip conservation invariant failed.');
 }
 export interface ParticipantViewOptions { readonly at: { readonly decisionId: string } }
+/**
+ * What the transition into a Replay Step presents, from the events since the step before (`segment`) and that step: the
+ * decision taken there, the deal, the street dealt, and at the result the showdown and payout. Its parts take the
+ * participant-safe shapes of Presentation Phase inputs. A street reveal or showdown sweeps the betting line as it stood
+ * at the step before; an all-in Hand's showdown waits for its result, after every runout street.
+ */
+function replayTransition(kind: ReplayStep['kind'], hand: HandState, segment: readonly DraftEvent[], previous: ReplayStep | undefined): ReplayTransition {
+  const acted = segment.find(event => event.type === 'acted');
+  const dealt = segment.find(event => event.type === 'board-dealt');
+  const line = (previous?.state.participants ?? []).filter(p => (p.wager ?? 0) > 0).map(p => p.participantId);
+  const cards = new Map(segment.flatMap(event => event.type === 'hole-cards-dealt' ? [[event.participantId, event.cardCount] as const] : []));
+  const sum = (transfers: readonly { readonly participantId: string; readonly amount: number }[], id: string) => transfers.reduce((total, t) => total + (t.participantId === id ? t.amount : 0), 0);
+  const shown = hand.participants.filter(p => p.revealed);
+  return {
+    ...(acted?.type === 'acted' ? { acted: { participantId: acted.participantId, action: projectAction(acted.action) } } : {}),
+    ...(segment.some(event => event.type === 'hand-started') ? { deal: {
+      dealt: dealingOrder(hand.participants, hand.buttonSeat).map(p => ({ participantId: p.participantId, cardCount: cards.get(p.participantId) ?? p.holeCards.length })),
+      blinds: segment.flatMap(event => event.type === 'forced-contribution' && event.kind !== 'ante' ? [event.participantId] : []),
+      refills: [],
+    } } : {}),
+    ...(dealt?.type === 'board-dealt' ? { street: { swept: line, cardCount: dealt.cards.length } } : {}),
+    ...(kind === 'result' && shown.length ? { showdown: { swept: line, shown: shown.map(p => ({ participantId: p.participantId, cardCount: p.holeCards.length })) } } : {}),
+    ...(kind === 'result' ? { payout: { awards: [...hand.participants].sort((a, b) => a.seat - b.seat).flatMap(({ participantId }) => {
+      const won = sum(hand.payouts, participantId), returned = sum(hand.returns, participantId);
+      return won + returned > 0 ? [{ participantId, won, returned }] : [];
+    }) } } : {}),
+  };
+}
 export class ParticipantCashGame {
-  constructor(private readonly read: (options?: ParticipantViewOptions) => ObservableGameView, private readonly project: (events: readonly CashGameEvent[]) => readonly ObservablePresentationEvent[]) {}
+  constructor(private readonly read: (options?: ParticipantViewOptions) => ObservableGameView, private readonly project: (events: readonly CashGameEvent[]) => readonly ObservablePresentationEvent[], private readonly replay: (handId: string) => ObservableHandReplay) {}
   getView(options?: ParticipantViewOptions): ObservableGameView { return this.read(options); }
   projectEvents(events: readonly CashGameEvent[]): readonly ObservablePresentationEvent[] { return this.project(events); }
+  /**
+   * A completed Hand's Replay Steps, as this Participant may see them (ADR-0041). Every completed Hand of the Table
+   * Session has them, for any Participant. Throws RangeError for a Hand that is not complete or not in this session.
+   */
+  getReplay(handId: string): ObservableHandReplay { return this.replay(handId); }
 }
 export class CashGame {
   #configuration: GameConfiguration;
   #state: CashGameState = { status: 'between-hands', buttonSeat: 1, nextButtonSeat: null, allowSeatChanges: true, participants: [], hands: [], commands: [], bankroll: 0 };
+  /** Set only while a replay reads a Hand: called on the draft each time a street is dealt, with the command's events so far. */
+  #streetDealt?: (draft: CashGameState, events: readonly DraftEvent[]) => void;
   private constructor(configuration: GameConfiguration) {
     this.#configuration = structuredClone(configuration);
     this.#state.allowSeatChanges = configuration.allowSeatChanges;
@@ -355,6 +390,7 @@ export class CashGame {
     const cards = Array.from({ length: hand.street === 'flop' ? 3 : 1 }, () => hand.deck[hand.drawnCardCount++]!);
     hand.board.push(...cards);
     events.push({ type: 'board-dealt', street: hand.street, cards });
+    this.#streetDealt?.(draft, events);
     this.#continueBetting(draft, hand, hand.buttonSeat, events);
   }
   /**
@@ -520,7 +556,7 @@ export class CashGame {
         case 'uncalled-return': case 'pot-awarded': return { type: event.type, participantId: event.participantId, amount: event.amount };
         case 'hand-completed': return { type: event.type, handId: event.handId };
       }
-    })));
+    })), handId => this.#readReplay(participantId, handId));
   }
   /**
    * Observable Session History covers the whole Table Session (ADR-0040): public information for every Hand, whenever
@@ -561,31 +597,78 @@ export class CashGame {
   #joined(participantId: ParticipantId): boolean {
     return this.#state.participants.some(p => p.participantId === participantId && p.joined);
   }
+  /**
+   * A completed Hand's Replay Steps (ADR-0041), rebuilt by replaying the accepted commands to the end of the Hand. A
+   * step comes after each command that opens a decision, after each street dealt (inside the command that deals it, so
+   * every all-in runout street is its own step), and after the command that completes the Hand. Before the result no
+   * step shows a hand a showdown will reveal: in an all-in runout the hands are turned up at the result.
+   */
+  #readReplay(participantId: ParticipantId, handId: string): ObservableHandReplay {
+    const target = this.#state.hands.find(hand => hand.handId === handId);
+    if (!target?.completed) throw new RangeError('This Hand is not a completed Hand of this Table Session.');
+    const replay = new CashGame(this.#configuration);
+    const steps: ReplayStep[] = [];
+    let configuration: ObservableGameConfiguration | undefined;
+    for (const command of this.#state.commands) {
+      const before = replay.#state.hands.at(-1);
+      const starts = command.type === 'start-hand' && replay.#state.hands.length + 1 === target.sequence;
+      if (!starts && !(before?.handId === handId && !before.completed)) {
+        if (!replayCommand(replay, command)?.ok) throw new Error('Accepted history could not be reconstructed.');
+        continue;
+      }
+      // Each step's transition is the command's events since the step before it.
+      let consumed = 0;
+      const step = (kind: ReplayStep['kind'], state: CashGameState, events: readonly DraftEvent[]) => {
+        const hand = state.hands.at(-1)!, segment = events.slice(consumed);
+        consumed = events.length;
+        const view = replay.#stateOf(participantId, state, { reveals: kind === 'result', actor: kind === 'decision' });
+        steps.push({ kind, state: view, transition: replayTransition(kind, hand, segment, steps.at(-1)), ...(kind === 'decision' && hand.actorId === participantId ? { viewerDecisionId: hand.decisionId! } : {}) });
+      };
+      replay.#streetDealt = (draft, events) => step('street', draft, events);
+      const result = replayCommand(replay, command);
+      replay.#streetDealt = undefined;
+      if (!result?.ok) throw new Error('Accepted history could not be reconstructed.');
+      if (starts) configuration = replay.#snapshot(participantId, [], true).configuration;
+      const hand = replay.#state.hands.at(-1)!;
+      if (hand.completed) { step('result', replay.#state, result.events); break; }
+      if (hand.decisionId && (starts || hand.decisionId !== before?.decisionId)) step('decision', replay.#state, result.events);
+    }
+    return immutable({ handId, configuration: configuration!, steps });
+  }
   /** `showsHand`: every historical view shows its Hand; a live view shows it only to those observing the live table. */
   #snapshot(participantId: ParticipantId, history: readonly ObservableHistoryEntry[], showsHand: boolean): ObservableGameView {
     const c = this.#configuration;
-    const hand = showsHand ? this.#state.hands.at(-1) : undefined;
     return immutable({
       configuration: {
         seatCount: c.seatCount, smallBlind: c.smallBlind, bigBlind: c.bigBlind, ante: c.ante,
         minimumBuyIn: c.minimumBuyIn, defaultBuyIn: c.defaultBuyIn, maximumBuyIn: c.maximumBuyIn,
         allowSeatChanges: this.#state.allowSeatChanges,
       },
-      state: { status: this.#state.status, buttonSeat: this.#state.buttonSeat, participants: this.#state.participants.map(p => {
-        const member = hand?.participants.find(member => member.participantId === p.participantId);
-        return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, anteContribution: member.anteContribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
-      }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId: hand?.actorId ?? null, legalActions: this.#legalActions(participantId),
-        ...(hand?.actorId === participantId ? { amountToCall: Math.min(this.#state.participants.find(p => p.participantId === participantId)!.stack, Math.max(0, hand.price - hand.participants.find(p => p.participantId === participantId)!.wager)) } : {}),
-        ...(hand ? { handId: hand.handId, decisionId: hand.decisionId, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) },
+      state: this.#stateOf(participantId, this.#state, { showsHand, reveals: true, actor: true }),
       history: structuredClone(history),
     });
   }
-  #legalActions(participantId: ParticipantId): LegalAction[] {
-    const hand = this.#state.hands.at(-1);
+  /**
+   * `state` as `participantId` may see it. `showsHand`: the Hand shows (by default). `reveals`: hands a showdown turned
+   * up show; otherwise only the viewer's own. `actor`: the current decision shows, with its actor; otherwise no one is
+   * to act.
+   */
+  #stateOf(participantId: ParticipantId, state: CashGameState, options: { readonly showsHand?: boolean; readonly reveals: boolean; readonly actor: boolean }): ObservableCashGameState {
+    const hand = options.showsHand === false ? undefined : state.hands.at(-1);
+    const actorId = options.actor ? hand?.actorId ?? null : null;
+    return { status: state.status, buttonSeat: state.buttonSeat, participants: state.participants.map(p => {
+      const member = hand?.participants.find(member => member.participantId === p.participantId);
+      return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, ...(member ? { inHand: true, handSeat: member.seat, folded: member.folded, allIn: member.allIn, contribution: member.contribution, anteContribution: member.anteContribution, wager: member.wager, cardCount: member.holeCards.length, ...(p.participantId === participantId || options.reveals && member.revealed ? { holeCards: [...member.holeCards] } : {}) } : {}) };
+    }), board: hand ? [...hand.board] : [], pots: hand ? hand.pots.map(p => ({ amount: p.amount, eligibleParticipantIds: [...p.eligibleParticipantIds] })) : [], actorId, legalActions: options.actor ? this.#legalActions(participantId, state) : [],
+      ...(hand && actorId === participantId ? { amountToCall: Math.min(state.participants.find(p => p.participantId === participantId)!.stack, Math.max(0, hand.price - hand.participants.find(p => p.participantId === participantId)!.wager)) } : {}),
+      ...(hand ? { handId: hand.handId, decisionId: options.actor ? hand.decisionId : null, street: hand.street, smallBlindParticipantId: hand.smallBlindParticipantId, bigBlindParticipantId: hand.bigBlindParticipantId, returns: hand.returns.map(p => ({ participantId: p.participantId, amount: p.amount })), payouts: hand.payouts.map(p => ({ participantId: p.participantId, amount: p.amount })) } : {}) };
+  }
+  #legalActions(participantId: ParticipantId, state: CashGameState = this.#state): LegalAction[] {
+    const hand = state.hands.at(-1);
     if (!hand || hand.completed || hand.actorId !== participantId) return [];
     const member = hand.participants.find(p => p.participantId === participantId)!;
     const actions: LegalAction[] = [{ type: 'fold' }, { type: member.wager < hand.price ? 'call' : 'check' }];
-    const participant = this.#state.participants.find(p => p.participantId === participantId)!;
+    const participant = state.participants.find(p => p.participantId === participantId)!;
     const maximum = member.wager + participant.stack;
     const reopened = member.actedAtPrice === null || hand.price - member.actedAtPrice >= hand.lastFullIncrement;
     if (reopened && maximum > hand.price && hand.participants.some(p => p.participantId !== participantId && !p.folded && !p.allIn)) {

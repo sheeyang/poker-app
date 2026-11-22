@@ -6,8 +6,11 @@ import { formatAndStakes, modeLabel } from './table-model.js';
 export const listPath = (mode: TableMode) => `/${mode}` as const;
 /** A table's one address, under its own mode. */
 export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/${tableSessionId}`;
-/** A table's Table History: its own screen, under its own address and mode. `hand` opens it at that Hand. */
-export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string) => `${tablePath(mode, tableSessionId)}/history${handId ? `?hand=${handId}` : ''}`;
+/**
+ * A table's Table History: its own screen, under its own address and mode. `hand` opens it at that Hand's replay, and
+ * `step` at that Replay Step of it (`stepKey`); a step needs its Hand.
+ */
+export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string, step?: string) => `${tablePath(mode, tableSessionId)}/history${handId ? `?hand=${handId}${step ? `&step=${step}` : ''}` : ''}`;
 /**
  * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
  * there is one; undefined outside the two modes. The table ID is as written: whether it names a table is for the server.
@@ -87,9 +90,13 @@ export function tableSearch(search: Record<string, unknown>): { analysis?: Analy
   return analysis ? { analysis } : {};
 }
 
-/** The search a Table History route accepts: `hand=hand-N`, the Hand to open. */
-export function historySearch(search: Record<string, unknown>): { hand?: string } {
-  return typeof search.hand === 'string' && /^hand-[0-9]+$/.test(search.hand) ? { hand: search.hand } : {};
+/**
+ * The search a Table History route accepts: `hand=hand-N`, the Hand to replay, and with it `step`, the Replay Step to open
+ * it at: `decision-N` (before that decision), `flop`, `turn`, `river` (after that street's reveal) or `result`.
+ */
+export function historySearch(search: Record<string, unknown>): { hand?: string; step?: string } {
+  if (typeof search.hand !== 'string' || !/^hand-[0-9]+$/.test(search.hand)) return {};
+  return typeof search.step === 'string' && /^(?:decision-[0-9]+|flop|turn|river|result)$/.test(search.step) ? { hand: search.hand, step: search.step } : { hand: search.hand };
 }
 
 const app = 'Poker Trainer';

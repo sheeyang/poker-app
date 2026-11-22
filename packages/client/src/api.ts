@@ -45,6 +45,8 @@ export const api = {
   markOpened: (id: string) => request<{ ok: true }>('/table-sessions/' + encodeURIComponent(id) + '/opened', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
   /** The table's completed Hands, as this Participant may see them. */
   readTableHistory: (id: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHistory>('/table-sessions/' + encodeURIComponent(id) + '/history', { signal }),
+  /** One completed Hand's Replay Steps, as this Guest may see them. */
+  readHandReplay: (id: string, handId: string, signal?: AbortSignal) => request<import('@poker/contracts').TableHandReplay>('/table-sessions/' + encodeURIComponent(id) + '/history/' + encodeURIComponent(handId), { signal }),
   readSession: (id: string, signal?: AbortSignal) => request<ObservableTableSession>('/table-sessions/' + encodeURIComponent(id), { signal }),
   createSession: (body: CreateTableSessionRequest) => request<CreationAcknowledgement>('/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
   seatParticipant: (id: string, body: SeatParticipantRequest) => request<MutationAcknowledgement>('/table-sessions/' + encodeURIComponent(id) + '/seat-participant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),

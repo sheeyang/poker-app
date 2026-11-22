@@ -1,4 +1,4 @@
-import type { TableHistory, TableHistoryHand } from '@poker/contracts';
+import type { ObservableHandReplay, TableHandReplay, TableHistory, TableHistoryHand } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
 import { findBinding, type PersistedTableSession } from './aggregate.js';
 
@@ -33,4 +33,19 @@ export function handsOf(aggregate: PersistedTableSession, game: CashGame, partic
     });
   }
   return hands;
+}
+
+/**
+ * One completed Hand's Replay Steps for one Participant (ADR-0041), as the engine projects them, with the Hand's list
+ * row and the names of everyone seated in it; `undefined` when `handId` is not a completed Hand of the table.
+ */
+export function handReplay(aggregate: PersistedTableSession, game: CashGame, participantId: string, handId: string): TableHandReplay | undefined {
+  let replay: ObservableHandReplay;
+  try { replay = game.forParticipant(participantId).getReplay(handId); } catch (error) { if (error instanceof RangeError) return undefined; throw error; }
+  const hand = handsOf(aggregate, game, participantId).find(row => row.handId === handId);
+  if (!hand) return undefined;
+  const seats = new Map<string, number>();
+  for (const step of replay.steps) for (const p of step.state.participants) if (p.seat !== null && !seats.has(p.participantId)) seats.set(p.participantId, p.seat);
+  const players = [...seats].sort((a, b) => a[1] - b[1]).map(([id]) => ({ participantId: id, name: findBinding(aggregate, id)?.name ?? '' }));
+  return { ...replay, tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, viewerParticipantId: participantId, hand, players };
 }
