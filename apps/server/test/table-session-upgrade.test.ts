@@ -120,7 +120,8 @@ test('a version-1 table loads as a Practice Table whose human keeps their analys
     await start();
   }
   expect(await read(t)).toEqual(resumed);
-});
+  // It starts the server twelve times, each start migrating the schema: far longer than one request on a loaded machine.
+}, 60_000);
 
 test('a version-1 table without its Trainer configuration still loads: the Guest\'s configuration applies either way', async () => {
   await stop();

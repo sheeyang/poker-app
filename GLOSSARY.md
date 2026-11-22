@@ -117,7 +117,7 @@ One point in a Replay: before each decision, after each street reveal including 
 _Avoid_: Frame, event, Beat
 
 **Overall History**:
-Every Table History a Guest can read, with its filters and Score Summaries across Table Sessions. It lists only the Guest's own decisions, from Hands they were dealt into; its non-score filters (street, Position, action type, table mode, completion date, pot in big blinds) apply at once.
+Every Table History a Guest can read, with its filters and Score Summaries across Table Sessions. It lists only the Guest's own decisions, from Hands they were dealt into; its non-score filters (street, Position, action type, table mode, completion date, pot in big blinds) apply at once. Its score filters (Decision Score and Action Rank Score ranges) narrow the list and its Score Summaries only once every analysis of the set the other filters admit has succeeded; until then they show Analyzing or Error.
 _Avoid_: Session summary, account history
 
 **Seat**:
@@ -125,7 +125,7 @@ A numbered table position that may be occupied by at most one Participant and ma
 _Avoid_: Participant, position name
 
 **Position**:
-A dealt-in Participant's place in a Hand relative to the button, fixed when the Hand is dealt: BTN, SB, BB, then UTG, UTG+1, UTG+2, LJ, HJ, CO, with middle positions dropped at smaller tables. Heads-up, the button posts the small blind and is BTN/SB. Participants not dealt in have no Position.
+A dealt-in Participant's place in a Hand relative to the button, fixed when the Hand is dealt: BTN, SB, BB, then UTG, UTG+1, UTG+2, LJ, HJ, CO, with middle positions dropped at smaller tables: two seats between the big blind and the button are UTG and CO, and a lone one (four dealt in) is CO. Heads-up, the button posts the small blind and is BTN/SB. Participants not dealt in have no Position.
 _Avoid_: Seat, seat number
 
 **Hand**:
