@@ -1451,7 +1451,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * when Table History asks (`history`), when it names a Strategy to compare, and always for a former Participant.
    */
   function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope, { strategy, history = false }: StudyRequest) {
-    const fromHistory = history || !!strategy ? userId : undefined;
+    const fromHistory = history || strategy ? userId : undefined;
     return studying(id, userId, strategy, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
       const binding = session && memberBinding(session.aggregate, userId);
