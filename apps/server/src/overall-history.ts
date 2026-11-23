@@ -1,9 +1,7 @@
 import { decisionSituation } from '@poker/research';
 import { historyBreakdownValue, historyBreakdownValues, matchesHistoryFilter, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision } from '@poker/contracts';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { CashGame } from '@poker/engine';
-import type { PersistedTableSession } from './aggregate.js';
-import { recordedConfiguration } from './projection.js';
+import { completedHands, tableFormat, type ReadableTable } from './readable-table.js';
 
 /**
  * Every decision the Participant made in a completed Hand of this table, as Overall History lists it (ADR-0041): their
@@ -11,23 +9,20 @@ import { recordedConfiguration } from './projection.js';
  * is never in it, and Hands completed or in progress without a decision of theirs add nothing. In decision order,
  * Hand by Hand. The facts (street, Position, pot in big blinds) are Research's, from the decision's recorded state.
  */
-export function ownDecisions(aggregate: PersistedTableSession, game: CashGame, participantId: string): OverallHistoryDecision[] {
-  const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
-  const numbers = new Map(game.getCompletedHands().map(hand => [hand.handId, hand.sequence]));
+export function ownDecisions(table: ReadableTable): OverallHistoryDecision[] {
+  const { aggregate, participantId } = table;
+  const format = tableFormat(aggregate);
   const decisions: OverallHistoryDecision[] = [];
-  for (const entry of game.forParticipant(participantId).getView().history) {
-    const handNumber = numbers.get(entry.handId);
-    if (!entry.result || handNumber === undefined) continue;
-    const completedAt = aggregate.handCompletedAt?.[entry.handId];
+  for (const { entry, handNumber, completedAt } of completedHands(table)) {
     for (const decision of entry.decisions) {
       if (decision.action.participantId !== participantId) continue;
       const me = decision.state.participants.find(participant => participant.participantId === participantId);
       decisions.push({
-        tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, seatCount, stakes: { smallBlind, bigBlind, ante },
+        tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, ...format,
         handId: entry.handId, handNumber, ...(completedAt !== undefined ? { completedAt } : {}),
         decisionId: decision.decisionId, action: decision.action.action,
         holeCards: [...me?.holeCards ?? []], board: [...decision.state.board],
-        ...decisionSituation(decision, bigBlind),
+        ...decisionSituation(decision, format.stakes.bigBlind),
       });
     }
   }

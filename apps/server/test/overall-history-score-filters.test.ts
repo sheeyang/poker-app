@@ -136,23 +136,23 @@ test('with every analysis complete, score ranges narrow the list, and combine wi
   await completed(f, cookie, everything.requestId);
   expect(listed(await f.current(cookie, everything.requestId))).toHaveLength(5);
   // The four check/call decisions score 1; the fold scores 0.
-  const good = await f.ask(cookie, { decisionScore: { min: 0.5 } });
-  await completed(f, cookie, good.requestId);
-  const goodList = await f.current(cookie, good.requestId);
-  expect(goodList).toMatchObject({ status: 'complete', total: 4, offset: 0, progress: { succeeded: 5, total: 5 }, referenceStrategy: highestProbabilityPlayingStrategy });
-  expect(listed(goodList)).toEqual(expect.arrayContaining(['preflop:call', 'flop:check', 'turn:check', 'river:check']));
-  expect(listed(goodList)).not.toContain('preflop:fold');
-  const bad = await f.ask(cookie, { actionRankScore: { max: 0.5 } });
-  await completed(f, cookie, bad.requestId);
-  expect(listed(await f.current(cookie, bad.requestId))).toEqual(['preflop:fold']);
-  // Combined with a non-score filter: only the preflop decisions, and of them the good one.
-  const preflopGood = await f.ask(cookie, { street: ['preflop'], decisionScore: { min: 0.5 }, actionRankScore: { min: 1 } });
-  await completed(f, cookie, preflopGood.requestId);
-  expect(listed(await f.current(cookie, preflopGood.requestId))).toEqual(['preflop:call']);
+  const scoredHigh = await f.ask(cookie, { decisionScore: { min: 0.5 } });
+  await completed(f, cookie, scoredHigh.requestId);
+  const scoredHighList = await f.current(cookie, scoredHigh.requestId);
+  expect(scoredHighList).toMatchObject({ status: 'complete', total: 4, offset: 0, progress: { succeeded: 5, total: 5 }, referenceStrategy: highestProbabilityPlayingStrategy });
+  expect(listed(scoredHighList)).toEqual(expect.arrayContaining(['preflop:call', 'flop:check', 'turn:check', 'river:check']));
+  expect(listed(scoredHighList)).not.toContain('preflop:fold');
+  const scoredLow = await f.ask(cookie, { actionRankScore: { max: 0.5 } });
+  await completed(f, cookie, scoredLow.requestId);
+  expect(listed(await f.current(cookie, scoredLow.requestId))).toEqual(['preflop:fold']);
+  // Combined with a non-score filter: only the preflop decisions, and of them the one scoring high.
+  const preflopScoredHigh = await f.ask(cookie, { street: ['preflop'], decisionScore: { min: 0.5 }, actionRankScore: { min: 1 } });
+  await completed(f, cookie, preflopScoredHigh.requestId);
+  expect(listed(await f.current(cookie, preflopScoredHigh.requestId))).toEqual(['preflop:call']);
   // Only the preflop set needed analysis.
-  expect(preflopGood.progress.total).toBe(2);
+  expect(preflopScoredHigh.progress.total).toBe(2);
   // Paging, with the same order as the list.
-  const page = await f.current(cookie, good.requestId, '?limit=3&offset=3');
+  const page = await f.current(cookie, scoredHigh.requestId, '?limit=3&offset=3');
   expect(page).toMatchObject({ status: 'complete', total: 4, offset: 3 });
   expect(page.status === 'complete' && page.decisions).toHaveLength(1);
   // A set with no match is complete and empty.
@@ -226,28 +226,28 @@ const summarized = (fixture: Fixture, cookie: string, requestId: string) => expe
 
 test('score ranges narrow a Score Summary and each of its buckets, once every analysis of the set has succeeded', async () => {
   const { cookie } = await twoTables();
-  // The four check/call decisions score 1, the fold 0, so the summary of the good ones is 100 / 100 over 4 decisions.
-  const good = await summarize(f, cookie, { decisionScore: { min: 0.5 } });
-  expect(good.filter).toEqual({ decisionScore: { min: 0.5 } });
-  await summarized(f, cookie, good.requestId);
-  expect((await summaryNow(f, cookie, good.requestId)).summary).toEqual({ status: 'complete', decisionCount: 4, progress: { succeeded: 5, total: 5 }, averages: { decisionScore: 1, actionRankScore: 1 } });
+  // The four check/call decisions score 1, the fold 0, so the summary of those scoring at least 0.5 is 100 / 100 over 4 decisions.
+  const scoredHigh = await summarize(f, cookie, { decisionScore: { min: 0.5 } });
+  expect(scoredHigh.filter).toEqual({ decisionScore: { min: 0.5 } });
+  await summarized(f, cookie, scoredHigh.requestId);
+  expect((await summaryNow(f, cookie, scoredHigh.requestId)).summary).toEqual({ status: 'complete', decisionCount: 4, progress: { succeeded: 5, total: 5 }, averages: { decisionScore: 1, actionRankScore: 1 } });
   // Below half: only the fold, scoring 0.
-  const bad = await summarize(f, cookie, { actionRankScore: { max: 0.5 } });
-  await summarized(f, cookie, bad.requestId);
-  expect((await summaryNow(f, cookie, bad.requestId)).summary).toEqual({ status: 'complete', decisionCount: 1, progress: { succeeded: 5, total: 5 }, averages: { decisionScore: 0, actionRankScore: 0 } });
+  const scoredLow = await summarize(f, cookie, { actionRankScore: { max: 0.5 } });
+  await summarized(f, cookie, scoredLow.requestId);
+  expect((await summaryNow(f, cookie, scoredLow.requestId)).summary).toEqual({ status: 'complete', decisionCount: 1, progress: { succeeded: 5, total: 5 }, averages: { decisionScore: 0, actionRankScore: 0 } });
   // A range nothing falls in is an empty summary, with no score.
   const none = await summarize(f, cookie, { decisionScore: { min: 0.2, max: 0.8 } });
   await summarized(f, cookie, none.requestId);
   expect((await summaryNow(f, cookie, none.requestId)).summary).toEqual({ status: 'empty', decisionCount: 0, progress: { succeeded: 5, total: 5 } });
-  // By action: the good calls and checks are in their buckets; the fold's bucket is empty, with no score.
+  // By action: the calls and checks, scoring 1, are in their buckets; the fold's bucket is empty, with no score.
   const byAction = await summarize(f, cookie, { decisionScore: { min: 0.5 } }, 'action');
   await summarized(f, cookie, byAction.requestId);
   const buckets = (await summaryNow(f, cookie, byAction.requestId)).buckets!;
   expect(Object.fromEntries(buckets.map(bucket => [bucket.value, bucket.summary.status === 'complete' ? [bucket.summary.decisionCount, bucket.summary.averages.decisionScore] : [bucket.summary.status, bucket.summary.decisionCount]]))).toEqual({ fold: ['empty', 0], check: [3, 1], call: [1, 1] });
   // Combined with a street filter, only the preflop set is analyzed and summarized.
-  const preflopBad = await summarize(f, cookie, { street: ['preflop'], decisionScore: { max: 0.5 } });
-  await summarized(f, cookie, preflopBad.requestId);
-  expect((await summaryNow(f, cookie, preflopBad.requestId)).summary).toEqual({ status: 'complete', decisionCount: 1, progress: { succeeded: 2, total: 2 }, averages: { decisionScore: 0, actionRankScore: 0 } });
+  const preflopScoredLow = await summarize(f, cookie, { street: ['preflop'], decisionScore: { max: 0.5 } });
+  await summarized(f, cookie, preflopScoredLow.requestId);
+  expect((await summaryNow(f, cookie, preflopScoredLow.requestId)).summary).toEqual({ status: 'complete', decisionCount: 1, progress: { succeeded: 2, total: 2 }, averages: { decisionScore: 0, actionRankScore: 0 } });
 });
 
 test('a score-filtered Score Summary is Analyzing with no decision count or mean until every analysis succeeds, and an Error until Retry', async () => {

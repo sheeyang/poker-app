@@ -1,9 +1,9 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@poker/client';
 import { historyBreakdowns, historyFilterParams, strategyToken, type HistoryBreakdown, type HistoryFilter, type HistoryScoreSummary, type OverallHistorySummary, type StrategyDescriptor } from '@poker/contracts';
 import { bucketLabel, summaryFigures } from './overall-history.js';
 import { strategyName } from './strategy-select.js';
 import { ColumnHead, CompareBar, useSummaryStrategies } from './summary-comparison.js';
+import { usePolledRequest } from './polled-request.js';
 
 const breakdownNames: Readonly<Record<HistoryBreakdown, string>> = { street: 'Street', position: 'Position', action: 'Action', mode: 'Table' };
 const running = (summary: OverallHistorySummary | undefined) => !!summary && [summary.summary, ...summary.buckets?.map(bucket => bucket.summary) ?? []].some(each => each.status === 'pending');
@@ -16,31 +16,14 @@ const failed = (summary: OverallHistorySummary | undefined) => !!summary && [sum
  * one it is the Guest's current Reference Strategy. Each Strategy is its own request, with its own progress and Error.
  */
 function useOverallHistorySummary(filter: HistoryFilter, breakdown: HistoryBreakdown | undefined, asked: boolean, strategy: StrategyDescriptor | undefined) {
-  const queryClient = useQueryClient();
-  const key = JSON.stringify([historyFilterParams(filter), breakdown ?? null, strategy ? strategyToken(strategy) : null]);
-  const created = useQuery({
-    queryKey: ['overall-history-summary', key], enabled: asked, staleTime: Number.POSITIVE_INFINITY, gcTime: 0, retry: false, placeholderData: keepPreviousData,
-    queryFn: () => api.requestOverallHistorySummary(filter, breakdown, strategy),
+  const summary = usePolledRequest({
+    key: ['overall-history-summary', JSON.stringify([historyFilterParams(filter), breakdown ?? null, strategy ? strategyToken(strategy) : null])], stateKey: requestId => ['overall-history-summary-state', requestId],
+    enabled: asked, previous: 'request', running,
+    create: () => api.requestOverallHistorySummary(filter, breakdown, strategy),
+    read: (requestId, signal) => api.readOverallHistorySummary(requestId, signal),
+    retry: requestId => api.retryOverallHistorySummary(requestId),
   });
-  const requestId = created.data?.requestId;
-  const current = useQuery({
-    queryKey: ['overall-history-summary-state', requestId], enabled: !!requestId && !created.isPlaceholderData, initialData: created.data, retry: false,
-    refetchInterval: query => running(query.state.data) && !query.state.error ? 1000 : false,
-    queryFn: ({ signal }) => api.readOverallHistorySummary(requestId!, signal),
-  });
-  const retry = useMutation({
-    mutationFn: (id: string) => api.retryOverallHistorySummary(id),
-    onSuccess: summary => queryClient.setQueryData(['overall-history-summary-state', summary.requestId], summary),
-  });
-  const data = created.isPlaceholderData ? created.data : current.data ?? created.data;
-  return {
-    data, stale: created.isPlaceholderData,
-    error: created.error ?? current.error ?? retry.error,
-    loading: asked && !data && created.isFetching,
-    retrying: retry.isPending,
-    retry: () => { if (data) retry.mutate(data.requestId); },
-    again: () => { retry.reset(); void created.refetch(); },
-  };
+  return { ...summary, loading: asked && !summary.data && summary.asking };
 }
 
 /** Both means, out of 100, beside how many decisions they cover. */

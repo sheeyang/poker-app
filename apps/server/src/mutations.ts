@@ -17,13 +17,15 @@ import type { AcceptanceTransactions, AcceptanceFaults } from './db/acceptance.j
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { FrozenHistorySummary, FrozenScoredHistory, FrozenScoreSummary } from './summaries.js';
+import type { FrozenHistorySummary, FrozenScoreSummary } from './summaries.js';
+import type { FrozenScoredHistory } from './scored-history.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
 import { handReplay, tableHistory } from './table-history.js';
 import { filtered, newestFirst, ownDecisions, summarySets, type StudiedDecision } from './overall-history.js';
+import { tableFormat, type ReadableTable } from './readable-table.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -803,7 +805,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * or Removal and at a Closed Table (ADR-0041). A read never loads the table, so it holds no handle, schedules
      * nothing and subscribes to nothing.
      */
-    async function readableTable(id: string, userId: string): Promise<{ participantId: string; aggregate: PersistedTableSession; game: CashGame } | undefined> {
+    async function readableTable(id: string, userId: string): Promise<ReadableTable | undefined> {
       const member = await participant(id, userId);
       if (!member) return undefined;
       const session = tables.get(id) ?? await readCommitted(id);
@@ -812,7 +814,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     /** The Table History list for a Guest who may read this table's history; `undefined` for anyone else. */
     async function readHistory(id: string, userId: string): Promise<TableHistory | undefined> {
       const table = await readableTable(id, userId);
-      return table && tableHistory(table.aggregate, table.game, table.participantId);
+      return table && tableHistory(table);
     }
     /**
      * The Guest-scoped Overall History (ADR-0041): every decision the Guest made, in a Hand they were dealt into, at any table
@@ -824,7 +826,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const decisions: OverallHistoryDecision[] = [];
       for (const { tableSessionId } of await participations(db, userId)) {
         const table = await readableTable(tableSessionId, userId);
-        if (table) decisions.push(...ownDecisions(table.aggregate, table.game, table.participantId));
+        if (table) decisions.push(...ownDecisions(table));
       }
       return newestFirst(filtered(decisions, filter));
     }
@@ -840,7 +842,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const table = await readableTable(tableSessionId, userId);
         if (!table) continue;
         const current = table.game.forParticipant(table.participantId).getView();
-        for (const decision of filtered(ownDecisions(table.aggregate, table.game, table.participantId), filter)) {
+        for (const decision of filtered(ownDecisions(table), filter)) {
           const input = captureEvaluation(table, table.participantId, decision.decisionId, referenceStrategy, current);
           if (input?.acceptedAction) decisions.push({ decision, input });
         }
@@ -869,7 +871,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      */
     async function readReplay(id: string, userId: string, handId: string): Promise<TableHandReplay | 'hand-not-found' | undefined> {
       const table = await readableTable(id, userId);
-      return table && (handReplay(table.aggregate, table.game, table.participantId, handId) ?? 'hand-not-found');
+      return table && (handReplay(table, handId) ?? 'hand-not-found');
     }
     /**
      * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
@@ -1324,8 +1326,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return (await savedTableEntries(db, userId)).map(({ stored, ...entry }): SavedTable => {
         const aggregate = upgradeTableSession(stored);
         if (!aggregate) return entry;
-        const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
-        return { ...entry, seatCount, stakes: { smallBlind, bigBlind, ante } };
+        return { ...entry, ...tableFormat(aggregate) };
       });
     }
     async function readPersistedSession(id: string) {
@@ -1428,7 +1429,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * It studies under the Guest's Reference Strategy, or under `strategy` when one is named, without reading their
    * Trainer Configuration.
    */
-  async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: CommittedSession & { participantId: string }, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
+  async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: ReadableTable, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
     const chosen = async () => strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
     if (await access(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
     const table = await readableTable(id, userId);

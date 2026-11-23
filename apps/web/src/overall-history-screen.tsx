@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
+import { usePolledRequest } from './polled-request.js';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api } from '@poker/client';
 import { decisionActionTypes, decisionStreets, hasScoreFilter, historyFilterParams, historyFilterSize, withoutScoreFilter, historyModes, positions, type DecisionActionType, type HistoryBreakdown, type HistoryFilter, type StrategyDescriptor, type Position, type Street, type TableMode } from '@poker/contracts';
@@ -115,19 +116,14 @@ function DecisionEntry({ row }: { row: DecisionRow }) {
  * read each second while Analyzing, and the list arrives only once every analysis has succeeded. `limit` grows with Show more.
  */
 function useScoredHistory(filter: HistoryFilter, enabled: boolean, limit: number) {
-  const queryClient = useQueryClient();
-  const key = JSON.stringify(historyFilterParams(filter));
-  const created = useQuery({ queryKey: ['overall-history-scored', key], enabled, staleTime: Number.POSITIVE_INFINITY, gcTime: 0, retry: false, queryFn: () => api.askScoredOverallHistory(filter, { limit: pageSize }) });
-  const requestId = created.data?.requestId;
-  const current = useQuery({
-    queryKey: ['overall-history-scored-state', requestId, limit], enabled: !!requestId, retry: false, placeholderData: keepPreviousData,
-    initialData: limit === pageSize ? created.data : undefined,
-    refetchInterval: query => query.state.data?.status === 'pending' && !query.state.error ? 1000 : false,
-    queryFn: ({ signal }) => api.readScoredOverallHistory(requestId!, { limit }, signal),
+  const scored = usePolledRequest({
+    key: ['overall-history-scored', JSON.stringify(historyFilterParams(filter))], stateKey: requestId => ['overall-history-scored-state', requestId, limit],
+    enabled, previous: 'state', seed: limit === pageSize, running: state => state.status === 'pending',
+    create: () => api.askScoredOverallHistory(filter, { limit: pageSize }),
+    read: (requestId, signal) => api.readScoredOverallHistory(requestId, { limit }, signal),
+    retry: requestId => api.retryScoredOverallHistory(requestId, { limit }),
   });
-  const retry = useMutation({ mutationFn: (id: string) => api.retryScoredOverallHistory(id, { limit }), onSuccess: next => queryClient.setQueryData(['overall-history-scored-state', next.requestId, limit], next) });
-  const data = enabled ? current.data ?? created.data : undefined;
-  return { data, error: created.error ?? current.error ?? retry.error, retrying: retry.isPending, retry: () => { if (data) retry.mutate(data.requestId); }, again: () => { retry.reset(); void created.refetch(); } };
+  return { data: enabled ? scored.data : undefined, error: scored.error, retrying: scored.retrying, retry: scored.retry, again: scored.again };
 }
 
 /** What stands in for the list while a score range waits on its analyses: Analyzing with progress, Error with Retry, or a failed request. */

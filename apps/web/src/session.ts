@@ -6,6 +6,7 @@ import { api, RequestFailure } from '@poker/client';
 import type { ObservableTableSession, SavedTables, TableMode, ActRequest, AddBotRequest, SetTableOptionsRequest, SetTablePasswordRequest, CreateTableSessionRequest, CreationAcknowledgement, MutationAcknowledgement, ParticipantManagementKind, ParticipantManagementRequest, RetryBotRequest, SeatParticipantRequest, SetPlayingStrategyRequest, SetTrainerConfigurationRequest, StartHandRequest, TrainerConfigurationAcknowledgement } from '@poker/contracts';
 import { listPath, tablePath } from './table-address.js';
 import { withMembershipEnded } from './current-table.js';
+import { trainerConfigurationKey } from './trainer-configuration.js';
 
 type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'start'; readonly body: StartHandRequest }
@@ -84,7 +85,7 @@ export function useCommand() {
       setPending(null);
       // The Guest's own change: every table view presents it, this one included.
       if (attempt.kind === 'trainer') {
-        await Promise.all([queryClient.invalidateQueries({ queryKey: ['trainer-configuration'] }), queryClient.invalidateQueries({ queryKey: ['table-session'] })]);
+        await Promise.all([queryClient.invalidateQueries({ queryKey: trainerConfigurationKey }), queryClient.invalidateQueries({ queryKey: ['table-session'] })]);
         return;
       }
       const result = acknowledgement as CreationAcknowledgement | MutationAcknowledgement;
