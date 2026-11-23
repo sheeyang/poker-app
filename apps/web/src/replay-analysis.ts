@@ -1,9 +1,9 @@
 import { useEffect, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import type { DecisionAnalysis, StrategyDescriptor, TableHandReplay } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource, type LiveConsumers } from '@poker/client';
 import { useShell } from './app-shell.js';
 import { comparisonTargets, type ComparisonTarget } from './comparison.js';
+import { useTrainerConfiguration } from './trainer-configuration.js';
 
 /**
  * Fans the shell's one live connection out to every analysis on show. The shell has room for one consumer, and a
@@ -28,8 +28,7 @@ type LiveHub = ReturnType<typeof createLiveHub>;
  */
 export function useReplayComparison(replay: TableHandReplay | undefined, index: number, compared: readonly StrategyDescriptor[]) {
   const { identity, consumeLive } = useShell();
-  // The Guest's Trainer Configuration: one choice for every table, read outside any table so a former table works too.
-  const configuration = useQuery({ queryKey: ['trainer-configuration'], queryFn: ({ signal }) => api.readTrainerConfiguration(signal), enabled: identity.isSuccess });
+  const configuration = useTrainerConfiguration(identity.isSuccess);
   const reference = configuration.data?.trainerConfiguration.referenceStrategy;
   const hub = useMemo(createLiveHub, []);
   useEffect(() => { consumeLive(hub.consumers); return () => consumeLive(null); }, [consumeLive, hub]);

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ConcreteAction, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type StrategyDescriptor, type TableHandReplay } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, type ConcreteAction, type DecisionAnalysis, type ObservableGameView, type ObservableTableSession, type ScoreSummary, type StrategyDescriptor, type TableHandReplay } from '@poker/contracts';
 import { HighestProbabilitySelector, type PolicyResult } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
@@ -355,4 +355,50 @@ test('a Strategy can also be named at an accepted decision without asking from h
   const state: DecisionAnalysis = await response.json();
   expect(state).toMatchObject({ decisionId, referenceStrategy: highestProbabilityPlayingStrategy, scoredDecision: expect.any(Object) });
   await complete(f, t, state.requestId);
+});
+
+// Table History asks for its Score Summaries, compared Strategies' included, as `history-analysis` (story 71).
+const summarize = (g: Fixture, t: { id: string; cookie: string }, body: object) => post(g, '/table-sessions/' + t.id + '/session-summaries', t.cookie, body);
+const post = (g: Fixture, path: string, cookie: string, body: unknown) => fetch(g.base + '/api' + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
+const summary = async (g: Fixture, t: { id: string; cookie: string }, requestId: string): Promise<ScoreSummary> => (await fetch(g.base + '/api/table-sessions/' + t.id + '/summaries/' + requestId, { headers: { cookie: t.cookie } })).json();
+/** Every held evaluation the fake Strategy is waiting to answer, under any Strategy. */
+const outstanding = (g: Fixture) => g.evaluations.filter(evaluation => !evaluation.answered).length;
+
+test('Table History\'s Score Summaries, a compared Strategy\'s included, never have more than 8 analyses outstanding for the Guest, and both complete', async () => {
+  const g = await fixture(32);
+  fixtures.push(g);
+  const t = await g.practice();
+  for (let hand = 0; hand < 3; hand++) await g.checkDown(t);
+  await g.idle();
+  expect((await g.configure(t, highestProbabilityPlayingStrategy)).status).toBe(200);
+  g.hold();
+  const asked = await Promise.all([summarize(g, t, { history: true }), summarize(g, t, { strategy: baselinePlayingStrategy })]);
+  expect(asked.map(response => response.status)).toEqual([200, 200]);
+  const states: ScoreSummary[] = await Promise.all(asked.map(response => response.json()));
+  expect(states.map(state => [state.status, state.decisionCount])).toEqual([['pending', 12], ['pending', 12]]);
+  await expect.poll(() => outstanding(g)).toBe(8);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(outstanding(g)).toBe(8);
+  g.release();
+  for (const state of states) await expect.poll(async () => (await summary(g, t, state.requestId)).status).toBe('complete');
+  expect((await summary(g, t, states[1]!.requestId)).referenceStrategy).toEqual(baselinePlayingStrategy);
+});
+
+test('analysis under a named Strategy runs as history-analysis under the cap of 8, whether or not it is asked from history', async () => {
+  const g = await fixture(32);
+  fixtures.push(g);
+  const t = await g.practice();
+  for (let hand = 0; hand < 3; hand++) await g.checkDown(t);
+  const decisions = (await Promise.all(['hand-1', 'hand-2', 'hand-3'].map(hand => g.ownDecisions(t, hand)))).flat();
+  expect(decisions).toHaveLength(12);
+  await g.idle();
+  g.hold();
+  // A joined Participant naming a Strategy, without asking from history.
+  const named = await Promise.all(decisions.map(decisionId => g.analyzeUnder(t, decisionId, baselinePlayingStrategy, {})));
+  expect(named.map(response => response.status)).toEqual(Array(12).fill(200));
+  await expect.poll(() => outstanding(g)).toBe(8);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(outstanding(g)).toBe(8);
+  g.release();
+  for (const response of named) await complete(g, t, ((await response.json()) as DecisionAnalysis).requestId);
 });

@@ -1,4 +1,5 @@
 import { createScoreSummaries } from './summaries.js';
+import { createScoredHistory } from './scored-history.js';
 import { createAnalysis } from './analysis.js';
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
 import { createHistoryAnalysisScheduler } from './history-analysis.js';
@@ -24,7 +25,7 @@ import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './gues
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
-import { notFound, outcomeStatus, reject } from './rejections.js';
+import { notFound, outcomeStatus, reject, unauthenticated } from './rejections.js';
 
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void;
   /** The clock for all play timing. Defaults to system time; tests substitute a manually advanced clock. */
@@ -101,6 +102,7 @@ export async function createServer(options: ServerOptions) {
   const historyAnalysis = createHistoryAnalysisScheduler(jobRunner);
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
   const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
+  const scoredHistory = createScoredHistory(summaries.analyses);
   app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
@@ -125,7 +127,7 @@ export async function createServer(options: ServerOptions) {
     websocket: true,
     preValidation: async (request, reply) => {
       const userId = await authenticatedUser(request);
-      if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+      if (!userId) return reply.code(401).send(unauthenticated());
       socketOwners.set(request, userId);
     },
   }, (socket, request) => {
@@ -176,7 +178,7 @@ export async function createServer(options: ServerOptions) {
     websocket: true,
     preValidation: async (request, reply) => {
       const userId = await authenticatedUser(request);
-      if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+      if (!userId) return reply.code(401).send(unauthenticated());
       try {
         if (!/^[0-9a-f-]{36}$/.test(request.params.id) || !await mutations.read(request.params.id, userId))
           return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
@@ -205,7 +207,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.put<{ Body: { displayName?: unknown } }>('/api/display-name', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     const body = request.body as unknown;
     const checked = validateDisplayName(body && typeof body === 'object' && !Array.isArray(body) ? (body as { displayName?: unknown }).displayName : undefined);
     if (!checked.ok) return reply.code(400).send(checked);
@@ -216,7 +218,7 @@ export async function createServer(options: ServerOptions) {
   // The Guest's Trainer Configuration, for every table (ADR-0041). Changing it is the Guest's own request, not a table's.
   app.get('/api/trainer-configuration', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     try { return { ok: true, trainerConfiguration: await trainerConfigurations.current(userId) }; }
     catch (error) {
       if (error instanceof TrainerConfigurationRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
@@ -225,7 +227,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.put<{ Body: unknown }>('/api/trainer-configuration', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     const requestId = (request.body as { requestId?: unknown } | null)?.requestId;
     if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
@@ -249,14 +251,14 @@ export async function createServer(options: ServerOptions) {
   });
   app.get('/api/table-sessions', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     try { return { tables: await mutations.savedTables(userId) }; }
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
   });
   // The Trainer says a Guest opened a table: the time is the server's, kept with their membership, and orders their saved lists (ADR-0037).
   app.post<{ Params: { id: string } }>('/api/table-sessions/:id/opened', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     try {
       if (!await recordOpened(db, userId, request.params.id, clock.now())) return reply.code(404).send(notFound());
       return { ok: true };
@@ -266,7 +268,7 @@ export async function createServer(options: ServerOptions) {
   // An ID that names no Online Table, malformed or a Practice Table's, gets the one answer a missing table gets.
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/join-preview', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     try {
       const preview = await mutations.previewJoin(userId, request.params.id);
       return preview.ok ? preview : reply.code(outcomeStatus(preview)).send(preview);
@@ -278,7 +280,7 @@ export async function createServer(options: ServerOptions) {
   app.post<{ Params: { id: string }; Body: JoinTableRequest }>('/api/table-sessions/:id/join-table', async (request, reply) => {
     const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
@@ -301,7 +303,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     try {
       const view = await mutations.read(request.params.id, userId);
@@ -315,7 +317,7 @@ export async function createServer(options: ServerOptions) {
   /** Table History: the list of the table's completed Hands, for a Guest who may read them (ADR-0040). */
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/history', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     try {
       const history = await mutations.readHistory(request.params.id, userId);
@@ -334,7 +336,7 @@ export async function createServer(options: ServerOptions) {
   const pageOf = (query: Record<string, unknown>) => ({ limit: count(query.limit, 50, 1, 200), offset: count(query.offset, 0, 0, Number.MAX_SAFE_INTEGER) });
   app.get<{ Querystring: Record<string, unknown> }>('/api/overall-history', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     const filter = decodeHistoryFilter(request.query);
     if (hasScoreFilter(filter)) return reply.code(400).send({ ok: false, rejection: { code: 'score-filter-needs-analysis', message: 'A score range is decided by analysis. Ask for it with POST /api/overall-history/scored.' } });
     const { limit, offset } = pageOf(request.query);
@@ -355,7 +357,7 @@ export async function createServer(options: ServerOptions) {
    */
   app.post<{ Body: OverallHistorySummaryRequest }>('/api/overall-history/summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     const body: unknown = request.body ?? {};
     const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
     if (!plain(body) || Object.keys(body).some(key => key !== 'filter' && key !== 'breakdown' && key !== 'strategy') || body.filter !== undefined && (!plain(body.filter) || Object.values(body.filter).some(value => typeof value !== 'string' && typeof value !== 'number' || String(value).length > 512)) || body.breakdown !== undefined && !isHistoryBreakdown(body.breakdown))
@@ -379,7 +381,7 @@ export async function createServer(options: ServerOptions) {
    */
   app.post<{ Body: { filter?: Record<string, unknown> }; Querystring: Record<string, unknown> }>('/api/overall-history/scored', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     const body: unknown = request.body ?? {};
     const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
     const filter = plain(body) && plain(body.filter) && Object.values(body.filter).every(value => (typeof value === 'string' || typeof value === 'number') && String(value).length <= 512) ? decodeHistoryFilter(body.filter) : undefined;
@@ -387,7 +389,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Supply a filter, in the Overall History address encoding, with a Decision Score or Action Rank Score range, and an optional Strategy.' } });
     if ('strategy' in body && !(options.supportsStrategy ?? isSupportedStrategy)(body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      return summaries.createScored(await mutations.captureScoredHistory(userId, filter, body.strategy as StrategyDescriptor | undefined), pageOf(request.query));
+      return scoredHistory.create(await mutations.captureScoredHistory(userId, filter, body.strategy as StrategyDescriptor | undefined), pageOf(request.query));
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Overall History is unavailable. Refresh to try reading it again.' } });
@@ -395,30 +397,30 @@ export async function createServer(options: ServerOptions) {
   });
   app.get<{ Params: { requestId: string }; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
-    return summaries.readScored(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    return scoredHistory.read(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never>; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Retry uses the captured request. Supply an empty request.' } });
-    return summaries.retryScored(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    return scoredHistory.retry(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
   });
   app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     return summaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never> }>('/api/overall-history/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     return summaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
   /** One completed Hand of Table History, replayed: its Replay Steps as the reader may see them (ADR-0041). */
   app.get<{ Params: { id: string; handId: string } }>('/api/table-sessions/:id/history/:handId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     try {
       const replay = await mutations.readReplay(request.params.id, userId, request.params.handId);
@@ -432,7 +434,7 @@ export async function createServer(options: ServerOptions) {
   });
   for (const kind of ['seat-participant', 'start-hand', 'act', 'stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button', 'leave-table', 'remove-participant', 'add-bot', 'remove-bot'] as const) app.post<{ Params: { id: string }; Body: PokerMutationRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
@@ -447,7 +449,7 @@ export async function createServer(options: ServerOptions) {
   });
   for (const kind of ['set-playing-strategy', 'retry-bot', 'set-table-options'] as const) app.post<{ Params: { id: string }; Body: SetPlayingStrategyRequest | RetryBotRequest | SetTableOptionsRequest }>('/api/table-sessions/:id/' + kind, async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
@@ -461,7 +463,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string }; Body: SetTablePasswordRequest }>('/api/table-sessions/:id/set-table-password', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send(notFound());
     if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
@@ -493,14 +495,16 @@ export async function createServer(options: ServerOptions) {
       return state || reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
-  app.post<{ Params: { id: string }; Body: { strategy?: StrategyDescriptor } }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
+  // `history: true` asks from Table History: run as the reader's `history-analysis`, under their per-Guest bound, as is
+  // any summary naming a Strategy to compare and any summary a former Participant asks for (ADR-0041).
+  app.post<{ Params: { id: string }; Body: { strategy?: StrategyDescriptor; history?: true } }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).some(key => key !== 'strategy'))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request, or only a Strategy to summarize them under.' } });
+    if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || request.body.history !== undefined && request.body.history !== true || Object.keys(request.body).some(key => key !== 'strategy' && key !== 'history'))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request, or a Strategy to summarize them under and whether Table History asks.' } });
     if (request.body && 'strategy' in request.body && !(options.supportsStrategy ?? isSupportedStrategy)(request.body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      const input = await mutations.captureSessionSummary(request.params.id, userId, request.body?.strategy);
+      const input = await mutations.captureSessionSummary(request.params.id, userId, { ...(request.body?.strategy ? { strategy: request.body.strategy } : {}), history: request.body?.history === true });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       const state = await summaries.create(input);
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
@@ -513,7 +517,7 @@ export async function createServer(options: ServerOptions) {
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId' && key !== 'strategy')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply the Hand ID, and optionally a Strategy.' } });
     if ('strategy' in request.body && !(options.supportsStrategy ?? isSupportedStrategy)(request.body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      const input = await mutations.captureHandSummary(request.params.id, userId, request.body.handId, request.body.strategy);
+      const input = await mutations.captureHandSummary(request.params.id, userId, request.body.handId, request.body.strategy ? { strategy: request.body.strategy } : {});
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'hand-unavailable', message: 'Choose an existing Hand.' } });
       const state = await summaries.create(input);
@@ -524,7 +528,8 @@ export async function createServer(options: ServerOptions) {
   // scheduled as `history-analysis`, behind all play and live study, under the reader's per-Guest bound.
   // `strategy` names a supported Strategy to analyze it under instead of the Guest's Reference Strategy (Counterfactual
   // Comparison): the same frozen inputs and seeds, its own result. It never changes the Guest's Trainer Configuration, and
-  // it applies only to an accepted decision, so it cannot be combined with `live`.
+  // it applies only to an accepted decision, so it cannot be combined with `live`. The server decides the schedule, not
+  // the flag: a named Strategy, and any study by a former Participant, is always `history-analysis` (ADR-0041).
   app.post<{ Params: { id: string }; Body: GetOrStartAnalysisRequest }>('/api/table-sessions/:id/analysis', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
@@ -532,18 +537,18 @@ export async function createServer(options: ServerOptions) {
     if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || request.body.history !== undefined && request.body.history !== true || request.body.live && request.body.history || request.body.live && 'strategy' in request.body || Object.keys(request.body).some(key => !['decisionId', 'live', 'history', 'strategy'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and either an optional Live Analysis request or an optional history request, with an optional Strategy for an accepted decision.' } });
     if ('strategy' in request.body && !(options.supportsStrategy ?? isSupportedStrategy)(request.body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      if (request.body.history) {
+      if (request.body.history || 'strategy' in request.body) {
         const input = await mutations.captureHistoryEvaluation(request.params.id, userId, request.body.decisionId, request.body.strategy);
         if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
         if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose one of your own accepted decisions.' } });
         const state = await analysis.getOrStart(input, { purpose: 'history-analysis', guestId: userId });
         return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
       }
-      const input = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId, request.body.strategy);
-      if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-      if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: request.body.strategy ? 'Choose one of your own accepted decisions.' : 'Choose a current or accepted human decision.' } });
-      if ('ok' in input) return reply.code(outcomeStatus(input)).send(input);
-      const state = await analysis.getOrStart(input, request.body.live ? 'live-analysis' : 'interactive-analysis');
+      const studied = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
+      if (studied === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
+      if (studied === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });
+      if ('ok' in studied) return reply.code(outcomeStatus(studied)).send(studied);
+      const state = await analysis.getOrStart(studied.input, studied.former ? { purpose: 'history-analysis', guestId: userId } : request.body.live ? 'live-analysis' : 'interactive-analysis');
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });
@@ -572,7 +577,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string }; Body: { handId: string } }>('/api/table-sessions/:id/inspect-hand', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Open the Trainer to establish your local identity.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (options.adminMode !== true) return reply.code(403).send({ ok: false, rejection: { code: 'admin-mode-disabled', message: 'Completed-Hand inspection is disabled on this server.' } });
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId'))

@@ -1,9 +1,9 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@poker/client';
 import { strategyToken, type ScoreSummary, type StrategyDescriptor } from '@poker/contracts';
 import { tableSummaryFigures } from './table-history.js';
 import { strategyName } from './strategy-select.js';
 import { ColumnHead, CompareBar, useSummaryStrategies } from './summary-comparison.js';
+import { usePolledRequest } from './polled-request.js';
 
 /**
  * A Score Summary of the reader's own decisions across the table's completed Hands, under one Strategy (the Guest's
@@ -11,28 +11,14 @@ import { ColumnHead, CompareBar, useSummaryStrategies } from './summary-comparis
  * analyses again. A new completed Hand asks again, since the summary is frozen when it is asked for.
  */
 function useTableSummary(tableSessionId: string, completedHands: number | undefined, asked: boolean, strategy: StrategyDescriptor | undefined) {
-  const queryClient = useQueryClient();
-  const key = [tableSessionId, completedHands, strategy ? strategyToken(strategy) : null];
-  const created = useQuery({
-    queryKey: ['table-summary', ...key], enabled: asked, staleTime: Number.POSITIVE_INFINITY, gcTime: 0, retry: false, placeholderData: keepPreviousData,
-    queryFn: () => api.createSessionSummary(tableSessionId, strategy),
+  const summary = usePolledRequest({
+    key: ['table-summary', tableSessionId, completedHands, strategy ? strategyToken(strategy) : null], stateKey: requestId => ['table-summary-state', tableSessionId, requestId],
+    enabled: asked, previous: 'request', running: state => state.status === 'pending',
+    create: () => api.requestTableHistorySummary(tableSessionId, strategy),
+    read: requestId => api.readSummary(tableSessionId, requestId),
+    retry: requestId => api.retrySummary(tableSessionId, requestId),
   });
-  const requestId = created.data?.requestId;
-  const current = useQuery({
-    queryKey: ['table-summary-state', tableSessionId, requestId], enabled: !!requestId && !created.isPlaceholderData, initialData: created.data, retry: false,
-    refetchInterval: query => query.state.data?.status === 'pending' && !query.state.error ? 1000 : false,
-    queryFn: () => api.readSummary(tableSessionId, requestId!),
-  });
-  const retry = useMutation({
-    mutationFn: (id: string) => api.retrySummary(tableSessionId, id),
-    onSuccess: summary => queryClient.setQueryData(['table-summary-state', tableSessionId, summary.requestId], summary),
-  });
-  const data = created.isPlaceholderData ? created.data : current.data ?? created.data;
-  return {
-    data, loading: asked && !data && created.isFetching, error: created.error ?? current.error ?? retry.error, retrying: retry.isPending,
-    retry: () => { if (data) retry.mutate(data.requestId); },
-    again: () => { retry.reset(); void created.refetch(); },
-  };
+  return { ...summary, loading: asked && !summary.data && summary.asking };
 }
 
 function Means({ summary }: { summary: ScoreSummary }) {

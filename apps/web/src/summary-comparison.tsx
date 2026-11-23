@@ -1,9 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@poker/client';
 import { strategyToken, type StrategyDescriptor } from '@poker/contracts';
 import { useShell } from './app-shell.js';
 import { addableStrategies, comparisonOrder } from './comparison.js';
 import { strategyName } from './strategy-select.js';
+import { useTrainerConfiguration } from './trainer-configuration.js';
 
 /**
  * Side-by-side Score Summaries (ADR-0041): the Guest's Reference Strategy and up to 3 others, each its own column. The
@@ -11,7 +10,7 @@ import { strategyName } from './strategy-select.js';
  */
 export function useSummaryStrategies(compared: readonly StrategyDescriptor[]) {
   const { identity } = useShell();
-  const configuration = useQuery({ queryKey: ['trainer-configuration'], queryFn: ({ signal }) => api.readTrainerConfiguration(signal), enabled: identity.isSuccess });
+  const configuration = useTrainerConfiguration(identity.isSuccess);
   const reference = configuration.data?.trainerConfiguration.referenceStrategy;
   return {
     reference,
@@ -36,10 +35,11 @@ export function CompareBar({ id, reference, shown, onCompare }: { id: string; re
   </div>;
 }
 
-/** A column's heading: the Strategy's name, and its Reference tag or Remove button. */
-export function ColumnHead({ name, reference, onRemove, headingId }: { name: string; reference: boolean; onRemove?: () => void; headingId: string }) {
+/** A column's heading: the Strategy's name, at heading `level` (3 unless given), and its Reference tag or Remove button. */
+export function ColumnHead({ name, reference, onRemove, headingId, level = 3 }: { name: string; reference: boolean; onRemove?: () => void; headingId: string; level?: 3 | 4 }) {
+  const Heading = level === 4 ? 'h4' : 'h3';
   return <header className="strategy-head">
-    <h3 id={headingId}>{name}</h3>
+    <Heading id={headingId}>{name}</Heading>
     {reference ? <span className="history-tag is-reference">Reference</span> : <button type="button" className="strategy-remove" onClick={onRemove} aria-label={`Remove ${name} from the comparison`}>Remove</button>}
   </header>;
 }

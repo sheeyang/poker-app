@@ -21,6 +21,7 @@ import { strategyName } from './strategy-select.js';
 import { useReplayComparison, useStrategyAnalysis } from './replay-analysis.js';
 import { TableHistorySummaryPanel } from './table-history-summary.js';
 import { addableStrategies, comparisonOrder, type ComparisonTarget } from './comparison.js';
+import { ColumnHead } from './summary-comparison.js';
 
 /** A link back to a table's own page. */
 function TableLink({ mode, tableSessionId, className, children }: { mode: TableMode; tableSessionId: string; className?: string; children: React.ReactNode }) {
@@ -37,13 +38,18 @@ export function HistoryLink({ mode, tableSessionId, handId, step, className, lab
     : <Link className={className} aria-label={label} to="/practice/$tableSessionId/history" params={{ tableSessionId }} search={search}>{children}</Link>;
 }
 
+/** Whether the reader was dealt into a Hand: they may not have been at the table for one they were not. */
+function DealtInTag({ dealtIn }: { dealtIn: boolean }) {
+  return <span className={`history-tag${dealtIn ? ' is-dealt-in' : ''}`}>{dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>;
+}
+
 /** One Hand of the list. Its number opens its replay; the whole row is the link's target. */
 function HandEntry({ row, selected, mode, tableSessionId }: { row: HandRow; selected: boolean; mode: TableMode; tableSessionId: string }) {
   return <li id={row.key} className="history-hand" data-selected={selected ? '' : undefined} aria-current={selected ? 'true' : undefined}>
     <div className="history-hand-head">
       <h2><HistoryLink className="history-hand-link" mode={mode} tableSessionId={tableSessionId} handId={row.key}>{row.label}<Icon name="chevron" size={14} /></HistoryLink></h2>
       {row.completed && <span className="history-time numeric">{row.completed}</span>}
-      <span className={`history-tag${row.dealtIn ? ' is-dealt-in' : ''}`}>{row.dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>
+      <DealtInTag dealtIn={row.dealtIn} />
     </div>
     <div className="history-board" role="group" aria-label={row.board.length ? 'Final board' : 'No board was dealt'}>
       {row.board.length ? row.board.map(card => <Card key={card} card={card} small />) : <span className="history-muted">No board</span>}
@@ -71,10 +77,7 @@ function StrategyColumn({ replay, target, reference, hub, step, onRemove }: { re
   const name = strategyName(target.strategy);
   const waiting = !complete && !failed && !display?.error;
   return <article className="strategy-column" aria-labelledby={`strategy-${strategyToken(target.strategy)}`} aria-busy={waiting || undefined}>
-    <header className="strategy-head">
-      <h4 id={`strategy-${strategyToken(target.strategy)}`}>{name}</h4>
-      {reference ? <span className="history-tag is-reference">Reference</span> : <button type="button" className="strategy-remove" onClick={onRemove} aria-label={`Remove ${name} from the comparison`}>Remove</button>}
-    </header>
+    <ColumnHead headingId={`strategy-${strategyToken(target.strategy)}`} name={name} reference={reference} onRemove={onRemove} level={4} />
     {display?.error ? <div className="notice-error" role="alert"><p>{display.error}</p><button type="button" onClick={analysis.request}>Retry analysis</button></div>
       : failed ? <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{failed.error.message}</p><button type="button" disabled={display?.retrying} onClick={analysis.retry}>{display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>
       : <div className="strategy-body">
@@ -176,7 +179,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
     <header className="replay-head">
       <h2 id="replay-title">{row?.label ?? (handId.startsWith('hand-') ? `Hand ${handId.slice(5)}` : 'Hand')}</h2>
       {row?.completed && <span className="history-time numeric">{row.completed}</span>}
-      {row && <span className={`history-tag${row.dealtIn ? ' is-dealt-in' : ''}`}>{row.dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>}
+      {row && <DealtInTag dealtIn={row.dealtIn} />}
       <HistoryLink className="replay-close" mode={mode} tableSessionId={tableSessionId}>All hands</HistoryLink>
     </header>
     {notFound ? <div className="replay-missing"><p>This hand isn’t in the table’s history yet. A hand can be replayed once it is complete.</p></div>

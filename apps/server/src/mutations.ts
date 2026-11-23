@@ -17,13 +17,15 @@ import type { AcceptanceTransactions, AcceptanceFaults } from './db/acceptance.j
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { FrozenHistorySummary, FrozenScoredHistory, FrozenScoreSummary } from './summaries.js';
+import type { FrozenHistorySummary, FrozenScoreSummary } from './summaries.js';
+import type { FrozenScoredHistory } from './scored-history.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
 import { handReplay, tableHistory } from './table-history.js';
 import { filtered, newestFirst, ownDecisions, summarySets, type StudiedDecision } from './overall-history.js';
+import { tableFormat, type ReadableTable } from './readable-table.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -34,6 +36,10 @@ import { withOwnershipSettled } from './ownership.js';
 
 /** Accepts a derived job result for a human Participant inside its table's FIFO. */
 export type AcceptTableJobResult = (tableSessionId: string, participantId: string, accept: () => boolean) => Promise<boolean>;
+/** How a Score Summary of one's own decisions is asked for: under a named Strategy, and whether from Table History. */
+export interface StudyRequest { readonly strategy?: StrategyDescriptor; readonly history?: boolean }
+/** One's own decision frozen for analysis; `former` when the Guest is no longer joined at the table, so it is study from history. */
+export interface StudiedEvaluation { readonly input: FrozenEvaluationInput; readonly former: boolean }
 type Database = ReturnType<typeof openDatabase>['db'];
 type CommittedSession = { aggregate: PersistedTableSession; game: CashGame };
 export class TableSessionRestorationError extends Error {
@@ -799,7 +805,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * or Removal and at a Closed Table (ADR-0041). A read never loads the table, so it holds no handle, schedules
      * nothing and subscribes to nothing.
      */
-    async function readableTable(id: string, userId: string): Promise<{ participantId: string; aggregate: PersistedTableSession; game: CashGame } | undefined> {
+    async function readableTable(id: string, userId: string): Promise<ReadableTable | undefined> {
       const member = await participant(id, userId);
       if (!member) return undefined;
       const session = tables.get(id) ?? await readCommitted(id);
@@ -808,7 +814,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     /** The Table History list for a Guest who may read this table's history; `undefined` for anyone else. */
     async function readHistory(id: string, userId: string): Promise<TableHistory | undefined> {
       const table = await readableTable(id, userId);
-      return table && tableHistory(table.aggregate, table.game, table.participantId);
+      return table && tableHistory(table);
     }
     /**
      * The Guest-scoped Overall History (ADR-0041): every decision the Guest made, in a Hand they were dealt into, at any table
@@ -820,7 +826,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const decisions: OverallHistoryDecision[] = [];
       for (const { tableSessionId } of await participations(db, userId)) {
         const table = await readableTable(tableSessionId, userId);
-        if (table) decisions.push(...ownDecisions(table.aggregate, table.game, table.participantId));
+        if (table) decisions.push(...ownDecisions(table));
       }
       return newestFirst(filtered(decisions, filter));
     }
@@ -836,7 +842,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const table = await readableTable(tableSessionId, userId);
         if (!table) continue;
         const current = table.game.forParticipant(table.participantId).getView();
-        for (const decision of filtered(ownDecisions(table.aggregate, table.game, table.participantId), filter)) {
+        for (const decision of filtered(ownDecisions(table), filter)) {
           const input = captureEvaluation(table, table.participantId, decision.decisionId, referenceStrategy, current);
           if (input?.acceptedAction) decisions.push({ decision, input });
         }
@@ -865,7 +871,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      */
     async function readReplay(id: string, userId: string, handId: string): Promise<TableHandReplay | 'hand-not-found' | undefined> {
       const table = await readableTable(id, userId);
-      return table && (handReplay(table.aggregate, table.game, table.participantId, handId) ?? 'hand-not-found');
+      return table && (handReplay(table, handId) ?? 'hand-not-found');
     }
     /**
      * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
@@ -1320,8 +1326,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return (await savedTableEntries(db, userId)).map(({ stored, ...entry }): SavedTable => {
         const aggregate = upgradeTableSession(stored);
         if (!aggregate) return entry;
-        const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
-        return { ...entry, seatCount, stakes: { smallBlind, bigBlind, ante } };
+        return { ...entry, ...tableFormat(aggregate) };
       });
     }
     async function readPersistedSession(id: string) {
@@ -1424,7 +1429,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * It studies under the Guest's Reference Strategy, or under `strategy` when one is named, without reading their
    * Trainer Configuration.
    */
-  async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: CommittedSession & { participantId: string }, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
+  async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: ReadableTable, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
     const chosen = async () => strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
     if (await access(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
     const table = await readableTable(id, userId);
@@ -1434,21 +1439,26 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     return former(table, referenceStrategy);
   }
   /** A summary of a Participant's own decisions in a scope, frozen from the committed table; null for a Hand it does not have. */
-  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: import('@poker/contracts').ScoreSummaryScope, referenceStrategy: StrategyDescriptor): FrozenScoreSummary | null {
+  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: import('@poker/contracts').ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
     if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
     const view = session.game.forParticipant(participantId).getView();
     const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
     const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
-    return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members });
+    return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members, ...(historyGuestId ? { historyGuestId } : {}) });
   }
-  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope, strategy?: StrategyDescriptor) {
+  /**
+   * A Score Summary request, frozen. It runs as the Guest's `history-analysis` (ADR-0041) when it is study from history:
+   * when Table History asks (`history`), when it names a Strategy to compare, and always for a former Participant.
+   */
+  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope, { strategy, history = false }: StudyRequest) {
+    const fromHistory = history || strategy ? userId : undefined;
     return studying(id, userId, strategy, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
       const binding = session && memberBinding(session.aggregate, userId);
       if (!session || !binding) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
-      return scoreSummaryOf(session, binding.participantId, scope, referenceStrategy);
-    }), (table, referenceStrategy) => scoreSummaryOf(table, table.participantId, scope, referenceStrategy));
+      return scoreSummaryOf(session, binding.participantId, scope, referenceStrategy, fromHistory);
+    }), (table, referenceStrategy) => scoreSummaryOf(table, table.participantId, scope, referenceStrategy, userId));
   }
   return {
     // A job result is not a request, a subscription or scheduled work, so it holds no handle on its table (ADR-0035).
@@ -1466,28 +1476,28 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const aggregate = row && upgradeTableSession(row.aggregate);
       return !stopped && !!aggregate && isHuman(findBinding(aggregate, participantId)) && accept();
     },
-    captureHandSummary: (id: string, userId: string, handId: string, strategy?: StrategyDescriptor) => captureScoreSummary(id, userId, { scope: 'hand', handId }, strategy),
-    captureSessionSummary: (id: string, userId: string, strategy?: StrategyDescriptor) => captureScoreSummary(id, userId, { scope: 'table-session' }, strategy),
+    captureHandSummary: (id: string, userId: string, handId: string, request: StudyRequest = {}) => captureScoreSummary(id, userId, { scope: 'hand', handId }, request),
+    captureSessionSummary: (id: string, userId: string, request: StudyRequest = {}) => captureScoreSummary(id, userId, { scope: 'table-session' }, request),
     /**
      * The frozen inputs for the requesting Guest's own decision. Analysis of the current decision before it is
      * accepted is Live Analysis: refused when its Action Window captured Allow Live Analysis as disallowed. A named
-     * supported `strategy` replaces the Guest's Reference Strategy, and only for an accepted decision (`null` otherwise).
-     * A former Participant has no current decision, so they study only decisions they made.
+     * Strategy is asked for from history (`captureHistoryEvaluation`). A former Participant has no current decision, so
+     * they study only decisions they made, and `former` marks it: their study is always `history-analysis` (ADR-0041).
      */
-    captureEvaluation: (id: string, userId: string, decisionId: string, strategy?: StrategyDescriptor) => studying(id, userId, strategy, referenceStrategy => enqueue(id, async (): Promise<FrozenEvaluationInput | ApplicationRejection | null | undefined> => {
+    captureEvaluation: (id: string, userId: string, decisionId: string) => studying(id, userId, undefined, referenceStrategy => enqueue(id, async (): Promise<StudiedEvaluation | ApplicationRejection | null | undefined> => {
       const session = tables.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
       if (stopped || recovering.has(id)) throw new Error('Table Session is unavailable.');
       const input = captureEvaluation(session, participantId, decisionId, referenceStrategy);
-      if (strategy) return input?.acceptedAction ? input : null;
-      if (!input || input.acceptedAction) return input;
+      if (!input) return input;
+      if (input.acceptedAction) return { input, former: false };
       const window = session.aggregate.schedule.actionWindow;
       const disallowed = window?.decisionId === decisionId ? !!window.liveAnalysisDisallowed : !session.aggregate.options.allowLiveAnalysis;
-      return disallowed ? liveAnalysisRefused() : input;
-    }), (table, referenceStrategy): FrozenEvaluationInput | null => {
+      return disallowed ? liveAnalysisRefused() : { input, former: false };
+    }), (table, referenceStrategy): StudiedEvaluation | null => {
       const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
-      return input?.acceptedAction ? input : null;
+      return input?.acceptedAction ? { input, former: true } : null;
     }),
     /** The requesting Guest's joined Participant at a table, and whether they own it; undefined means not-found. */
     access,

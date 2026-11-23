@@ -341,17 +341,17 @@ test("one Strategy's Error and Retry don't touch the summaries under other Strat
   const failing = supportedStrategies[2]!;
   f.failUnder(failing);
   try {
-    const bad = await f.summarize(cookie, {}, undefined, failing);
-    const good = await f.summarize(cookie);
-    await completed(f, cookie, good.requestId);
-    await expect.poll(async () => (await f.current(cookie, bad.requestId)).summary.status).toBe('error');
-    expect((await f.current(cookie, bad.requestId)).summary).not.toHaveProperty('averages');
+    const failed = await f.summarize(cookie, {}, undefined, failing);
+    const reference = await f.summarize(cookie);
+    await completed(f, cookie, reference.requestId);
+    await expect.poll(async () => (await f.current(cookie, failed.requestId)).summary.status).toBe('error');
+    expect((await f.current(cookie, failed.requestId)).summary).not.toHaveProperty('averages');
     const evaluated = f.under(highestProbabilityPlayingStrategy).length;
     f.failUnder(undefined);
-    expect((await f.retry(cookie, bad.requestId)).status).toBe(200);
-    await completed(f, cookie, bad.requestId);
-    expect((await f.current(cookie, bad.requestId)).summary).toMatchObject({ averages: { decisionScore: 0.8 } });
-    expect((await f.current(cookie, good.requestId)).summary).toMatchObject({ status: 'complete', averages: { decisionScore: 0.8 } });
+    expect((await f.retry(cookie, failed.requestId)).status).toBe(200);
+    await completed(f, cookie, failed.requestId);
+    expect((await f.current(cookie, failed.requestId)).summary).toMatchObject({ averages: { decisionScore: 0.8 } });
+    expect((await f.current(cookie, reference.requestId)).summary).toMatchObject({ status: 'complete', averages: { decisionScore: 0.8 } });
     expect(f.under(highestProbabilityPlayingStrategy).length).toBe(evaluated);
   } finally { f.failUnder(undefined); }
 });
