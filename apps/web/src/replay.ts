@@ -1,6 +1,7 @@
-import type { ConcreteAction, DecisionAnalysis, ReplayStep, StrategyDescriptor, Street, TableHandReplay } from '@poker/contracts';
+import type { ConcreteAction, DecisionAnalysis, ReplayStep, StrategyDescriptor, Street, TableHandReplay, TableReplayStep } from '@poker/contracts';
 import type { FeltView } from './felt-view.js';
 import { chips } from './table-model.js';
+import { resultLabel } from './table-history.js';
 import { identity } from './analysis-identity.js';
 
 /**
@@ -24,6 +25,21 @@ export function stepKey(step: ReplayStep, handId: string): string {
 export function openStep(replay: TableHandReplay, key: string | undefined): number {
   const index = key === undefined ? -1 : replay.steps.findIndex(step => stepKey(step, replay.handId) === key);
   return Math.max(0, index);
+}
+
+/**
+ * The Hand whose list row hides its board and result while it is replayed (Story 21): `handId`, the Hand open on the
+ * screen, until the replay has loaded and stands at its result step; nothing when no Hand is open. Until the replay is
+ * known the row stays hidden, so the list never gives the Hand away while the felt is still at the deal.
+ */
+export function concealedHand(handId: string | undefined, replay: TableHandReplay | undefined, step: string | undefined): string | undefined {
+  if (!handId) return undefined;
+  return replay && replay.steps[openStep(replay, step)]?.kind === 'result' ? undefined : handId;
+}
+
+/** Who won what at the result step ("You won 70 · Rex won 70"); nothing at any other step, which does not carry it. */
+export function replayResult(replay: TableHandReplay, step: TableReplayStep): string | undefined {
+  return step.result && resultLabel(step.result.payouts, participantId => participantId === replay.viewerParticipantId ? 'You' : nameOf(replay, participantId));
 }
 
 /** Where each replay control goes from the step at `index`, as step keys; absent where there is nowhere to go. */

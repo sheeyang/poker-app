@@ -68,7 +68,7 @@ test('a Participant reads a completed Hand\'s Replay Steps, their own decisions 
   await humanAct(t, { type: 'call' }); await botAct(t, { type: 'check' });
   for (let street = 0; street < 3; street++) { await botAct(t, { type: 'check' }); await humanAct(t, { type: 'check' }); }
   const replay = await replayed(t);
-  expect(replay).toMatchObject({ tableSessionId: t.id, mode: 'practice', viewerParticipantId: t.human, handId: 'hand-1', hand: { handId: 'hand-1', handNumber: 1, viewerDealtIn: true, showdown: true }, configuration: { seatCount: 6, smallBlind: 10, bigBlind: 20 } });
+  expect(replay).toMatchObject({ tableSessionId: t.id, mode: 'practice', viewerParticipantId: t.human, handId: 'hand-1', hand: { handId: 'hand-1', handNumber: 1, viewerDealtIn: true, dealtIn: [{ participantId: t.human, name: 'Ann' }, { participantId: t.bot, name: 'Rex' }] }, configuration: { seatCount: 6, smallBlind: 10, bigBlind: 20 } });
   expect(replay.participants).toEqual([{ participantId: t.human, name: 'Ann', bot: false }, { participantId: t.bot, name: 'Rex', bot: true }]);
   expect(outline(replay.steps)).toEqual([
     ['decision', 'preflop', t.human], ['decision', 'preflop', t.bot],
@@ -83,6 +83,39 @@ test('a Participant reads a completed Hand\'s Replay Steps, their own decisions 
   expect(holders(replay.steps)).toEqual([...Array(11).fill([t.human]), [t.human, t.bot]]);
   expect(replay.steps.at(-1)!.transition).toMatchObject({ showdown: { shown: [{ participantId: t.human, cardCount: 2 }, { participantId: t.bot, cardCount: 2 }] }, payout: { awards: expect.any(Array) } });
   expect(JSON.stringify(replay)).not.toMatch(/"(?:seed|deck|burns|commands|userId|ownerUserId)"\s*:/);
+});
+
+test("a Hand's replay holds no board, result or revealed cards outside its result step", async () => {
+  const t = await practice();
+  await deal(t);
+  await humanAct(t, { type: 'call' }); await botAct(t, { type: 'check' });
+  for (let street = 0; street < 3; street++) { await botAct(t, { type: 'check' }); await humanAct(t, { type: 'check' }); }
+  const replay = await replayed(t);
+  const result = replay.steps.at(-1)!;
+  const earlier = replay.steps.slice(0, -1);
+  // The Hand row the replay carries is only its number, completion time and who was dealt in.
+  expect(Object.keys(replay.hand).filter(key => key !== 'completedAt').sort()).toEqual(['dealtIn', 'handId', 'handNumber', 'viewerDealtIn']);
+  expect(replay.hand.dealtIn.every(dealt => Object.keys(dealt).sort().join() === 'name,participantId')).toBe(true);
+  // How it ended is on the result step alone: the board it ended on, the showdown, who won, and Rex's revealed cards.
+  expect(earlier.some(step => 'result' in step)).toBe(false);
+  expect(result.kind).toBe('result');
+  const finalBoard = result.state.board;
+  expect(finalBoard).toHaveLength(5);
+  expect(result.result).toMatchObject({ board: finalBoard, showdown: true, payouts: expect.any(Array) });
+  const rex = result.state.participants.find(p => p.participantId === t.bot)!.holeCards!;
+  expect(result.result!.holeCards).toEqual(expect.arrayContaining([{ participantId: t.bot, cards: rex }]));
+  // Before it, each step shows the board revealed so far, no payout, and none of Rex's cards.
+  const revealed = { preflop: 0, flop: 3, turn: 4, river: 5 } as const;
+  for (const step of earlier) {
+    expect(step.state.board).toEqual(finalBoard.slice(0, revealed[step.state.street ?? 'preflop']));
+    expect(step.state.payouts ?? []).toEqual([]);
+    expect(step.transition.payout).toBeUndefined();
+    expect(step.transition.showdown).toBeUndefined();
+    expect(step.state.status).not.toBe('completed-hand');
+  }
+  const outside = JSON.stringify({ ...replay, steps: earlier });
+  for (const card of rex) expect(outside).not.toContain(JSON.stringify(card));
+  expect(outside).not.toMatch(/"(?:showdown|result)"|"payouts":\[\{/);
 });
 
 test('an all-in Hand has a Replay Step after each runout street, and a result step', async () => {

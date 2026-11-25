@@ -30,7 +30,7 @@ const steps: ReplayStep[] = [
 ];
 const replay: TableHandReplay = {
   tableSessionId: 'table-1', mode: 'practice', viewerParticipantId: 'you', handId: 'hand-3', configuration: defaultConfiguration, steps,
-  hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, showdown: true, board: [...board.river], dealtIn: [{ participantId: 'you', name: 'Alex', holeCards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex', holeCards: ['Jc', 'Jd'] }], payouts: [{ participantId: 'you', amount: 80 }] },
+  hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, dealtIn: [{ participantId: 'you', name: 'Alex' }, { participantId: 'rex', name: 'Rex' }] },
   participants: [{ participantId: 'you', name: 'Alex', bot: false }, { participantId: 'rex', name: 'Rex', bot: true }],
 };
 

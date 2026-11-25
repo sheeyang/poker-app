@@ -9,9 +9,9 @@ import { SeatGlyph } from './felt.js';
 import { Skeleton } from './loading-skeleton.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { usePresentation } from './use-presentation.js';
-import { handRows, historyStanding, returnBar, type HandRow } from './table-history.js';
+import { completedLabel, handRows, historyStanding, returnBar, type HandRow } from './table-history.js';
 import { comparedStrategies, historyPath, historySearch, listPath } from './table-address.js';
-import { actedLabel, openStep, replayControls, stepKey, stepLabel, streetName } from './replay.js';
+import { actedLabel, concealedHand, openStep, replayControls, replayResult, stepKey, stepLabel, streetName } from './replay.js';
 import { ReplayFelt } from './replay-felt.js';
 import type { ReplayMove } from './replay-motion.js';
 import { actionLabel, blindsLabel, modeLabel, tableFormat } from './table-model.js';
@@ -43,22 +43,27 @@ function DealtInTag({ dealtIn }: { dealtIn: boolean }) {
   return <span className={`history-tag${dealtIn ? ' is-dealt-in' : ''}`}>{dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>;
 }
 
+/** A completed Hand never changes, so its replay is read once. The list and the replay share this read, so the list knows which step the replay is at. */
+function useHandReplay(tableSessionId: string, handId: string | undefined, enabled: boolean) {
+  return useQuery({ queryKey: ['hand-replay', tableSessionId, handId], queryFn: ({ signal }) => api.readHandReplay(tableSessionId, handId!, signal), enabled: enabled && handId !== undefined, staleTime: Infinity });
+}
+
 /** One Hand of the list. Its number opens its replay; the whole row is the link's target. */
 function HandEntry({ row, selected, mode, tableSessionId }: { row: HandRow; selected: boolean; mode: TableMode; tableSessionId: string }) {
-  return <li id={row.key} className="history-hand" data-selected={selected ? '' : undefined} aria-current={selected ? 'true' : undefined}>
+  return <li id={row.key} className={`history-hand${row.concealed ? ' is-concealed' : ''}`} data-selected={selected ? '' : undefined} aria-current={selected ? 'true' : undefined}>
     <div className="history-hand-head">
       <h2><HistoryLink className="history-hand-link" mode={mode} tableSessionId={tableSessionId} handId={row.key}>{row.label}<Icon name="chevron" size={14} /></HistoryLink></h2>
       {row.completed && <span className="history-time numeric">{row.completed}</span>}
       <DealtInTag dealtIn={row.dealtIn} />
     </div>
-    <div className="history-board" role="group" aria-label={row.board.length ? 'Final board' : 'No board was dealt'}>
+    {row.board && <div className="history-board" role="group" aria-label={row.board.length ? 'Final board' : 'No board was dealt'}>
       {row.board.length ? row.board.map(card => <Card key={card} card={card} small />) : <span className="history-muted">No board</span>}
-    </div>
+    </div>}
     <ul className="history-participants" aria-label="Dealt in">{row.participants.map(dealt => <li key={dealt.participantId}>
       <span className="history-participant-name">{dealt.name}</span>
       {dealt.cards && <span className="history-participant-cards" role="group" aria-label={`${dealt.name === 'You' ? 'Your' : `${dealt.name}’s`} cards`}>{dealt.cards.map(card => <Card key={card} card={card} small />)}</span>}
     </li>)}</ul>
-    <p className="history-result"><strong>{row.result}</strong><span>{row.ending}</span></p>
+    {row.concealed ? <p className="history-concealed">Board and result show at the result step.</p> : <p className="history-result"><strong>{row.result}</strong><span>{row.ending}</span></p>}
   </li>;
 }
 
@@ -139,8 +144,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
   const { identity } = useShell();
   const navigate = useNavigate();
   const section = useRef<HTMLElement>(null);
-  // A completed Hand never changes, so its replay is read once.
-  const read = useQuery({ queryKey: ['hand-replay', tableSessionId, handId], queryFn: ({ signal }) => api.readHandReplay(tableSessionId, handId, signal), enabled: identity.isSuccess, staleTime: Infinity });
+  const read = useHandReplay(tableSessionId, handId, identity.isSuccess);
   const replay = read.data;
   const index = replay ? openStep(replay, step) : 0;
   // The Strategies compared beside the Reference Strategy live in the address, so a reload reproduces the comparison.
@@ -168,18 +172,18 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   const notFound = read.error instanceof RequestFailure && read.error.code === 'hand-not-found';
-  const row = replay && handRows([replay.hand], replay.viewerParticipantId)[0];
+  const { hand } = replay ?? {};
   const current = replay?.steps[index];
   const analysis = useReplayComparison(replay, index, compared);
   // Choosing Strategies changes the address only, at the step on show: never the Guest's Trainer Configuration.
   const changeCompared = (strategies: readonly StrategyDescriptor[]) => { if (current) void navigate({ href: historyPath(mode, tableSessionId, handId, stepKey(current, handId), strategies), replace: true }); };
   // What led to this step, and at the result who won.
-  const happened = replay && current ? [actedLabel(replay, current), current.kind === 'result' ? row?.result : undefined].filter(Boolean).join(' · ') : '';
+  const happened = replay && current ? [actedLabel(replay, current), replayResult(replay, current)].filter(Boolean).join(' · ') : '';
   return <section ref={section} className="replay" aria-labelledby="replay-title">
     <header className="replay-head">
-      <h2 id="replay-title">{row?.label ?? (handId.startsWith('hand-') ? `Hand ${handId.slice(5)}` : 'Hand')}</h2>
-      {row?.completed && <span className="history-time numeric">{row.completed}</span>}
-      {row && <DealtInTag dealtIn={row.dealtIn} />}
+      <h2 id="replay-title">{hand ? `Hand ${hand.handNumber}` : (handId.startsWith('hand-') ? `Hand ${handId.slice(5)}` : 'Hand')}</h2>
+      {hand?.completedAt !== undefined && <span className="history-time numeric">{completedLabel(hand.completedAt)}</span>}
+      {hand && <DealtInTag dealtIn={hand.viewerDealtIn} />}
       <HistoryLink className="replay-close" mode={mode} tableSessionId={tableSessionId}>All hands</HistoryLink>
     </header>
     {notFound ? <div className="replay-missing"><p>This hand isn’t in the table’s history yet. A hand can be replayed once it is complete.</p></div>
@@ -241,7 +245,10 @@ export function TableHistoryScreen({ mode, tableSessionId }: { mode: TableMode; 
   // Only the history decides who may read it: a former Participant cannot read the live table, and is not refused here.
   const missing = list.error instanceof RequestFailure && list.error.code === 'not-found';
   const facts = list.data;
-  const rows = useMemo(() => facts ? handRows(facts.hands, facts.viewerParticipantId) : undefined, [facts]);
+  // The Hand being replayed keeps its board and result out of the list until its replay reaches the result step (Story 21).
+  const selectedReplay = useHandReplay(tableSessionId, selectedHand, identity.isSuccess).data;
+  const concealed = concealedHand(selectedHand, selectedReplay, step);
+  const rows = useMemo(() => facts ? handRows(facts.hands, facts.viewerParticipantId, concealed) : undefined, [facts, concealed]);
   const standing = facts && historyStanding(facts);
   const tableMode = facts?.mode ?? table?.mode;
   const correctedTo = tableMode && tableMode !== mode ? historyPath(tableMode, tableSessionId, selectedHand, step, comparedStrategies(compare)) : undefined;

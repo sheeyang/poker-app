@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ConcreteAction, type DecisionAnalysis, type ObservableCashGameState, type ReplayStep, type ReplayTransition, type Street, type TableHandReplay } from '@poker/contracts';
-import { actedLabel, openStep, replayAnalysisTarget, replayControls, stepFelt, stepKey, stepLabel } from '../src/replay.js';
+import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ConcreteAction, type DecisionAnalysis, type ObservableCashGameState, type ReplayStep, type ReplayTransition, type Street, type TableHandReplay, type TableReplayStep } from '@poker/contracts';
+import { actedLabel, concealedHand, openStep, replayAnalysisTarget, replayControls, replayResult, stepFelt, stepKey, stepLabel } from '../src/replay.js';
 
 // One Hand as the server replays it for "you": you call, Rex checks; on the flop Rex checks and you check; on the turn Rex bets and you fold.
 function state(street: Street, actorId: string | null, decision: number | null, change: Partial<ObservableCashGameState> = {}): ObservableCashGameState {
@@ -16,7 +16,7 @@ function state(street: Street, actorId: string | null, decision: number | null, 
 }
 const acted = (participantId: string, action: ConcreteAction): ReplayTransition => ({ acted: { participantId, action } });
 const decision = (street: Street, actorId: string, n: number, transition: ReplayTransition = {}): ReplayStep => ({ kind: 'decision', state: state(street, actorId, n), transition, ...(actorId === 'you' ? { viewerDecisionId: 'hand-3/decision-' + n } : {}) });
-const steps: ReplayStep[] = [
+const steps: TableReplayStep[] = [
   decision('preflop', 'you', 1, { deal: { dealt: [{ participantId: 'you', cardCount: 2 }, { participantId: 'rex', cardCount: 2 }], blinds: ['you', 'rex'], refills: [] } }),
   decision('preflop', 'rex', 2, acted('you', { type: 'call' })),
   { kind: 'street', state: state('flop', null, null), transition: { ...acted('rex', { type: 'check' }), street: { swept: ['you', 'rex'], cardCount: 3 } } },
@@ -25,11 +25,12 @@ const steps: ReplayStep[] = [
   { kind: 'street', state: state('turn', null, null), transition: { ...acted('you', { type: 'check' }), street: { swept: [], cardCount: 1 } } },
   decision('turn', 'rex', 5),
   decision('turn', 'you', 6, acted('rex', { type: 'bet', betTo: 40 })),
-  { kind: 'result', state: state('turn', null, null, { status: 'completed-hand' }), transition: { ...acted('you', { type: 'fold' }), payout: { awards: [{ participantId: 'rex', won: 40, returned: 40 }] } } },
+  { kind: 'result', state: state('turn', null, null, { status: 'completed-hand' }), transition: { ...acted('you', { type: 'fold' }), payout: { awards: [{ participantId: 'rex', won: 40, returned: 40 }] } },
+    result: { board: ['As', 'Kd', '7c', '2h'], showdown: false, payouts: [{ participantId: 'rex', amount: 80 }], holeCards: [{ participantId: 'you', cards: ['Ah', 'Qs'] }] } },
 ];
 const replay: TableHandReplay = {
   tableSessionId: 'table-1', mode: 'online', viewerParticipantId: 'you', handId: 'hand-3', configuration: defaultConfiguration, steps,
-  hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, showdown: false, board: ['As', 'Kd', '7c', '2h'], dealtIn: [{ participantId: 'you', name: 'Alex', holeCards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex' }], payouts: [{ participantId: 'rex', amount: 80 }] },
+  hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, dealtIn: [{ participantId: 'you', name: 'Alex' }, { participantId: 'rex', name: 'Rex' }] },
   participants: [{ participantId: 'you', name: 'Alex', bot: false }, { participantId: 'rex', name: 'Rex', bot: true }],
 };
 /** The same Hand for someone who watched it: none of its decisions are theirs. */
@@ -43,6 +44,22 @@ describe('a Replay Step’s address', () => {
     expect(openStep(replay, 'decision-4')).toBe(4);
     expect(openStep(replay, 'result')).toBe(8);
     for (const missing of [undefined, 'river', 'decision-9']) expect(openStep(replay, missing)).toBe(0);
+  });
+});
+
+describe('the Hand whose list row is concealed while it is replayed', () => {
+  it('is the open Hand at every step before its result, and while its replay has not loaded', () => {
+    for (const key of [undefined, 'decision-1', 'flop', 'decision-4', 'turn', 'decision-6', 'river', 'nonsense']) expect(concealedHand('hand-3', replay, key)).toBe('hand-3');
+    expect(concealedHand('hand-3', undefined, 'result')).toBe('hand-3');
+  });
+  it('is nothing at the result step, and nothing when no Hand is open', () => {
+    expect(concealedHand('hand-3', replay, 'result')).toBeUndefined();
+    expect(concealedHand(undefined, undefined, undefined)).toBeUndefined();
+  });
+  it('says who won what at the result step alone', () => {
+    expect(steps.slice(0, -1).map(step => replayResult(replay, step))).toEqual(Array(8).fill(undefined));
+    expect(replayResult(replay, steps.at(-1)!)).toBe('Rex won 80');
+    expect(replayResult({ ...replay, viewerParticipantId: 'rex' }, steps.at(-1)!)).toBe('You won 80');
   });
 });
 

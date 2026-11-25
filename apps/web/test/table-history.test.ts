@@ -27,6 +27,24 @@ describe('the Table History rows', () => {
   });
 });
 
+describe('the Table History row of the Hand being replayed', () => {
+  const before = (concealed: string | undefined) => handRows([hand({ handId: 'hand-36', handNumber: 36 }), hand()], 'you', concealed);
+  it('shows only its number, completion time and who was dealt in until its result step: no board, result, ending or cards', () => {
+    const [selected] = before('hand-37');
+    expect(selected).toMatchObject({ key: 'hand-37', label: 'Hand 37', completed: completedLabel(Date.UTC(2026, 10, 22, 14, 5)), dealtIn: true, concealed: true, board: undefined, result: undefined, ending: undefined });
+    expect(selected!.participants).toEqual([{ participantId: 'you', name: 'You', cards: undefined }, { participantId: 'rex', name: 'Rex', cards: undefined }]);
+  });
+  it('shows its board, result, ending and cards at the result step', () => {
+    const [selected] = before(undefined);
+    expect(selected).toMatchObject({ concealed: false, board: ['As', 'Kd', '7c', '2h', 'Tc'], result: 'You won 140', ending: 'Showdown' });
+    expect(selected!.participants.map(participant => participant.cards)).toEqual([['Ah', 'Qs'], ['9d', '9s']]);
+  });
+  it('leaves every other Hand’s row as it is, whether or not one is concealed', () => {
+    expect(before('hand-37')[1]).toEqual(before(undefined)[1]);
+    expect(before('hand-37')[1]).toMatchObject({ concealed: false, board: ['As', 'Kd', '7c', '2h', 'Tc'], result: 'You won 140', ending: 'Showdown' });
+  });
+});
+
 describe('why a reader of Table History cannot play there', () => {
   const list = { tableSessionId: 't', viewerParticipantId: 'you', mode: 'online' as const, seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 }, hands: [] };
   it('says nothing to a Participant still at the table', () => {

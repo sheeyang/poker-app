@@ -1,4 +1,4 @@
-import type { Card, ObservableTableSession, ScoreSummary, TableHistory, TableHistoryHand } from '@poker/contracts';
+import type { Card, ObservableTableSession, ScoreSummary, TableHistory, TableHistoryHand, TableHistoryOutcome } from '@poker/contracts';
 import { actionWindowOpen, deadlineCountdown } from './presentation.js';
 import { chips } from './table-model.js';
 import { tablePath } from './table-address.js';
@@ -11,12 +11,18 @@ export interface HandRow {
   readonly label: string;
   /** When it completed; absent for a Hand completed before completion times were recorded. */
   readonly completed: string | undefined;
-  /** Everyone dealt in, the viewer as "You"; cards only where the viewer may see them. */
+  /** Everyone dealt in, the viewer as "You"; cards only where the viewer may see them, and none while the Hand is concealed. */
   readonly participants: readonly { readonly participantId: string; readonly name: string; readonly cards: readonly Card[] | undefined }[];
-  readonly board: readonly Card[];
+  /**
+   * The Hand is being replayed and has not reached its result step: its row then gives only its number, completion time and
+   * who was dealt in, so the list never shows what the replay has not yet reached (Story 21). Its `board`, `result` and
+   * `ending` are absent.
+   */
+  readonly concealed: boolean;
+  readonly board: readonly Card[] | undefined;
   /** "You won 70 · Rex won 70". */
-  readonly result: string;
-  readonly ending: 'Showdown' | 'No showdown';
+  readonly result: string | undefined;
+  readonly ending: 'Showdown' | 'No showdown' | undefined;
   /** The viewer was dealt in, so made decisions in this Hand. */
   readonly dealtIn: boolean;
 }
@@ -26,18 +32,29 @@ export function completedLabel(at: number | undefined, zone?: string): string | 
   return at === undefined ? undefined : new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(zone ? { timeZone: zone } : {}) }).format(at);
 }
 
-/** The Hands of a Table History as list rows, newest first. */
-export function handRows(hands: readonly TableHistoryHand[], viewerParticipantId: string): HandRow[] {
+/** "You won 70 · Rex won 70": each winner's share of the payouts, named by `nameOf`. */
+export function resultLabel(payouts: TableHistoryOutcome['payouts'], nameOf: (participantId: string) => string): string {
+  const won = new Map<string, number>();
+  for (const payout of payouts) won.set(payout.participantId, (won.get(payout.participantId) ?? 0) + payout.amount);
+  return [...won].map(([participantId, amount]) => `${nameOf(participantId)} won ${chips(amount)}`).join(' · ');
+}
+
+/**
+ * The Hands of a Table History as list rows, newest first. `concealed` names the Hand being replayed whose result step has
+ * not been reached: its row shows only its number, completion time and who was dealt in, with no cards, board or result.
+ * Every other row is unchanged.
+ */
+export function handRows(hands: readonly TableHistoryHand[], viewerParticipantId: string, concealed?: string): HandRow[] {
   return [...hands].sort((a, b) => b.handNumber - a.handNumber).map(hand => {
     const name = (participantId: string, fallback = '') => participantId === viewerParticipantId ? 'You' : hand.dealtIn.find(dealt => dealt.participantId === participantId)?.name ?? fallback;
-    const won = new Map<string, number>();
-    for (const payout of hand.payouts) won.set(payout.participantId, (won.get(payout.participantId) ?? 0) + payout.amount);
+    const hidden = hand.handId === concealed;
     return {
       key: hand.handId, handNumber: hand.handNumber, label: `Hand ${hand.handNumber}`, completed: completedLabel(hand.completedAt),
-      participants: hand.dealtIn.map(dealt => ({ participantId: dealt.participantId, name: name(dealt.participantId, dealt.name), cards: dealt.holeCards })),
-      board: hand.board,
-      result: [...won].map(([participantId, amount]) => `${name(participantId)} won ${chips(amount)}`).join(' · '),
-      ending: hand.showdown ? 'Showdown' : 'No showdown',
+      participants: hand.dealtIn.map(dealt => ({ participantId: dealt.participantId, name: name(dealt.participantId, dealt.name), cards: hidden ? undefined : dealt.holeCards })),
+      concealed: hidden,
+      board: hidden ? undefined : hand.board,
+      result: hidden ? undefined : resultLabel(hand.payouts, name),
+      ending: hidden ? undefined : hand.showdown ? 'Showdown' : 'No showdown',
       dealtIn: hand.viewerDealtIn,
     };
   });

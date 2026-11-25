@@ -21,7 +21,7 @@ const steps: ReplayStep[] = [
 ];
 const replay: TableHandReplay = {
   tableSessionId: 'table-1', mode: 'online', viewerParticipantId: 'you', handId: 'hand-3', configuration: defaultConfiguration, steps,
-  hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, showdown: false, board: [], dealtIn: [], payouts: [] },
+  hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, dealtIn: [] },
   participants: [{ participantId: 'you', name: 'Alex', bot: false }, { participantId: 'rex', name: 'Rex', bot: true }],
 };
 const reference = defaultTrainerConfiguration.referenceStrategy;
