@@ -84,22 +84,6 @@ export function returnBar(table: ObservableTableSession, serverNow: number): { r
 }
 
 /**
- * What a table's Score Summary shows, one Strategy's column: both means out of 100 once complete and "—" otherwise (never
- * a partial mean), how many decisions it covers, and its state: "Analyzing 340 / 2,000" while it runs (the analyses that
- * have succeeded out of all it needs, and that fraction), "Error" once an analysis failed.
- */
-export function tableSummaryFigures(summary: ScoreSummary): { decisionScore: string; actionRankScore: string; count: string; state: string | undefined; fraction?: number } {
-  const count = summary.decisionCount ? `${summary.decisionCount.toLocaleString('en')} ${summary.decisionCount === 1 ? 'decision' : 'decisions'}` : 'No decisions';
-  if (summary.status === 'complete') return { decisionScore: (summary.averages.decisionScore * 100).toFixed(1), actionRankScore: (summary.averages.actionRankScore * 100).toFixed(1), count, state: undefined };
-  const none = { decisionScore: '—', actionRankScore: '—', count };
-  if (summary.status === 'pending') {
-    const { succeeded, total } = summary.progress;
-    return { ...none, state: `Analyzing ${succeeded.toLocaleString('en')} / ${total.toLocaleString('en')}`, fraction: total ? succeeded / total : 0 };
-  }
-  return { ...none, state: summary.status === 'error' ? 'Error' : undefined };
-}
-
-/**
  * A table's Score Summary (a Hand's, the Session's, or Table History's) as the Trainer follows it on the user channel:
  * Analyzing with its count until it is complete, empty or in Error, which only a Retry moves on from.
  */

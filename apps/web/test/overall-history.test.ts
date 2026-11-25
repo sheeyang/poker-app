@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type OverallHistoryDecision } from '@poker/contracts';
-import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, bucketWaiting, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
+import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, bucketWaiting, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, toggled, withBreakdown } from '../src/overall-history.js';
+import { summaryFigures } from '../src/summary-figures.js';
 import { parseAddress } from '../src/table-address.js';
 
 const decision = (override: Partial<OverallHistoryDecision> = {}): OverallHistoryDecision => ({

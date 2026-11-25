@@ -1,4 +1,4 @@
-import type { ConcreteAction, DecisionAnalysis, ReplayStep, StrategyDescriptor, Street, TableHandReplay, TableReplayStep } from '@poker/contracts';
+import { decisionStep, type ConcreteAction, type DecisionAnalysis, type ReplayStep, type StrategyDescriptor, type Street, type TableHandReplay, type TableReplayStep } from '@poker/contracts';
 import type { FeltView } from './felt-view.js';
 import { chips } from './table-model.js';
 import { resultLabel } from './table-history.js';
@@ -17,8 +17,7 @@ import { identity } from './analysis-identity.js';
 export function stepKey(step: ReplayStep, handId: string): string {
   if (step.kind === 'result') return 'result';
   if (step.kind === 'street') return step.state.street ?? 'flop';
-  const decisionId = step.state.decisionId ?? '';
-  return decisionId.startsWith(handId + '/') ? decisionId.slice(handId.length + 1) : decisionId;
+  return decisionStep(step.state.decisionId ?? '');
 }
 
 /** The index of the step `key` names, or the Hand's first step when it names none of them. */
