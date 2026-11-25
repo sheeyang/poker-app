@@ -23,8 +23,9 @@ export interface PolledRequestOptions<T extends { readonly requestId: string }> 
 
 /**
  * Asks for a transient request once `enabled`, then reads its state again each second while it runs; Retry asks the
- * server to retry it, and `again` asks for a new request. This is the one place the Trainer waits on such requests by
- * reading them again.
+ * server to retry it, and `again` asks for a new request. This is the one place the Trainer still waits on such requests
+ * by reading them again: only Table History's Score Summary, until table summaries report progress on the user channel
+ * as Overall History's requests do (`use-followed-request`).
  */
 export function usePolledRequest<T extends { readonly requestId: string }>({ key, stateKey, enabled, create, read, retry, running, previous, seed = true }: PolledRequestOptions<T>) {
   const queryClient = useQueryClient();

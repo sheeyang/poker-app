@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AnalysisUpdate, ClientLiveMessage, InspectionCapabilities, ObservableTableSession, ObservablePresentationEvent, ServerLiveMessage, TableMembershipEnded, TableRuntimeStatus } from '@poker/contracts';
+import type { AnalysisUpdate, ClientLiveMessage, InspectionCapabilities, ObservableTableSession, ObservablePresentationEvent, OverallHistoryUpdate, ProgressUpdate, ServerLiveMessage, TableMembershipEnded, TableRuntimeStatus } from '@poker/contracts';
 
 // React Query applies this to HTTP reads and WebSocket cache writes.
 export function retainNewestTable(previous: unknown, incoming: unknown): ObservableTableSession {
@@ -31,6 +31,10 @@ export interface LiveConsumers {
   readonly onMembershipEnded?: (ended: TableMembershipEnded) => void;
   /** The Guest's Trainer Configuration changed, in this tab or another. Their table views are read again already. */
   readonly onTrainerConfigurationChanged?: () => void;
+  /** The latest count of each of the Guest's pending requests: counts only, never results, and never kept. */
+  readonly onProgress?: (update: ProgressUpdate, lifecycle: UserChannelLifecycle) => void;
+  /** One of the Guest's Overall History requests settled or failed: it is read again over HTTP. */
+  readonly onOverallHistoryUpdate?: (update: OverallHistoryUpdate, lifecycle: UserChannelLifecycle) => void;
 }
 /** Per followed table, the latest word of the current connection. */
 type PerTable<T> = { readonly generation: number; readonly tables: Readonly<Record<string, T>> };
@@ -139,6 +143,14 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
         }
         if (message.type === 'analysis-update') {
           if (lifecycle) callbacks.current.onAnalysisUpdate?.(message, lifecycle);
+          return;
+        }
+        if (message.type === 'progress') {
+          if (lifecycle) callbacks.current.onProgress?.(message, lifecycle);
+          return;
+        }
+        if (message.type === 'overall-history-update') {
+          if (lifecycle) callbacks.current.onOverallHistoryUpdate?.(message, lifecycle);
           return;
         }
         if (message.type === 'trainer-configuration-changed') {

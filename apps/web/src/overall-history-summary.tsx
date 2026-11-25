@@ -1,26 +1,26 @@
 import { api } from '@poker/client';
 import { historyBreakdowns, historyFilterParams, strategyToken, type HistoryBreakdown, type HistoryFilter, type HistoryScoreSummary, type OverallHistorySummary, type StrategyDescriptor } from '@poker/contracts';
-import { bucketLabel, summaryFigures } from './overall-history.js';
+import { bucketLabel, bucketWaiting, followedSummary, summaryFigures } from './overall-history.js';
 import { strategyName } from './strategy-select.js';
 import { ColumnHead, CompareBar, useSummaryStrategies } from './summary-comparison.js';
-import { usePolledRequest } from './polled-request.js';
+import { useFollowedRequest } from './use-followed-request.js';
 
 const breakdownNames: Readonly<Record<HistoryBreakdown, string>> = { street: 'Street', position: 'Position', action: 'Action', mode: 'Table' };
-const running = (summary: OverallHistorySummary | undefined) => !!summary && [summary.summary, ...summary.buckets?.map(bucket => bucket.summary) ?? []].some(each => each.status === 'pending');
 const failed = (summary: OverallHistorySummary | undefined) => !!summary && [summary.summary, ...summary.buckets?.map(bucket => bucket.summary) ?? []].some(each => each.status === 'error');
 
 /**
  * An Overall History Score Summary over `filter`, broken down by `breakdown`, once `asked`. A new filter or breakdown
- * asks again (matching analyses are reused). While any of its summaries is Analyzing it is read again each second, for
- * its progress; Retry asks again only for the failed analyses. `strategy` names the Strategy to summarize under; without
- * one it is the Guest's current Reference Strategy. Each Strategy is its own request, with its own progress and Error.
+ * asks again (matching analyses are reused). While it is Analyzing its count follows the Guest's `progress` messages,
+ * and each completion or failure notice reads it again; Retry asks again only for the failed analyses. `strategy` names
+ * the Strategy to summarize under; without one it is the Guest's current Reference Strategy. Each Strategy is its own
+ * request, with its own progress and Error.
  */
 function useOverallHistorySummary(filter: HistoryFilter, breakdown: HistoryBreakdown | undefined, asked: boolean, strategy: StrategyDescriptor | undefined) {
-  const summary = usePolledRequest({
-    key: ['overall-history-summary', JSON.stringify([historyFilterParams(filter), breakdown ?? null, strategy ? strategyToken(strategy) : null])], stateKey: requestId => ['overall-history-summary-state', requestId],
-    enabled: asked, previous: 'request', running,
+  const summary = useFollowedRequest({
+    key: JSON.stringify([historyFilterParams(filter), breakdown ?? null, strategy ? strategyToken(strategy) : null]),
+    enabled: asked, keepPrevious: true, model: followedSummary,
     create: () => api.requestOverallHistorySummary(filter, breakdown, strategy),
-    read: (requestId, signal) => api.readOverallHistorySummary(requestId, signal),
+    read: requestId => api.readOverallHistorySummary(requestId),
     retry: requestId => api.retryOverallHistorySummary(requestId),
   });
   return { ...summary, loading: asked && !summary.data && summary.asking };
@@ -54,7 +54,7 @@ function BucketRow({ breakdown, value, summary }: { breakdown: HistoryBreakdown;
     <td className="numeric">{summary.decisionCount?.toLocaleString('en') ?? '—'}</td>
     {summary.status === 'complete'
       ? <><td className="numeric ogs-score">{figures.decisionScore}</td><td className="numeric ogs-score is-secondary">{figures.actionRankScore}</td></>
-      : <td colSpan={2} className="ogs-waiting numeric">{figures.state ?? '—'}</td>}
+      : <td colSpan={2} className="ogs-waiting">{bucketWaiting(summary)}</td>}
   </tr>;
 }
 
