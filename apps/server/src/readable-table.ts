@@ -1,4 +1,4 @@
-import type { SavedTable } from '@poker/contracts';
+import type { Stakes } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
 import type { CompletedHand, HistoryReader } from '@poker/research';
 import { isBot, type PersistedTableSession } from './aggregate.js';
@@ -11,7 +11,7 @@ import { recordedConfiguration } from './projection.js';
 export interface ReadableTable { readonly participantId: string; readonly aggregate: PersistedTableSession; readonly game: CashGame }
 
 /** The table's format as its history and saved-tables list show it: seat count and stakes, as recorded. */
-export function tableFormat(aggregate: PersistedTableSession): { readonly seatCount: number; readonly stakes: NonNullable<SavedTable['stakes']> } {
+export function tableFormat(aggregate: PersistedTableSession): { readonly seatCount: number; readonly stakes: Stakes } {
   const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
   return { seatCount, stakes: { smallBlind, bigBlind, ante } };
 }

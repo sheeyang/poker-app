@@ -3,7 +3,7 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ScoreSummaryScope, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
 import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
@@ -157,7 +157,7 @@ export interface BotRuntimeOptions {
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
   /** Each Guest's Trainer Configuration: table views present it, and each analysis captures its Reference Strategy. */
-  readonly trainerConfigurations?: Pick<TrainerConfigurations, 'current' | 'known'>;
+  readonly trainerConfigurations?: Pick<TrainerConfigurations, 'current' | 'known' | 'studyStrategy'>;
 }
 export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock, guests: GuestQueue = createGuestQueue()) {
   /** The only way to reach a table in memory: each committed table, while something needs it (ADR-0035). */
@@ -183,7 +183,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   const scheduledRecovery = new Set<string>();
   const strategyFactory = bots?.strategyFactory ?? createStrategy;
   const supportsStrategy = bots?.supportsStrategy ?? isSupportedStrategy;
-  const trainerConfigurations = bots?.trainerConfigurations ?? { current: async () => defaultTrainerConfiguration, known: () => defaultTrainerConfiguration };
+  const trainerConfigurations = bots?.trainerConfigurations ?? { current: async () => defaultTrainerConfiguration, known: () => defaultTrainerConfiguration, studyStrategy: async (_userId: string, strategy?: StrategyDescriptor) => strategy ? immutableData(strategy) : defaultTrainerConfiguration.referenceStrategy };
   /**
    * The Trainer Configuration of a viewing Participant's Guest, for a projection that cannot wait. Every read and
    * subscription reads it first, so a viewer's Guest is always known by then.
@@ -796,7 +796,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * `null` for a decision that is not their own accepted one.
      */
     async function captureHistoryEvaluation(id: string, userId: string, decisionId: string, strategy?: StrategyDescriptor): Promise<FrozenEvaluationInput | null | undefined> {
-      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+      const referenceStrategy = await trainerConfigurations.studyStrategy(userId, strategy);
       const table = await readableTable(id, userId);
       if (!table) return undefined;
       const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
@@ -1345,7 +1345,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * Trainer Configuration.
    */
   async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: ReadableTable, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
-    const chosen = async () => strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    const chosen = () => trainerConfigurations.studyStrategy(userId, strategy);
     if (await access(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
     const table = await readableTable(id, userId);
     if (!table) return undefined;
@@ -1354,7 +1354,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     return former(table, referenceStrategy);
   }
   /** A summary of a Participant's own decisions in a scope, frozen from the committed table; null for a Hand it does not have. */
-  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: import('@poker/contracts').ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
+  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
     if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
     const view = session.game.forParticipant(participantId).getView();
     const decisionIds = ownDecisionIds(view.history, participantId, scope);
@@ -1365,7 +1365,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * A Score Summary request, frozen. It runs as the Guest's `history-analysis` (ADR-0041) when it is study from history:
    * when Table History asks (`history`), when it names a Strategy to compare, and always for a former Participant.
    */
-  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope, { strategy, history = false }: StudyRequest) {
+  function captureScoreSummary(id: string, userId: string, scope: ScoreSummaryScope, { strategy, history = false }: StudyRequest) {
     const fromHistory = history || strategy ? userId : undefined;
     return studying(id, userId, strategy, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
@@ -1425,7 +1425,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * The Guest to tell of a human Participant's study results, joined or former (ADR-0041): from the loaded table, or
      * from the membership index, which loads nothing.
      */
-    async studentOf(id: string, participantId: string): Promise<string | undefined> {
+    async guestOf(id: string, participantId: string): Promise<string | undefined> {
       const session = tables.get(id);
       if (!session) return participantGuest(db, id, participantId);
       const binding = findBinding(session.aggregate, participantId);

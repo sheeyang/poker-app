@@ -147,9 +147,9 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
     }
     catch { dependency.starting = false; dependency.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be loaded.' }; changed(dependency); await release(dependency); }
   }
-  /** Takes the mean once every analysis has succeeded: in this coordinator's turn for a table, as `history-analysis` for a Guest. */
   /** The scores a summary's mean is taken over: every member's, or with score ranges those the ranges admit. */
   const scoresOf = (entry: Entry) => entry.members.flatMap(member => member.state?.status === 'complete' && member.state.scores && (!entry.admits || entry.admits(member.state.scores)) ? [member.state.scores] : []);
+  /** Takes the mean once every analysis has succeeded: in this coordinator's turn for a table, as `history-analysis` for a Guest. */
   function aggregate(entry: Entry, counted: boolean) {
     const attempt = entry.attempt;
     const scores = scoresOf(entry);
@@ -176,7 +176,7 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
   /** The shared dependencies for a set's members; a history summary's are run as its Guest's `history-analysis` from now on. */
   function dependenciesOf(members: readonly FrozenEvaluationInput[], guestId?: string): Dependency[] {
     return members.map(member => {
-      const key = analysis.matchingKey(member);
+      const key = analysis.canonicalAnalysisKey(member);
       let dependency = dependencies.get(key);
       if (!dependency) { dependency = { input: member, consumers: new Set(), running: false, queued: false, retryRequested: false, starting: false, settlements: new Map(), settledAttempts: new Set(), counted: false }; dependencies.set(key, dependency); }
       if (guestId) dependency.guestId ??= guestId;

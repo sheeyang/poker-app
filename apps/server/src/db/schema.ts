@@ -1,4 +1,6 @@
-import type { CreationOutcome, MutationOutcome, TrainerConfiguration, TrainerConfigurationAcknowledgement } from '@poker/contracts';
+import type { CreationOutcome, DecisionAnalysis, MutationOutcome, TrainerConfiguration, TrainerConfigurationAcknowledgement } from '@poker/contracts';
+/** A stored analysis is always a finished one. */
+type CompleteDecisionAnalysis = Extract<DecisionAnalysis, { status: 'complete' }>;
 import { bigint, boolean, jsonb, pgTable, primaryKey, text, unique, uuid } from 'drizzle-orm/pg-core';
 import type { MembershipStatus, StoredTableSession } from '../aggregate.js';
 export const localUsers = pgTable('local_users', {
@@ -59,7 +61,7 @@ export const analysisEvaluations = pgTable('analysis_evaluations', {
   requestId: uuid('request_id').notNull().unique(),
   tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
   participantId: text('participant_id').notNull(),
-  result: jsonb('result').$type<Extract<import('@poker/contracts').DecisionAnalysis, { status: 'complete' }>>().notNull(),
+  result: jsonb('result').$type<CompleteDecisionAnalysis>().notNull(),
 });
 /** Successful scores retain their evaluation identity without entering poker records. */
 export const analysisScores = pgTable('analysis_scores', {
@@ -67,5 +69,5 @@ export const analysisScores = pgTable('analysis_scores', {
   requestId: uuid('request_id').notNull().unique(),
   tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
   participantId: text('participant_id').notNull(),
-  result: jsonb('result').$type<Extract<import('@poker/contracts').DecisionAnalysis, { status: 'complete' }>>().notNull(),
+  result: jsonb('result').$type<CompleteDecisionAnalysis>().notNull(),
 });

@@ -1,5 +1,6 @@
 /** Participant-safe wire contracts. This package imports no authoritative code. */
 import type { PresentedPhase } from './presentation.js';
+import type { Stakes } from './history.js';
 export type ParticipantId = string;
 export type TableSessionId = string;
 export type ChipAmount = number;
@@ -297,7 +298,7 @@ export interface SavedTable {
   /** When the Guest last opened this table, by the server's clock in epoch milliseconds; absent until they have. */
   readonly openedAt?: number;
   readonly seatCount?: number;
-  readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly stakes?: Stakes;
 }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**

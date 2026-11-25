@@ -48,6 +48,8 @@ export async function writeTableSession(tx: Database, previous: PersistedTableSe
  * and is answered as a table that doesn't exist is.
  */
 export const tableSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A request ID as the server issues it: a lowercase UUID, as a Table Session ID is. */
+export const requestIdPattern = tableSessionIdPattern;
 /**
  * The stored aggregate of the Online Table a Join Link names, read without loading the table; undefined for an ID that
  * names no table, or names a Practice Table, which has no Join Link.
@@ -106,7 +108,7 @@ export async function savedTableEntries(db: Database, userId: string): Promise<(
 }
 /** Notes that the Guest opened a table they have a membership at: its time is the server's `at`. False when they have none. */
 export async function recordOpened(db: Database, userId: string, tableSessionId: string, at: number): Promise<boolean> {
-  if (!/^[0-9a-f-]{36}$/.test(tableSessionId)) return false;
+  if (!tableSessionIdPattern.test(tableSessionId)) return false;
   const rows = await db.update(tableMemberships).set({ openedAt: at })
     .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId))).returning({ id: tableMemberships.tableSessionId });
   return rows.length > 0;
