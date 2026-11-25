@@ -9,7 +9,7 @@ import type { useDecisionAnalysis } from './analysis.js';
 import type { useHandSummary, useTableSessionSummary } from './summaries.js';
 import type { Command } from './session.js';
 import { sessionSummaryRefreshKey } from './session-summary.js';
-import { tableSummaryFigures } from './table-history.js';
+import { Progress } from './history-summary.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
 import { AnalysisSkeleton, ScoreSkeleton, Skeleton } from './loading-skeleton.js';
 import { liveAnalysisAllowed, tableLiveAnalysisNote } from './live-analysis.js';
@@ -165,7 +165,7 @@ export function SummaryResult({ summary, currentReference }: { summary: HandSumm
   const differentReference = data && currentReference && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
   return <>
     {!display?.error && (!data || data.status === 'pending') && (display?.loading || data?.status === 'pending' || !display && summary.canRequest) && <div className="summary-averages" role="status" aria-label="Loading complete summary"><div><span>Mean Decision Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div></div>}
-    {!display?.error && data?.status === 'pending' && <div className="ogs-progress"><span className="numeric" role="status">{tableSummaryFigures(data).state}</span><progress max={data.progress.total || 1} value={data.progress.succeeded} aria-label="Analyses succeeded" /></div>}
+    {!display?.error && data?.status === 'pending' && <Progress summary={data} />}
     {display?.error && <div className="notice-error" role="alert"><p>{display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message}</p><button disabled={display?.retrying} onClick={() => void summary.retry()}>{display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {data?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}

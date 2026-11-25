@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type TableHistoryHand, type TableSchedule } from '@poker/contracts';
-import { completedLabel, handRows, historyStanding, returnBar, tableSummaryFigures } from '../src/table-history.js';
+import { completedLabel, handRows, historyStanding, returnBar } from '../src/table-history.js';
+import { summaryFigures } from '../src/summary-figures.js';
 
 const hand = (change: Partial<TableHistoryHand> = {}): TableHistoryHand => ({
   handId: 'hand-37', handNumber: 37, completedAt: Date.UTC(2026, 10, 22, 14, 5), viewerDealtIn: true, showdown: true, board: ['As', 'Kd', '7c', '2h', 'Tc'],
@@ -98,10 +99,10 @@ describe('the "Your turn — return" bar', () => {
 describe('a table’s Score Summary figures', () => {
   const base = { ok: true, tableSessionId: 't', requestId: 'r', attemptId: 'a', capturedPokerRevision: 1, decisionIds: [], referenceStrategy: baselinePlayingStrategy, scope: 'table-session', progress: { succeeded: 0, total: 0 } } as const;
   it('gives both means out of 100 only once complete, and never a partial mean', () => {
-    expect(tableSummaryFigures({ ...base, progress: { succeeded: 4, total: 4 }, decisionCount: 4, status: 'complete', averages: { decisionScore: 0.325, actionRankScore: 0.375 } })).toEqual({ decisionScore: '32.5', actionRankScore: '37.5', count: '4 decisions', state: undefined });
-    expect(tableSummaryFigures({ ...base, progress: { succeeded: 0, total: 1 }, decisionCount: 1, status: 'pending' })).toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Analyzing 0 / 1', fraction: 0 });
-    expect(tableSummaryFigures({ ...base, progress: { succeeded: 340, total: 2000 }, decisionCount: 2000, status: 'pending' })).toMatchObject({ state: 'Analyzing 340 / 2,000', fraction: 0.17 });
-    expect(tableSummaryFigures({ ...base, progress: { succeeded: 2, total: 3 }, decisionCount: 3, status: 'error', error: { code: 'failed', message: 'x' } })).toMatchObject({ decisionScore: '—', state: 'Error' });
-    expect(tableSummaryFigures({ ...base, decisionCount: 0, status: 'empty' })).toEqual({ decisionScore: '—', actionRankScore: '—', count: 'No decisions', state: undefined });
+    expect(summaryFigures({ ...base, progress: { succeeded: 4, total: 4 }, decisionCount: 4, status: 'complete', averages: { decisionScore: 0.325, actionRankScore: 0.375 } })).toEqual({ decisionScore: '32.5', actionRankScore: '37.5', count: '4 decisions', state: undefined });
+    expect(summaryFigures({ ...base, progress: { succeeded: 0, total: 1 }, decisionCount: 1, status: 'pending' })).toEqual({ decisionScore: '—', actionRankScore: '—', count: '1 decision', state: 'Analyzing 0 / 1', fraction: 0 });
+    expect(summaryFigures({ ...base, progress: { succeeded: 340, total: 2000 }, decisionCount: 2000, status: 'pending' })).toMatchObject({ state: 'Analyzing 340 / 2,000', fraction: 0.17 });
+    expect(summaryFigures({ ...base, progress: { succeeded: 2, total: 3 }, decisionCount: 3, status: 'error', error: { code: 'failed', message: 'x' } })).toMatchObject({ decisionScore: '—', state: 'Error' });
+    expect(summaryFigures({ ...base, decisionCount: 0, status: 'empty' })).toEqual({ decisionScore: '—', actionRankScore: '—', count: 'No decisions', state: undefined });
   });
 });
