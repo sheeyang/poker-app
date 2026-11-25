@@ -1327,6 +1327,9 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
 .history-result { margin: 0; display: grid; gap: 2px; }
 .history-result strong { font-weight: 600; font-size: .92rem; font-variant-numeric: tabular-nums; }
 .history-result span { color: var(--muted); font-size: .8rem; }
+/* The Hand open in the replay, before its result step: number, time and who was dealt in; the rest waits for the result. */
+.history-hand.is-concealed { grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(0, 220px); }
+.history-concealed { margin: 0; color: var(--muted); font-size: .86rem; text-wrap: balance; }
 .history-hand-skeleton { grid-template-columns: 1fr 1fr 1fr; min-height: 74px; }
 @media (max-width: 860px) {
   .history-page { padding-top: 20px; }
@@ -1335,6 +1338,7 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
   .history-hand-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
   .history-participants > li { min-height: 33px; }
   .history-result { grid-template-columns: 1fr auto; align-items: baseline; }
+  .history-hand.is-concealed { grid-template-columns: 1fr; }
 }
 @media (max-width: 650px) {
   .history-return { padding-block: 8px; }
