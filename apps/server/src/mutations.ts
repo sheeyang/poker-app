@@ -3,12 +3,12 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, normalizeHistoryFilter, onlineTableCapacity, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision, type TableHandReplay, type TableHistory, type ActionWindow, type ObservableGameView, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
 import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
-import { afterHandRequestsScheduled, currentTable, membership, participantGuest, participation, participations, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
+import { afterHandRequestsScheduled, currentTable, membership, participantGuest, participation, savedTableEntries, storedOnlineTable, writeTableSession } from './membership.js';
 import { createGuestQueue, type GuestQueue } from './guest-queue.js';
 import { projectConfiguration, projectOptions, projectTableSession, projectTableUpdate, recordedConfiguration } from './projection.js';
 import { createTableRegistry, type TableHandle } from './table-registry.js';
@@ -17,15 +17,14 @@ import type { AcceptanceTransactions, AcceptanceFaults } from './db/acceptance.j
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { FrozenHistorySummary, FrozenScoreSummary } from './summaries.js';
-import type { FrozenScoredHistory, StudiedDecision } from './scored-history.js';
+import type { FrozenScoreSummary } from './table-summaries.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
-import { handReplay, tableHistory } from './table-history.js';
-import { filteredDecisions, inListOrder, newestFirst, ownDecisionIds, ownDecisions, summarySets } from '@poker/research';
-import { completedHands, historyReader, tableFormat, type ReadableTable } from './readable-table.js';
+import { ownDecisionIds } from '@poker/research';
+import { captureEvaluation } from './capture-evaluation.js';
+import { tableFormat, type ReadableTable } from './readable-table.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -593,28 +592,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   function viewer(session: CommittedSession | undefined, userId: string) {
     return session && memberBinding(session.aggregate, userId)?.participantId;
   }
-  /**
-   * The frozen inputs of a human Participant's decision, under the Reference Strategy its Guest has as it is asked.
-   * `current` is the Participant's current view, when the caller already has it for many decisions.
-   */
-  function captureEvaluation(session: CommittedSession, participantId: string, decisionId: string, referenceStrategy: StrategyDescriptor, current = session.game.forParticipant(participantId).getView()): FrozenEvaluationInput | null {
-    const binding = findBinding(session.aggregate, participantId);
-    if (!isHuman(binding)) return null;
-    const participant = session.game.forParticipant(participantId);
-    const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
-    let view: ObservableGameView;
-    try { view = participant.getView({ at: { decisionId } }); } catch (error) { if (error instanceof RangeError) return null; throw error; }
-    if (view.state.actorId !== participantId || !view.state.handId || !view.state.legalActions.length || !accepted && current.state.decisionId !== decisionId) return null;
-    const masterSeed = session.aggregate.pokerRecord.configuration.seed;
-    return immutableData({ view, ...(accepted ? { acceptedAction: accepted.action.action } : {}), identity: {
-      tableSessionId: session.aggregate.tableSessionId, participantId, handId: view.state.handId, decisionId,
-      referenceStrategy,
-      inputFingerprint: createHash('sha256').update(canonical(view)).digest('hex'),
-      evaluationSeed: deriveSeed(masterSeed, 'policy', participantId, decisionId),
-      selectionSeed: deriveSeed(masterSeed, 'selector', participantId, decisionId),
-      engineVersion: session.aggregate.pokerRecord.engineVersion, randomVersion: 'v1', evaluationVersion: 'v1',
-    } });
-  }
   function analyzeAccepted(session: CommittedSession, participantId: string, decisionId: string) {
     const onAccepted = bots?.onHumanActionAccepted;
     const binding = findBinding(session.aggregate, participantId);
@@ -810,67 +787,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       if (!member) return undefined;
       const session = tables.get(id) ?? await readCommitted(id);
       return session && { participantId: member.participantId, aggregate: session.aggregate, game: session.game };
-    }
-    /** The Table History list for a Guest who may read this table's history; `undefined` for anyone else. */
-    async function readHistory(id: string, userId: string): Promise<TableHistory | undefined> {
-      const table = await readableTable(id, userId);
-      return table && tableHistory(table);
-    }
-    /**
-     * The Guest-scoped Overall History (ADR-0041): every decision the Guest made, in a Hand they were dealt into, at any table
-     * they may read, passing the non-score restrictions of `filter`, the newest Hand first. The tables are those of the
-     * membership index in any status, and each is read through `readableTable`, the one rule for reading a table's history,
-     * so it never loads a table and shows no decision of anyone else's.
-     */
-    async function readOverallHistory(userId: string, filter: HistoryFilter): Promise<OverallHistoryDecision[]> {
-      const decisions: OverallHistoryDecision[] = [];
-      for (const { tableSessionId } of await participations(db, userId)) {
-        const table = await readableTable(tableSessionId, userId);
-        if (table) decisions.push(...ownDecisions(completedHands(table), historyReader(table)));
-      }
-      return newestFirst(filteredDecisions(decisions, filter));
-    }
-    /**
-     * An Overall History Score Summary request, frozen (ADR-0041): the decisions `readOverallHistory` lists for `filter`,
-     * each frozen for analysis under the Guest's Reference Strategy now, or under the supported `strategy` named instead,
-     * and with `breakdown` the same decisions in one set per bucket. Each table is read as its history is, so it loads
-     * nothing.
-     */
-    async function studiedDecisions(userId: string, filter: HistoryFilter, referenceStrategy: StrategyDescriptor): Promise<StudiedDecision[]> {
-      const decisions: StudiedDecision[] = [];
-      for (const { tableSessionId } of await participations(db, userId)) {
-        const table = await readableTable(tableSessionId, userId);
-        if (!table) continue;
-        const current = table.game.forParticipant(table.participantId).getView();
-        for (const decision of filteredDecisions(ownDecisions(completedHands(table), historyReader(table)), filter)) {
-          const input = captureEvaluation(table, table.participantId, decision.decisionId, referenceStrategy, current);
-          if (input?.acceptedAction) decisions.push({ decision, input });
-        }
-      }
-      return decisions;
-    }
-    async function captureOverallHistorySummary(userId: string, filter: HistoryFilter, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<FrozenHistorySummary> {
-      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
-      const decisions = await studiedDecisions(userId, filter, referenceStrategy);
-      return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), ...(breakdown ? { breakdown } : {}), referenceStrategy, ...summarySets(decisions, breakdown) });
-    }
-    /**
-     * A score-filtered Overall History request, frozen: every decision the non-score restrictions of `filter` admit, in the
-     * list's order, each frozen for analysis under the Guest's Reference Strategy now (or the supported `strategy`). The
-     * score ranges are applied afterwards, to the finished analyses, by the coordinator.
-     */
-    async function captureScoredHistory(userId: string, filter: HistoryFilter, strategy?: StrategyDescriptor): Promise<FrozenScoredHistory> {
-      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
-      const decisions = await studiedDecisions(userId, filter, referenceStrategy);
-      return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), referenceStrategy, decisions: inListOrder(decisions) });
-    }
-    /**
-     * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
-     * table, `'hand-not-found'` when the Hand is not a completed Hand of it.
-     */
-    async function readReplay(id: string, userId: string, handId: string): Promise<TableHandReplay | 'hand-not-found' | undefined> {
-      const table = await readableTable(id, userId);
-      return table && (handReplay(table, handId) ?? 'hand-not-found');
     }
     /**
      * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
@@ -1516,11 +1432,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       return isHuman(binding) ? binding.userId : undefined;
     },
     read,
-    readHistory,
-    readOverallHistory,
-    captureOverallHistorySummary,
-    captureScoredHistory,
-    readReplay,
+    readableTable,
     captureHistoryEvaluation,
     subscribe,
     configure,

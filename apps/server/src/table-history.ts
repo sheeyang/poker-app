@@ -33,3 +33,25 @@ export function handReplay(table: ReadableTable, handId: string): TableHandRepla
   const hand = tableHistoryHands(completedHands(table), reader).find(row => row.handId === handId);
   return hand && tableHandReplay(replay, hand, reader);
 }
+
+/**
+ * The reads of Table History: the list and one Hand's Replay Steps, each for a Guest who may read the table (ADR-0041).
+ * `readableTable` is the one rule for that, so no read loads a table.
+ */
+export function createTableHistoryReads(readableTable: (id: string, userId: string) => Promise<ReadableTable | undefined>) {
+  return {
+    /** The Table History list for a Guest who may read this table's history; `undefined` for anyone else. */
+    async readHistory(id: string, userId: string): Promise<TableHistory | undefined> {
+      const table = await readableTable(id, userId);
+      return table && tableHistory(table);
+    },
+    /**
+     * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
+     * table, `'hand-not-found'` when the Hand is not a completed Hand of it.
+     */
+    async readReplay(id: string, userId: string, handId: string): Promise<TableHandReplay | 'hand-not-found' | undefined> {
+      const table = await readableTable(id, userId);
+      return table && (handReplay(table, handId) ?? 'hand-not-found');
+    },
+  };
+}

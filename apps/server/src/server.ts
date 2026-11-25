@@ -1,5 +1,9 @@
-import { createScoreSummaries } from './summaries.js';
-import { createScoredHistory } from './scored-history.js';
+import { createSharedAnalyses } from './shared-analyses.js';
+import { createTableSummaries } from './table-summaries.js';
+import { createOverallHistorySummaries } from './overall-history-summaries.js';
+import { createOverallHistory, createScoredHistory } from './scored-history.js';
+import { createTableHistoryReads } from './table-history.js';
+import { participations } from './membership.js';
 import { createAnalysis } from './analysis.js';
 import { JobRunner, type JobRunnerOptions } from './job-runner.js';
 import { createHistoryAnalysisScheduler } from './history-analysis.js';
@@ -103,9 +107,13 @@ export async function createServer(options: ServerOptions) {
   // Every analysis a Table History or Overall History request schedules shares one per-Guest bound.
   const historyAnalysis = createHistoryAnalysisScheduler(jobRunner);
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
-  const summaries = createScoreSummaries(analysis, jobRunner, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
-  const scoredHistory = createScoredHistory(summaries.analyses);
-  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); summaries.stop(); analysis.stop(); });
+  const sharedAnalyses = createSharedAnalyses(analysis, jobRunner, historyAnalysis);
+  const summaries = createTableSummaries(analysis, sharedAnalyses, publishUserUpdate, mutations.acceptJobResult);
+  const overallSummaries = createOverallHistorySummaries(sharedAnalyses, mutations.acceptJobResult);
+  const scoredHistory = createScoredHistory(sharedAnalyses.analyses);
+  const tableHistory = createTableHistoryReads(mutations.readableTable);
+  const overallHistory = createOverallHistory({ participations: userId => participations(db, userId), readableTable: mutations.readableTable, trainerConfigurations });
+  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); sharedAnalyses.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
@@ -322,7 +330,7 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     try {
-      const history = await mutations.readHistory(request.params.id, userId);
+      const history = await tableHistory.readHistory(request.params.id, userId);
       if (!history) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
       return history;
     } catch (error) {
@@ -343,7 +351,7 @@ export async function createServer(options: ServerOptions) {
     if (hasScoreFilter(filter)) return reply.code(400).send({ ok: false, rejection: { code: 'score-filter-needs-analysis', message: 'A score range is decided by analysis. Ask for it with POST /api/overall-history/scored.' } });
     const { limit, offset } = pageOf(request.query);
     try {
-      const decisions = await mutations.readOverallHistory(userId, filter);
+      const decisions = await overallHistory.readOverallHistory(userId, filter);
       const history: OverallHistory = { filter, total: decisions.length, offset, decisions: decisions.slice(offset, offset + limit) };
       return history;
     } catch (error) {
@@ -367,8 +375,8 @@ export async function createServer(options: ServerOptions) {
     // A named Strategy summarizes the same set under it instead of the Guest's Reference Strategy, and never changes their Trainer Configuration.
     if ('strategy' in body && !(options.supportsStrategy ?? isSupportedStrategy)(body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      const input = await mutations.captureOverallHistorySummary(userId, decodeHistoryFilter(body.filter ?? {}), body.breakdown as HistoryBreakdown | undefined, body.strategy as StrategyDescriptor | undefined);
-      return summaries.createHistory(input);
+      const input = await overallHistory.captureOverallHistorySummary(userId, decodeHistoryFilter(body.filter ?? {}), body.breakdown as HistoryBreakdown | undefined, body.strategy as StrategyDescriptor | undefined);
+      return overallSummaries.createHistory(input);
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } });
@@ -391,7 +399,7 @@ export async function createServer(options: ServerOptions) {
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Supply a filter, in the Overall History address encoding, with a Decision Score or Action Rank Score range, and an optional Strategy.' } });
     if ('strategy' in body && !(options.supportsStrategy ?? isSupportedStrategy)(body.strategy)) return reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } });
     try {
-      return scoredHistory.create(await mutations.captureScoredHistory(userId, filter, body.strategy as StrategyDescriptor | undefined), pageOf(request.query));
+      return scoredHistory.create(await overallHistory.captureScoredHistory(userId, filter, body.strategy as StrategyDescriptor | undefined), pageOf(request.query));
     } catch (error) {
       if (error instanceof TableSessionRestorationError) return reply.code(503).send({ ok: false, rejection: { code: 'record-restoration-failed', message: error.message } });
       return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Overall History is unavailable. Refresh to try reading it again.' } });
@@ -411,13 +419,13 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    return summaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    return overallSummaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never> }>('/api/overall-history/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (request.body !== undefined && (!request.body || Array.isArray(request.body) || typeof request.body !== 'object' || Object.keys(request.body).length)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
-    return summaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    return overallSummaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
   /** One completed Hand of Table History, replayed: its Replay Steps as the reader may see them (ADR-0041). */
   app.get<{ Params: { id: string; handId: string } }>('/api/table-sessions/:id/history/:handId', async (request, reply) => {
@@ -425,7 +433,7 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!/^[0-9a-f-]{36}$/.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     try {
-      const replay = await mutations.readReplay(request.params.id, userId, request.params.handId);
+      const replay = await tableHistory.readReplay(request.params.id, userId, request.params.handId);
       if (!replay) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable to this local identity.' } });
       if (replay === 'hand-not-found') return reply.code(404).send({ ok: false, rejection: { code: 'hand-not-found', message: 'This Hand is not a completed Hand of this table.' } });
       return replay;
