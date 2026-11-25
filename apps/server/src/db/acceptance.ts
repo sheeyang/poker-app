@@ -17,11 +17,11 @@ export class AcceptanceTransactions {
   private readonly journal: Pool;
   private readonly closing = Promise.withResolvers<never>();
   private stopped = false;
-  constructor(private readonly targets: Pool, databaseUrl: string, namespace = 'public') {
+  constructor(private readonly targets: Pool, databaseUrl: string, namespace = 'public', connectionTimeoutMillis = 2000) {
     // Target clients must never exhaust the capacity needed to durably journal them. Journal statements stay bounded at
     // 2 seconds; opening a connection may take longer (a new PostgreSQL backend is a new process, slow on a loaded
     // machine), so it is allowed 10 seconds, as the authority client is, rather than failing startup recovery.
-    this.journal = new Pool({ connectionString: databaseUrl, options: '-c search_path=' + namespace, max: 2, connectionTimeoutMillis: 10000, query_timeout: 2000, statement_timeout: 2000 });
+    this.journal = new Pool({ connectionString: databaseUrl, options: '-c search_path=' + namespace, max: 2, connectionTimeoutMillis, query_timeout: 2000, statement_timeout: 2000 });
     void this.closing.promise.catch(() => {});
   }
   stop() { if (!this.stopped) { this.stopped = true; this.closing.reject(new Error('Server is closing.')); } }

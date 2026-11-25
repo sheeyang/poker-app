@@ -7,13 +7,13 @@ const databaseUrl = process.env.TEST_DATABASE_URL!;
 const schema = 'browser_inspection_' + randomUUID().replaceAll('-', '');
 const administration = new Pool({ connectionString: databaseUrl });
 await administration.query('CREATE SCHEMA "' + schema + '"');
-let server = await createServer({ databaseUrl, schema });
+let server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema });
 await server.listen({ host: '127.0.0.1', port: 3014 });
 const control = http.createServer(async (request, response) => {
   const url = new URL(request.url!, 'http://localhost');
   if (url.pathname === '/restart') {
     await server.close();
-    server = await createServer({ databaseUrl, schema, adminMode: url.searchParams.get('admin') !== 'false' });
+    server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, adminMode: url.searchParams.get('admin') !== 'false' });
     await server.listen({ host: '127.0.0.1', port: 3014 });
     response.end('Restarted');
   } else if (url.pathname === '/stop') {

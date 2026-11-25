@@ -37,7 +37,7 @@ async function fixture(concurrency = 2) {
   const is = (a: StrategyDescriptor | undefined, b: StrategyDescriptor) => !!a && a.policy.id === b.policy.id && a.selector.id === b.selector.id;
   let controller!: TableSessionControllerCommands;
   const answer = (evaluation: Evaluation) => { evaluation.answered = true; evaluation.result.resolve(settle(evaluation.view)); };
-  const server = await createServer({ clock, databaseUrl: databaseUrl!, schema, automaticBots: false, jobRunnerOptions: { concurrency, maximumQueued: 16 },
+  const server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl: databaseUrl!, schema, automaticBots: false, jobRunnerOptions: { concurrency, maximumQueued: 16 },
     onControllerCommandsReady: commands => { controller = commands; },
     strategyFactory: descriptor => ({ policy: { checkCompatibility: () => ({ compatible: true }), evaluate: view => {
       const evaluation: Evaluation = { decisionId: view.state.decisionId!, descriptor, view, result: Promise.withResolvers<PolicyResult>(), answered: false };

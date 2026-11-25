@@ -38,7 +38,7 @@ beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
   // Bots act by themselves here, through the controllable fixture Strategy. Analysis may run one job at a time and
   // queue none, so a single held analysis fills the computation it may use.
-  server = await createServer({ clock, databaseUrl: databaseUrl!, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 0, timeoutMs: 60_000 },
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl: databaseUrl!, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 0, timeoutMs: 60_000 },
     supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
     strategyFactory: descriptor => descriptor.policy.id !== 'fixture' ? held(createStrategy(descriptor)) : {
       policy: {

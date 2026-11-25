@@ -11,7 +11,7 @@ await administration.query('CREATE SCHEMA "' + schema + '"');
 let failOnce = process.env.POKER_BROWSER_FAIL_ONCE === '1';
 let failSaveOnce = process.env.POKER_BROWSER_FAIL_SAVE_ONCE === '1';
 const port = Number(process.env.POKER_BROWSER_PORT ?? 3012);
-const server = await createServer({ databaseUrl, schema, mutationTransactionFaults: { beforeCommit: async context => {
+const server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, mutationTransactionFaults: { beforeCommit: async context => {
   if (context.requestId.startsWith('bot:') && failSaveOnce) { failSaveOnce = false; throw new Error('Controlled browser PostgreSQL rollback.'); }
 } }, strategyFactory: descriptor => {
   const strategy = createStrategy(descriptor);

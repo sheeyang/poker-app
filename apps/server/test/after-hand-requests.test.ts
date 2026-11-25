@@ -18,7 +18,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
 async function startServer() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
@@ -181,7 +181,7 @@ test('Deal received before the table has woken for the end of the payout phase s
   const silent = new (class extends ManualClock { override setTimer() { return () => {}; } })();
   const quietSchema = schema + '_quiet';
   await administration.query('CREATE SCHEMA "' + quietSchema + '"');
-  const quiet = await createServer({ clock: silent, automaticBots: false, databaseUrl: databaseUrl!, schema: quietSchema });
+  const quiet = await createServer({ journalConnectionTimeoutMs: 10_000, clock: silent, automaticBots: false, databaseUrl: databaseUrl!, schema: quietSchema });
   const origin = await quiet.listen({ host: '127.0.0.1', port: 0 });
   try {
     const cookie = (await fetch(origin + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(origin, cookie);

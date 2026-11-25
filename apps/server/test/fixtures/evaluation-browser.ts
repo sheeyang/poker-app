@@ -14,7 +14,7 @@ let held = 0;
 let failed = false;
 let evaluations = 0;
 async function start() {
-  const server = await createServer({ databaseUrl, schema, automaticBots: false, strategyFactory: descriptor => {
+  const server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, automaticBots: false, strategyFactory: descriptor => {
     const strategy = createStrategy(descriptor);
     return { ...strategy, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, execution) => {
       evaluations++;

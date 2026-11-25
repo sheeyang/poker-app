@@ -25,7 +25,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base = '';
   async function start() {
-    server = await createServer({ clock, databaseUrl, schema, automaticBots: false,
+    server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false,
       mutationTransactionFaults: {
         openClient: async context => {
           if (context.requestId !== heldId) return;

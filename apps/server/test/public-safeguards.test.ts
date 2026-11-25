@@ -19,7 +19,7 @@ async function withServer(options: Partial<ServerOptions>, body: (harness: Harne
   const clock = new ManualClock();
   await administration.query('CREATE SCHEMA "' + schema + '"');
   let server: Awaited<ReturnType<typeof createServer>> | undefined;
-  const harness: Harness = { base: '', clock, restart: async () => { await server?.close(); server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, ...options }); harness.base = await server.listen({ host: '127.0.0.1', port: 0 }); } };
+  const harness: Harness = { base: '', clock, restart: async () => { await server?.close(); server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, ...options }); harness.base = await server.listen({ host: '127.0.0.1', port: 0 }); } };
   try { await harness.restart(); await body(harness); }
   finally { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); }
 }

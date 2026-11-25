@@ -17,7 +17,7 @@ let beforeCommit: () => Promise<void> = async () => {};
 let afterCommit: () => Promise<void> = async () => {};
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, automaticBots: false,
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false,
     databaseUrl, schema,
     transactionFaults: { beforeCommit: () => beforeCommit(), afterCommit: () => afterCommit() },
   });
