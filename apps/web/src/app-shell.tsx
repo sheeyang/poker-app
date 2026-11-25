@@ -74,7 +74,8 @@ export function AppShell() {
       setNotice(ended.closed ? 'That table closed, so you are no longer at it.' : 'You are no longer at that table.');
     },
     onReady: lifecycle => { consumers.current?.onReady?.(lifecycle); for (const listener of requestListeners.current) listener.ready(); },
-    onAnalysisUpdate: (update, lifecycle) => consumers.current?.onAnalysisUpdate?.(update, lifecycle),
+    // A table summary's notice is also the followed request's: the table's own analysis resources hear it as before.
+    onAnalysisUpdate: (update, lifecycle) => { consumers.current?.onAnalysisUpdate?.(update, lifecycle); for (const listener of requestListeners.current) listener.notice(update); },
     onProgress: update => { for (const listener of requestListeners.current) listener.progress(update); },
     onOverallHistoryUpdate: update => { for (const listener of requestListeners.current) listener.notice(update); },
   }, currentTable);

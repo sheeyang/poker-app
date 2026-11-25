@@ -2,6 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { hashKey } from '@tanstack/react-query';
 import type { ScoreSummary, ObservableTableSession } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource } from '@poker/client';
+import { followedTableSummary } from './table-history.js';
+import { useFollowedCount } from './use-followed-request.js';
+
+/**
+ * A summary resource whose count follows the Guest's `progress` messages while it is Analyzing. The resource reads it
+ * again on its notices and reconnects, as before; nothing reads it on a timer.
+ */
+function useSummaryProgress<R extends { display?: { data?: ScoreSummary } }>(resource: R): R {
+  const data = useFollowedCount(followedTableSummary, resource.display?.data);
+  return resource.display ? { ...resource, display: { ...resource.display, data } } : resource;
+}
 
 export function useHandSummary(table: ObservableTableSession | undefined) {
   const handId = table?.view.state.handId;
@@ -15,7 +26,7 @@ export function useHandSummary(table: ObservableTableSession | undefined) {
     create: () => api.createHandSummary(table.tableSessionId, handId), read: requestId => api.readSummary(table.tableSessionId, requestId), retry: requestId => api.retrySummary(table.tableSessionId, requestId),
     accepts: data => data.tableSessionId === table.tableSessionId && data.scope === 'hand' && data.handId === handId && hashKey([data.decisionIds]) === hashKey([decisionIds]),
   }) : null, [key]);
-  const resource = useAnalysisResource(target);
+  const resource = useSummaryProgress(useAnalysisResource(target));
   const [settled, setSettled] = useState<{ scope: string; data: Extract<ScoreSummary, { status: 'complete' }> }>();
   const candidate = resource.display?.data;
   const complete = candidate?.status === 'complete' ? candidate : settled?.scope === scope ? settled.data : undefined;
@@ -30,6 +41,6 @@ export function useTableSessionSummary(table: ObservableTableSession | undefined
     create: () => api.createSessionSummary(table.tableSessionId), read: requestId => api.readSummary(table.tableSessionId, requestId), retry: requestId => api.retrySummary(table.tableSessionId, requestId),
     accepts: data => data.tableSessionId === table.tableSessionId && data.scope === 'table-session',
   }) : null, [key]);
-  const resource = useAnalysisResource(target);
+  const resource = useSummaryProgress(useAnalysisResource(target));
   return { ...resource, canRequest: !!target, request: () => resource.request(true) };
 }

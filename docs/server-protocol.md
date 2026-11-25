@@ -60,6 +60,20 @@ configuration and its table views and analysis again over HTTP. Every analysis o
 summary request captures the Reference Strategy at request time, and keeps it
 after later changes.
 
+#### Progress on the user channel
+
+A Score Summary request that is pending (an Overall History summary or score-filtered list, or a table's Hand,
+Session or Table History summary) reports how many of the analyses it needs have succeeded, out of all of them, as
+`progress: { succeeded, total }` in every HTTP response ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+Each Guest's `/api/live` connections also hear it as `{ type: 'progress', progress: [{ resource, requestId, succeeded,
+total }, …] }`, where `resource` is `overall-history-summary`, `overall-history-scored` or `summary` (a table's). The
+message carries the latest running count of every request of that Guest's still pending, and counts only, never a
+result. The first change is sent at once; later changes are coalesced into one message a second, by the server clock. A
+request leaves it when its notice is sent: `overall-history-update` for the Overall History resources, and the
+`analysis-update` of `resource: 'summary'` for a table's, each `complete` or `error`. Only the requesting Guest's
+connections receive any of it. Progress is never stored: after a reconnect the client reads each request once over
+HTTP. Nothing polls ([ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)).
+
 An Online Table's address is its Join Link ([ADR-0033](adr/0033-use-the-online-table-address-as-its-join-link.md)):
 the web Trainer's `/online/:tableSessionId`, which shows the table to its Participants and the
 join form to any other Guest. It never changes, and every Participant can pass it on, since
@@ -192,7 +206,7 @@ same optional `strategy` for a table's own summaries (Table History compares tho
 Every analysis a summary needs is the Guest's `history-analysis`: matching cached analyses and stored results are
 reused, and the rest are submitted under the per-Guest bound of 8 outstanding jobs, which holds back the remainder
 without a capacity error. `GET /api/overall-history/summaries/:requestId` reads its state and progress; the web app reads
-it each second while any summary in it is `pending`. `POST /api/overall-history/summaries/:requestId/retry` (empty body)
+it again on its notices and reconnects, never on a timer (see [Progress on the user channel](#progress-on-the-user-channel)). `POST /api/overall-history/summaries/:requestId/retry` (empty body)
 asks again for every failed analysis and starts a new `attemptId`. Both answer 404 to any other Guest and 401 to a
 stranger. A result is accepted only while every table its decisions come from still accepts its Participant's results
 (the same check each table's own results pass); reading the tables loads none of them.

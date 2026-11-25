@@ -1616,7 +1616,6 @@ a.og-row:hover .og-hand strong { color: var(--gold-hover); }
 .ogs-column .ogs-means { margin-top: 8px; padding-top: 12px; }
 .ogs-column[aria-busy] .ogs-means, .ogs-column[aria-busy] .ogs-table { opacity: .7; transition: opacity 150ms; }
 .ogs-column .ogs-table { max-width: none; margin-top: 18px; }
-.ths .ogs-progress progress:not([value]) { opacity: .6; }
 @media (min-width: 56rem) {
   .ogs-columns:not([data-count="1"]) { grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); column-gap: 24px; }
   .ogs-columns:not([data-count="1"]) > .ogs-column:not(:first-child) { margin-top: 0; border-top: 0; padding-top: 4px; border-left: 1px solid var(--line); padding-left: 24px; }

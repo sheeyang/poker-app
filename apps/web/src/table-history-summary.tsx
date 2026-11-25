@@ -1,19 +1,20 @@
 import { api } from '@poker/client';
 import { strategyToken, type ScoreSummary, type StrategyDescriptor } from '@poker/contracts';
-import { tableSummaryFigures } from './table-history.js';
+import { followedTableSummary, tableSummaryFigures } from './table-history.js';
 import { strategyName } from './strategy-select.js';
 import { ColumnHead, CompareBar, useSummaryStrategies } from './summary-comparison.js';
-import { usePolledRequest } from './polled-request.js';
+import { useFollowedRequest } from './use-followed-request.js';
 
 /**
  * A Score Summary of the reader's own decisions across the table's completed Hands, under one Strategy (the Guest's
- * Reference Strategy when none is named). It is read again each second while Analyzing; Retry runs only the failed
- * analyses again. A new completed Hand asks again, since the summary is frozen when it is asked for.
+ * Reference Strategy when none is named). While it is Analyzing its count follows the Guest's `progress` messages, and its
+ * completion or failure notice reads it again; nothing reads it on a timer. Retry runs only the failed analyses again. A
+ * new completed Hand asks again, since the summary is frozen when it is asked for.
  */
 function useTableSummary(tableSessionId: string, completedHands: number | undefined, asked: boolean, strategy: StrategyDescriptor | undefined) {
-  const summary = usePolledRequest({
-    key: ['table-summary', tableSessionId, completedHands, strategy ? strategyToken(strategy) : null], stateKey: requestId => ['table-summary-state', tableSessionId, requestId],
-    enabled: asked, previous: 'request', running: state => state.status === 'pending',
+  const summary = useFollowedRequest({
+    key: JSON.stringify(['table-summary', tableSessionId, completedHands ?? null, strategy ? strategyToken(strategy) : null]),
+    enabled: asked, keepPrevious: true, model: followedTableSummary,
     create: () => api.requestTableHistorySummary(tableSessionId, strategy),
     read: requestId => api.readSummary(tableSessionId, requestId),
     retry: requestId => api.retrySummary(tableSessionId, requestId),
@@ -37,13 +38,13 @@ function SummaryColumn({ tableSessionId, completedHands, asked, strategy, refere
   const named = data?.referenceStrategy ?? strategy;
   const headingId = `ths-column-${strategy ? strategyToken(strategy) : 'reference'}`;
   const figures = data && tableSummaryFigures(data);
-  return <article className="ogs-column" aria-labelledby={headingId} aria-busy={(summary.loading || data?.status === 'pending') || undefined}>
+  return <article className="ogs-column" aria-labelledby={headingId} aria-busy={(summary.stale || summary.loading || data?.status === 'pending') || undefined}>
     <ColumnHead headingId={headingId} name={named ? strategyName(named) : 'Reference Strategy'} reference={reference} onRemove={onRemove} />
     {summary.error && !data && <div className="notice-error" role="alert"><p>{summary.error.message}</p><button type="button" onClick={summary.again}>Request summary again</button></div>}
     {summary.loading && <div className="ogs-means" role="status" aria-label="Requesting the summary"><div className="ogs-mean"><span>Mean Decision Score</span><strong className="numeric">—<small>/100</small></strong></div><div className="ogs-mean is-secondary"><span>Mean Action Rank Score</span><strong className="numeric">—<small>/100</small></strong></div></div>}
     {data && <>
       <Means summary={data} />
-      {figures?.state === 'Analyzing' && <div className="ogs-progress"><span className="numeric" role="status">Analyzing {data.decisionCount.toLocaleString('en')} {data.decisionCount === 1 ? 'decision' : 'decisions'}</span><progress aria-label="Analyzing" /></div>}
+      {data.status === 'pending' && <div className="ogs-progress"><span className="numeric" role="status">{figures?.state}</span><progress max={data.progress.total || 1} value={data.progress.succeeded} aria-label="Analyses succeeded" /></div>}
       {data.status === 'empty' && <p className="ogs-note">You have no decisions at this table yet, so there is no score.</p>}
       {data.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message || 'An analysis failed, so this summary has no score.'} Retry analyzes only the failed ones again.</p><button type="button" disabled={summary.retrying} onClick={summary.retry}>{summary.retrying ? 'Retrying…' : 'Retry'}</button></div>}
       {data.status !== 'error' && summary.error && <div className="notice-error" role="alert"><p>{summary.error.message}</p><button type="button" onClick={summary.again}>Request summary again</button></div>}
