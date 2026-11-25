@@ -22,6 +22,16 @@ export class TrainerConfigurationRestorationError extends Error {
  * committed, `announce` tells the Guest's connections, which read it again over HTTP. Table views and analysis read
  * the current value through `current`; a live table's synchronous projections use `known` for a Guest already read.
  */
+/** The Strategy a study runs under: the supported one the request names, else the Guest's Reference Strategy. Never changes the Trainer Configuration. */
+async function studyStrategyOf(strategy: StrategyDescriptor | undefined, current: () => Promise<TrainerConfiguration>): Promise<StrategyDescriptor> {
+  return strategy ? immutableData(strategy) : (await current()).referenceStrategy;
+}
+/** Every Guest at the default Trainer Configuration, for table mutations built without stored configurations. */
+export const defaultTrainerConfigurations = {
+  current: async (_userId: string): Promise<TrainerConfiguration> => defaultTrainerConfiguration,
+  known: (_userId: string): TrainerConfiguration | undefined => defaultTrainerConfiguration,
+  studyStrategy: (_userId: string, strategy?: StrategyDescriptor) => studyStrategyOf(strategy, async () => defaultTrainerConfiguration),
+};
 export function createTrainerConfigurations(db: Database, announce: (userId: string) => void, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy) {
   // This process is the only writer, so a value read or written here stays current until this process changes it.
   const cache = new Map<string, TrainerConfiguration>();
@@ -85,7 +95,7 @@ export function createTrainerConfigurations(db: Database, announce: (userId: str
     current,
     set,
     /** The Strategy a study runs under: the supported one the request names, else the Guest's Reference Strategy. Never changes the Trainer Configuration. */
-    async studyStrategy(userId: string, strategy?: StrategyDescriptor): Promise<StrategyDescriptor> { return strategy ? immutableData(strategy) : (await current(userId)).referenceStrategy; },
+    studyStrategy: (userId: string, strategy?: StrategyDescriptor) => studyStrategyOf(strategy, () => current(userId)),
     /** The Guest's configuration if this process has read or written it, for projections that cannot wait. */
     known: (userId: string): TrainerConfiguration | undefined => cache.get(userId),
   };
