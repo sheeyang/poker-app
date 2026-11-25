@@ -40,13 +40,13 @@ export interface HistoryReader {
 export function tableHistoryHands(hands: readonly CompletedHand[], reader: HistoryReader): TableHistoryHand[] {
   return hands.map(({ entry, handNumber, completedAt }): TableHistoryHand => {
     const { result } = entry;
-    const dealt = result.participants.filter(player => player.inHand).sort((a, b) => a.handSeat! - b.handSeat!);
+    const dealt = result.participants.filter(participant => participant.inHand).sort((a, b) => a.handSeat! - b.handSeat!);
     return {
       handId: entry.handId, handNumber, ...(completedAt !== undefined ? { completedAt } : {}),
-      dealtIn: dealt.map(player => ({ participantId: player.participantId, name: reader.names.get(player.participantId) ?? '', ...(player.holeCards ? { holeCards: [...player.holeCards] } : {}) })),
-      viewerDealtIn: dealt.some(player => player.participantId === reader.participantId),
+      dealtIn: dealt.map(participant => ({ participantId: participant.participantId, name: reader.names.get(participant.participantId) ?? '', ...(participant.holeCards ? { holeCards: [...participant.holeCards] } : {}) })),
+      viewerDealtIn: dealt.some(participant => participant.participantId === reader.participantId),
       board: [...result.board],
-      showdown: dealt.filter(player => !player.folded).length > 1,
+      showdown: dealt.filter(participant => !participant.folded).length > 1,
       payouts: (result.payouts ?? []).map(payout => ({ participantId: payout.participantId, amount: payout.amount })),
     };
   });
