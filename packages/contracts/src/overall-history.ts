@@ -22,8 +22,8 @@ export interface NumberRange { readonly min?: number; readonly max?: number }
  * admits. `completed` is in server milliseconds and excludes Hands that carry no completion time whenever it is set.
  * `pot` is in big blinds, as the decision's actor faced it: every chip committed to the Hand so far, wagers on the
  * current street included. The score ranges are on a 0 to 1 scale, under the Strategy the request names: a decision's
- * Decision Score and Action Rank Score. They are not recorded facts, so only an analysis can decide them
- * (`matchesScoreFilter`); the list and the summaries of the non-score set ignore them.
+ * Decision Score and Action Rank Score. They are not recorded facts, so only an analysis can decide them; the list and
+ * the summaries of the non-score set ignore them. Matching decisions against a filter is Research's (ADR-0021).
  */
 export interface HistoryFilter {
   readonly street?: readonly Street[];
@@ -103,28 +103,9 @@ export const normalizeHistoryFilter = (filter: HistoryFilter): HistoryFilter => 
 /** How many dimensions a filter restricts. */
 export const historyFilterSize = (filter: HistoryFilter): number => choiceDimensions.filter(d => filter[d.field]?.length).length + rangeDimensions.filter(d => filter[d.field]).length;
 
-const within = (range: NumberRange | undefined, value: number) => !range || (range.min === undefined || value >= range.min) && (range.max === undefined || value <= range.max);
-/** Whether a decision's recorded facts pass every non-score restriction. A date restriction excludes undated Hands. */
-export function matchesHistoryFilter(filter: HistoryFilter, facts: DecisionFacts): boolean {
-  return (!filter.street?.length || filter.street.includes(facts.street))
-    && (!filter.position?.length || filter.position.includes(facts.position))
-    && (!filter.action?.length || filter.action.includes(facts.action.type))
-    && (!filter.mode?.length || filter.mode.includes(facts.mode))
-    && (!filter.completed || facts.completedAt !== undefined && within(filter.completed, facts.completedAt))
-    && within(filter.pot, facts.potBigBlinds);
-}
-
 const scoreFields = ['decisionScore', 'actionRankScore'] as const;
 /** Whether the filter restricts either score, so that only a finished analysis can say what it admits. */
 export const hasScoreFilter = (filter: HistoryFilter): boolean => scoreFields.some(field => filter[field] !== undefined);
-/** The filter without its score ranges: the recorded-facts part, which the list and the analyses to be run are chosen by. */
-export function withoutScoreFilter(filter: HistoryFilter): HistoryFilter {
-  const { decisionScore: _decision, actionRankScore: _rank, ...rest } = filter;
-  return rest;
-}
-/** Whether a decision's two scores pass the filter's score ranges (inclusive); a filter with none admits everything. */
-export const matchesScoreFilter = (filter: HistoryFilter, scores: { readonly decisionScore: number; readonly actionRankScore: number }): boolean =>
-  within(filter.decisionScore, scores.decisionScore) && within(filter.actionRankScore, scores.actionRankScore);
 
 /**
  * One of the reader's own decisions as Overall History lists it: from a Hand they were dealt into, at any table they
@@ -165,8 +146,6 @@ export type HistoryBreakdown = typeof historyBreakdowns[number];
 export const isHistoryBreakdown = (value: unknown): value is HistoryBreakdown => (historyBreakdowns as readonly unknown[]).includes(value);
 /** Every value a breakdown can have a bucket for, in declared order. */
 export const historyBreakdownValues: Readonly<Record<HistoryBreakdown, readonly string[]>> = { street: decisionStreets, position: positions, action: decisionActionTypes, mode: historyModes };
-/** The bucket a decision falls in under a breakdown. */
-export const historyBreakdownValue = (breakdown: HistoryBreakdown, facts: DecisionFacts): string => breakdown === 'action' ? facts.action.type : facts[breakdown];
 
 /** How far a summary has got: how many of the analyses it needs have succeeded, out of all of them. */
 export interface HistorySummaryProgress { readonly succeeded: number; readonly total: number }

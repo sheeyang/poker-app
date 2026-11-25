@@ -18,14 +18,14 @@ import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { FrozenHistorySummary, FrozenScoreSummary } from './summaries.js';
-import type { FrozenScoredHistory } from './scored-history.js';
+import type { FrozenScoredHistory, StudiedDecision } from './scored-history.js';
 import { nameKey, participantName, participantNameRules, validateTableOptionChanges } from './validation.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
 import { handReplay, tableHistory } from './table-history.js';
-import { filtered, newestFirst, ownDecisions, summarySets, type StudiedDecision } from './overall-history.js';
-import { tableFormat, type ReadableTable } from './readable-table.js';
+import { filteredDecisions, inListOrder, newestFirst, ownDecisionIds, ownDecisions, summarySets } from '@poker/research';
+import { completedHands, historyReader, tableFormat, type ReadableTable } from './readable-table.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -826,9 +826,9 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       const decisions: OverallHistoryDecision[] = [];
       for (const { tableSessionId } of await participations(db, userId)) {
         const table = await readableTable(tableSessionId, userId);
-        if (table) decisions.push(...ownDecisions(table));
+        if (table) decisions.push(...ownDecisions(completedHands(table), historyReader(table)));
       }
-      return newestFirst(filtered(decisions, filter));
+      return newestFirst(filteredDecisions(decisions, filter));
     }
     /**
      * An Overall History Score Summary request, frozen (ADR-0041): the decisions `readOverallHistory` lists for `filter`,
@@ -842,7 +842,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const table = await readableTable(tableSessionId, userId);
         if (!table) continue;
         const current = table.game.forParticipant(table.participantId).getView();
-        for (const decision of filtered(ownDecisions(table), filter)) {
+        for (const decision of filteredDecisions(ownDecisions(completedHands(table), historyReader(table)), filter)) {
           const input = captureEvaluation(table, table.participantId, decision.decisionId, referenceStrategy, current);
           if (input?.acceptedAction) decisions.push({ decision, input });
         }
@@ -862,8 +862,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     async function captureScoredHistory(userId: string, filter: HistoryFilter, strategy?: StrategyDescriptor): Promise<FrozenScoredHistory> {
       const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
       const decisions = await studiedDecisions(userId, filter, referenceStrategy);
-      const order = new Map(newestFirst(decisions.map(studied => studied.decision)).map((decision, index) => [decision, index] as const));
-      return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), referenceStrategy, decisions: decisions.toSorted((a, b) => order.get(a.decision)! - order.get(b.decision)!) });
+      return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), referenceStrategy, decisions: inListOrder(decisions) });
     }
     /**
      * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
@@ -1442,7 +1441,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   function scoreSummaryOf(session: CommittedSession, participantId: string, scope: import('@poker/contracts').ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
     if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
     const view = session.game.forParticipant(participantId).getView();
-    const decisionIds = view.history.filter(hand => scope.scope === 'table-session' ? hand.result !== undefined : hand.handId === scope.handId).flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === participantId).map(decision => decision.decisionId));
+    const decisionIds = ownDecisionIds(view.history, participantId, scope);
     const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
     return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members, ...(historyGuestId ? { historyGuestId } : {}) });
   }

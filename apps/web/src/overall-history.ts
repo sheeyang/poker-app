@@ -62,6 +62,11 @@ export function rangedBy(filter: HistoryFilter, field: RangeField, edge: 'min' |
   return normalizeHistoryFilter(Object.keys(next).length ? { ...rest, [field]: next } : rest);
 }
 export const clearedFilter = (): HistoryFilter => ({});
+/** The filter without its score ranges: the recorded-facts part, which the plain list is asked for with. */
+export function withoutScoreFilter(filter: HistoryFilter): HistoryFilter {
+  const { decisionScore: _decision, actionRankScore: _rank, ...rest } = filter;
+  return rest;
+}
 const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** The first millisecond of a calendar day (`YYYY-MM-DD`) in the Guest's own time zone; nothing for anything else. */
 export function dayStartMs(date: string): number | undefined {

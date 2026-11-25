@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { hasScoreFilter, matchesScoreFilter, type AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistorySummary, ScoreAverages, ScoreSummary, ScoreSummaryScope, StrategyDescriptor } from '@poker/contracts';
+import { type AnalysisFailureCode, AnalysisUpdate, DecisionAnalysis, HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistorySummary, ScoreAverages, ScoreSummary, ScoreSummaryScope, StrategyDescriptor } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
-import { calculateScoreSummary } from '@poker/research';
+import { calculateScoreSummary, scoreAdmission } from '@poker/research';
 import type { AnalysisSchedule, createAnalysis, FrozenEvaluationInput } from './analysis.js';
 import type { JobHandle, JobRunner } from './job-runner.js';
 import type { AcceptTableJobResult } from './mutations.js';
@@ -302,7 +302,7 @@ export function createScoreSummaries(analysis: ReturnType<typeof createAnalysis>
      * summary of it waits for all of its set's analyses and then covers only the decisions the ranges admit.
      */
     createHistory(input: FrozenHistorySummary): OverallHistorySummary {
-      const admits = hasScoreFilter(input.filter) ? (scores: ScoreAverages) => matchesScoreFilter(input.filter, scores) : undefined;
+      const admits = scoreAdmission(input.filter);
       const memberships = membershipsOf(input.members);
       const owner: Owner = {
         guestId: input.guestId,
