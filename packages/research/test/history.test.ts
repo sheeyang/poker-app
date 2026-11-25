@@ -49,7 +49,7 @@ const hand2: CompletedHand = {
 };
 const reader: HistoryReader = {
   tableSessionId: 'table-a', mode: 'practice', participantId: 'me', seatCount: 3, stakes: { smallBlind: 5, bigBlind: 10, ante: 0 },
-  names: new Map([['me', 'Mia'], ['opp', 'Olu'], ['bot', 'Bot 1']]),
+  names: new Map([['me', 'Mia'], ['opp', 'Olu'], ['bot', 'Bot 1']]), bots: new Set(['bot']),
 };
 
 test('a Table History row shows everyone dealt in, in seat order and by name, with only the hole cards the reader saw, the board and the payouts', () => {
@@ -68,14 +68,14 @@ test('a Table History row shows everyone dealt in, in seat order and by name, wi
   expect(second).not.toHaveProperty('completedAt');
 });
 
-test('a reader who was not dealt in sees the row as not theirs, a player not dealt in is not listed, and a missing name shows none', () => {
+test('a reader who was not dealt in sees the row as not theirs, a Participant not dealt in is not listed, and a missing name shows none', () => {
   const sitting = { ...hand1, entry: { ...hand1.entry, result: { ...hand1.entry.result, participants: [...hand1.entry.result.participants, { participantId: 'late', seat: 4, stack: 1_000, sittingOut: false }] } } };
   const [row] = tableHistoryHands([sitting], { ...reader, participantId: 'late', names: new Map([['me', 'Mia']]) });
   expect(row!.viewerDealtIn).toBe(false);
   expect(row!.dealtIn.map(player => [player.participantId, player.name])).toEqual([['me', 'Mia'], ['opp', ''], ['bot', '']]);
 });
 
-test("a Hand's replay carries the engine's steps unchanged, the list row, and everyone seated at any step in seat order at their first step", () => {
+test("a Hand's replay carries the engine's steps unchanged, the list row, and everyone seated at any step in seat order at their first step, each a Bot or not", () => {
   const step = (participants: ObservableParticipant[], kind: ReplayStep['kind'] = 'decision'): ReplayStep => ({ kind, state: state({ handId: 'hand-1', participants }), transition: {} });
   const replay: ObservableHandReplay = {
     handId: 'hand-1', configuration: { seatCount: 3, smallBlind: 5, bigBlind: 10, ante: 0, minimumBuyIn: 400, defaultBuyIn: 1_000, maximumBuyIn: 2_000, allowSeatChanges: false },
@@ -87,7 +87,7 @@ test("a Hand's replay carries the engine's steps unchanged, the list row, and ev
   };
   const [hand] = tableHistoryHands([hand1], reader);
   const replayed = tableHandReplay(replay, hand!, reader);
-  expect(replayed).toEqual({ ...replay, tableSessionId: 'table-a', mode: 'practice', viewerParticipantId: 'me', hand, players: [{ participantId: 'me', name: 'Mia' }, { participantId: 'opp', name: 'Olu' }, { participantId: 'bot', name: 'Bot 1' }] });
+  expect(replayed).toEqual({ ...replay, tableSessionId: 'table-a', mode: 'practice', viewerParticipantId: 'me', hand, participants: [{ participantId: 'me', name: 'Mia', bot: false }, { participantId: 'opp', name: 'Olu', bot: false }, { participantId: 'bot', name: 'Bot 1', bot: true }] });
   expect(replayed.steps).toBe(replay.steps);
 });
 

@@ -69,7 +69,7 @@ test('a Participant reads a completed Hand\'s Replay Steps, their own decisions 
   for (let street = 0; street < 3; street++) { await botAct(t, { type: 'check' }); await humanAct(t, { type: 'check' }); }
   const replay = await replayed(t);
   expect(replay).toMatchObject({ tableSessionId: t.id, mode: 'practice', viewerParticipantId: t.human, handId: 'hand-1', hand: { handId: 'hand-1', handNumber: 1, viewerDealtIn: true, showdown: true }, configuration: { seatCount: 6, smallBlind: 10, bigBlind: 20 } });
-  expect(replay.players).toEqual([{ participantId: t.human, name: 'Ann' }, { participantId: t.bot, name: 'Rex' }]);
+  expect(replay.participants).toEqual([{ participantId: t.human, name: 'Ann', bot: false }, { participantId: t.bot, name: 'Rex', bot: true }]);
   expect(outline(replay.steps)).toEqual([
     ['decision', 'preflop', t.human], ['decision', 'preflop', t.bot],
     ['street', 'flop', null], ['decision', 'flop', t.bot], ['decision', 'flop', t.human],
@@ -134,6 +134,34 @@ test('every Participant reads the same steps of an Online Table\'s Hand, a late 
     expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'hand-not-found' } });
   }
   expect((await get('/api/table-sessions/' + t.id + '/history/hand-1', '')).status).toBe(401);
+});
+
+test('every Replay Step\'s actor, and everyone whose decision a step records, is among the replay\'s named participants, a Bot removed since included', async () => {
+  const ann = await guest('Ann');
+  const t = await create(ann, { bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Kit', playingStrategy: baselinePlayingStrategy }] });
+  const kit = (await read(t)).bindings[2]!.participantId;
+  await command(t, ann, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, ann, 'seat-participant', { participantId: t.bot, seat: 2 });
+  await command(t, ann, 'seat-participant', { participantId: kit, seat: 3 });
+  await deal(t);
+  // Everyone checks or calls the Hand down to a showdown, so each of the three makes decisions on every street.
+  for (let current = await read(t); current.view.state.status === 'active-hand'; current = await read(t)) {
+    // A Bot's legal actions are not in Ann's view: it checks when nobody has bet more than it this street, else calls.
+    const { actorId: actor, participants } = current.view.state, wager = (id: string | null) => participants.find(p => p.participantId === id)?.wager ?? 0;
+    const action: ConcreteAction = { type: participants.every(p => wager(p.participantId) <= wager(actor)) ? 'check' : 'call' };
+    if (actor === t.human) await humanAct(t, action);
+    else { clock.settle(); expect(await controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId: actor!, action })).toMatchObject({ ok: true }); }
+  }
+  clock.settle();
+  await command(t, ann, 'remove-bot', { participantId: kit });
+  expect((await read(t)).view.state.participants.find(p => p.participantId === kit)?.seat ?? null).toBeNull();
+
+  const replay = await replayed(t);
+  expect(replay.participants).toEqual([{ participantId: t.human, name: 'Ann', bot: false }, { participantId: t.bot, name: 'Rex', bot: true }, { participantId: kit, name: 'Kit', bot: true }]);
+  const named = new Map(replay.participants.map(participant => [participant.participantId, participant.name]));
+  const actors = replay.steps.flatMap(step => [...step.kind === 'decision' ? [step.state.actorId] : [], ...step.transition.acted ? [step.transition.acted.participantId] : []]);
+  expect(new Set(actors)).toEqual(new Set([t.human, t.bot, kit]));
+  for (const actor of actors) expect(named.get(actor!)).toMatch(/\S/);
 });
 
 test('reading a Hand\'s Replay Steps does not load the table', async () => {

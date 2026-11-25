@@ -1,5 +1,6 @@
-import { presentationPhaseLength, presentingPhase, settleAfter, type ObservableTableSession, type PhaseInputs, type PresentationPhase, type PresentingPhaseKind, type ReplayStep, type TableHandReplay } from '@poker/contracts';
-import { replayTable } from './replay.js';
+import { presentationPhaseLength, presentingPhase, settleAfter, type PhaseInputs, type PresentationPhase, type PresentingPhaseKind, type ReplayStep, type TableHandReplay } from '@poker/contracts';
+import type { FeltView } from './felt-view.js';
+import { stepFelt } from './replay.js';
 import { planMotion, sceneOf, type Cue } from './table-motion.js';
 
 /**
@@ -15,9 +16,9 @@ export type ReplayMove = 'step' | 'jump';
 export interface ReplayFelt {
   /** The step the reader is at: where the felt rests once its motion is over. */
   readonly step: number;
-  /** The step the felt draws now, and its table. */
+  /** The step the felt draws now, and what it draws there. */
   readonly drawn: number;
-  readonly table: ObservableTableSession;
+  readonly felt: FeltView;
   /** The motion to play, timed on the client clock. */
   readonly cues: readonly Cue[];
   /** Play the cues backward: a step back, drawn at the later step until its motion is over. */
@@ -31,7 +32,7 @@ export interface ReplayFelt {
 
 /** A replay opened at `step`, drawn at once. */
 export function openReplay(replay: TableHandReplay, step: number, input = 0): ReplayFelt {
-  return { step, drawn: step, table: replayTable(replay, step), cues: [], reverse: false, input };
+  return { step, drawn: step, felt: stepFelt(replay, step), cues: [], reverse: false, input };
 }
 
 /**
@@ -52,11 +53,11 @@ function transitionPhases(step: ReplayStep, handId: string, mode: TableHandRepla
   return phases;
 }
 
-/** The step at `index`'s own motion from the step before it, played from client time `at`, and the table it plays on. */
-function stepMotion(replay: TableHandReplay, index: number, at: number): { readonly table: ObservableTableSession; readonly cues: Cue[] } {
-  const still = replayTable(replay, index);
-  const table: ObservableTableSession = { ...still, serverTime: at, schedule: { phases: transitionPhases(replay.steps[index]!, replay.handId, replay.mode, at), actionWindow: null } };
-  return { table, cues: planMotion(sceneOf(replayTable(replay, index - 1)), table) };
+/** The step at `index`'s own motion from the step before it, played from client time `at`, and the felt it plays on. */
+function stepMotion(replay: TableHandReplay, index: number, at: number): { readonly felt: FeltView; readonly cues: Cue[] } {
+  const still = stepFelt(replay, index);
+  const felt: FeltView = { ...still, serverTime: at, phases: transitionPhases(replay.steps[index]!, replay.handId, replay.mode, at) };
+  return { felt, cues: planMotion(sceneOf(stepFelt(replay, index - 1)), felt) };
 }
 
 /**
@@ -69,7 +70,7 @@ export function moveReplay(replay: TableHandReplay, felt: ReplayFelt, to: number
   if (how === 'step' && to === from + 1) return { step: to, drawn: to, ...stepMotion(replay, to, now), reverse: false, input };
   // A step back plays the later step's own cues backward, on its felt: it ends where the earlier step begins. One that
   // would undo a deal renders at once: cards gathered back into the deck show nothing worth waiting for.
-  if (how === 'step' && to === from - 1 && !replay.steps[from]?.transition.deal) return { step: to, drawn: from, table: replayTable(replay, from), cues: stepMotion(replay, from, now).cues, reverse: true, input };
+  if (how === 'step' && to === from - 1 && !replay.steps[from]?.transition.deal) return { step: to, drawn: from, felt: stepFelt(replay, from), cues: stepMotion(replay, from, now).cues, reverse: true, input };
   return openReplay(replay, to, input);
 }
 
