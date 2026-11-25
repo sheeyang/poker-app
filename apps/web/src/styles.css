@@ -1499,6 +1499,7 @@ a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .og-analyzing progress { appearance: none; width: 100%; height: 4px; border: 0; border-radius: 2px; background: var(--line); overflow: hidden; }
 .og-analyzing progress::-webkit-progress-bar { background: var(--line); }
 .og-analyzing progress::-webkit-progress-value { background: var(--gold); transition: inline-size 300ms cubic-bezier(.16,1,.3,1); }
+.og-analyzing progress::-moz-progress-bar { background: var(--gold); }
 .og-field { gap: 6px; font-weight: 500; color: var(--muted); }
 .og-input { position: relative; display: block; }
 .og-input input { padding-right: 38px; }

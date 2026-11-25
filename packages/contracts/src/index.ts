@@ -468,6 +468,37 @@ export interface AnalysisUpdate {
   readonly attemptId: string;
   readonly status: 'complete' | 'error';
 }
+/**
+ * A Guest-scoped request the user channel reports on, named by its HTTP resource: an Overall History Score Summary
+ * request (`/api/overall-history/summaries`) or a score-filtered Overall History list (`/api/overall-history/scored`).
+ */
+export type OverallHistoryResource = 'overall-history-summary' | 'overall-history-scored';
+/**
+ * One of the Guest's Overall History requests reached a terminal state: one of its summaries completed (or its score
+ * ranges left it empty), the score-filtered list was decided, or it failed. Sent on the Guest's user channel only, once
+ * that state is readable; like every notice it carries no result, and the client reads the request again over HTTP.
+ */
+export interface OverallHistoryUpdate {
+  readonly type: 'overall-history-update';
+  readonly resource: OverallHistoryResource;
+  readonly requestId: string;
+  readonly attemptId: string;
+  readonly status: 'complete' | 'error';
+}
+/**
+ * A request whose pending count travels on the user channel, in `progress` messages. Each one also publishes a
+ * completion or failure notice (`OverallHistoryUpdate`), so a pending request is never left waiting on progress alone.
+ */
+export type ProgressResource = OverallHistoryResource;
+/** How far one pending request has got: how many of the analyses it needs have succeeded, out of all of them. */
+export interface RequestProgress { readonly resource: ProgressResource; readonly requestId: string; readonly succeeded: number; readonly total: number }
+/**
+ * The latest count of every pending request of the Guest's, sent on their user channel at most once a second while
+ * counts change (ADR-0026: results still refresh over HTTP after notices, and nothing polls). It carries counts only,
+ * never results, and is never stored: after a reconnect the client reads each request over HTTP. A request leaves it
+ * once its completion or failure notice is sent.
+ */
+export interface ProgressUpdate { readonly type: 'progress'; readonly progress: readonly RequestProgress[] }
 export interface UserChannelReady { readonly type: 'user-channel-ready' }
 /**
  * The Guest's Trainer Configuration changed, sent on their user channel to every one of their connections once the
@@ -499,7 +530,7 @@ export interface TableMembershipEnded {
  */
 export interface TablePresence { readonly type: 'table-presence'; readonly tableSessionId: TableSessionId; readonly connectedParticipantIds: readonly ParticipantId[] }
 export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate | TableMembershipEnded | TablePresence;
-export type ServerLiveMessage = UserChannelReady | TrainerConfigurationChanged | TableSubscriptionResult | TableLiveMessage;
+export type ServerLiveMessage = UserChannelReady | TrainerConfigurationChanged | ProgressUpdate | OverallHistoryUpdate | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
   minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,

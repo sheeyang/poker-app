@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query';
-import { usePolledRequest } from './polled-request.js';
+import { useFollowedRequest } from './use-followed-request.js';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api } from '@poker/client';
 import { decisionActionTypes, decisionStreets, hasScoreFilter, historyFilterParams, historyFilterSize, historyModes, positions, type DecisionActionType, type HistoryBreakdown, type HistoryFilter, type StrategyDescriptor, type Position, type Street, type TableMode } from '@poker/contracts';
@@ -10,7 +10,7 @@ import { Skeleton } from './loading-skeleton.js';
 import { SeatGlyph } from './felt.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { HistoryLink } from './table-history-screen.js';
-import { breakdownOfSearch, compareOfSearch, withCompare, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, toggled, withBreakdown, withoutScoreFilter, type DecisionRow } from './overall-history.js';
+import { breakdownOfSearch, compareOfSearch, withCompare, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, followedScored, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, toggled, withBreakdown, withoutScoreFilter, type DecisionRow } from './overall-history.js';
 import { OverallHistorySummaryPanel } from './overall-history-summary.js';
 import { streetName } from './replay.js';
 import { modeLabel } from './table-model.js';
@@ -112,15 +112,15 @@ function DecisionEntry({ row }: { row: DecisionRow }) {
 }
 
 /**
- * The decisions a filter with score ranges admits, under the Reference Strategy. Asking starts the analyses; the state is
- * read each second while Analyzing, and the list arrives only once every analysis has succeeded. `limit` grows with Show more.
+ * The decisions a filter with score ranges admits, under the Reference Strategy. Asking starts the analyses; while they
+ * run the count follows the Guest's `progress` messages, and the list is read once its completion or failure notice
+ * comes, arriving only once every analysis has succeeded. `limit` grows with Show more, which reads it again.
  */
 function useScoredHistory(filter: HistoryFilter, enabled: boolean, limit: number) {
-  const scored = usePolledRequest({
-    key: ['overall-history-scored', JSON.stringify(historyFilterParams(filter))], stateKey: requestId => ['overall-history-scored-state', requestId, limit],
-    enabled, previous: 'state', seed: limit === pageSize, running: state => state.status === 'pending',
+  const scored = useFollowedRequest({
+    key: JSON.stringify(historyFilterParams(filter)), enabled, model: followedScored, readKey: limit,
     create: () => api.askScoredOverallHistory(filter, { limit: pageSize }),
-    read: (requestId, signal) => api.readScoredOverallHistory(requestId, { limit }, signal),
+    read: requestId => api.readScoredOverallHistory(requestId, { limit }),
     retry: requestId => api.retryScoredOverallHistory(requestId, { limit }),
   });
   return { data: enabled ? scored.data : undefined, error: scored.error, retrying: scored.retrying, retry: scored.retry, again: scored.again };

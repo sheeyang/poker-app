@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { baselinePlayingStrategy, highestProbabilityPlayingStrategy, type OverallHistoryDecision } from '@poker/contracts';
-import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
+import { breakdownOfSearch, compareOfSearch, withCompare, bucketLabel, bucketWaiting, clearedFilter, dateInputValue, dayEndMs, dayStartMs, decisionRow, filterOfSearch, overallHistoryPath, overallHistorySearch, percentScore, rangedBy, scoredFigures, scorePercent, searchOfFilter, summaryFigures, toggled, withBreakdown } from '../src/overall-history.js';
 import { parseAddress } from '../src/table-address.js';
 
 const decision = (override: Partial<OverallHistoryDecision> = {}): OverallHistoryDecision => ({
@@ -112,6 +112,12 @@ test('a summary shows both means only once complete, its progress while Analyzin
   // With score ranges, how many decisions a summary covers is unknown until every analysis of the set has succeeded.
   expect(summaryFigures({ status: 'pending', progress: { succeeded: 3, total: 5 } }))
     .toEqual({ decisionScore: '—', actionRankScore: '—', count: '—', state: 'Analyzing 3 / 5', fraction: 0.6 });
+});
+
+test('a breakdown row still Analyzing reads "Analyzing" without a count, which only the whole set follows', () => {
+  expect(bucketWaiting({ status: 'pending', decisionCount: 2, progress: { succeeded: 1, total: 2 } })).toBe('Analyzing');
+  expect(bucketWaiting({ status: 'error', decisionCount: 2, progress: { succeeded: 1, total: 2 }, error: { code: 'failed', message: 'x' } })).toBe('Error');
+  expect(bucketWaiting({ status: 'empty', decisionCount: 0, progress: { succeeded: 2, total: 2 } })).toBe('—');
 });
 
 test('score ranges live in the address as 0 to 1 numbers, edit like any range, and show as percentages in their fields', () => {

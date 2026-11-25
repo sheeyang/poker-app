@@ -1,5 +1,6 @@
 import { compareParam, comparedStrategies } from './table-address.js';
-import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type StrategyDescriptor, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type Position, type ScoredOverallHistory, type TableMode, type Street } from '@poker/contracts';
+import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type StrategyDescriptor, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type OverallHistorySummary, type Position, type ScoredOverallHistory, type TableMode, type Street } from '@poker/contracts';
+import type { Followed } from './request-progress.js';
 import { completedLabel } from './table-history.js';
 import { streetName } from './replay.js';
 import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.js';
@@ -149,6 +150,37 @@ export function percentScore(text: string): number | undefined {
   if (text.trim() === '' || !Number.isFinite(Number(text)) || Number(text) < 0) return undefined;
   return Number((Math.min(100, Number(text)) / 100).toFixed(6));
 }
+/**
+ * What a breakdown row shows in place of its means until it is complete: "Analyzing" with no count, since only the
+ * whole set's count follows progress and a bucket's would stand still between reads, or "Error", or "—" for no score.
+ */
+export function bucketWaiting(summary: HistoryScoreSummary): string {
+  return summary.status === 'pending' ? 'Analyzing' : summary.status === 'error' ? 'Error' : '—';
+}
+
+/** Every summary of an Overall History summary request: the whole set's, then each bucket's. */
+const summariesOf = (request: OverallHistorySummary) => [request.summary, ...request.buckets?.map(bucket => bucket.summary) ?? []];
+/**
+ * An Overall History summary request as the Trainer follows it on the user channel. Its count is the whole set's
+ * summary's, which covers every bucket's decisions, so progress applies while that summary is Analyzing; a bucket still
+ * Analyzing after it is read again when its own notice comes.
+ */
+export const followedSummary: Followed<OverallHistorySummary> = {
+  resource: 'overall-history-summary',
+  pending: request => request.summary.status === 'pending',
+  settled: request => summariesOf(request).every(summary => summary.status !== 'pending'),
+  count: request => request.summary.progress,
+  withCount: (request, progress) => ({ ...request, summary: { ...request.summary, progress } }),
+};
+/** A score-filtered list as the Trainer follows it on the user channel: Analyzing, with its count, until it is decided. */
+export const followedScored: Followed<ScoredOverallHistory> = {
+  resource: 'overall-history-scored',
+  pending: scored => scored.status === 'pending',
+  settled: scored => scored.status !== 'pending',
+  count: scored => scored.progress,
+  withCount: (scored, progress) => ({ ...scored, progress }),
+};
+
 /** What a score-filtered list reports until it can list anything: its Analyzing count, or Error. Nothing once complete. */
 export function scoredFigures(scored: Pick<ScoredOverallHistory, 'status' | 'progress'> | undefined): { state: string | undefined; fraction?: number } {
   if (!scored) return { state: 'Starting analysis…' };
