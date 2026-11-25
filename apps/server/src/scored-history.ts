@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { matchesScoreFilter, type HistoryFilter, type OverallHistoryDecision, type ScoredOverallHistory, type StrategyDescriptor } from '@poker/contracts';
+import type { HistoryFilter, OverallHistoryDecision, ScoredOverallHistory, StrategyDescriptor } from '@poker/contracts';
+import { admittedByScores } from '@poker/research';
 import { immutableData } from '@poker/strategies';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { SharedAnalyses, SharedAnalysis } from './summaries.js';
 
+/** One of the Guest's listed decisions, frozen for analysis under the request's Strategy. */
+export interface StudiedDecision { readonly decision: OverallHistoryDecision; readonly input: FrozenEvaluationInput }
 /**
  * A score-filtered Overall History request, frozen: the decisions the non-score restrictions of `filter` admit, in the
  * list's order, each with its frozen analysis input. The filter's score ranges are decided by those analyses.
@@ -12,7 +15,7 @@ export interface FrozenScoredHistory {
   readonly guestId: string;
   readonly filter: HistoryFilter;
   readonly referenceStrategy: StrategyDescriptor;
-  readonly decisions: readonly { readonly decision: OverallHistoryDecision; readonly input: FrozenEvaluationInput }[];
+  readonly decisions: readonly StudiedDecision[];
 }
 /** Which decisions of a complete score-filtered list to return. */
 export interface ScoredPage { readonly limit: number; readonly offset: number }
@@ -32,7 +35,7 @@ export function createScoredHistory(analyses: SharedAnalyses) {
     const failure = members.map(analyses.failed).find(Boolean);
     if (failure) return immutableData({ ...identity, progress, status: 'error', error: failure });
     if (progress.succeeded < progress.total) return immutableData({ ...identity, progress, status: 'pending' });
-    const admitted = input.decisions.filter((_, index) => { const scores = analyses.scores(members[index]!); return !!scores && matchesScoreFilter(input.filter, scores); });
+    const admitted = admittedByScores(input.filter, input.decisions, members.map(member => analyses.scores(member)));
     return immutableData({ ...identity, progress, status: 'complete', total: admitted.length, offset: page.offset, decisions: admitted.slice(page.offset, page.offset + page.limit).map(studied => studied.decision) });
   };
   return {

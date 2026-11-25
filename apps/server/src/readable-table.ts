@@ -1,5 +1,6 @@
-import type { ObservableHistoryEntry, SavedTable } from '@poker/contracts';
+import type { SavedTable } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
+import type { CompletedHand, HistoryReader } from '@poker/research';
 import type { PersistedTableSession } from './aggregate.js';
 import { recordedConfiguration } from './projection.js';
 
@@ -15,13 +16,11 @@ export function tableFormat(aggregate: PersistedTableSession): { readonly seatCo
   return { seatCount, stakes: { smallBlind, bigBlind, ante } };
 }
 
-/** One completed Hand of the Participant's Observable Session History. */
-export interface CompletedHand {
-  readonly entry: ObservableHistoryEntry & { readonly result: NonNullable<ObservableHistoryEntry['result']> };
-  /** The engine's table-wide Hand sequence. */
-  readonly handNumber: number;
-  /** The server's completion time, absent for a Hand completed before it was recorded. */
-  readonly completedAt?: number;
+/** The participant-safe facts Research reads the table's history with: its public facts, names and the reader. */
+export function historyReader({ aggregate, participantId }: ReadableTable): HistoryReader {
+  const names = new Map<string, string>();
+  for (const binding of aggregate.bindings) if (!names.has(binding.participantId)) names.set(binding.participantId, binding.name);
+  return { tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, participantId, ...tableFormat(aggregate), names };
 }
 
 /** Every completed Hand of the table in the Participant's Observable Session History, oldest first. */
