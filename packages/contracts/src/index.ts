@@ -1,6 +1,7 @@
 /** Participant-safe wire contracts. This package imports no authoritative code. */
 import type { PresentedPhase } from './presentation.js';
 import type { Stakes } from './history.js';
+import type { HistorySummaryProgress } from './overall-history.js';
 export type ParticipantId = string;
 export type TableSessionId = string;
 export type ChipAmount = number;
@@ -486,10 +487,12 @@ export interface OverallHistoryUpdate {
   readonly status: 'complete' | 'error';
 }
 /**
- * A request whose pending count travels on the user channel, in `progress` messages. Each one also publishes a
- * completion or failure notice (`OverallHistoryUpdate`), so a pending request is never left waiting on progress alone.
+ * A request whose pending count travels on the user channel, in `progress` messages: an Overall History request, or a
+ * table's Score Summary (`summary`: a Hand's, the Session's, or Table History's). Each one also publishes a completion
+ * or failure notice (`OverallHistoryUpdate`, or an `AnalysisUpdate` of the `summary` resource), so a pending request is
+ * never left waiting on progress alone.
  */
-export type ProgressResource = OverallHistoryResource;
+export type ProgressResource = OverallHistoryResource | 'summary';
 /** How far one pending request has got: how many of the analyses it needs have succeeded, out of all of them. */
 export interface RequestProgress { readonly resource: ProgressResource; readonly requestId: string; readonly succeeded: number; readonly total: number }
 /**
@@ -652,9 +655,13 @@ export type DecisionAnalysis = AnalysisRequestIdentity & (
  */
 export interface GetOrStartAnalysisRequest { readonly decisionId: string; readonly live?: true; readonly history?: true; readonly strategy?: StrategyDescriptor }
 
-/** One immutable, explicitly requested set of accepted human decisions. */
+/**
+ * One immutable, explicitly requested set of accepted human decisions. `progress` is how many of the analyses it needs
+ * have succeeded, out of all of them: while it is Analyzing the same count travels on the user channel (`progress`
+ * messages of the `summary` resource), and every HTTP response reports the latest one.
+ */
 interface ScoreSummaryMetadata {
-  readonly ok: true; readonly tableSessionId: TableSessionId;
+  readonly ok: true; readonly tableSessionId: TableSessionId; readonly progress: HistorySummaryProgress;
   readonly requestId: string; readonly attemptId: string; readonly capturedPokerRevision: Revision;
   readonly decisionIds: readonly string[]; readonly decisionCount: number; readonly referenceStrategy: StrategyDescriptor;
 }

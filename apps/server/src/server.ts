@@ -123,9 +123,9 @@ export async function createServer(options: ServerOptions) {
   const historyAnalysis = createHistoryAnalysisScheduler(jobRunner);
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
   const sharedAnalyses = createSharedAnalyses(analysis, jobRunner, historyAnalysis);
-  const summaries = createTableSummaries(analysis, sharedAnalyses, publishUserUpdate, mutations.acceptJobResult);
-  // Overall History requests are the Guest's own: their notices and pending counts reach that Guest's connections only.
+  // Score Summary requests are the Guest's own: their notices and pending counts reach that Guest's connections only.
   const guestDelivery = { publish: deliverToGuest, progress: createProgressChannel(clock, deliverToGuest) };
+  const summaries = createTableSummaries(analysis, sharedAnalyses, publishUserUpdate, mutations.acceptJobResult, guestDelivery.progress);
   const overallSummaries = createOverallHistorySummaries(sharedAnalyses, mutations.acceptJobResult, guestDelivery);
   const scoredHistory = createScoredHistory(sharedAnalyses, guestDelivery);
   const tableHistory = createTableHistoryReads(mutations.readableTable);
@@ -532,7 +532,7 @@ export async function createServer(options: ServerOptions) {
     try {
       const input = await mutations.captureSessionSummary(request.params.id, userId, { ...(request.body?.strategy ? { strategy: request.body.strategy } : {}), history: request.body?.history === true });
       if (!input) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-      const state = await summaries.create(input);
+      const state = await summaries.create(input, userId);
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
@@ -547,7 +547,7 @@ export async function createServer(options: ServerOptions) {
       const input = await mutations.captureHandSummary(request.params.id, userId, request.body.handId, request.body.strategy ? { strategy: request.body.strategy } : {});
       if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
       if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'hand-unavailable', message: 'Choose an existing Hand.' } });
-      const state = await summaries.create(input);
+      const state = await summaries.create(input, userId);
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
