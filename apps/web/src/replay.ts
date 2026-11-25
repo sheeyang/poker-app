@@ -2,7 +2,7 @@ import { decisionStep, type ConcreteAction, type DecisionAnalysis, type ReplaySt
 import type { FeltView } from './felt-view.js';
 import { chips } from './table-model.js';
 import { resultLabel } from './table-history.js';
-import { identity } from './analysis-identity.js';
+import { canonicalAnalysisKey } from './analysis-identity.js';
 
 /**
  * Replay of one completed Hand of Table History (ADR-0041), as pure model: where each Replay Step lives in the address,
@@ -14,7 +14,7 @@ import { identity } from './analysis-identity.js';
  * A step's name in the address: `decision-N` before that decision of the Hand, the street (`flop`, `turn`, `river`)
  * after its reveal, or `result`. Each names one step of its Hand, so an address reopens the same step after a reload.
  */
-export function stepKey(step: ReplayStep, handId: string): string {
+export function stepKey(step: ReplayStep): string {
   if (step.kind === 'result') return 'result';
   if (step.kind === 'street') return step.state.street ?? 'flop';
   return decisionStep(step.state.decisionId ?? '');
@@ -22,7 +22,7 @@ export function stepKey(step: ReplayStep, handId: string): string {
 
 /** The index of the step `key` names, or the Hand's first step when it names none of them. */
 export function openStep(replay: TableHandReplay, key: string | undefined): number {
-  const index = key === undefined ? -1 : replay.steps.findIndex(step => stepKey(step, replay.handId) === key);
+  const index = key === undefined ? -1 : replay.steps.findIndex(step => stepKey(step) === key);
   return Math.max(0, index);
 }
 
@@ -52,8 +52,8 @@ export interface ReplayControls {
 }
 
 export function replayControls(replay: TableHandReplay, index: number): ReplayControls {
-  const { steps, handId } = replay;
-  const key = (i: number) => (steps[i] ? stepKey(steps[i], handId) : undefined);
+  const { steps } = replay;
+  const key = (i: number) => (steps[i] ? stepKey(steps[i]) : undefined);
   const streetOf = (step: ReplayStep): Street => step.state.street ?? 'preflop';
   const opens = steps.flatMap((step, i) => i === 0 || step.kind === 'street' ? [{ street: streetOf(step), step: key(i)! }] : []);
   const on = steps[index] ? streetOf(steps[index]) : undefined;
@@ -131,9 +131,9 @@ export function replayAnalysisTarget(replay: TableHandReplay, index: number, ref
   const decisionId = replay.steps[index]?.viewerDecisionId;
   const acted = replay.steps[index + 1]?.transition.acted;
   if (!decisionId || acted?.participantId !== replay.viewerParticipantId) return undefined;
-  const key = identity([replay.tableSessionId, decisionId, referenceStrategy, acted.action]);
+  const key = canonicalAnalysisKey([replay.tableSessionId, decisionId, referenceStrategy, acted.action]);
   return {
     decisionId, action: acted.action, key,
-    accepts: data => identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === key,
+    accepts: data => canonicalAnalysisKey([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === key,
   };
 }

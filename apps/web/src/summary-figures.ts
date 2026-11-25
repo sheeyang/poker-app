@@ -14,6 +14,15 @@ export function summaryFigures(summary: ScoreSummary | HistoryScoreSummary): Sum
   const count = summary.decisionCount === undefined ? '—' : summary.decisionCount ? `${summary.decisionCount.toLocaleString('en')} ${summary.decisionCount === 1 ? 'decision' : 'decisions'}` : 'No decisions';
   if (summary.status === 'complete') return { decisionScore: score(summary.averages.decisionScore), actionRankScore: score(summary.averages.actionRankScore), count, state: undefined };
   const none = { decisionScore: '—', actionRankScore: '—', count };
-  if (summary.status === 'pending') return { ...none, state: `Analyzing ${summary.progress.succeeded.toLocaleString('en')} / ${summary.progress.total.toLocaleString('en')}`, fraction: summary.progress.total ? summary.progress.succeeded / summary.progress.total : 0 };
-  return { ...none, state: summary.status === 'error' ? 'Error' : undefined };
+  return { ...none, ...progressFigures(summary) };
+}
+
+/**
+ * What a request that waits on analyses reports while it is not complete: "Analyzing 340 / 2,000" with the fraction done
+ * while running, "Error" once any analysis has failed, and nothing otherwise. Score Summaries and the score-filtered
+ * list read the same.
+ */
+export function progressFigures({ status, progress }: { status: string; progress: { succeeded: number; total: number } }): { state: string | undefined; fraction?: number } {
+  if (status === 'pending') return { state: `Analyzing ${progress.succeeded.toLocaleString('en')} / ${progress.total.toLocaleString('en')}`, fraction: progress.total ? progress.succeeded / progress.total : 0 };
+  return { state: status === 'error' ? 'Error' : undefined };
 }

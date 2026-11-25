@@ -1,6 +1,7 @@
 import { compareParam, comparedStrategies } from './table-address.js';
 import { decisionStep, decodeHistoryFilter, historyFilterParams, isHistoryBreakdown, normalizeHistoryFilter, type Card, type HistoryBreakdown, type HistoryScoreSummary, type StrategyDescriptor, type DecisionActionType, type HistoryFilter, type OverallHistoryDecision, type OverallHistorySummary, type Position, type ScoredOverallHistory, type TableMode, type Street } from '@poker/contracts';
 import type { Followed } from './request-progress.js';
+import { progressFigures } from './summary-figures.js';
 import { completedLabel } from './table-history.js';
 import { streetName } from './replay.js';
 import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.js';
@@ -169,7 +170,5 @@ export const followedScored: Followed<ScoredOverallHistory> = {
 
 /** What a score-filtered list reports until it can list anything: its Analyzing count, or Error. Nothing once complete. */
 export function scoredFigures(scored: Pick<ScoredOverallHistory, 'status' | 'progress'> | undefined): { state: string | undefined; fraction?: number } {
-  if (!scored) return { state: 'Starting analysis…' };
-  if (scored.status === 'pending') return { state: `Analyzing ${scored.progress.succeeded.toLocaleString('en')} / ${scored.progress.total.toLocaleString('en')}`, fraction: scored.progress.total ? Math.round(scored.progress.succeeded / scored.progress.total * 100) / 100 : 0 };
-  return { state: scored.status === 'error' ? 'Error' : undefined };
+  return scored ? progressFigures(scored) : { state: 'Starting analysis…' };
 }

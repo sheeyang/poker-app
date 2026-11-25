@@ -3,7 +3,7 @@ import { useQueries } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession } from '@poker/contracts';
 import { api, createAnalysisTarget, useAnalysisResource, type LiveConsumers } from '@poker/client';
 import { liveAnalysisOn } from './live-analysis.js';
-import { identity } from './analysis-identity.js';
+import { canonicalAnalysisKey } from './analysis-identity.js';
 
 /** The analysis tab kept in the table's address: `tab` is what the address names, `choose` replaces it. */
 export type AnalysisAddress = { tab: 'live' | 'hand' | 'session' | undefined; choose: (tab: 'live' | 'hand' | 'session') => void };
@@ -29,14 +29,14 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined, a
   const rowGeneration = useRef<number | null>(null);
   const confirmedRows = useRef(new Map<string, DecisionAnalysis>());
   const reviewDecisions = acceptedDecisions.filter(decision => decision.handId === (accepted?.handId ?? table?.view.state.handId));
-  const rowKeys = reviewDecisions.map(decision => identity([table!.tableSessionId, decision.decisionId, table!.trainerConfiguration.referenceStrategy, decision.action]));
+  const rowKeys = reviewDecisions.map(decision => canonicalAnalysisKey([table!.tableSessionId, decision.decisionId, table!.trainerConfiguration.referenceStrategy, decision.action]));
   // A fresh generation also covers completion notifications that race an initial HTTP read.
   // Keep confirmed values under their full identity while that read is refreshed.
   const rowQueries = useQueries({ queries: reviewDecisions.map((decision, index) => {
     const rowKey = rowKeys[index]!;
     return { queryKey: ['decision-row-analysis', rowKey, rowRevision], staleTime: Infinity, placeholderData: confirmedRows.current.get(rowKey), queryFn: async () => {
       const data = await api.getOrStartAnalysis(table!.tableSessionId, decision.decisionId);
-      if (identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) !== rowKey) throw new Error('Analysis does not match this decision.');
+      if (canonicalAnalysisKey([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) !== rowKey) throw new Error('Analysis does not match this decision.');
       return data;
     } };
   }) });
@@ -49,22 +49,22 @@ export function useDecisionAnalysis(table: ObservableTableSession | undefined, a
   });
   const rowErrors = Object.fromEntries(reviewDecisions.map((decision, index) => [decision.decisionId, rowQueries[index]!.isError]));
   const decisionId = view === 'live' ? liveEnabled ? currentDecisionId : undefined : selectedDecisionId;
-  const key = table && decisionId ? identity([table.tableSessionId, decisionId, table.trainerConfiguration.referenceStrategy, accepted?.action ?? null]) : '';
+  const key = table && decisionId ? canonicalAnalysisKey([table.tableSessionId, decisionId, table.trainerConfiguration.referenceStrategy, accepted?.action ?? null]) : '';
   const target = useMemo(() => key && table && decisionId ? createAnalysisTarget<DecisionAnalysis>({
     key, tableId: table.tableSessionId, resource: 'analysis', wanted: !!accepted || liveEnabled, recoverMissing: true,
     create: () => api.getOrStartAnalysis(table.tableSessionId, decisionId, !accepted && liveEnabled),
     read: requestId => api.readAnalysis(table.tableSessionId, requestId), retry: requestId => api.retryAnalysis(table.tableSessionId, requestId),
-    accepts: data => identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === key,
+    accepts: data => canonicalAnalysisKey([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === key,
   }) : null, [key, liveEnabled]);
   const resource = useAnalysisResource(target);
   // Reviewing an earlier decision must not stop evaluation of the latest action.
   const newest = acceptedDecisions.at(-1);
-  const backgroundKey = table && newest && (view === 'live' || selectedDecisionId !== newest.decisionId) ? identity([table.tableSessionId, newest.decisionId, table.trainerConfiguration.referenceStrategy, newest.action]) : '';
+  const backgroundKey = table && newest && (view === 'live' || selectedDecisionId !== newest.decisionId) ? canonicalAnalysisKey([table.tableSessionId, newest.decisionId, table.trainerConfiguration.referenceStrategy, newest.action]) : '';
   const backgroundTarget = useMemo(() => backgroundKey && table && newest ? createAnalysisTarget<DecisionAnalysis>({
     key: backgroundKey, tableId: table.tableSessionId, resource: 'analysis', wanted: true, recoverMissing: true,
     create: () => api.getOrStartAnalysis(table.tableSessionId, newest.decisionId),
     read: id => api.readAnalysis(table.tableSessionId, id), retry: id => api.retryAnalysis(table.tableSessionId, id),
-    accepts: data => identity([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === backgroundKey,
+    accepts: data => canonicalAnalysisKey([data.tableSessionId, data.decisionId, data.referenceStrategy, data.scoredDecision?.acceptedAction ?? null]) === backgroundKey,
   }) : null, [backgroundKey]);
   const background = useAnalysisResource(backgroundTarget);
   const consumers: LiveConsumers = {

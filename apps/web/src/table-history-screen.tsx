@@ -176,7 +176,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
   const current = replay?.steps[index];
   const analysis = useReplayComparison(replay, index, compared);
   // Choosing Strategies changes the address only, at the step on show: never the Guest's Trainer Configuration.
-  const changeCompared = (strategies: readonly StrategyDescriptor[]) => { if (current) void navigate({ href: historyPath(mode, tableSessionId, handId, stepKey(current, handId), strategies), replace: true }); };
+  const changeCompared = (strategies: readonly StrategyDescriptor[]) => { if (current) void navigate({ href: historyPath(mode, tableSessionId, handId, stepKey(current), strategies), replace: true }); };
   // What led to this step, and at the result who won.
   const happened = replay && current ? [actedLabel(replay, current), replayResult(replay, current)].filter(Boolean).join(' · ') : '';
   return <section ref={section} className="replay" aria-labelledby="replay-title">
@@ -190,7 +190,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
       : read.isError ? <div className="notice-error" role="alert"><p>{read.error.message}</p><button type="button" onClick={() => void read.refetch()}>Retry</button></div>
       : !replay || !current || !controls ? <div className="replay-skeleton" role="status" aria-label="Loading the replay"><div className="loading-oval" aria-hidden="true" /><div className="replay-dock" aria-hidden="true"><Skeleton className="skeleton-action" /></div></div>
       : <>
-        <ReplayFelt replay={replay} index={index} move={intent.current?.to === stepKey(current, handId) ? intent.current.how : 'jump'} />
+        <ReplayFelt replay={replay} index={index} move={intent.current?.to === stepKey(current) ? intent.current.how : 'jump'} />
         <div className="replay-dock">
           <p className="replay-step" aria-live="polite">
             <strong>{stepLabel(replay, current)}</strong>

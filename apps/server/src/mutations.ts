@@ -4,7 +4,7 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
 import { defaultTrainerConfiguration, onlineTableCapacity, type ScoreSummaryScope, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
-import type { TrainerConfigurations } from './trainer-configuration.js';
+import { defaultTrainerConfigurations, type TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
 import { creationRequests, localUsers, processedRequests, tableSessions } from './db/schema.js';
@@ -183,7 +183,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   const scheduledRecovery = new Set<string>();
   const strategyFactory = bots?.strategyFactory ?? createStrategy;
   const supportsStrategy = bots?.supportsStrategy ?? isSupportedStrategy;
-  const trainerConfigurations = bots?.trainerConfigurations ?? { current: async () => defaultTrainerConfiguration, known: () => defaultTrainerConfiguration, studyStrategy: async (_userId: string, strategy?: StrategyDescriptor) => strategy ? immutableData(strategy) : defaultTrainerConfiguration.referenceStrategy };
+  const trainerConfigurations = bots?.trainerConfigurations ?? defaultTrainerConfigurations;
   /**
    * The Trainer Configuration of a viewing Participant's Guest, for a projection that cannot wait. Every read and
    * subscription reads it first, so a viewer's Guest is always known by then.

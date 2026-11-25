@@ -38,7 +38,7 @@ const watched: TableHandReplay = { ...replay, viewerParticipantId: 'cy', steps: 
 
 describe('a Replay Step’s address', () => {
   it('names a decision by its number in the Hand, a street reveal by its street, and the result', () => {
-    expect(steps.map(step => stepKey(step, 'hand-3'))).toEqual(['decision-1', 'decision-2', 'flop', 'decision-3', 'decision-4', 'turn', 'decision-5', 'decision-6', 'result']);
+    expect(steps.map(step => stepKey(step))).toEqual(['decision-1', 'decision-2', 'flop', 'decision-3', 'decision-4', 'turn', 'decision-5', 'decision-6', 'result']);
   });
   it('reopens the step it names, and the Hand’s first step when it names none the Hand has', () => {
     expect(openStep(replay, 'decision-4')).toBe(4);
