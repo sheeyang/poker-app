@@ -19,8 +19,8 @@ export class AcceptanceTransactions {
   private stopped = false;
   constructor(private readonly targets: Pool, databaseUrl: string, namespace = 'public', connectionTimeoutMillis = 2000) {
     // Target clients must never exhaust the capacity needed to durably journal them. Journal statements stay bounded at
-    // 2 seconds; opening a connection may take longer (a new PostgreSQL backend is a new process, slow on a loaded
-    // machine), so it is allowed 10 seconds, as the authority client is, rather than failing startup recovery.
+    // 2 seconds. Opening a connection is allowed 2 seconds by default; the server's `journalConnectionTimeoutMs` option
+    // can allow longer (test fixtures do, since a new PostgreSQL backend is a new process, slow on a loaded machine).
     this.journal = new Pool({ connectionString: databaseUrl, options: '-c search_path=' + namespace, max: 2, connectionTimeoutMillis, query_timeout: 2000, statement_timeout: 2000 });
     void this.closing.promise.catch(() => {});
   }
