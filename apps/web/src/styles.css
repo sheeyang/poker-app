@@ -1320,10 +1320,10 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
 .history-tag.is-dealt-in { border-style: solid; border-color: #4f6a57; background: var(--tag, #2d4031); color: #c1cfb9; }
 .history-board { display: flex; gap: 5px; min-height: 41px; align-items: center; }
 .history-muted { color: var(--muted); font-size: .86rem; }
-.history-players { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; }
-.history-players > li { display: inline-flex; align-items: center; gap: 8px; min-height: 41px; }
-.history-player-name { font-size: .9rem; font-weight: 600; }
-.history-player-cards { display: inline-flex; gap: 3px; }
+.history-participants { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.history-participants > li { display: inline-flex; align-items: center; gap: 8px; min-height: 41px; }
+.history-participant-name { font-size: .9rem; font-weight: 600; }
+.history-participant-cards { display: inline-flex; gap: 3px; }
 .history-result { margin: 0; display: grid; gap: 2px; }
 .history-result strong { font-weight: 600; font-size: .92rem; font-variant-numeric: tabular-nums; }
 .history-result span { color: var(--muted); font-size: .8rem; }
@@ -1333,7 +1333,7 @@ a.quiet-button:hover { background: var(--control-hover); border-color: #6c8070; 
   .history-heading h1 { font-size: 1.6rem; }
   .history-hand { grid-template-columns: 1fr; gap: 10px; padding: 16px 4px; }
   .history-hand-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
-  .history-players > li { min-height: 33px; }
+  .history-participants > li { min-height: 33px; }
   .history-result { grid-template-columns: 1fr auto; align-items: baseline; }
 }
 @media (max-width: 650px) {

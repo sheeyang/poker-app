@@ -2,7 +2,7 @@ import type { Card, ChipAmount, ConcreteAction, DecisionId, HandId, ObservableCa
 import type { DealInputs, PayoutInputs, ShowdownInputs, StreetInputs } from './presentation.js';
 
 /** One Participant dealt into a Hand, as the viewer may know them: hole cards only where they are the viewer's own or a showdown revealed them. */
-export interface TableHistoryPlayer {
+export interface TableHistoryParticipant {
   readonly participantId: ParticipantId;
   readonly name: string;
   readonly holeCards?: readonly Card[];
@@ -15,11 +15,11 @@ export interface TableHistoryHand {
   /** Server time the Hand completed; absent for a Hand completed before completion times were recorded. */
   readonly completedAt?: number;
   /** Everyone dealt into the Hand, in seat order. */
-  readonly dealtIn: readonly TableHistoryPlayer[];
+  readonly dealtIn: readonly TableHistoryParticipant[];
   /** Whether the reading Participant was dealt in, and so made decisions in it. */
   readonly viewerDealtIn: boolean;
   readonly board: readonly Card[];
-  /** Whether more than one player remained to see cards at the end, so that a showdown could reveal them. */
+  /** Whether more than one Participant remained to see cards at the end, so that a showdown could reveal them. */
   readonly showdown: boolean;
   readonly payouts: readonly { readonly participantId: ParticipantId; readonly amount: ChipAmount }[];
 }
@@ -87,6 +87,15 @@ export interface TableHandReplay extends ObservableHandReplay {
   readonly viewerParticipantId: ParticipantId;
   /** The Hand as the Table History list shows it. */
   readonly hand: TableHistoryHand;
-  /** Everyone seated at any step, by name, in seat order at their first step: departed Guests and removed Bots included. */
-  readonly players: readonly { readonly participantId: ParticipantId; readonly name: string }[];
+  /**
+   * Everyone seated at any step, by name and whether they are a Bot, in seat order at their first step: departed Guests
+   * and removed Bots included. Every step's actor, and everyone whose decision a transition records, is one of them.
+   */
+  readonly participants: readonly ReplayParticipant[];
+}
+/** A Participant seated at some step of a replayed Hand: their name, and whether they are a Bot. */
+export interface ReplayParticipant {
+  readonly participantId: ParticipantId;
+  readonly name: string;
+  readonly bot: boolean;
 }

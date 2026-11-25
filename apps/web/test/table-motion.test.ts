@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, payoutBeats, showdownBeats, streetBeats, type DealInputs, type ObservableCashGameState, type ObservableParticipantState, type ObservableTableSession, type PayoutInputs, type PresentationPhase, type ShowdownInputs, type StreetInputs } from '@poker/contracts';
+import { baselinePlayingStrategy, dealBeats, defaultConfiguration, defaultTrainerConfiguration, payoutBeats, showdownBeats, streetBeats, type DealInputs, type ObservableCashGameState, type ObservableParticipantState, type PayoutInputs, type PresentationPhase, type ShowdownInputs, type StreetInputs } from '@poker/contracts';
 import { heldStacks, planMotion, sceneOf, type Cue } from '../src/table-motion.js';
+import { liveFelt, type FeltView } from '../src/felt-view.js';
 
 const phase = (kind: 'settle', startsAt: number, street: PresentationPhase['street'] = 'preflop', handId = 'hand-1'): PresentationPhase => ({ kind, handId, street, startsAt, endsAt: startsAt + 1000, durationMs: 1000 });
 /** The three-handed table's deal (button seat 3): you, then ada, then cy; you and ada post the blinds. */
@@ -19,9 +20,9 @@ const heads = (...ids: string[]) => ids.map(participantId => ({ participantId, c
 const seat = (participantId: string, seatNumber: number, extra: Partial<ObservableParticipantState> = {}): ObservableParticipantState => ({ participantId, seat: seatNumber, stack: 1000, sittingOut: false, inHand: true, cardCount: 2, contribution: 0, ...extra });
 type Decision = readonly [participantId: string, type: string];
 
-/** A three-handed Practice Table: you in seat 1, bots in seats 2 and 3; the button is seat 3. */
-function table({ state = {}, phases = [], serverTime = 10_000, decisions = [] }: { state?: Partial<ObservableCashGameState>; phases?: PresentationPhase[]; serverTime?: number; decisions?: readonly Decision[] } = {}): ObservableTableSession {
-  return { tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime, schedule: { phases, actionWindow: null }, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
+/** The felt of a three-handed Practice Table: you in seat 1, Bots in seats 2 and 3; the button is seat 3. */
+function table({ state = {}, phases = [], serverTime = 10_000, decisions = [] }: { state?: Partial<ObservableCashGameState>; phases?: PresentationPhase[]; serverTime?: number; decisions?: readonly Decision[] } = {}): FeltView {
+  return liveFelt({ tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime, schedule: { phases, actionWindow: null }, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, ...['ada', 'cy'].map(id => ({ participantId: id, name: id, controller: { kind: 'bot' as const, playingStrategy: baselinePlayingStrategy } }))],
     view: { configuration: { ...defaultConfiguration, seatCount: 3 },
       history: [{ handId: state.handId ?? 'hand-1', decisions: decisions.map(([participantId, type], i) => ({ decisionId: `d${i}`, action: { participantId, action: { type } } })) }] as never,
@@ -30,7 +31,7 @@ function table({ state = {}, phases = [], serverTime = 10_000, decisions = [] }:
         smallBlindParticipantId: 'you', bigBlindParticipantId: 'ada',
         participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10 }), seat('ada', 2, { wager: 20 }), seat('cy', 3)],
         ...state,
-      } } };
+      } } });
 }
 const kinds = (cues: Cue[]) => cues.map(c => c.kind);
 
@@ -137,7 +138,7 @@ describe('a Hand is dealt and played', () => {
     ]);
     // A viewer with no earlier view plans the identical showdown, fitted to the phase when its length differs.
     expect(planMotion(undefined, called)).toEqual([{ kind: 'showdown', beats: showdownBeats(inputs), viewerId: 'you', at: 30_000 }]);
-    const longer = table({ phases: [showdown(30_000, inputs, 'river', 3000)], state: called.view.state });
+    const longer = table({ phases: [showdown(30_000, inputs, 'river', 3000)], state: called.state });
     expect(planMotion(undefined, longer)).toEqual([{ kind: 'showdown', beats: showdownBeats(inputs, 3000), viewerId: 'you', at: 30_000 }]);
   });
   it('presents each street of a runout from its own phase', () => {

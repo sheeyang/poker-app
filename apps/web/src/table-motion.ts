@@ -1,5 +1,5 @@
-import { dealBeats, dealingOrder, payoutBeats, readPhaseInputs, showdownBeats, streetBeats, type BoardStreet, type DealBeats, type ObservableTableSession, type PayoutBeats, type PhaseInputs, type PresentationPhase, type PresentationPhaseKind, type PresentingPhaseKind, type ShowdownBeats, type Street, type StreetBeats } from '@poker/contracts';
-import { connectionOf } from './online-status.js';
+import { dealBeats, dealingOrder, payoutBeats, readPhaseInputs, showdownBeats, streetBeats, type BoardStreet, type DealBeats, type PayoutBeats, type PhaseInputs, type PresentationPhase, type PresentationPhaseKind, type PresentingPhaseKind, type ShowdownBeats, type Street, type StreetBeats } from '@poker/contracts';
+import { feltParticipant, type FeltView } from './felt-view.js';
 
 /**
  * What changed at the table between two presented views, as motion cues with the server time of the moment each one
@@ -78,34 +78,34 @@ export type Cue = { readonly at: number } & (
  * Whether the current Hand's betting is over: it has a showdown or payout phase, or it is complete. The last street's
  * wagers stay in the view, but they are in the pot from then on, so the line is shown empty and swept.
  */
-export function bettingOver(table: ObservableTableSession): boolean {
-  const state = table.view.state;
-  return state.status === 'completed-hand' || table.schedule.phases.some(p => p.handId === state.handId && (p.kind === 'showdown' || p.kind === 'payout'));
+export function bettingOver(felt: FeltView): boolean {
+  const { state } = felt;
+  return state.status === 'completed-hand' || felt.phases.some(p => p.handId === state.handId && (p.kind === 'showdown' || p.kind === 'payout'));
 }
 
-export function sceneOf(table: ObservableTableSession): TableScene {
-  const state = table.view.state, over = bettingOver(table);
-  const viewerSeat = state.participants.find(p => p.participantId === table.viewerParticipantId)?.seat ?? null;
+export function sceneOf(felt: FeltView): TableScene {
+  const { state } = felt, over = bettingOver(felt);
+  const viewerSeat = state.participants.find(p => p.participantId === felt.viewerParticipantId)?.seat ?? null;
   return {
-    tableSessionId: table.tableSessionId,
+    tableSessionId: felt.tableSessionId,
     ...(state.handId ? { handId: state.handId } : {}),
     complete: state.status === 'completed-hand',
     board: state.board,
     buttonSeat: state.buttonSeat ?? null,
-    viewerId: table.viewerParticipantId,
+    viewerId: felt.viewerParticipantId,
     viewerSeat,
-    seatCount: table.view.configuration.seatCount,
+    seatCount: felt.seatCount,
     seats: state.participants.filter(p => p.seat !== null).map(p => ({
       participantId: p.participantId, seat: p.seat!, cards: p.cardCount ?? 0, shown: !!p.holeCards?.length, folded: !!p.folded,
-      wager: over ? 0 : p.wager ?? 0, stack: p.stack, sittingOut: !!p.sittingOut, offline: connectionOf(table, p.participantId) === 'disconnected',
+      wager: over ? 0 : p.wager ?? 0, stack: p.stack, sittingOut: !!p.sittingOut, offline: !!feltParticipant(felt, p.participantId)?.disconnected,
     })),
-    decisions: (table.view.history.find(h => h.handId === state.handId)?.decisions ?? []).map(d => ({ participantId: d.action.participantId, type: d.action.action.type })),
+    decisions: felt.decisions.map(d => ({ participantId: d.participantId, type: d.action.type })),
   };
 }
 
 /** `handId`'s phase of `kind`, if the schedule has one. */
-function handPhase<K extends PresentationPhaseKind>(table: ObservableTableSession, handId: string | undefined, kind: K): Extract<PresentationPhase, { readonly kind: K }> | undefined {
-  return table.schedule.phases.find((p): p is Extract<PresentationPhase, { readonly kind: K }> => p.handId === handId && p.kind === kind);
+function handPhase<K extends PresentationPhaseKind>(felt: FeltView, handId: string | undefined, kind: K): Extract<PresentationPhase, { readonly kind: K }> | undefined {
+  return felt.phases.find((p): p is Extract<PresentationPhase, { readonly kind: K }> => p.handId === handId && p.kind === kind);
 }
 
 /** How many board cards are out before each street reveal. */
@@ -136,10 +136,10 @@ function inputsOf<K extends PresentingPhaseKind>(phase: { readonly kind: K; read
  * fitted to its length, so every viewer plays the same beats at the same server times: in an all-in runout, each street
  * from its own phase. A viewer with no earlier view (`prev` undefined) gets the identical cues.
  */
-function revealCues(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'board' | 'showdown' }>[] {
+function revealCues(prev: TableScene | undefined, next: TableScene, felt: FeltView): Extract<Cue, { kind: 'board' | 'showdown' }>[] {
   const sameHand = !!prev && prev.handId === next.handId, cues: Extract<Cue, { kind: 'board' | 'showdown' }>[] = [];
   const seen = sameHand ? prev.board.length : 0;
-  for (const phase of table.schedule.phases) {
+  for (const phase of felt.phases) {
     if (phase.handId !== next.handId) continue;
     if (phase.kind === 'street' && phase.street !== 'preflop') {
       const inputs = inputsOf(phase, next), from = boardBefore[phase.street], to = from + inputs.cardCount;
@@ -159,8 +159,8 @@ function revealCues(prev: TableScene | undefined, next: TableScene, table: Obser
  * length, so every viewer, one who joined late included, plays the same beats at the same server times. A viewer with
  * no earlier view (`prev` undefined) gets the identical deal, without the last Hand's cards or button to move.
  */
-function dealCue(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'deal' }> | undefined {
-  const phase = handPhase(table, next.handId, 'deal');
+function dealCue(prev: TableScene | undefined, next: TableScene, felt: FeltView): Extract<Cue, { kind: 'deal' }> | undefined {
+  const phase = handPhase(felt, next.handId, 'deal');
   if (!phase || !next.seats.some(s => s.cards > 0)) return undefined;
   // The view before this Hand, when this viewer saw it.
   const last = prev && prev.handId !== next.handId ? prev : undefined;
@@ -169,8 +169,8 @@ function dealCue(prev: TableScene | undefined, next: TableScene, table: Observab
 }
 
 /** The payout's beats, fitted to its phase, when the current Hand has a payout phase: and that phase's start. */
-function payoutOf(table: ObservableTableSession, scene: TableScene): { readonly beats: PayoutBeats; readonly at: number } | undefined {
-  const phase = handPhase(table, table.view.state.handId, 'payout');
+function payoutOf(felt: FeltView, scene: TableScene): { readonly beats: PayoutBeats; readonly at: number } | undefined {
+  const phase = handPhase(felt, felt.state.handId, 'payout');
   return phase && { beats: payoutBeats(inputsOf(phase, scene), phase.durationMs), at: phase.startsAt };
 }
 
@@ -178,21 +178,21 @@ function payoutOf(table: ObservableTableSession, scene: TableScene): { readonly 
  * The payout, when this view is the first to show the Hand complete: planned from the payout phase's own inputs and
  * fitted to its length, so a viewer with no earlier view (`prev` undefined) gets the identical payout, joined part-way.
  */
-function payoutCue(prev: TableScene | undefined, next: TableScene, table: ObservableTableSession): Extract<Cue, { kind: 'payout' }> | undefined {
-  const payout = payoutOf(table, next);
+function payoutCue(prev: TableScene | undefined, next: TableScene, felt: FeltView): Extract<Cue, { kind: 'payout' }> | undefined {
+  const payout = payoutOf(felt, next);
   if (!payout || !next.complete || (prev?.handId === next.handId && prev?.complete)) return undefined;
   return { kind: 'payout', ...payout };
 }
 
 /**
- * The cues for going from `prev` to the presented `table`. A first view moves nothing but the phases it presents, and
+ * The cues for going from `prev` to the presented `felt`. A first view moves nothing but the phases it presents, and
  * nothing moves when the viewer sits down or stands up. When the viewer moves seats, the table is drawn turned so they
  * stay at the bottom and every seat is in a new place: that is one cue, a turn, and nothing else moves with it.
  */
-export function planMotion(prev: TableScene | undefined, table: ObservableTableSession): Cue[] {
-  const next = sceneOf(table);
-  if (!prev || prev.tableSessionId !== next.tableSessionId) return [dealCue(undefined, next, table), ...(next.handId ? revealCues(undefined, next, table) : []), payoutCue(undefined, next, table)].filter(cue => cue !== undefined);
-  const viewAt = table.serverTime, cues: Cue[] = [];
+export function planMotion(prev: TableScene | undefined, felt: FeltView): Cue[] {
+  const next = sceneOf(felt);
+  if (!prev || prev.tableSessionId !== next.tableSessionId) return [dealCue(undefined, next, felt), ...(next.handId ? revealCues(undefined, next, felt) : []), payoutCue(undefined, next, felt)].filter(cue => cue !== undefined);
+  const viewAt = felt.serverTime, cues: Cue[] = [];
   if (prev.viewerSeat !== next.viewerSeat) return prev.viewerSeat !== null && next.viewerSeat !== null ? [{ kind: 'turn', seat: next.viewerSeat, at: viewAt }] : [];
   const before = new Map(prev.seats.map(s => [s.participantId, s]));
   const after = new Map(next.seats.map(s => [s.participantId, s]));
@@ -217,7 +217,7 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
   }
   if (!next.handId) return cues;
 
-  const deal = dealCue(prev, next, table);
+  const deal = dealCue(prev, next, felt);
   if (deal) cues.push(deal);
   // The blinds went in with the deal.
   const blinds = deal?.beats.blinds.map(b => b.participantId) ?? [];
@@ -238,12 +238,12 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
   }
   // A street reveal or showdown sweeps the line as its first beat, so the burn and the hands wait for it; the sweep is
   // played here only when no such phase presents it, already or still to come (a Hand won by folds).
-  const reveals = revealCues(prev, next, table);
-  const presented = new Set(table.schedule.phases.flatMap(p => p.handId === next.handId && (p.kind === 'street' || p.kind === 'showdown') && (p.startsAt > viewAt || reveals.some(c => c.at === p.startsAt)) ? inputsOf(p, next).swept : []));
+  const reveals = revealCues(prev, next, felt);
+  const presented = new Set(felt.phases.flatMap(p => p.handId === next.handId && (p.kind === 'street' || p.kind === 'showdown') && (p.startsAt > viewAt || reveals.some(c => c.at === p.startsAt)) ? inputsOf(p, next).swept : []));
   const swept = prev.seats.filter(s => s.wager > 0 && (after.get(s.participantId)?.wager ?? 0) === 0 && !presented.has(s.participantId)).map(s => s.participantId);
   if (swept.length) cues.push({ kind: 'sweep', participantIds: swept, at: viewAt });
   cues.push(...reveals);
-  const paid = payoutCue(prev, next, table);
+  const paid = payoutCue(prev, next, felt);
   if (paid) cues.push(paid);
   return cues;
 }
@@ -253,12 +253,12 @@ export function planMotion(prev: TableScene | undefined, table: ObservableTableS
  * until their award's landing beat, from the payout phase's own beats, then the new total at once. It needs no earlier
  * view, so a viewer who joins mid-payout sees the same figures as everyone else. Keyed by Participant.
  */
-export function heldStacks(table: ObservableTableSession, serverNow: number): Map<string, { readonly value: number; readonly until: number }> {
+export function heldStacks(felt: FeltView, serverNow: number): Map<string, { readonly value: number; readonly until: number }> {
   const held = new Map<string, { value: number; until: number }>();
-  const payout = payoutOf(table, sceneOf(table));
-  if (!payout || table.view.state.status !== 'completed-hand') return held;
+  const payout = payoutOf(felt, sceneOf(felt));
+  if (!payout || felt.state.status !== 'completed-hand') return held;
   for (const award of payout.beats.awards) {
-    const until = payout.at + award.endsAt, stack = table.view.state.participants.find(p => p.participantId === award.participantId)?.stack;
+    const until = payout.at + award.endsAt, stack = felt.state.participants.find(p => p.participantId === award.participantId)?.stack;
     if (serverNow < until && stack !== undefined) held.set(award.participantId, { value: stack - award.amount, until });
   }
   return held;

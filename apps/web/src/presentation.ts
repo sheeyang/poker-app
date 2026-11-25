@@ -1,4 +1,4 @@
-import { handEndsAt, type BoardStreet, type ObservableTableSession } from '@poker/contracts';
+import { handEndsAt, type ActionWindow, type BoardStreet, type ObservableCashGameState, type ObservableTableSession } from '@poker/contracts';
 
 /**
  * Presentation of the server's schedule. Pure: the Trainer shows already-received facts at their server
@@ -73,7 +73,11 @@ export function dealOpen(table: ObservableTableSession, serverNow: number): bool
 
 /** The Action Window of the current decision, if the schedule has one. */
 export function currentWindow(table: ObservableTableSession) {
-  const state = table.view.state, window = table.schedule.actionWindow;
+  return decisionWindow(table.view.state, table.schedule.actionWindow);
+}
+
+/** `window`, when it is the Action Window of `state`'s current decision. */
+export function decisionWindow(state: ObservableCashGameState, window: ActionWindow | null): ActionWindow | undefined {
   return state.status === 'active-hand' && window && window.participantId === state.actorId && window.decisionId === state.decisionId ? window : undefined;
 }
 

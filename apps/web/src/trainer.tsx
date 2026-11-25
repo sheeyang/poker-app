@@ -9,6 +9,7 @@ import { useSession } from './session.js';
 import { analysisTabParam, joinPreviewWanted, listPath, tableAddress, type AnalysisTab } from './table-address.js';
 import { usePracticeSetup } from './practice-setup.js';
 import { PokerTable } from './poker-table.js';
+import { liveFelt } from './felt-view.js';
 import { ActionTray, CommandFeedback } from './controls.js';
 import { TableSettings } from './settings.js';
 import { JoinLinkDialog, JoinTable, JoinTableSkeleton } from './join-table.js';
@@ -194,7 +195,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
             {/* The tray announces the next Hand; this is its glanceable echo beside the Hand it follows. */}
             {nextHandShort && <span className="hand-status-next" aria-hidden="true">{nextHandShort}</span>}</div>
           {preparing ? <section className="practice-preparing" role="status"><Icon name="cards" size={38} /><h2>{setup.paused ? 'Your setup is saved.' : setup.afterHandId === undefined ? 'Getting everyone to the table…' : 'Preparing the next hand…'}</h2><p>{setup.paused ?? (setup.afterHandId === undefined ? `${current.view.state.participants.filter(p => p.seat !== null).length} of ${current.bindings.length} players seated. Your hand starts next.` : 'Returning players and refilling empty stacks before the deal.')}</p>{setup.paused && <div className="button-row"><button className="primary" disabled={command.busy} onClick={() => { command.dismiss(); useSession.getState().setSetup({ ...setup, paused: undefined }); }}>Continue setup</button><button onClick={() => { useSession.getState().setSetup(null); setSettings('all'); }}>Table options</button></div>}</section> : <>
-            <PokerTable table={shown} serverNow={presentation.serverNow} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} nextHand={presentation.nextHand} handOpen={handOpen} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} />
+            <PokerTable felt={liveFelt(shown)} serverNow={presentation.serverNow} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} nextHand={presentation.nextHand} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} actionable={participantId => participantActions(shown, participantId, handOpen).length > 0} />
 
           </>}
           <div className="table-dock"><div className="table-dock-inner">

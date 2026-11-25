@@ -1,4 +1,5 @@
-import { defaultTrainerConfiguration, type ConcreteAction, type DecisionAnalysis, type ObservableHistoryEntry, type ObservableTableSession, type ReplayStep, type StrategyDescriptor, type Street, type TableHandReplay } from '@poker/contracts';
+import type { ConcreteAction, DecisionAnalysis, ReplayStep, StrategyDescriptor, Street, TableHandReplay } from '@poker/contracts';
+import type { FeltView } from './felt-view.js';
 import { chips } from './table-model.js';
 import { identity } from './analysis-identity.js';
 
@@ -51,28 +52,27 @@ export function replayControls(replay: TableHandReplay, index: number): ReplayCo
 }
 
 /**
- * The step at `index` as a table the felt draws (`PokerTable`): the step's own state, seen by the reader, with the
- * decisions taken before it in the Hand's history so each seat shows its last action. It has no schedule, no Action
- * Window and nobody disconnected: a replay plays no live timing.
+ * The step at `index` as the felt draws it (`PokerTable`): the step's own state, seen by the reader, everyone seated in
+ * the Hand by name and as a Bot or not, and the decisions taken before the step so each seat shows its last action. It
+ * has no schedule, no Action Window and nobody disconnected: a replay plays no live timing.
  */
-export function replayTable(replay: TableHandReplay, index: number): ObservableTableSession {
+export function stepFelt(replay: TableHandReplay, index: number): FeltView {
   const step = replay.steps[index]!;
-  const decisions: ObservableHistoryEntry['decisions'][number][] = [];
+  const decisions: FeltView['decisions'][number][] = [];
   for (let i = 1; i <= index; i++) {
-    const acted = replay.steps[i]!.transition.acted, before = replay.steps[i - 1]!;
-    if (acted && before.state.decisionId) decisions.push({ decisionId: before.state.decisionId, state: before.state, action: acted });
+    const acted = replay.steps[i]!.transition.acted;
+    if (acted && replay.steps[i - 1]!.state.decisionId) decisions.push(acted);
   }
-  const players = replay.players.map(player => player.participantId);
   return {
-    tableSessionId: replay.tableSessionId, mode: replay.mode, options: { actionTimeLimitSeconds: null, allowLiveAnalysis: false },
-    viewerParticipantId: replay.viewerParticipantId, ownerParticipantId: '', pokerRevision: 0, sessionRevision: 0,
-    bindings: replay.players.map(player => ({ participantId: player.participantId, name: player.name, controller: { kind: 'human' } })),
-    trainerConfiguration: defaultTrainerConfiguration,
-    view: { configuration: replay.configuration, state: step.state, history: [{ handId: replay.handId, description: `Hand ${replay.hand.handNumber}`, decisions }] },
-    schedule: { phases: [], actionWindow: null }, serverTime: 0, pendingChanges: [], connectedParticipantIds: players,
-    inspection: { adminMode: false, completedHands: [] },
+    tableSessionId: replay.tableSessionId, mode: replay.mode, viewerParticipantId: replay.viewerParticipantId,
+    seatCount: replay.configuration.seatCount, state: step.state,
+    participants: replay.participants.map(({ participantId, name, bot }) => ({ participantId, name, bot, disconnected: false })),
+    decisions, phases: [], actionWindow: null, serverTime: 0,
   };
 }
+
+/** The name of a Participant seated in the replayed Hand: the server names every one of them, every actor included. */
+const nameOf = (replay: TableHandReplay, participantId: string | null) => replay.participants.find(participant => participant.participantId === participantId)?.name ?? '';
 
 const streetNames: Readonly<Record<Street, string>> = { preflop: 'Preflop', flop: 'Flop', turn: 'Turn', river: 'River' };
 /** A step in a few words: whose decision comes next ("Your decision", "Rex to act"), the street just dealt, or the result. */
@@ -81,14 +81,14 @@ export function stepLabel(replay: TableHandReplay, step: ReplayStep): string {
   if (step.kind === 'street') return streetNames[step.state.street ?? 'flop'];
   const actor = step.state.actorId;
   if (actor === replay.viewerParticipantId) return 'Your decision';
-  return `${replay.players.find(player => player.participantId === actor)?.name ?? 'Next player'} to act`;
+  return `${nameOf(replay, actor)} to act`;
 }
 
 /** The decision taken just before `step`, in the past tense ("Rex bet 40", "You folded"); none when the step follows no decision. */
 export function actedLabel(replay: TableHandReplay, step: ReplayStep): string | undefined {
   const acted = step.transition.acted;
   if (!acted) return undefined;
-  const who = acted.participantId === replay.viewerParticipantId ? 'You' : replay.players.find(player => player.participantId === acted.participantId)?.name ?? 'A player';
+  const who = acted.participantId === replay.viewerParticipantId ? 'You' : nameOf(replay, acted.participantId);
   const { action } = acted;
   const what = action.type === 'bet' ? `bet ${chips(action.betTo)}` : action.type === 'raise' ? `raised to ${chips(action.raiseTo)}` : { fold: 'folded', check: 'checked', call: 'called' }[action.type];
   return `${who} ${what}`;

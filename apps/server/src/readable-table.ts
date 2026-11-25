@@ -1,7 +1,7 @@
 import type { SavedTable } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
 import type { CompletedHand, HistoryReader } from '@poker/research';
-import type { PersistedTableSession } from './aggregate.js';
+import { isBot, type PersistedTableSession } from './aggregate.js';
 import { recordedConfiguration } from './projection.js';
 
 /**
@@ -16,11 +16,17 @@ export function tableFormat(aggregate: PersistedTableSession): { readonly seatCo
   return { seatCount, stakes: { smallBlind, bigBlind, ante } };
 }
 
-/** The participant-safe facts Research reads the table's history with: its public facts, names and the reader. */
+/**
+ * The participant-safe facts Research reads the table's history with: its public facts, the names of everyone who has
+ * had a place there and which of them are Bots (a removed Bot's binding stays), and the reader.
+ */
 export function historyReader({ aggregate, participantId }: ReadableTable): HistoryReader {
-  const names = new Map<string, string>();
-  for (const binding of aggregate.bindings) if (!names.has(binding.participantId)) names.set(binding.participantId, binding.name);
-  return { tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, participantId, ...tableFormat(aggregate), names };
+  const names = new Map<string, string>(), bots = new Set<string>();
+  for (const binding of aggregate.bindings) {
+    if (!names.has(binding.participantId)) names.set(binding.participantId, binding.name);
+    if (isBot(binding)) bots.add(binding.participantId);
+  }
+  return { tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, participantId, ...tableFormat(aggregate), names, bots };
 }
 
 /** Every completed Hand of the table in the Participant's Observable Session History, oldest first. */

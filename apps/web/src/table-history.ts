@@ -12,7 +12,7 @@ export interface HandRow {
   /** When it completed; absent for a Hand completed before completion times were recorded. */
   readonly completed: string | undefined;
   /** Everyone dealt in, the viewer as "You"; cards only where the viewer may see them. */
-  readonly players: readonly { readonly participantId: string; readonly name: string; readonly cards: readonly Card[] | undefined }[];
+  readonly participants: readonly { readonly participantId: string; readonly name: string; readonly cards: readonly Card[] | undefined }[];
   readonly board: readonly Card[];
   /** "You won 70 · Rex won 70". */
   readonly result: string;
@@ -29,12 +29,12 @@ export function completedLabel(at: number | undefined, zone?: string): string | 
 /** The Hands of a Table History as list rows, newest first. */
 export function handRows(hands: readonly TableHistoryHand[], viewerParticipantId: string): HandRow[] {
   return [...hands].sort((a, b) => b.handNumber - a.handNumber).map(hand => {
-    const name = (participantId: string, fallback = '') => participantId === viewerParticipantId ? 'You' : hand.dealtIn.find(player => player.participantId === participantId)?.name ?? fallback;
+    const name = (participantId: string, fallback = '') => participantId === viewerParticipantId ? 'You' : hand.dealtIn.find(dealt => dealt.participantId === participantId)?.name ?? fallback;
     const won = new Map<string, number>();
     for (const payout of hand.payouts) won.set(payout.participantId, (won.get(payout.participantId) ?? 0) + payout.amount);
     return {
       key: hand.handId, handNumber: hand.handNumber, label: `Hand ${hand.handNumber}`, completed: completedLabel(hand.completedAt),
-      players: hand.dealtIn.map(player => ({ participantId: player.participantId, name: name(player.participantId, player.name), cards: player.holeCards })),
+      participants: hand.dealtIn.map(dealt => ({ participantId: dealt.participantId, name: name(dealt.participantId, dealt.name), cards: dealt.holeCards })),
       board: hand.board,
       result: [...won].map(([participantId, amount]) => `${name(participantId)} won ${chips(amount)}`).join(' · '),
       ending: hand.showdown ? 'Showdown' : 'No showdown',

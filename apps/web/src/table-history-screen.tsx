@@ -54,9 +54,9 @@ function HandEntry({ row, selected, mode, tableSessionId }: { row: HandRow; sele
     <div className="history-board" role="group" aria-label={row.board.length ? 'Final board' : 'No board was dealt'}>
       {row.board.length ? row.board.map(card => <Card key={card} card={card} small />) : <span className="history-muted">No board</span>}
     </div>
-    <ul className="history-players" aria-label="Dealt in">{row.players.map(player => <li key={player.participantId}>
-      <span className="history-player-name">{player.name}</span>
-      {player.cards && <span className="history-player-cards" role="group" aria-label={`${player.name === 'You' ? 'Your' : `${player.name}’s`} cards`}>{player.cards.map(card => <Card key={card} card={card} small />)}</span>}
+    <ul className="history-participants" aria-label="Dealt in">{row.participants.map(dealt => <li key={dealt.participantId}>
+      <span className="history-participant-name">{dealt.name}</span>
+      {dealt.cards && <span className="history-participant-cards" role="group" aria-label={`${dealt.name === 'You' ? 'Your' : `${dealt.name}’s`} cards`}>{dealt.cards.map(card => <Card key={card} card={card} small />)}</span>}
     </li>)}</ul>
     <p className="history-result"><strong>{row.result}</strong><span>{row.ending}</span></p>
   </li>;

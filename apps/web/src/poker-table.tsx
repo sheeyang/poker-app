@@ -1,12 +1,11 @@
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties } from 'react';
-import { tableMotion, type ObservableTableSession } from '@poker/contracts';
+import { tableMotion } from '@poker/contracts';
 import { Card } from './cards.js';
 import { chips, potTotal, seatPosition, actionLabel } from './table-model.js';
 import { Icon } from './icons.js';
-import { afterHandRequestOf, afterHandRequestLabel } from './self-service.js';
-import { connectionOf, nextHandLabel, type NextHandStatus } from './online-status.js';
-import { participantActions } from './participant-actions.js';
-import { currentWindow } from './presentation.js';
+import { afterHandRequestLabel } from './self-service.js';
+import { nextHandLabel, type NextHandStatus } from './online-status.js';
+import { feltParticipant, feltWindow, type FeltView } from './felt-view.js';
 import { bettingOver, heldStacks } from './table-motion.js';
 import { useTableMotion, type ReplayPlayback, type StackRoll } from './table-choreography.js';
 
@@ -15,27 +14,27 @@ import { useTableMotion, type ReplayPlayback, type StackRoll } from './table-cho
  * `actorWindowOpen`: the acting Participant's Action Window is open, so they are now deciding.
  * `countdown`: whole seconds left before their Action Deadline, shown to everyone; `undefined` without one.
  * `nextHand`: between Hands at an Online Table, the Next-Hand Countdown or why there is none.
- * Seat and Participant actions open beside the object the player points at.
+ * `actionable`: whether the viewer has actions for a seated Participant; pointing at their seat opens them beside it,
+ * as pointing at an open Seat opens its own.
  * `replay`: the table is a Replay Step of Table History, playing the motion it is given (replay-motion.ts), with nothing
  * to act on and no open seats; the acting seat is the one whose decision comes next.
  */
-export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextHand, handOpen, choosing, openSeat, openParticipant, replay }: { table: ObservableTableSession; serverNow: number; actorWindowOpen: boolean; countdown?: number; nextHand?: NextHandStatus; handOpen: boolean; choosing: boolean; openSeat: (seat: number, anchor: HTMLElement) => void; openParticipant: (participantId: string, anchor: HTMLElement) => void; replay?: ReplayPlayback }) {
-  const state = table.view.state;
-  const humanId = table.viewerParticipantId;
+export function PokerTable({ felt, serverNow, actorWindowOpen, countdown, nextHand, choosing, openSeat, openParticipant, actionable, replay }: { felt: FeltView; serverNow: number; actorWindowOpen: boolean; countdown?: number; nextHand?: NextHandStatus; choosing: boolean; openSeat: (seat: number, anchor: HTMLElement) => void; openParticipant: (participantId: string, anchor: HTMLElement) => void; actionable?: (participantId: string) => boolean; replay?: ReplayPlayback }) {
+  const { state } = felt;
+  const humanId = felt.viewerParticipantId;
   const viewerSeat = state.participants.find(p => p.participantId === humanId)?.seat ?? null;
   const heroSeat = viewerSeat ?? 1;
-  const count = table.view.configuration.seatCount;
+  const count = felt.seatCount;
   const hasHand = !!state.handId;
-  const currentHistory = table.view.history.find(h => h.handId === state.handId);
-  const actions = currentHistory?.decisions ?? [];
+  const actions = felt.decisions;
   const payouts = state.payouts ?? [];
-  const { stage, rolls } = useTableMotion(table, serverNow, replay);
+  const { stage, rolls } = useTableMotion(felt, serverNow, replay);
   // Client time minus server time, for parts that keep their own clock between renders.
   const offset = serverNow - Date.now();
-  const held = heldStacks(table, serverNow);
-  const actionWindow = currentWindow(table);
+  const held = heldStacks(felt, serverNow);
+  const actionWindow = feltWindow(felt);
   // Once betting is over the last street's chips are in the pot; the line is swept.
-  const lineSwept = bettingOver(table);
+  const lineSwept = bettingOver(felt);
   return <section ref={stage} className={`table-stage ${count > 6 ? 'dense-table' : ''} ${choosing ? 'choosing-seats' : ''}`} aria-label="Poker table">
     <div className="table-felt" aria-hidden="true"><div className="felt-inset" /></div>
     <div className="table-center" data-motion="center">
@@ -44,7 +43,7 @@ export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextH
         <div className="board" aria-label="Community cards">{Array.from({ length: 5 }, (_, i) => state.board[i] ? <Card key={`${state.handId}-${i}`} card={state.board[i]} faces attrs={{ 'data-board': String(i) }} /> : <span key={i} className="card-slot" aria-hidden="true" />)}</div>
         {state.pots.length > 1 && (state.status === 'completed-hand' || state.participants.some(p => p.allIn) && state.pots.reduce((sum, p) => sum + p.amount, 0) === potTotal(state)) && <div className="side-pots">{state.pots.map((p, i) => <span key={i}>{i === 0 ? 'Main' : `Side ${i}`} {chips(p.amount)}</span>)}</div>}
         <div className="deck-area" aria-label="Deck and face-down burn pile"><Card small attrs={{ 'data-motion': 'deck' }} /><span className="burn-pile">{state.board.length > 0 && <Card small attrs={{ 'data-motion': 'burn' }} />}</span></div>
-      </> : table.mode === 'online'
+      </> : felt.mode === 'online'
         // Before the first Hand the felt is empty, so it says what the table is waiting for.
         ? <div className="table-ready"><strong>{viewerSeat === null && nextHand?.kind !== 'countdown' ? 'Take an open seat' : nextHandLabel(nextHand, true) ?? 'Waiting for players'}</strong><p>{viewerSeat === null ? 'Hands are dealt automatically once two players are seated.' : 'Hands are dealt automatically.'}</p></div>
         : <div className="table-ready"><strong>A place at the table.</strong><p>Seat your players, then deal the first hand.</p></div>}
@@ -54,29 +53,29 @@ export function PokerTable({ table, serverNow, actorWindowOpen, countdown, nextH
     {Array.from({ length: count }, (_, index) => {
       const seat = ((heroSeat - 1 + index) % count) + 1;
       const participant = state.participants.find(p => p.seat === seat);
-      const binding = table.bindings.find(b => b.participantId === participant?.participantId);
+      const named = feltParticipant(felt, participant?.participantId);
       const hero = participant?.participantId === humanId;
       const actor = participant && state.actorId === participant.participantId && actorWindowOpen;
       // Past the deadline the window has closed, and the Timeout Action is on its way.
       const timedOut = participant && state.actorId === participant.participantId && countdown === 0;
       const turn = actor ? replay ? (hero ? 'Your decision' : 'To act') : (hero ? 'Your turn' : 'Thinking…') + (countdown !== undefined ? ` · ${countdown}s` : '') : timedOut ? 'Time’s up' : undefined;
-      const recentAction = participant && actions.findLast(d => d.action.participantId === participant.participantId)?.action.action;
-      const label = hero ? 'You' : binding?.name;
+      const recentAction = participant && actions.findLast(d => d.participantId === participant.participantId)?.action;
+      const label = hero ? 'You' : named?.name;
       const payout = payouts.filter(p => p.participantId === participant?.participantId).reduce((total, p) => total + p.amount, 0);
-      const pending = participant && afterHandRequestOf(table, participant.participantId);
+      const pending = named?.pending;
       // At an Online Table everyone sees who is connected; a disconnected human stays in the Hand until they are sat out.
-      const offline = participant && connectionOf(table, participant.participantId) === 'disconnected';
-      const actionable = !replay && participant && participantActions(table, participant.participantId, handOpen).length > 0;
+      const offline = !!named?.disconnected;
+      const hasActions = !replay && !!participant && !!actionable?.(participant.participantId);
       // An opponent's folded hand is mucked; your own stays, dimmed.
       const cardsShown = !!participant?.cardCount && !(participant.folded && !hero);
       // The acting seat's brass edge is the clock while an Action Deadline runs.
       const timed = actor && actionWindow?.deadlineAt !== undefined && actionWindow.participantId === participant.participantId ? actionWindow : undefined;
       const hold = participant && held.get(participant.participantId);
-      const SeatTarget = actionable ? 'button' : 'span';
+      const SeatTarget = hasActions ? 'button' : 'span';
       return <div data-table-seat={seat} key={seat} className={`table-seat ${hero ? 'hero-seat' : ''} ${actor ? 'acting-seat' : ''} ${timed ? 'timed-seat' : ''} ${participant?.folded ? 'folded-seat' : ''} ${offline ? 'offline-seat' : ''}`} style={seatPosition(index, count) as CSSProperties}>
         {participant ? <>
           {cardsShown && <div className="hole-cards">{Array.from({ length: participant.cardCount ?? 0 }, (_, i) => <Card key={`${state.handId}-${i}`} card={participant.holeCards?.[i]} small={!hero} faces attrs={{ 'data-card': `${participant.participantId}-${i}` }} />)}</div>}
-          <div className="seat-body" data-seat-body={participant.participantId}><SeatTarget className="seat-target" data-table-participant={participant.participantId} aria-label={actionable ? `${label} actions` : undefined} aria-haspopup={actionable ? 'menu' : undefined} onClick={actionable ? event => openParticipant(participant.participantId, event.currentTarget) : undefined}><span className={`avatar avatar-${index % 4}`} aria-hidden="true">{hero ? 'Y' : binding?.name.replace('Bot ', '').slice(0, 2)}</span><span className="seat-copy"><strong>{label}</strong>{offline && <small className="connection-label">Disconnected</small>}<span data-stack={participant.participantId}><StackFigure value={participant.stack} hold={hold && { value: hold.value, until: hold.until - offset }} roll={rolls.get(participant.participantId)} /> <small>chips</small></span></span></SeatTarget>{state.buttonSeat === seat && <span className="dealer-marker" data-motion="button" title="Dealer button">D</span>}<span className="dealer-marker motion-anchor" data-button-anchor={seat} aria-hidden="true" />{timed && timed.deadlineAt !== undefined && <EdgeCountdown key={timed.decisionId} opensAt={timed.opensAt - offset} deadlineAt={timed.deadlineAt - offset} />}</div>
+          <div className="seat-body" data-seat-body={participant.participantId}><SeatTarget className="seat-target" data-table-participant={participant.participantId} aria-label={hasActions ? `${label} actions` : undefined} aria-haspopup={hasActions ? 'menu' : undefined} onClick={hasActions ? event => openParticipant(participant.participantId, event.currentTarget) : undefined}><span className={`avatar avatar-${index % 4}`} aria-hidden="true">{hero ? 'Y' : named?.name.replace('Bot ', '').slice(0, 2)}</span><span className="seat-copy"><strong>{label}</strong>{offline && <small className="connection-label">Disconnected</small>}<span data-stack={participant.participantId}><StackFigure value={participant.stack} hold={hold && { value: hold.value, until: hold.until - offset }} roll={rolls.get(participant.participantId)} /> <small>chips</small></span></span></SeatTarget>{state.buttonSeat === seat && <span className="dealer-marker" data-motion="button" title="Dealer button">D</span>}<span className="dealer-marker motion-anchor" data-button-anchor={seat} aria-hidden="true" />{timed && timed.deadlineAt !== undefined && <EdgeCountdown key={timed.decisionId} opensAt={timed.opensAt - offset} deadlineAt={timed.deadlineAt - offset} />}</div>
           <div className="seat-caption" data-caption={participant.participantId}>{state.status === 'completed-hand' && payout > 0 ? `Won ${chips(payout)}` : pending ? afterHandRequestLabel(pending) : !replay && state.status === 'completed-hand' && participant.stack === 0 ? 'Rebuy to play' : participant.sittingOut ? 'Sitting out' : turn ? turn : participant.allIn ? 'All-in' : participant.folded ? 'Folded' : recentAction ? actionLabel(recentAction) : ''}</div>
           {(participant.wager ?? 0) > 0 && !lineSwept && <span className={`seat-wager wager-${index}`} data-wager={participant.participantId}><i aria-hidden="true" data-wager-chip={participant.participantId} />{chips(participant.wager ?? 0)}{state.smallBlindParticipantId === participant.participantId ? <small>SB</small> : state.bigBlindParticipantId === participant.participantId ? <small>BB</small> : null}</span>}
         </> : replay ? null : <button className="empty-seat empty-seat-open" onClick={event => openSeat(seat, event.currentTarget)} aria-label={`Seat ${seat} actions`} title={`Seat ${seat} actions`} aria-haspopup="menu"><Icon name="plus" size={24} /></button>}

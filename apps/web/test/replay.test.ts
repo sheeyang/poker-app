@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ConcreteAction, type DecisionAnalysis, type ObservableCashGameState, type ReplayStep, type ReplayTransition, type Street, type TableHandReplay } from '@poker/contracts';
-import { actedLabel, openStep, replayAnalysisTarget, replayControls, replayTable, stepKey, stepLabel } from '../src/replay.js';
+import { actedLabel, openStep, replayAnalysisTarget, replayControls, stepFelt, stepKey, stepLabel } from '../src/replay.js';
 
 // One Hand as the server replays it for "you": you call, Rex checks; on the flop Rex checks and you check; on the turn Rex bets and you fold.
 function state(street: Street, actorId: string | null, decision: number | null, change: Partial<ObservableCashGameState> = {}): ObservableCashGameState {
@@ -30,7 +30,7 @@ const steps: ReplayStep[] = [
 const replay: TableHandReplay = {
   tableSessionId: 'table-1', mode: 'online', viewerParticipantId: 'you', handId: 'hand-3', configuration: defaultConfiguration, steps,
   hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, showdown: false, board: ['As', 'Kd', '7c', '2h'], dealtIn: [{ participantId: 'you', name: 'Alex', holeCards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex' }], payouts: [{ participantId: 'rex', amount: 80 }] },
-  players: [{ participantId: 'you', name: 'Alex' }, { participantId: 'rex', name: 'Rex' }],
+  participants: [{ participantId: 'you', name: 'Alex', bot: false }, { participantId: 'rex', name: 'Rex', bot: true }],
 };
 /** The same Hand for someone who watched it: none of its decisions are theirs. */
 const watched: TableHandReplay = { ...replay, viewerParticipantId: 'cy', steps: steps.map(({ viewerDecisionId: _, ...step }) => step) };
@@ -64,16 +64,14 @@ describe('the replay controls', () => {
 
 describe('a Replay Step on the felt', () => {
   it('is the table as the step shows it, viewed by the reader, with the decisions taken before it', () => {
-    const table = replayTable(replay, 5);
-    expect(table.view.state).toBe(steps[5]!.state);
-    expect(table).toMatchObject({ tableSessionId: 'table-1', mode: 'online', viewerParticipantId: 'you', schedule: { phases: [], actionWindow: null } });
-    expect(table.view.configuration).toBe(defaultConfiguration);
-    expect(table.bindings.map(binding => [binding.participantId, binding.name])).toEqual([['you', 'Alex'], ['rex', 'Rex']]);
-    expect(table.view.history).toHaveLength(1);
-    expect(table.view.history[0]!.decisions.map(d => [d.decisionId, d.action.participantId, d.action.action.type])).toEqual([['hand-3/decision-1', 'you', 'call'], ['hand-3/decision-2', 'rex', 'check'], ['hand-3/decision-3', 'rex', 'check'], ['hand-3/decision-4', 'you', 'check']]);
-    expect(replayTable(replay, 0).view.history[0]!.decisions).toEqual([]);
-    // Nobody shows as disconnected in a replay.
-    expect(table.connectedParticipantIds).toEqual(['you', 'rex']);
+    const felt = stepFelt(replay, 5);
+    expect(felt.state).toBe(steps[5]!.state);
+    expect(felt).toMatchObject({ tableSessionId: 'table-1', mode: 'online', viewerParticipantId: 'you', seatCount: defaultConfiguration.seatCount, phases: [], actionWindow: null });
+    expect(felt.decisions.map(d => [d.participantId, d.action.type])).toEqual([['you', 'call'], ['rex', 'check'], ['rex', 'check'], ['you', 'check']]);
+    expect(stepFelt(replay, 0).decisions).toEqual([]);
+  });
+  it('names everyone seated in the Hand, a Bot as a Bot, and shows nobody as disconnected', () => {
+    expect(stepFelt(replay, 5).participants).toEqual([{ participantId: 'you', name: 'Alex', bot: false, disconnected: false }, { participantId: 'rex', name: 'Rex', bot: true, disconnected: false }]);
   });
 });
 

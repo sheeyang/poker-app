@@ -28,6 +28,8 @@ export interface HistoryReader {
   readonly stakes: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
   /** Everyone who has had a place at the table, by name; anyone missing shows no name. */
   readonly names: ReadonlyMap<ParticipantId, string>;
+  /** Every Participant at the table who is a Bot, removed Bots included. */
+  readonly bots: ReadonlySet<ParticipantId>;
 }
 
 /**
@@ -52,14 +54,15 @@ export function tableHistoryHands(hands: readonly CompletedHand[], reader: Histo
 
 /**
  * One completed Hand replayed for the reader: the engine's Replay Steps as they may see them, with the Hand's list row
- * and the name of everyone seated at any step, in seat order at their first step (departed Guests and removed Bots
- * included), so the Trainer can draw it without the live table.
+ * and everyone seated at any step, by name and whether they are a Bot, in seat order at their first step (departed
+ * Guests and removed Bots included), so the Trainer can draw it without the live table. Only a seated Participant acts,
+ * so every step's actor is among them.
  */
 export function tableHandReplay(replay: ObservableHandReplay, hand: TableHistoryHand, reader: HistoryReader): TableHandReplay {
   const seats = new Map<ParticipantId, number>();
   for (const step of replay.steps) for (const p of step.state.participants) if (p.seat !== null && !seats.has(p.participantId)) seats.set(p.participantId, p.seat);
-  const players = [...seats].sort((a, b) => a[1] - b[1]).map(([id]) => ({ participantId: id, name: reader.names.get(id) ?? '' }));
-  return { ...replay, tableSessionId: reader.tableSessionId, mode: reader.mode, viewerParticipantId: reader.participantId, hand, players };
+  const participants = [...seats].sort((a, b) => a[1] - b[1]).map(([id]) => ({ participantId: id, name: reader.names.get(id) ?? '', bot: reader.bots.has(id) }));
+  return { ...replay, tableSessionId: reader.tableSessionId, mode: reader.mode, viewerParticipantId: reader.participantId, hand, participants };
 }
 
 /**

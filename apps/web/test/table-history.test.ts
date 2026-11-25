@@ -15,7 +15,7 @@ describe('the Table History rows', () => {
   });
   it('name the viewer "You", show cards only where the server gave them, and say who won what', () => {
     const [row] = handRows([hand({ dealtIn: [{ participantId: 'you', name: 'Alex', holeCards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex' }], showdown: false, payouts: [{ participantId: 'rex', amount: 60 }, { participantId: 'rex', amount: 20 }] })], 'you');
-    expect(row!.players).toEqual([{ participantId: 'you', name: 'You', cards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex', cards: undefined }]);
+    expect(row!.participants).toEqual([{ participantId: 'you', name: 'You', cards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex', cards: undefined }]);
     expect(row!.result).toBe('Rex won 80');
     expect(row!.ending).toBe('No showdown');
   });

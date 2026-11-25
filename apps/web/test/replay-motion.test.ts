@@ -31,7 +31,7 @@ const steps: ReplayStep[] = [
 const replay: TableHandReplay = {
   tableSessionId: 'table-1', mode: 'practice', viewerParticipantId: 'you', handId: 'hand-3', configuration: defaultConfiguration, steps,
   hand: { handId: 'hand-3', handNumber: 3, viewerDealtIn: true, showdown: true, board: [...board.river], dealtIn: [{ participantId: 'you', name: 'Alex', holeCards: ['Ah', 'Qs'] }, { participantId: 'rex', name: 'Rex', holeCards: ['Jc', 'Jd'] }], payouts: [{ participantId: 'you', amount: 80 }] },
-  players: [{ participantId: 'you', name: 'Alex' }, { participantId: 'rex', name: 'Rex' }],
+  participants: [{ participantId: 'you', name: 'Alex', bot: false }, { participantId: 'rex', name: 'Rex', bot: true }],
 };
 
 describe('stepping forward', () => {
@@ -43,7 +43,7 @@ describe('stepping forward', () => {
       { kind: 'board', from: 0, to: 3, beats: streetBeats(flop), at: 1_000 },
     ]);
     expect(felt).toMatchObject({ step: 2, drawn: 2, reverse: false });
-    expect(felt.table.view.state).toBe(steps[2]!.state);
+    expect(felt.felt.state).toBe(steps[2]!.state);
   });
   it('deals each runout street as its own step, then turns the hands up and, after the showdown’s Settle, pushes the pot', () => {
     expect(moveReplay(replay, openReplay(replay, 2), 3, 'step', 2_000).cues).toEqual([{ kind: 'board', from: 3, to: 4, beats: streetBeats(card), at: 2_000 }]);
@@ -81,7 +81,7 @@ describe('a jump', () => {
     for (const [from, to] of [[0, 2], [5, 2], [1, 2], [3, 2]] as const) {
       const jumped = moveReplay(replay, openReplay(replay, from), to, 'jump', 5_000);
       expect(jumped).toMatchObject({ step: to, drawn: to, cues: [], reverse: false });
-      expect(jumped.table.view.state).toBe(steps[to]!.state);
+      expect(jumped.felt.state).toBe(steps[to]!.state);
     }
   });
   it('is any move of more than one step', () => {
@@ -95,10 +95,10 @@ describe('stepping back', () => {
     for (const to of [1, 2, 3, 4]) {
       const back = moveReplay(replay, openReplay(replay, to + 1), to, 'step', 5_000);
       expect(back).toMatchObject({ step: to, drawn: to + 1, reverse: true, cues: moveReplay(replay, openReplay(replay, to), to + 1, 'step', 5_000).cues });
-      expect(back.table.view.state).toBe(steps[to + 1]!.state);
+      expect(back.felt.state).toBe(steps[to + 1]!.state);
       const rested = settleReplay(replay, back, back.input);
       expect(rested).toMatchObject({ step: to, drawn: to, cues: [], reverse: false });
-      expect(rested.table.view.state).toBe(steps[to]!.state);
+      expect(rested.felt.state).toBe(steps[to]!.state);
     }
     // The flop's reverse: the board goes back to the deck while the line comes back out of the pot, and Rex's call returns.
     expect(moveReplay(replay, openReplay(replay, 2), 1, 'step', 5_000).cues.map(cue => cue.kind)).toEqual(['bet', 'board']);
@@ -108,7 +108,7 @@ describe('stepping back', () => {
     const dealing: TableHandReplay = { ...replay, steps: steps.map((step, i) => i === 1 ? { ...step, transition: { ...step.transition, deal: steps[0]!.transition.deal! } } : step) };
     const back = moveReplay(dealing, openReplay(dealing, 1), 0, 'step', 5_000);
     expect(back).toMatchObject({ step: 0, drawn: 0, cues: [], reverse: false });
-    expect(back.table.view.state).toBe(steps[0]!.state);
+    expect(back.felt.state).toBe(steps[0]!.state);
   });
   it('leaves a forward step resting where it is once its motion is over', () => {
     const forward = moveReplay(replay, openReplay(replay, 1), 2, 'step', 1_000);

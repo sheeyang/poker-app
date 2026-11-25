@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import { returnBeat, sweepBeats, tableMotion as T, type Beat, type ObservableTableSession, type SweepBeats } from '@poker/contracts';
+import { returnBeat, sweepBeats, tableMotion as T, type Beat, type SweepBeats } from '@poker/contracts';
+import type { FeltView } from './felt-view.js';
 import { at, box, flipUp, fly, play, q, reveal, snapshot, stay, type Box, type MotionContext, type Snapshot } from './motion.js';
 import { planMotion, sceneOf, type Cue, type TableScene } from './table-motion.js';
 import { chips } from './table-model.js';
@@ -238,16 +239,16 @@ function reverseAll(animations: readonly Animation[]) {
  * stack roll its figure up from the old total. `serverNow` is the estimated server time this render shows. A `replay`
  * felt plays the motion it is given instead of planning it, and leaves the live table's remembered scene alone.
  */
-export function useTableMotion(table: ObservableTableSession, serverNow: number, replay?: ReplayPlayback) {
+export function useTableMotion(felt: FeltView, serverNow: number, replay?: ReplayPlayback) {
   const stage = useRef<HTMLElement>(null);
-  const kept = replay ? undefined : remembered.get(table.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
+  const kept = replay ? undefined : remembered.get(felt.tableSessionId), fresh = kept && Date.now() - kept.at < REMEMBER_FOR ? kept : undefined;
   const scene = useRef<TableScene | undefined>(fresh?.scene), last = useRef<Snapshot>(fresh?.last ?? new Map()), running = useRef(new Set<Animation>());
   // The replay key whose motion has been played.
   const played = useRef<string>(undefined);
-  const cues = replay ? (replay.key === played.current ? [] : replay.cues) : planMotion(scene.current, table).filter(cue => serverNow - cue.at < lasts(cue));
+  const cues = replay ? (replay.key === played.current ? [] : replay.cues) : planMotion(scene.current, felt).filter(cue => serverNow - cue.at < lasts(cue));
   useLayoutEffect(() => {
     const node = stage.current, fx = node?.querySelector<HTMLElement>('[data-motion-layer="over"]'), under = node?.querySelector<HTMLElement>('[data-motion-layer="under"]');
-    scene.current = sceneOf(table);
+    scene.current = sceneOf(felt);
     if (!node || !fx || !under) return;
     const ctx: MotionContext = { stage: node, fx, under, last: last.current, track: animation => {
       running.current.add(animation);
@@ -281,12 +282,12 @@ export function useTableMotion(table: ObservableTableSession, serverNow: number,
       resting.set(key, old && moving ? old : value);
     }
     last.current = resting;
-    if (!replay) remembered.set(table.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
+    if (!replay) remembered.set(felt.tableSessionId, { scene: scene.current, last: resting, at: Date.now() });
   });
   useEffect(() => () => { for (const animation of running.current) animation.cancel(); }, []);
   const rolls = new Map<string, StackRoll>();
   for (const cue of cues) if (cue.kind === 'chips') {
-    const stack = table.view.state.participants.find(p => p.participantId === cue.participantId)?.stack;
+    const stack = felt.state.participants.find(p => p.participantId === cue.participantId)?.stack;
     if (stack !== undefined) rolls.set(cue.participantId, { from: cue.from, id: `${cue.participantId}@${cue.at}` });
   } else if (cue.kind === 'deal') {
     // A refill is a rebuy: the stack rolls up from empty.
