@@ -124,7 +124,7 @@ export async function createServer(options: ServerOptions) {
     // A history request names its Guest. Otherwise a former Participant studies too, so their Guest may have to be
     // found in the membership index.
     if (guestId) return deliverTo(guestId);
-    void mutations.studentOf(message.tableSessionId, participantId).then(deliverTo, () => { /* Delivery cannot change a readable result. */ });
+    void mutations.guestOf(message.tableSessionId, participantId).then(deliverTo, () => { /* Delivery cannot change a readable result. */ });
   }
   /**
    * The requesting Guest's own Participant, joined or former (ADR-0041): the only one whose study results they may read

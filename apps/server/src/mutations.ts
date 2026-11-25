@@ -157,7 +157,7 @@ export interface BotRuntimeOptions {
   readonly supportsStrategy?: (descriptor: unknown) => boolean;
   readonly onHumanActionAccepted?: (input: FrozenEvaluationInput) => unknown | Promise<unknown>;
   /** Each Guest's Trainer Configuration: table views present it, and each analysis captures its Reference Strategy. */
-  readonly trainerConfigurations?: Pick<TrainerConfigurations, 'current' | 'known'>;
+  readonly trainerConfigurations?: Pick<TrainerConfigurations, 'current' | 'known' | 'studyStrategy'>;
 }
 export function createTableSessionMutations(db: Database, acceptance: AcceptanceTransactions, faults?: MutationTransactionFaults, bots?: BotRuntimeOptions, clock: ServerClock = systemClock, guests: GuestQueue = createGuestQueue()) {
   /** The only way to reach a table in memory: each committed table, while something needs it (ADR-0035). */
@@ -183,7 +183,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
   const scheduledRecovery = new Set<string>();
   const strategyFactory = bots?.strategyFactory ?? createStrategy;
   const supportsStrategy = bots?.supportsStrategy ?? isSupportedStrategy;
-  const trainerConfigurations = bots?.trainerConfigurations ?? { current: async () => defaultTrainerConfiguration, known: () => defaultTrainerConfiguration };
+  const trainerConfigurations = bots?.trainerConfigurations ?? { current: async () => defaultTrainerConfiguration, known: () => defaultTrainerConfiguration, studyStrategy: async (_userId: string, strategy?: StrategyDescriptor) => strategy ? immutableData(strategy) : defaultTrainerConfiguration.referenceStrategy };
   /**
    * The Trainer Configuration of a viewing Participant's Guest, for a projection that cannot wait. Every read and
    * subscription reads it first, so a viewer's Guest is always known by then.
@@ -796,7 +796,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * `null` for a decision that is not their own accepted one.
      */
     async function captureHistoryEvaluation(id: string, userId: string, decisionId: string, strategy?: StrategyDescriptor): Promise<FrozenEvaluationInput | null | undefined> {
-      const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+      const referenceStrategy = await trainerConfigurations.studyStrategy(userId, strategy);
       const table = await readableTable(id, userId);
       if (!table) return undefined;
       const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
@@ -1345,7 +1345,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * Trainer Configuration.
    */
   async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: ReadableTable, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
-    const chosen = async () => strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    const chosen = () => trainerConfigurations.studyStrategy(userId, strategy);
     if (await access(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
     const table = await readableTable(id, userId);
     if (!table) return undefined;
@@ -1425,7 +1425,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * The Guest to tell of a human Participant's study results, joined or former (ADR-0041): from the loaded table, or
      * from the membership index, which loads nothing.
      */
-    async studentOf(id: string, participantId: string): Promise<string | undefined> {
+    async guestOf(id: string, participantId: string): Promise<string | undefined> {
       const session = tables.get(id);
       if (!session) return participantGuest(db, id, participantId);
       const binding = findBinding(session.aggregate, participantId);

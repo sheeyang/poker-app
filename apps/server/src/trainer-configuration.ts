@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
-import { defaultTrainerConfiguration, type TrainerConfiguration, type TrainerConfigurationAcknowledgement, type TrainerConfigurationOutcome } from '@poker/contracts';
+import { defaultTrainerConfiguration, type StrategyDescriptor, type TrainerConfiguration, type TrainerConfigurationAcknowledgement, type TrainerConfigurationOutcome } from '@poker/contracts';
 import { immutableData, isSupportedStrategy } from '@poker/strategies';
 import type { openDatabase } from './db/database.js';
 import { guestRequests, localUsers } from './db/schema.js';
@@ -84,6 +84,8 @@ export function createTrainerConfigurations(db: Database, announce: (userId: str
   return {
     current,
     set,
+    /** The Strategy a study runs under: the supported one the request names, else the Guest's Reference Strategy. Never changes the Trainer Configuration. */
+    async studyStrategy(userId: string, strategy?: StrategyDescriptor): Promise<StrategyDescriptor> { return strategy ? immutableData(strategy) : (await current(userId)).referenceStrategy; },
     /** The Guest's configuration if this process has read or written it, for projections that cannot wait. */
     known: (userId: string): TrainerConfiguration | undefined => cache.get(userId),
   };

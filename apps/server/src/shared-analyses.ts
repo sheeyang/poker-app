@@ -176,7 +176,7 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
   /** The shared dependencies for a set's members; a history summary's are run as its Guest's `history-analysis` from now on. */
   function dependenciesOf(members: readonly FrozenEvaluationInput[], guestId?: string): Dependency[] {
     return members.map(member => {
-      const key = analysis.matchingKey(member);
+      const key = analysis.canonicalAnalysisKey(member);
       let dependency = dependencies.get(key);
       if (!dependency) { dependency = { input: member, consumers: new Set(), running: false, queued: false, retryRequested: false, starting: false, settlements: new Map(), settledAttempts: new Set(), counted: false }; dependencies.set(key, dependency); }
       if (guestId) dependency.guestId ??= guestId;

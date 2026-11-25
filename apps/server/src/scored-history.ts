@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { normalizeHistoryFilter, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision, type ScoredOverallHistory, type StrategyDescriptor, type TrainerConfiguration } from '@poker/contracts';
+import { normalizeHistoryFilter, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision, type ScoredOverallHistory, type StrategyDescriptor } from '@poker/contracts';
 import { admittedByScores, filteredDecisions, inListOrder, newestFirst, ownDecisions, summarySets } from '@poker/research';
 import { immutableData } from '@poker/strategies';
+import type { TrainerConfigurations } from './trainer-configuration.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { SharedAnalyses, SharedAnalysis } from './shared-analyses.js';
 import type { FrozenHistorySummary } from './overall-history-summaries.js';
@@ -73,7 +74,7 @@ export interface OverallHistorySources {
   /** The tables the Guest has ever been a Participant at, in any status. */
   participations(userId: string): Promise<readonly { readonly tableSessionId: string }[]>;
   readableTable(id: string, userId: string): Promise<ReadableTable | undefined>;
-  trainerConfigurations: { current(userId: string): Promise<TrainerConfiguration> };
+  trainerConfigurations: Pick<TrainerConfigurations, 'studyStrategy'>;
 }
 
 /**
@@ -115,7 +116,7 @@ export function createOverallHistory({ participations, readableTable, trainerCon
     return decisions;
   }
   async function captureOverallHistorySummary(userId: string, filter: HistoryFilter, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<FrozenHistorySummary> {
-    const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    const referenceStrategy = await trainerConfigurations.studyStrategy(userId, strategy);
     const decisions = await studiedDecisions(userId, filter, referenceStrategy);
     return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), ...(breakdown ? { breakdown } : {}), referenceStrategy, ...summarySets(decisions, breakdown) });
   }
@@ -125,7 +126,7 @@ export function createOverallHistory({ participations, readableTable, trainerCon
    * score ranges are applied afterwards, to the finished analyses, by the coordinator.
    */
   async function captureScoredHistory(userId: string, filter: HistoryFilter, strategy?: StrategyDescriptor): Promise<FrozenScoredHistory> {
-    const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    const referenceStrategy = await trainerConfigurations.studyStrategy(userId, strategy);
     const decisions = await studiedDecisions(userId, filter, referenceStrategy);
     return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), referenceStrategy, decisions: inListOrder(decisions) });
   }
