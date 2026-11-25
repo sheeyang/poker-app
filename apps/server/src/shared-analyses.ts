@@ -14,47 +14,64 @@ export interface Dependency {
   guestId?: string;
   /** Whether it holds one of this coordinator's own admission places. */
   counted: boolean;
+  /** Whether it is counted as succeeded in its consumers' running totals (`Entry.succeeded`). */
+  tallied: boolean;
 }
-export type Outcome = { readonly status: 'empty' | 'pending' } | { readonly status: 'complete'; readonly averages: ScoreAverages } | { readonly status: 'error'; readonly error: Failure };
-/** Where a summary's results are accepted, whose bound its jobs run under, and whom its terminal state is told. */
+export type Outcome =
+  | { readonly status: 'empty' | 'pending' }
+  | { readonly status: 'complete'; readonly averages: ScoreAverages }
+  | { readonly status: 'error'; readonly error: Failure }
+  /** A set that takes no mean (`Entry.list`): every analysis of it has succeeded. */
+  | { readonly status: 'succeeded' };
+/** Where a summary's results are accepted, whose bound its jobs run under, and whom its states are told. */
 export interface Owner {
   /** Applies `change` when the summary's results may still be accepted; whether it was applied. */
   accept(change: () => boolean): Promise<boolean>;
   /** The Guest whose `history-analysis` bound a history summary's jobs run under; absent for a table's own summary. */
   readonly guestId?: string;
+  /** The entry left pending: complete, error, or decided empty by its score ranges. Once per attempt. */
   notify(entry: Entry): void;
+  /** One of the entry's analyses succeeded (or stopped counting as succeeded): its running total changed. */
+  progress?(entry: Entry): void;
 }
-/** One ordinary Score Summary over a frozen set: a table's Hand or Session summary, or one set of a history request. */
+/**
+ * One ordinary Score Summary over a frozen set: a table's Hand or Session summary, or one set of a history request.
+ * The score-filtered list is one too, taking no mean (`list`), so it shares every rule of a summary's state.
+ */
 export interface Entry {
   readonly owner: Owner; attempt: string; outcome: Outcome; readonly members: readonly Dependency[]; aggregating: boolean; notified?: string;
   /** A score-filtered summary's ranges: once every member has succeeded, the mean covers only the members they admit. */
   readonly admits?: (scores: ScoreAverages) => boolean;
   /** How many members `admits` let in, once decided. */
   admitted?: number;
+  /** A set read as a list rather than summarized: once every member has succeeded it is `succeeded`, with no mean. */
+  readonly list?: true;
+  /** The running total: how many members have succeeded, kept as each settles and never recounted. */
+  succeeded: number;
 }
 /** One analysis the coordinator shares between every request that needs it; opaque outside this module. */
 export type SharedAnalysis = Dependency;
+/** What a set of a Guest's analyses is followed as: a summary, with or without score ranges, or the score-filtered list. */
+export interface GuestSet { readonly admits?: (scores: ScoreAverages) => boolean; readonly list?: true }
 /**
- * The coordinator's shared analyses, for a request that reads them itself rather than summarizing them (the
- * score-filtered list, `createScoredHistory`).
+ * How far an entry has got, from its running total: every member once it is decided (complete, empty or succeeded),
+ * however a member's state has moved since.
  */
-export interface SharedAnalyses {
-  /** The shared analyses of `inputs`, each asked for as the Guest's `history-analysis` unless it has already succeeded. */
-  forGuest(inputs: readonly FrozenEvaluationInput[], guestId: string): readonly SharedAnalysis[];
-  succeeded(analysis: SharedAnalysis): boolean;
-  failed(analysis: SharedAnalysis): Failure | undefined;
-  /** A succeeded analysis's scores. */
-  scores(analysis: SharedAnalysis): ScoreAverages | undefined;
-  /** Asks again for a failed analysis. */
-  retry(analysis: SharedAnalysis): void;
+export function progressOf(entry: Entry): { readonly succeeded: number; readonly total: number } {
+  const total = entry.members.length;
+  return { succeeded: entry.outcome.status === 'pending' || entry.outcome.status === 'error' ? entry.succeeded : total, total };
 }
+/** A succeeded member's scores. */
+export const scoresOfMember = (member: SharedAnalysis): ScoreAverages | undefined => member.state?.status === 'complete' ? member.state.scores : undefined;
 /**
  * The analyses every Score Summary shares: one coordinator over the application's existing runner, so a decision that
  * more than one request needs is analyzed once. A table's summaries from play are admitted under this coordinator's
  * own small bound as `summary-analysis`. A summary from history, Table History's (a compared Strategy's and a former
  * Participant's included) and every Overall History summary, has its analyses submitted at once as the Guest's
  * `history-analysis`, whose per-Guest bound (`history`) holds back the rest of a large set without a capacity
- * error, so its progress covers the whole set. The table summaries and the Overall History summaries are built on it.
+ * error, so its progress covers the whole set. The table summaries, the Overall History summaries and the
+ * score-filtered list are built on it. Each entry keeps a running total of its succeeded members, moved as each one
+ * settles, which its owner hears of (`Owner.progress`) and every count is read from.
  */
 export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>, runner: JobRunner, history?: HistoryAnalysisScheduler) {
   const dependencies = new Map<string, Dependency>();
@@ -66,8 +83,9 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
   let outstanding = 0;
   let stopped = false;
   let pumping: Promise<void> | undefined;
+  /** Tells the owner its entry left pending: called only on that change, so an entry empty from the start is never told. */
   function terminal(entry: Entry) {
-    if (stopped || entry.outcome.status === 'pending' || entry.outcome.status === 'empty' || entry.notified === entry.attempt) return;
+    if (stopped || entry.outcome.status === 'pending' || entry.notified === entry.attempt) return;
     entry.notified = entry.attempt;
     try { entry.owner.notify(entry); } catch { /* HTTP state remains readable. */ }
   }
@@ -85,14 +103,26 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
       if (next(entry) !== 'aggregate' || entry.aggregating) return true;
       if (entry.admits) {
         entry.admitted = scoresOf(entry).length;
-        if (!entry.admitted) { entry.outcome = { status: 'empty' }; return true; }
+        if (!entry.admitted) { entry.outcome = { status: 'empty' }; terminal(entry); return true; }
       }
+      if (entry.list) { entry.outcome = { status: 'succeeded' }; terminal(entry); return true; }
       entry.aggregating = true;
       if (entry.owner.guestId) aggregate(entry, false); else { waiting.push(entry); schedule(); }
       return true;
     });
   }
-  function changed(dependency: Dependency) { for (const entry of dependency.consumers) void reduce(entry); }
+  /** A dependency's state moved: its consumers' running totals follow it, and each consumer may settle. */
+  function changed(dependency: Dependency) {
+    const now = succeeded(dependency);
+    if (now !== dependency.tallied) {
+      dependency.tallied = now;
+      for (const entry of dependency.consumers) {
+        entry.succeeded += now ? 1 : -1;
+        try { entry.owner.progress?.(entry); } catch { /* HTTP state remains readable. */ }
+      }
+    }
+    for (const entry of dependency.consumers) void reduce(entry);
+  }
   function schedule() { if (!stopped) queueMicrotask(() => { void pump(); }); }
   /** Asks for a dependency's analysis: as its Guest's `history-analysis` at once, otherwise in this coordinator's turn. */
   function ask(dependency: Dependency) {
@@ -178,14 +208,31 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
     return members.map(member => {
       const key = analysis.matchingKey(member);
       let dependency = dependencies.get(key);
-      if (!dependency) { dependency = { input: member, consumers: new Set(), running: false, queued: false, retryRequested: false, starting: false, settlements: new Map(), settledAttempts: new Set(), counted: false }; dependencies.set(key, dependency); }
+      if (!dependency) { dependency = { input: member, consumers: new Set(), running: false, queued: false, retryRequested: false, starting: false, settlements: new Map(), settledAttempts: new Set(), counted: false, tallied: false }; dependencies.set(key, dependency); }
       if (guestId) dependency.guestId ??= guestId;
       return dependency;
     });
   }
-  function entryOf(owner: Owner, members: readonly Dependency[], admits?: (scores: ScoreAverages) => boolean): Entry {
-    const entry: Entry = { owner, attempt: randomUUID(), outcome: { status: members.length ? 'pending' : 'empty' }, members, aggregating: false, ...(admits ? { admits } : {}), ...(admits && !members.length ? { admitted: 0 } : {}) };
+  function entryOf(owner: Owner, members: readonly Dependency[], { admits, list }: GuestSet = {}): Entry {
+    const entry: Entry = {
+      owner, attempt: randomUUID(), outcome: { status: members.length ? 'pending' : 'empty' }, members, aggregating: false,
+      ...(admits ? { admits } : {}), ...(admits && !members.length ? { admitted: 0 } : {}), ...(list ? { list } : {}),
+      // Counted once, as the entry starts; from then on it moves only as a member settles.
+      succeeded: members.filter(member => member.tallied).length,
+    };
     for (const member of members) member.consumers.add(entry);
+    return entry;
+  }
+  /**
+   * A set of the Guest's analyses, followed as one entry of `owner`'s: each analysis is asked for as their
+   * `history-analysis` unless it has already succeeded (matching analyses and stored results are reused), and an entry
+   * whose members have all settled already can settle now.
+   */
+  function forGuest(owner: Owner & { readonly guestId: string }, inputs: readonly FrozenEvaluationInput[], set: GuestSet = {}): Entry {
+    const members = dependenciesOf(inputs, owner.guestId);
+    const entry = entryOf(owner, members, set);
+    for (const member of members) if (!succeeded(member)) ask(member);
+    void reduce(entry);
     return entry;
   }
   /** Starts a Retry of a failed summary: a new attempt, and every failed analysis it needs asked for again. */
@@ -197,20 +244,8 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
     }
     return true;
   }
-  const analyses: SharedAnalyses = {
-    forGuest(inputs, guestId) {
-      const members = dependenciesOf(inputs, guestId);
-      for (const member of members) if (!succeeded(member)) ask(member);
-      return members;
-    },
-    succeeded, failed,
-    scores: member => member.state?.status === 'complete' ? member.state.scores : undefined,
-    retry(member) { member.retryRequested = true; ask(member); },
-  };
   return {
-    /** The shared analyses, for a request that reads them itself rather than summarizing them (the score-filtered list). */
-    analyses,
-    succeeded, ask, watch, reduce, pump, dependenciesOf, entryOf, retryEntry,
+    succeeded, ask, watch, reduce, pump, dependenciesOf, entryOf, forGuest, retryEntry,
     stop() { stopped = true; waiting.length = 0; },
   };
 }

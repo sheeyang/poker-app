@@ -2,6 +2,7 @@ import { createSharedAnalyses } from './shared-analyses.js';
 import { createTableSummaries } from './table-summaries.js';
 import { createOverallHistorySummaries } from './overall-history-summaries.js';
 import { createOverallHistory, createScoredHistory } from './scored-history.js';
+import { createProgressChannel } from './progress.js';
 import { createTableHistoryReads } from './table-history.js';
 import { participations } from './membership.js';
 import { createAnalysis } from './analysis.js';
@@ -109,16 +110,20 @@ export async function createServer(options: ServerOptions) {
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
   const sharedAnalyses = createSharedAnalyses(analysis, jobRunner, historyAnalysis);
   const summaries = createTableSummaries(analysis, sharedAnalyses, publishUserUpdate, mutations.acceptJobResult);
-  const overallSummaries = createOverallHistorySummaries(sharedAnalyses, mutations.acceptJobResult);
-  const scoredHistory = createScoredHistory(sharedAnalyses.analyses);
+  // Overall History requests are the Guest's own: their notices and pending counts reach that Guest's connections only.
+  const guestDelivery = { publish: deliverToGuest, progress: createProgressChannel(clock, deliverToGuest) };
+  const overallSummaries = createOverallHistorySummaries(sharedAnalyses, mutations.acceptJobResult, guestDelivery);
+  const scoredHistory = createScoredHistory(sharedAnalyses, guestDelivery);
   const tableHistory = createTableHistoryReads(mutations.readableTable);
   const overallHistory = createOverallHistory({ participations: userId => participations(db, userId), readableTable: mutations.readableTable, trainerConfigurations });
-  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); sharedAnalyses.stop(); analysis.stop(); });
+  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); sharedAnalyses.stop(); guestDelivery.progress.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
   // reaching only its Human Controller, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
+  /** Sends `message` to every live connection of the Guest's, and nobody else's. */
+  function deliverToGuest(guestId: string, message: ServerLiveMessage) { for (const deliver of userChannels.get(guestId) ?? []) deliver(message); }
   function publishUserUpdate(participantId: string, message: AnalysisUpdate, guestId?: string) {
     const deliverTo = (userId: string | undefined) => { for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message); };
     // A history request names its Guest. Otherwise a former Participant studies too, so their Guest may have to be

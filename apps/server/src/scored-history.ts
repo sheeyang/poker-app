@@ -3,8 +3,8 @@ import { normalizeHistoryFilter, type HistoryBreakdown, type HistoryFilter, type
 import { admittedByScores, filteredDecisions, inListOrder, newestFirst, ownDecisions, summarySets } from '@poker/research';
 import { immutableData } from '@poker/strategies';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { SharedAnalyses, SharedAnalysis } from './shared-analyses.js';
-import type { FrozenHistorySummary } from './overall-history-summaries.js';
+import { progressOf, scoresOfMember, type Entry, type Owner, type SharedAnalysisCoordinator } from './shared-analyses.js';
+import type { FrozenHistorySummary, GuestDelivery } from './overall-history-summaries.js';
 import { captureEvaluation } from './capture-evaluation.js';
 import { completedHands, historyReader, type ReadableTable } from './readable-table.js';
 
@@ -22,25 +22,30 @@ export interface FrozenScoredHistory {
 }
 /** Which decisions of a complete score-filtered list to return. */
 export interface ScoredPage { readonly limit: number; readonly offset: number }
-interface ScoredRequest { readonly input: FrozenScoredHistory; readonly requestId: string; attemptId: string; readonly members: readonly SharedAnalysis[] }
+interface ScoredRequest { readonly input: FrozenScoredHistory; readonly requestId: string; entry: Entry }
 
 /**
- * Score-filtered Overall History lists (ADR-0041). Each request's analyses are the Score Summaries' own shared ones, run
- * as the Guest's `history-analysis`, so a decision another request or summary has analyzed is not analyzed again.
+ * Score-filtered Overall History lists (ADR-0041). Each request is a set of the Score Summaries' own shared analyses, run
+ * as the Guest's `history-analysis`, so a decision another request or summary has analyzed is not analyzed again. It
+ * follows a summary's rules, being one that takes no mean: Error ahead of Analyzing, an Error kept until a Retry, and
+ * its count from the same running total. While it is pending its count travels on the Guest's progress channel, and it
+ * publishes its completion or failure.
  */
-export function createScoredHistory(analyses: SharedAnalyses) {
+export function createScoredHistory({ reduce, forGuest, retryEntry }: SharedAnalysisCoordinator, delivery: GuestDelivery) {
   const requests = new Map<string, ScoredRequest>();
   /** The state of a score-filtered request: Error ahead of Analyzing, and a list only when every analysis has succeeded. */
   const scoredHistory = (request: ScoredRequest, page: ScoredPage): ScoredOverallHistory => {
-    const { input, members } = request;
-    const identity = { ok: true as const, requestId: request.requestId, attemptId: request.attemptId, filter: input.filter, referenceStrategy: input.referenceStrategy };
-    const progress = { succeeded: members.filter(analyses.succeeded).length, total: members.length };
-    const failure = members.map(analyses.failed).find(Boolean);
-    if (failure) return immutableData({ ...identity, progress, status: 'error', error: failure });
-    if (progress.succeeded < progress.total) return immutableData({ ...identity, progress, status: 'pending' });
-    const admitted = admittedByScores(input.filter, input.decisions, members.map(member => analyses.scores(member)));
-    return immutableData({ ...identity, progress, status: 'complete', total: admitted.length, offset: page.offset, decisions: admitted.slice(page.offset, page.offset + page.limit).map(studied => studied.decision) });
+    const { input, entry } = request;
+    const identity = { ok: true as const, requestId: request.requestId, attemptId: entry.attempt, filter: input.filter, referenceStrategy: input.referenceStrategy, progress: progressOf(entry) };
+    if (entry.outcome.status === 'error') return immutableData({ ...identity, status: 'error', error: entry.outcome.error });
+    if (entry.outcome.status === 'pending') return immutableData({ ...identity, status: 'pending' });
+    const admitted = admittedByScores(input.filter, input.decisions, entry.members.map(scoresOfMember));
+    return immutableData({ ...identity, status: 'complete', total: admitted.length, offset: page.offset, decisions: admitted.slice(page.offset, page.offset + page.limit).map(studied => studied.decision) });
   };
+  function follow(request: ScoredRequest) {
+    if (request.entry.outcome.status !== 'pending') return;
+    delivery.progress.follow(request.input.guestId, { resource: 'overall-history-scored', requestId: request.requestId, count: () => progressOf(request.entry) });
+  }
   return {
     /**
      * Starts a score-filtered Overall History request. Every analysis of the non-score set is asked for as the Guest's
@@ -48,21 +53,35 @@ export function createScoredHistory(analyses: SharedAnalyses) {
      * decisions the score ranges admit only once every one of those analyses has succeeded.
      */
     create(input: FrozenScoredHistory, page: ScoredPage): ScoredOverallHistory {
-      const members = analyses.forGuest(input.decisions.map(studied => studied.input), input.guestId);
-      const request: ScoredRequest = { input, requestId: randomUUID(), attemptId: randomUUID(), members };
-      requests.set(request.requestId, request);
+      const guestId = input.guestId, requestId = randomUUID();
+      const owner: Owner & { readonly guestId: string } = {
+        guestId,
+        // Deciding the list accepts no result into any table: nothing is written.
+        accept: async change => change(),
+        notify: entry => {
+          delivery.progress.settled(guestId, requestId);
+          delivery.publish(guestId, { type: 'overall-history-update', resource: 'overall-history-scored', requestId, attemptId: entry.attempt, status: entry.outcome.status === 'error' ? 'error' : 'complete' });
+        },
+        progress: entry => { if (entry.outcome.status === 'pending') delivery.progress.changed(guestId, requestId); },
+      };
+      // Readable before its set is followed, so even a notice sent at once names a request that can be read.
+      const request = { input, requestId } as ScoredRequest;
+      requests.set(requestId, request);
+      request.entry = forGuest(owner, input.decisions.map(studied => studied.input), { list: true });
+      follow(request);
       return scoredHistory(request, page);
     },
     read(requestId: string, guestId: string, page: ScoredPage): ScoredOverallHistory | undefined {
       const request = requests.get(requestId);
       return request?.input.guestId === guestId ? scoredHistory(request, page) : undefined;
     },
-    /** Asks again for each failed analysis of the request; the others are not run again. */
+    /** Asks again for each failed analysis of the request, in a new attempt; the others are not run again. */
     retry(requestId: string, guestId: string, page: ScoredPage): ScoredOverallHistory | undefined {
       const request = requests.get(requestId);
       if (request?.input.guestId !== guestId) return undefined;
-      if (request.members.some(member => analyses.failed(member))) request.attemptId = randomUUID();
-      for (const member of request.members) if (analyses.failed(member)) analyses.retry(member);
+      retryEntry(request.entry);
+      follow(request);
+      void reduce(request.entry);
       return scoredHistory(request, page);
     },
   };
