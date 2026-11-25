@@ -147,9 +147,9 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
     }
     catch { dependency.starting = false; dependency.failure = { code: 'persistence-unavailable', message: 'A required analysis could not be loaded.' }; changed(dependency); await release(dependency); }
   }
-  /** Takes the mean once every analysis has succeeded: in this coordinator's turn for a table, as `history-analysis` for a Guest. */
   /** The scores a summary's mean is taken over: every member's, or with score ranges those the ranges admit. */
   const scoresOf = (entry: Entry) => entry.members.flatMap(member => member.state?.status === 'complete' && member.state.scores && (!entry.admits || entry.admits(member.state.scores)) ? [member.state.scores] : []);
+  /** Takes the mean once every analysis has succeeded: in this coordinator's turn for a table, as `history-analysis` for a Guest. */
   function aggregate(entry: Entry, counted: boolean) {
     const attempt = entry.attempt;
     const scores = scoresOf(entry);

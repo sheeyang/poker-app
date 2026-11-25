@@ -103,16 +103,16 @@ const listOrder = (a: { readonly decision: OverallHistoryDecision; readonly inde
   || (a.decision.tableSessionId < b.decision.tableSessionId ? -1 : a.decision.tableSessionId > b.decision.tableSessionId ? 1 : 0)
   || b.decision.handNumber - a.decision.handNumber
   || a.index - b.index;
+/** Decisions, each with what was frozen for it, in Overall History's order (`newestFirst`). */
+export function inListOrder<T extends { readonly decision: OverallHistoryDecision }>(studied: readonly T[]): T[] {
+  return studied.map((item, index) => ({ item, decision: item.decision, index })).sort(listOrder).map(({ item }) => item);
+}
 /**
  * Overall History's order: the most recently completed Hand first, Hands without a completion time after those that have
  * one, and decisions in the order they were made within a Hand. `decisions` arrive grouped by table, in decision order.
  */
 export function newestFirst(decisions: readonly OverallHistoryDecision[]): OverallHistoryDecision[] {
-  return decisions.map((decision, index) => ({ decision, index })).sort(listOrder).map(({ decision }) => decision);
-}
-/** Decisions, each with what was frozen for it, in Overall History's order (`newestFirst`). */
-export function inListOrder<T extends { readonly decision: OverallHistoryDecision }>(studied: readonly T[]): T[] {
-  return studied.map((item, index) => ({ item, decision: item.decision, index })).sort(listOrder).map(({ item }) => item);
+  return inListOrder(decisions.map(decision => ({ decision }))).map(({ decision }) => decision);
 }
 
 const within = (range: NumberRange | undefined, value: number) => !range || (range.min === undefined || value >= range.min) && (range.max === undefined || value <= range.max);

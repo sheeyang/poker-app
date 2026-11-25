@@ -3,7 +3,7 @@ import type { JobRunner, JobHandle } from './job-runner.js';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import { CashGame, deriveSeed, type CashGameEvent, type CashGameResult } from '@poker/engine';
-import { defaultTrainerConfiguration, onlineTableCapacity, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
+import { defaultTrainerConfiguration, onlineTableCapacity, type ScoreSummaryScope, type ActionWindow, type ApplicationRejection, type ConcreteAction, type JoinLinkPreview, type JoinOutcome, type JoinTableRequest, type LeaveTableRequest, type SavedTable, type TableMode, type StrategyDescriptor, type SetPlayingStrategyRequest, type RetryBotRequest, type SetTableOptionsRequest, type SetTablePasswordRequest, type AddBotRequest, type RemoveBotRequest, type ActRequest, type MutationOutcome, type TableLiveMessage, type TableRuntimeStatus, type PokerMutationRequest, type SeatParticipantRequest, type StandUpParticipantRequest, type RemoveParticipantRequest, type MoveParticipantRequest, type SetSittingOutRequest, type TopUpToRequest, type SetButtonRequest, type StartHandRequest, type Refill, type TrainerConfiguration } from '@poker/contracts';
 import type { TrainerConfigurations } from './trainer-configuration.js';
 import { findBinding, humanBindings, isBot, isHuman, memberBinding, placesTaken, upgradeTableSession, type PersistedBotBinding, type PersistedTableSession, type BotActionProvenance, type StoredTableSession } from './aggregate.js';
 import type { openDatabase } from './db/database.js';
@@ -1354,7 +1354,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     return former(table, referenceStrategy);
   }
   /** A summary of a Participant's own decisions in a scope, frozen from the committed table; null for a Hand it does not have. */
-  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: import('@poker/contracts').ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
+  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
     if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
     const view = session.game.forParticipant(participantId).getView();
     const decisionIds = ownDecisionIds(view.history, participantId, scope);
@@ -1365,7 +1365,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
    * A Score Summary request, frozen. It runs as the Guest's `history-analysis` (ADR-0041) when it is study from history:
    * when Table History asks (`history`), when it names a Strategy to compare, and always for a former Participant.
    */
-  function captureScoreSummary(id: string, userId: string, scope: import('@poker/contracts').ScoreSummaryScope, { strategy, history = false }: StudyRequest) {
+  function captureScoreSummary(id: string, userId: string, scope: ScoreSummaryScope, { strategy, history = false }: StudyRequest) {
     const fromHistory = history || strategy ? userId : undefined;
     return studying(id, userId, strategy, referenceStrategy => enqueue(id, async (): Promise<FrozenScoreSummary | null | undefined> => {
       const session = tables.get(id);
