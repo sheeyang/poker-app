@@ -1,5 +1,6 @@
 /** Participant-safe wire contracts. This package imports no authoritative code. */
 import type { PresentedPhase } from './presentation.js';
+import type { Stakes } from './history.js';
 export type ParticipantId = string;
 export type TableSessionId = string;
 export type ChipAmount = number;
