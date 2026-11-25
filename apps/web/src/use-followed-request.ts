@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShell } from './app-shell.js';
-import { createRequestFollower, type Followed, type FollowerSnapshot } from './request-progress.js';
+import { afterProgress, afterResponse, createRequestFollower, type Followed, type FollowerSnapshot } from './request-progress.js';
 
 export interface FollowedRequestOptions<T> {
   /** The request's own key: a new key asks for a new request. */
@@ -55,4 +55,24 @@ export function useFollowedRequest<T extends { readonly requestId: string }>(opt
     retry: () => { void follower?.retry(); },
     again: () => follower?.again(),
   };
+}
+
+/**
+ * The count of a request another hook reads over HTTP, kept current by `progress` messages (ADR-0026): the same client
+ * rules as a followed request. `data` is the request as last read; the state returned is that read with the latest
+ * count the Guest was told of, which only rises while the request is pending, and which a request held as complete or
+ * failed never takes. It reads nothing itself: the reads still come on the request's notices and reconnects.
+ */
+export function useFollowedCount<T extends { readonly requestId: string }>(model: Followed<T>, data: T | undefined): T | undefined {
+  const { followRequests } = useShell();
+  const [state, setState] = useState<{ readonly source: T | undefined; readonly shown: T | undefined }>({ source: data, shown: data });
+  let current = state;
+  // A new read (or a Retry's answer) is taken as the state on show, except that it never lowers a pending count.
+  if (state.source !== data) { current = { source: data, shown: data ? afterResponse(model, state.shown, data) : undefined }; setState(current); }
+  useEffect(() => followRequests({
+    ready() {},
+    notice() {},
+    progress: update => setState(held => { const shown = afterProgress(model, held.shown, update); return shown === held.shown ? held : { source: held.source, shown }; }),
+  }), [followRequests, model]);
+  return current.shown;
 }
