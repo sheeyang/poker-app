@@ -87,8 +87,30 @@ test("a Hand's replay carries the engine's steps unchanged, the list row, and ev
   };
   const [hand] = tableHistoryHands([hand1], reader);
   const replayed = tableHandReplay(replay, hand!, reader);
-  expect(replayed).toEqual({ ...replay, tableSessionId: 'table-a', mode: 'practice', viewerParticipantId: 'me', hand, participants: [{ participantId: 'me', name: 'Mia', bot: false }, { participantId: 'opp', name: 'Olu', bot: false }, { participantId: 'bot', name: 'Bot 1', bot: true }] });
-  expect(replayed.steps).toBe(replay.steps);
+  expect(replayed).toEqual({
+    ...replay, tableSessionId: 'table-a', mode: 'practice', viewerParticipantId: 'me',
+    // The row it carries says who was dealt in, and nothing of how the Hand ended.
+    hand: { handId: 'hand-1', handNumber: 1, completedAt: 1_000, viewerDealtIn: true, dealtIn: [{ participantId: 'me', name: 'Mia' }, { participantId: 'opp', name: 'Olu' }, { participantId: 'bot', name: 'Bot 1' }] },
+    participants: [{ participantId: 'me', name: 'Mia', bot: false }, { participantId: 'opp', name: 'Olu', bot: false }, { participantId: 'bot', name: 'Bot 1', bot: true }],
+    steps: [replay.steps[0], { ...replay.steps[1], result: { board: ['2c', '7h', 'Jd'], showdown: false, payouts: [{ participantId: 'me', amount: 105 }], holeCards: [{ participantId: 'me', cards: ['As', 'Kd'] }] } }],
+  });
+  expect(replayed.steps[0]).toBe(replay.steps[0]);
+});
+
+test("a Hand's replay holds how the Hand ended on its result step alone, a showdown's revealed cards included", () => {
+  const [, second] = tableHistoryHands([hand1, hand2], reader);
+  const decisionStep: ReplayStep = { kind: 'decision', state: state({ handId: 'hand-2', participants: [player('me', 1, { holeCards: mine }), player('opp', 2)] }), transition: {} };
+  const streetStep: ReplayStep = { kind: 'street', state: state({ handId: 'hand-2', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [player('me', 1, { holeCards: mine }), player('opp', 2)] }), transition: {} };
+  const resultStep: ReplayStep = { kind: 'result', state: hand2.entry.result, transition: {} };
+  const replayed = tableHandReplay({ handId: 'hand-2', configuration: {} as ObservableHandReplay['configuration'], steps: [decisionStep, streetStep, resultStep] }, second!, reader);
+  expect(replayed.steps.map(step => 'result' in step)).toEqual([false, false, true]);
+  expect(replayed.steps[2]!.result).toEqual({
+    board: ['2c', '7h', 'Jd', 'Qs', '3h'], showdown: true, payouts: [{ participantId: 'opp', amount: 25 }],
+    holeCards: [{ participantId: 'me', cards: ['As', 'Kd'] }, { participantId: 'opp', cards: ['9c', '9d'] }],
+  });
+  // Outside the result step, nothing but the table as the step shows it: the flop's board, the viewer's own cards.
+  const before = JSON.stringify({ ...replayed, steps: replayed.steps.slice(0, 2) });
+  for (const spoiler of ['Qs', '3h', '9c', '9d', 'payouts', 'showdown']) expect(before).not.toContain(spoiler);
 });
 
 test("the reader's own decisions are theirs alone, in decision order, with the facts the filters read from each recorded state", () => {

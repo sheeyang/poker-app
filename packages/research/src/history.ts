@@ -1,4 +1,4 @@
-import { hasScoreFilter, historyBreakdownValues, type ChipAmount, type DecisionFacts, type DecisionId, type HistoryBreakdown, type HistoryFilter, type NumberRange, type ObservableHandReplay, type ObservableHistoryEntry, type ObservableSessionHistory, type OverallHistoryDecision, type ParticipantId, type ScoreAverages, type ScoreSummaryScope, type TableHandReplay, type TableHistoryHand, type TableMode, type TableSessionId } from '@poker/contracts';
+import { hasScoreFilter, historyBreakdownValues, type ChipAmount, type DecisionFacts, type DecisionId, type HistoryBreakdown, type HistoryFilter, type NumberRange, type ObservableHandReplay, type ObservableHistoryEntry, type ObservableSessionHistory, type OverallHistoryDecision, type ParticipantId, type ScoreAverages, type ScoreSummaryScope, type TableHandReplay, type TableHistoryHand, type TableHistoryHandHead, type TableHistoryResult, type TableReplayStep, type TableMode, type TableSessionId } from '@poker/contracts';
 import { decisionSituation } from './decision-facts.js';
 
 /**
@@ -53,16 +53,28 @@ export function tableHistoryHands(hands: readonly CompletedHand[], reader: Histo
 }
 
 /**
- * One completed Hand replayed for the reader: the engine's Replay Steps as they may see them, with the Hand's list row
- * and everyone seated at any step, by name and whether they are a Bot, in seat order at their first step (departed
- * Guests and removed Bots included), so the Trainer can draw it without the live table. Only a seated Participant acts,
- * so every step's actor is among them.
+ * One completed Hand replayed for the reader: the engine's Replay Steps as they may see them, with the Hand's number,
+ * completion time and who was dealt in, and everyone seated at any step, by name and whether they are a Bot, in seat
+ * order at their first step (departed Guests and removed Bots included), so the Trainer can draw it without the live
+ * table. Only a seated Participant acts, so every step's actor is among them.
+ *
+ * How the Hand ended (its final board, who won what, and the hole cards a showdown revealed) is carried by the result step
+ * alone: the replay's `hand` holds nothing of it, so no step before the result can show a viewer what the Hand came to.
  */
 export function tableHandReplay(replay: ObservableHandReplay, hand: TableHistoryHand, reader: HistoryReader): TableHandReplay {
   const seats = new Map<ParticipantId, number>();
   for (const step of replay.steps) for (const p of step.state.participants) if (p.seat !== null && !seats.has(p.participantId)) seats.set(p.participantId, p.seat);
   const participants = [...seats].sort((a, b) => a[1] - b[1]).map(([id]) => ({ participantId: id, name: reader.names.get(id) ?? '', bot: reader.bots.has(id) }));
-  return { ...replay, tableSessionId: reader.tableSessionId, mode: reader.mode, viewerParticipantId: reader.participantId, hand, participants };
+  const result: TableHistoryResult = {
+    board: [...hand.board], showdown: hand.showdown, payouts: hand.payouts.map(payout => ({ ...payout })),
+    holeCards: hand.dealtIn.flatMap(dealt => dealt.holeCards ? [{ participantId: dealt.participantId, cards: [...dealt.holeCards] }] : []),
+  };
+  const head: TableHistoryHandHead = {
+    handId: hand.handId, handNumber: hand.handNumber, ...(hand.completedAt !== undefined ? { completedAt: hand.completedAt } : {}),
+    dealtIn: hand.dealtIn.map(({ participantId, name }) => ({ participantId, name })), viewerDealtIn: hand.viewerDealtIn,
+  };
+  const steps = replay.steps.map((step): TableReplayStep => step.kind === 'result' ? { ...step, result } : step);
+  return { ...replay, steps, tableSessionId: reader.tableSessionId, mode: reader.mode, viewerParticipantId: reader.participantId, hand: head, participants };
 }
 
 /**
