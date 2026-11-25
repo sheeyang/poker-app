@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { HistoryFilter, OverallHistoryDecision, ScoredOverallHistory, StrategyDescriptor } from '@poker/contracts';
-import { admittedByScores } from '@poker/research';
+import { normalizeHistoryFilter, type HistoryBreakdown, type HistoryFilter, type OverallHistoryDecision, type ScoredOverallHistory, type StrategyDescriptor, type TrainerConfiguration } from '@poker/contracts';
+import { admittedByScores, filteredDecisions, inListOrder, newestFirst, ownDecisions, summarySets } from '@poker/research';
 import { immutableData } from '@poker/strategies';
 import type { FrozenEvaluationInput } from './analysis.js';
-import type { SharedAnalyses, SharedAnalysis } from './summaries.js';
+import type { SharedAnalyses, SharedAnalysis } from './shared-analyses.js';
+import type { FrozenHistorySummary } from './overall-history-summaries.js';
+import { captureEvaluation } from './capture-evaluation.js';
+import { completedHands, historyReader, type ReadableTable } from './readable-table.js';
 
 /** One of the Guest's listed decisions, frozen for analysis under the request's Strategy. */
 export interface StudiedDecision { readonly decision: OverallHistoryDecision; readonly input: FrozenEvaluationInput }
@@ -63,4 +66,68 @@ export function createScoredHistory(analyses: SharedAnalyses) {
       return scoredHistory(request, page);
     },
   };
+}
+
+/** What Overall History capture reads: the Guest's tables, how a Guest may read one, and their Trainer Configuration. */
+export interface OverallHistorySources {
+  /** The tables the Guest has ever been a Participant at, in any status. */
+  participations(userId: string): Promise<readonly { readonly tableSessionId: string }[]>;
+  readableTable(id: string, userId: string): Promise<ReadableTable | undefined>;
+  trainerConfigurations: { current(userId: string): Promise<TrainerConfiguration> };
+}
+
+/**
+ * Overall History's capture (ADR-0041): the Guest's own decisions across every table they may read, listed, and frozen
+ * for a summary request or a score-filtered list. Each table is read through `readableTable`, so nothing is loaded.
+ */
+export function createOverallHistory({ participations, readableTable, trainerConfigurations }: OverallHistorySources) {
+  /**
+   * The Guest-scoped Overall History (ADR-0041): every decision the Guest made, in a Hand they were dealt into, at any table
+   * they may read, passing the non-score restrictions of `filter`, the newest Hand first. The tables are those of the
+   * membership index in any status, and each is read through `readableTable`, the one rule for reading a table's history,
+   * so it never loads a table and shows no decision of anyone else's.
+   */
+  async function readOverallHistory(userId: string, filter: HistoryFilter): Promise<OverallHistoryDecision[]> {
+    const decisions: OverallHistoryDecision[] = [];
+    for (const { tableSessionId } of await participations(userId)) {
+      const table = await readableTable(tableSessionId, userId);
+      if (table) decisions.push(...ownDecisions(completedHands(table), historyReader(table)));
+    }
+    return newestFirst(filteredDecisions(decisions, filter));
+  }
+  /**
+   * An Overall History Score Summary request, frozen (ADR-0041): the decisions `readOverallHistory` lists for `filter`,
+   * each frozen for analysis under the Guest's Reference Strategy now, or under the supported `strategy` named instead,
+   * and with `breakdown` the same decisions in one set per bucket. Each table is read as its history is, so it loads
+   * nothing.
+   */
+  async function studiedDecisions(userId: string, filter: HistoryFilter, referenceStrategy: StrategyDescriptor): Promise<StudiedDecision[]> {
+    const decisions: StudiedDecision[] = [];
+    for (const { tableSessionId } of await participations(userId)) {
+      const table = await readableTable(tableSessionId, userId);
+      if (!table) continue;
+      const current = table.game.forParticipant(table.participantId).getView();
+      for (const decision of filteredDecisions(ownDecisions(completedHands(table), historyReader(table)), filter)) {
+        const input = captureEvaluation(table, table.participantId, decision.decisionId, referenceStrategy, current);
+        if (input?.acceptedAction) decisions.push({ decision, input });
+      }
+    }
+    return decisions;
+  }
+  async function captureOverallHistorySummary(userId: string, filter: HistoryFilter, breakdown?: HistoryBreakdown, strategy?: StrategyDescriptor): Promise<FrozenHistorySummary> {
+    const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    const decisions = await studiedDecisions(userId, filter, referenceStrategy);
+    return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), ...(breakdown ? { breakdown } : {}), referenceStrategy, ...summarySets(decisions, breakdown) });
+  }
+  /**
+   * A score-filtered Overall History request, frozen: every decision the non-score restrictions of `filter` admit, in the
+   * list's order, each frozen for analysis under the Guest's Reference Strategy now (or the supported `strategy`). The
+   * score ranges are applied afterwards, to the finished analyses, by the coordinator.
+   */
+  async function captureScoredHistory(userId: string, filter: HistoryFilter, strategy?: StrategyDescriptor): Promise<FrozenScoredHistory> {
+    const referenceStrategy = strategy ? immutableData(strategy) : (await trainerConfigurations.current(userId)).referenceStrategy;
+    const decisions = await studiedDecisions(userId, filter, referenceStrategy);
+    return immutableData({ guestId: userId, filter: normalizeHistoryFilter(filter), referenceStrategy, decisions: inListOrder(decisions) });
+  }
+  return { readOverallHistory, captureOverallHistorySummary, captureScoredHistory };
 }
