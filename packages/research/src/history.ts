@@ -1,4 +1,4 @@
-import { hasScoreFilter, historyBreakdownValues, type ChipAmount, type DecisionFacts, type DecisionId, type HistoryBreakdown, type HistoryFilter, type NumberRange, type ObservableHandReplay, type ObservableHistoryEntry, type ObservableSessionHistory, type OverallHistoryDecision, type ParticipantId, type ScoreAverages, type ScoreSummaryScope, type TableHandReplay, type TableHistoryHand, type TableMode, type TableSessionId } from '@poker/contracts';
+import { hasScoreFilter, historyBreakdownValues, type DecisionFacts, type DecisionId, type HistoryBreakdown, type HistoryFilter, type NumberRange, type ObservableHandReplay, type ObservableHistoryEntry, type ObservableSessionHistory, type OverallHistoryDecision, type ParticipantId, type ScoreAverages, type ScoreSummaryScope, type Stakes, type TableHandReplay, type TableHistoryHand, type TableMode, type TableSessionId } from '@poker/contracts';
 import { decisionSituation } from './decision-facts.js';
 
 /**
@@ -25,7 +25,7 @@ export interface HistoryReader {
   /** The reading Participant. */
   readonly participantId: ParticipantId;
   readonly seatCount: number;
-  readonly stakes: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly stakes: Stakes;
   /** Everyone who has had a place at the table, by name; anyone missing shows no name. */
   readonly names: ReadonlyMap<ParticipantId, string>;
   /** Every Participant at the table who is a Bot, removed Bots included. */

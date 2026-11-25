@@ -1,4 +1,4 @@
-import type { AnalysisFailureCode, Card, ChipAmount, ConcreteAction, DecisionId, HandId, ScoreAverages, StrategyDescriptor, Street, TableMode, TableSessionId } from './index.js';
+import type { AnalysisFailureCode, Card, ChipAmount, ConcreteAction, DecisionId, HandId, ScoreAverages, Stakes, StrategyDescriptor, Street, TableMode, TableSessionId } from './index.js';
 
 /**
  * Overall History (ADR-0041): the Guest's own decisions across every table they can read. The filter below is the
@@ -115,7 +115,7 @@ export const hasScoreFilter = (filter: HistoryFilter): boolean => scoreFields.so
 export interface OverallHistoryDecision extends DecisionFacts {
   readonly tableSessionId: TableSessionId;
   readonly seatCount: number;
-  readonly stakes: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly stakes: Stakes;
   readonly handId: HandId;
   /** The table-wide Hand number. */
   readonly handNumber: number;

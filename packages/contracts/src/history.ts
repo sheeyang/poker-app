@@ -1,6 +1,9 @@
 import type { Card, ChipAmount, ConcreteAction, DecisionId, HandId, ObservableCashGameState, ObservableGameConfiguration, ParticipantId, TableMode, TableSessionId } from './index.js';
 import type { DealInputs, PayoutInputs, ShowdownInputs, StreetInputs } from './presentation.js';
 
+/** A table's blinds and ante, as recorded: the stakes its history and the saved-tables list show. */
+export interface Stakes { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount }
+
 /** One Participant dealt into a Hand, as the viewer may know them: hole cards only where they are the viewer's own or a showdown revealed them. */
 export interface TableHistoryParticipant {
   readonly participantId: ParticipantId;
@@ -33,7 +36,7 @@ export interface TableHistory {
   readonly viewerParticipantId: ParticipantId;
   readonly mode: TableMode;
   readonly seatCount: number;
-  readonly stakes: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly stakes: Stakes;
   /** The viewer is a former Participant: they left, were removed, or the table closed. They read; they cannot play. */
   readonly left?: true;
   /** A Closed Table: nobody can join or play there again. Its memberships have all ended, so it is `left` too. */
