@@ -14,7 +14,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });

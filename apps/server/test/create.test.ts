@@ -19,7 +19,7 @@ let tableSessionId: string;
 
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => {
@@ -55,7 +55,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
   });
   expect(JSON.stringify(before)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
-  server = await createServer({ clock, automaticBots: false, databaseUrl, schema });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   const after = await fetch(base + '/api/table-sessions/' + tableSessionId, { headers: { cookie } });
   expect(await after.json()).toEqual(before);

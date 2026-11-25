@@ -19,7 +19,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 async function start() {
-  server = await createServer({ clock, adminMode: true, automaticBots: false, databaseUrl: databaseUrl!, schema });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await start(); });

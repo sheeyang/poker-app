@@ -15,7 +15,7 @@ const schema = 'test_' + randomUUID().replaceAll('-', '');
 const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
-beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); server = await createServer({ clock, adminMode: true, databaseUrl, schema }); base = await server.listen({ host: '127.0.0.1', port: 0 }); });
+beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, databaseUrl, schema }); base = await server.listen({ host: '127.0.0.1', port: 0 }); });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(botCount = 1, configuration?: { ante: number; minimumBuyIn: number; defaultBuyIn: number }) {
   const identity = await fetch(base + '/api/identity');

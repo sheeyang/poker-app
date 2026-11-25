@@ -21,7 +21,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
 async function startServer() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
@@ -267,7 +267,7 @@ test('a Bot decision is requested only once its Action Window opens, including a
   let botServer: Awaited<ReturnType<typeof createServer>> | undefined;
   let botBase = '';
   const start = async () => {
-    botServer = await createServer({ clock: botClock, databaseUrl: databaseUrl!, schema: botSchema, supportsStrategy: value => (value as StrategyDescriptor)?.policy?.id === 'fixture' || isSupportedStrategy(value),
+    botServer = await createServer({ journalConnectionTimeoutMs: 10_000, clock: botClock, databaseUrl: databaseUrl!, schema: botSchema, supportsStrategy: value => (value as StrategyDescriptor)?.policy?.id === 'fixture' || isSupportedStrategy(value),
       strategyFactory: descriptor => descriptor.policy.id !== 'fixture' ? createStrategy(descriptor) : { actionSelector: new HighestProbabilitySelector(), policy: {
         checkCompatibility: () => ({ compatible: true }),
         evaluate: view => { const result = Promise.withResolvers<PolicyResult>(); evaluations.push({ decisionId: view.state.decisionId!, result }); return result.promise; },

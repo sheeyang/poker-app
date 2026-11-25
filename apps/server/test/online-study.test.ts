@@ -39,7 +39,7 @@ function observed(descriptor: StrategyDescriptor): Strategy {
 }
 async function startServer() {
   // Held evaluations stay pending for as long as a test needs, never reaching the computation timeout.
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, strategyFactory: observed, jobRunnerOptions: { timeoutMs: 120_000 } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, strategyFactory: observed, jobRunnerOptions: { timeoutMs: 120_000 } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });

@@ -31,7 +31,7 @@ const faults: AcceptanceFaults = {
 };
 let server!: Awaited<ReturnType<typeof createServer>>;
 async function start(adminMode = true) {
-  server = await createServer({ databaseUrl, schema, adminMode, transactionFaults: faults, mutationTransactionFaults: faults });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, adminMode, transactionFaults: faults, mutationTransactionFaults: faults });
   await server.listen({ host: '127.0.0.1', port: Number(process.env.POKER_BROWSER_PORT ?? 3015) });
   console.log('Recovery browser fixture ready; isolated schema ' + schema);
 }

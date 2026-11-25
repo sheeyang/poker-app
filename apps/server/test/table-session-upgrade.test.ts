@@ -17,7 +17,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>> | undefined;
 let base: string;
 async function start() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 async function stop() { await server?.close(); server = undefined; }

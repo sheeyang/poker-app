@@ -23,7 +23,7 @@ let controllers: TableSessionControllerCommands;
 const botParticipants = new Set<string>();
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, adminMode: true, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, adminMode: true, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -146,7 +146,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   expect(await read(t)).toEqual(before);
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual({ ...before, inspection: { adminMode: false, completedHands: [] } });
   expect(await (await inspect(t)).json()).toMatchObject({ ok: false, rejection: { code: 'admin-mode-disabled' } });
@@ -159,7 +159,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   } finally { socket.terminate(); }
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, adminMode: true, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, adminMode: true, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } });
 });
@@ -243,7 +243,7 @@ async function holdSharedSlot(t: Table, shared: ReturnType<typeof sharedSlotStra
 test('queued inspection retains its captured active-Hand rejection after the live Hand completes', async () => {
   await server.close();
   const shared = sharedSlotStrategy();
-  server = await createServer({ clock, adminMode: true, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();
@@ -279,7 +279,7 @@ test('queued inspection retains its captured active-Hand rejection after the liv
 test('inspection shares the analysis capacity of the one JobRunner, waits outside mutation acceptance and retains a completed result when later poker advances', async () => {
   await server.close();
   const shared = sharedSlotStrategy();
-  server = await createServer({ clock, adminMode: true, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();

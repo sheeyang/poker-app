@@ -27,7 +27,9 @@ import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
 import { notFound, outcomeStatus, reject, unauthenticated } from './rejections.js';
 
-export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void;
+export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string;
+  /** How long the acceptance journal waits to open a connection. Defaults to 2 seconds; test fixtures on a loaded machine raise it. Journal statements stay bounded at 2 seconds regardless. */
+  readonly journalConnectionTimeoutMs?: number; readonly logger?: boolean; readonly secureCookies?: boolean; readonly beforeInitialize?: (app: FastifyInstance) => Promise<void>; readonly transactionFaults?: CreationTransactionFaults; readonly mutationTransactionFaults?: MutationTransactionFaults; readonly adminMode?: boolean; readonly automaticBots?: boolean; readonly jobRunnerOptions?: JobRunnerOptions; readonly strategyFactory?: (descriptor: StrategyDescriptor) => Strategy; readonly supportsStrategy?: (descriptor: unknown) => boolean; readonly onControllerCommandsReady?: (commands: TableSessionControllerCommands) => void;
   /** The clock for all play timing. Defaults to system time; tests substitute a manually advanced clock. */
   readonly clock?: ServerClock;
   /**
@@ -89,7 +91,7 @@ export async function createServer(options: ServerOptions) {
     return reply.code(429).header('retry-after', String(decision.retryAfterSeconds))
       .send({ ok: false, rejection: { code: 'rate-limited', message: `${limitMessages[kind]} Try again in ${waitText(decision.retryAfterSeconds)}.` } });
   }
-  const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema);
+  const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema, options.journalConnectionTimeoutMs);
   // Creating and joining share each Guest's turn, so a Guest is never let in at two Online Tables at once.
   const guests = createGuestQueue();
   const create = createTableSessionCreator(db, acceptance, options.transactionFaults, options.supportsStrategy ?? isSupportedStrategy, guests, options.clock);

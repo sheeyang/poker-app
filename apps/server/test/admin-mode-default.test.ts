@@ -13,7 +13,7 @@ let base: string;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
   // No adminMode option: the hosted default.
-  server = await createServer({ databaseUrl, schema, automaticBots: false });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, automaticBots: false });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });

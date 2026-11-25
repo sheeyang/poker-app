@@ -16,7 +16,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 await administration.query('CREATE SCHEMA "' + schema + '"');
 const port = Number(process.env.POKER_BROWSER_PORT ?? 4031);
 async function start() {
-  const started = await createServer({ databaseUrl, schema });
+  const started = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema });
   await started.listen({ host: '127.0.0.1', port });
   return started;
 }

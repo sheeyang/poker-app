@@ -29,7 +29,7 @@ const release = () => { holding = false; for (const answer of held.splice(0)) an
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
   // Enough running slots that every submitted analysis runs at once: the held evaluations are all the outstanding jobs.
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, jobRunnerOptions: { concurrency: 32, maximumQueued: 32 }, onControllerCommandsReady: commands => { controller = commands; },
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, jobRunnerOptions: { concurrency: 32, maximumQueued: 32 }, onControllerCommandsReady: commands => { controller = commands; },
     strategyFactory: descriptor => {
       const strategy = createStrategy(descriptor);
       return { actionSelector: strategy.actionSelector, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, options) => {

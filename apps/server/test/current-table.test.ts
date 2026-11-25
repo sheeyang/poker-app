@@ -18,7 +18,7 @@ const heldJoins = new Map<string, Promise<void>>();
 let heldCreation: Promise<void> | undefined;
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema,
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema,
     mutationTransactionFaults: { beforeCommit: async ({ requestId }) => { await heldJoins.get(requestId); } },
     transactionFaults: { beforeCommit: async () => { await heldCreation; } } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });

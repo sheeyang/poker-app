@@ -40,7 +40,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     },
   };
   async function start() {
-    server = await createServer({ clock, databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
+    server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
       strategyFactory: options.strategyFactory && (descriptor => {
         const controlled = options.strategyFactory!(descriptor); const reference = baselineStrategy(descriptor);
         return { ...controlled, policy: { ...controlled.policy, evaluate: (view, execution) => humans.has(view.state.actorId ?? '') ? reference.policy.evaluate(view, execution) : controlled.policy.evaluate(view, execution) } };

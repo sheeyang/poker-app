@@ -23,7 +23,7 @@ let controllers: TableSessionControllerCommands;
 let analysisGate: ReturnType<typeof Promise.withResolvers<void>> | undefined;
 let evaluationsStarted = 0;
 async function startServer() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; },
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; },
     strategyFactory: descriptor => {
       const strategy = createStrategy(descriptor);
       return { actionSelector: strategy.actionSelector, policy: {
