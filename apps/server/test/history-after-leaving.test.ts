@@ -54,10 +54,10 @@ const post = (path: string, cookie: string, body: unknown) => fetch(base + path,
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000 };
 
 /**
- * Ann's Online Table, with Ben and Cy joined through its Join Link, or with only those `joiners` named. All of them are
+ * Ann's three-Seat Online Table, with Ben and Cy joined through its Join Link, or with only those `joiners` named. All of them are
  * connected and seated, so the table deals by itself. Every decision each player makes is recorded, by Decision ID.
  */
-async function threeHanded(joiners = ['Ben', 'Cy']) {
+async function threeSeatTable(joiners = ['Ben', 'Cy']) {
   const ann = await guest('Ann');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online', configuration: stakes })).json();
   const id = created.tableSessionId as string;
@@ -142,7 +142,7 @@ async function summarized(id: string, cookie: string, path: 'hand-summaries' | '
 }
 
 test('a User who left, and a User who was removed, read the whole Table History, Hands completed after they left included, and study their own decisions; they cannot act there', async () => {
-  const t = await threeHanded();
+  const t = await threeSeatTable();
   await t.playHand('hand-1');
   // Ben leaves between Hands; Ann and Cy play on.
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
@@ -183,7 +183,7 @@ test('a User who left, and a User who was removed, read the whole Table History,
 });
 
 test('reading a table one has left, and studying there, loads nothing; once it is a Closed Table every former Participant still reads and studies it, read-only', async () => {
-  const t = await threeHanded();
+  const t = await threeSeatTable();
   await t.playHand('hand-1');
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
   // Nobody is connected and nothing is scheduled, so the table leaves memory.
@@ -253,7 +253,7 @@ async function strangerRefused(id: string, decisionId: string, requestId: string
 }
 
 test('a User who left and a User who was removed step through their Hands and study their own decisions from history, under a named Strategy too; nothing plays', async () => {
-  const t = await threeHanded();
+  const t = await threeSeatTable();
   await t.playHand('hand-1');
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
   await t.playHand('hand-2');
@@ -293,7 +293,7 @@ test('a User who left and a User who was removed step through their Hands and st
 });
 
 test('at a table not in memory, and once it is a Closed Table, former Participants step through Hands and complete analysis from history under named Strategies, loading nothing and writing only derived analysis', async () => {
-  const t = await threeHanded();
+  const t = await threeSeatTable();
   await t.playHand('hand-1');
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
   for (const player of [t.ann, t.cy]) expect((await t.as(player.cookie, 'stand-up-participant', { participantId: player.participantId })).status).toBe(200);
@@ -332,7 +332,7 @@ test('at a table not in memory, and once it is a Closed Table, former Participan
 
 test('a former Participant\'s study is history-analysis under the cap of 8 even when asked for as in-table study, a summary included', async () => {
   // Heads-up, with Ben alone joining Ann, and Ann raising once a Hand: Ben has five decisions in each of two Hands.
-  const t = await threeHanded(['Ben']);
+  const t = await threeSeatTable(['Ben']);
   for (const hand of ['hand-1', 'hand-2']) await t.playHand(hand, t.ann.participantId);
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
   const decisions = t.decisions.get(t.ben.participantId)!;
