@@ -4,7 +4,7 @@ import { Field, Icon } from './ui.js';
 type Viewer = 'player-seated' | 'player-watching' | 'owner-seated' | 'owner-watching';
 type Task = 'rebuy' | 'take-seat' | 'add-bot' | 'top-up' | 'strategy' | 'remove-bot' | 'leave-table';
 type Panel = 'table' | Task;
-type Participant = 'you' | number;
+type Participant = 'viewer' | number;
 type Bot = { name: string; stack: number; sittingOut?: boolean; pending?: string; strategy?: string };
 const defaultStrategy = 'Uniform Choice · Probability Selector';
 
@@ -27,8 +27,8 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
   const [bots, setBots] = useState<Record<number, Bot>>(() => Object.fromEntries((index === 5 ? [1, 2, 3, 5, 6].filter(s => !(s === 1 && viewer.endsWith('seated'))) : [3, 5]).map((s, i) => [s, { name: `Bot ${i + 1}`, stack: 2000 }])));
   const [panel, setPanel] = useState<Panel>(index === 0 ? 'rebuy' : 'table');
   const [menuSeat, setMenuSeat] = useState<number | null>(index === 1 || index === 2 ? 4 : null);
-  const [participantMenu, setParticipantMenu] = useState<Participant | null>(index === 3 || index === 4 ? 'you' : null);
-  const [managed, setManaged] = useState<Participant>('you');
+  const [participantMenu, setParticipantMenu] = useState<Participant | null>(index === 3 || index === 4 ? 'viewer' : null);
+  const [managed, setManaged] = useState<Participant>('viewer');
   const [selectedSeat, setSelectedSeat] = useState(4);
   const [choosing, setChoosing] = useState(index === 5);
   const [movingBot, setMovingBot] = useState<number | null>(null);
@@ -43,13 +43,13 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
   const focusMenu = useRef(false), previousPanel = useRef(panel);
   const occupied = (seat: number) => seat === viewerSeat || !!bots[seat];
   const openSeats = [1, 2, 3, 4, 5, 6].filter(s => !occupied(s));
-  const targetStack = managed === 'you' ? stack : bots[managed]?.stack ?? 0;
-  const targetName = managed === 'you' ? 'You' : bots[managed]?.name ?? 'Bot';
+  const targetStack = managed === 'viewer' ? stack : bots[managed]?.stack ?? 0;
+  const targetName = managed === 'viewer' ? 'You' : bots[managed]?.name ?? 'Bot';
   const topUp = panel === 'top-up' && targetStack > 0;
   const minimum = topUp ? Math.max(400, targetStack + 1) : 400;
   const valid = amount.trim() !== '' && Number.isSafeInteger(Number(amount)) && Number(amount) >= minimum && Number(amount) <= 4000;
   const count = () => setActions(a => a + 1);
-  const participantAnchor = (who: Participant) => who === 'you' ? '[data-participant="you"]' : `.seat-${who} .occupied-seat`;
+  const participantAnchor = (who: Participant) => who === 'viewer' ? '[data-participant="viewer"]' : `.seat-${who} .occupied-seat`;
   const focusAnchor = (selector: string) => requestAnimationFrame(() => simulation.current?.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true }));
   const focusSeat = (seat: number) => focusAnchor(`.seat-${seat} button`);
   const closeMenus = (restore = true) => {
@@ -79,7 +79,7 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
   function participantTask(task: Task) {
     if (participantMenu === null) return;
     count(); setManaged(participantMenu);
-    const currentStack = participantMenu === 'you' ? stack : bots[participantMenu]?.stack ?? 0;
+    const currentStack = participantMenu === 'viewer' ? stack : bots[participantMenu]?.stack ?? 0;
     setAmount(currentStack === 0 ? '2000' : '4000');
     if (typeof participantMenu === 'number') setStrategy(bots[participantMenu]?.strategy ?? defaultStrategy);
     closeMenus(false); setPanel(task);
@@ -92,10 +92,10 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
     } else if (viewerSeat) { setViewerSeat(menuSeat); finish(`Moved to seat ${menuSeat}.`); }
   }
   function sitOut(who: Participant) {
-    const isOut = who === 'you' ? sittingOut : !!bots[who]?.sittingOut;
-    const name = who === 'you' ? 'You' : bots[who]?.name;
+    const isOut = who === 'viewer' ? sittingOut : !!bots[who]?.sittingOut;
+    const name = who === 'viewer' ? 'You' : bots[who]?.name;
     if (isOut && handOpen) return;
-    if (who === 'you') { if (handOpen) setPending('Sitting out after this hand'); else setSittingOut(!isOut); }
+    if (who === 'viewer') { if (handOpen) setPending('Sitting out after this hand'); else setSittingOut(!isOut); }
     else setBots(current => ({ ...current, [who]: { ...current[who]!, ...(handOpen ? { pending: 'Sitting out after this hand' } : { sittingOut: !isOut }) } }));
     finish(handOpen ? `${name}: sitting out after this hand.` : `${name}: ${isOut ? 'back in play' : 'sitting out'}.`);
   }
@@ -123,10 +123,10 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
       if (viewerSeat || occupied(selectedSeat)) return;
       setViewerSeat(selectedSeat); setStack(Number(amount)); finish(`You’re in seat ${selectedSeat} with ${Number(amount).toLocaleString()} chips.`);
     } else if (!handOpen) {
-      if (managed === 'you') setStack(Number(amount));
+      if (managed === 'viewer') setStack(Number(amount));
       else if (owner && bots[managed]) setBots(current => ({ ...current, [managed]: { ...current[managed]!, stack: Number(amount) } }));
       else return;
-      finish(`${managed === 'you' ? '' : `${targetName}: `}${topUp ? 'Stack topped up' : 'Rebought'} to ${Number(amount).toLocaleString()} chips.`);
+      finish(`${managed === 'viewer' ? '' : `${targetName}: `}${topUp ? 'Stack topped up' : 'Rebought'} to ${Number(amount).toLocaleString()} chips.`);
     }
   }
   const moneyField = (label: string) => <Field label={label} hint={minimum > 4000 ? 'Your stack is already at the maximum buy-in.' : `${minimum.toLocaleString()}–4,000 chips${topUp && valid ? ` · Adds ${(Number(amount) - targetStack).toLocaleString()} chips` : ''}`}><input name="chipAmount" aria-label={label} type="number" inputMode="numeric" step="1" min={minimum} max="4000" required value={amount} aria-invalid={!valid} disabled={minimum > 4000} onChange={e => setAmount(e.target.value)} /></Field>;
@@ -136,15 +136,15 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
     if (!joined) { count(); setJoined(true); setMessage('You’re back at your table.'); return; }
     if (index === 6) { count(); setMessage('You’re back at your table.'); return; }
     if (!viewerSeat || index === 1 || index === 2) { chooseSeats(); return; }
-    count(); setMessage(''); setManaged('you'); setAmount(stack === 0 ? '2000' : '4000'); setPanel(stack === 0 ? 'rebuy' : 'top-up');
+    count(); setMessage(''); setManaged('viewer'); setAmount(stack === 0 ? '2000' : '4000'); setPanel(stack === 0 ? 'rebuy' : 'top-up');
   };
-  const participantName = participantMenu === 'you' ? 'You' : participantMenu !== null ? bots[participantMenu]?.name ?? 'Bot' : '';
-  const isSelf = participantMenu === 'you';
-  const participantStack = isSelf ? stack : participantMenu !== null ? bots[participantMenu]?.stack ?? 0 : 0;
-  const participantOut = isSelf ? sittingOut : participantMenu !== null && !!bots[participantMenu]?.sittingOut;
-  const participantPending = isSelf ? pending : participantMenu !== null ? bots[participantMenu]?.pending : '';
+  const participantName = participantMenu === 'viewer' ? 'You' : participantMenu !== null ? bots[participantMenu]?.name ?? 'Bot' : '';
+  const isViewer = participantMenu === 'viewer';
+  const participantStack = isViewer ? stack : participantMenu !== null ? bots[participantMenu]?.stack ?? 0 : 0;
+  const participantOut = isViewer ? sittingOut : participantMenu !== null && !!bots[participantMenu]?.sittingOut;
+  const participantPending = isViewer ? pending : participantMenu !== null ? bots[participantMenu]?.pending : '';
   const hasMenu = menuSeat !== null || participantMenu !== null;
-  const panelTitle = panel === 'rebuy' ? 'Rebuy' : panel === 'top-up' ? `${topUp ? 'Top up' : 'Rebuy'}${managed === 'you' ? '' : ` ${targetName}`}` : panel === 'take-seat' ? `Take seat ${selectedSeat}` : panel === 'add-bot' ? `Add a Bot to seat ${selectedSeat}` : panel === 'strategy' ? `${targetName} · Playing Strategy` : panel === 'remove-bot' ? `Remove ${targetName}?` : 'Leave table?';
+  const panelTitle = panel === 'rebuy' ? 'Rebuy' : panel === 'top-up' ? `${topUp ? 'Top up' : 'Rebuy'}${managed === 'viewer' ? '' : ` ${targetName}`}` : panel === 'take-seat' ? `Take seat ${selectedSeat}` : panel === 'add-bot' ? `Add a Bot to seat ${selectedSeat}` : panel === 'strategy' ? `${targetName} · Playing Strategy` : panel === 'remove-bot' ? `Remove ${targetName}?` : 'Leave table?';
   return <>
     <div className={`simulation after-simulation ${choosing ? 'choosing-seats' : ''}`} ref={simulation}>
       <div inert={panel !== 'table'}>
@@ -153,24 +153,24 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
           <span className="hand-label">{handOpen ? 'Hand in progress' : 'Between hands'}</span>
           <div className="felt"><div className="felt-copy"><Icon name="spade" size={22} /><span>No-limit Hold’em</span><strong>{choosing ? movingBot !== null ? `Choose a seat for ${bots[movingBot]?.name}` : 'Choose an open seat' : handOpen ? 'Hand in progress' : 'Waiting for the next hand'}</strong></div></div>
           {[1, 2, 3, 4, 5, 6].map(s => <div key={s} className={`demo-seat seat-${s} ${viewerSeat === s ? 'viewer-seat' : ''}`}>
-            {occupied(s) ? <button className="occupied-seat" data-participant={s === viewerSeat ? 'you' : s} aria-label={`${s === viewerSeat ? 'You' : bots[s]?.name} actions`} aria-haspopup="menu" aria-expanded={participantMenu === (s === viewerSeat ? 'you' : s)} onClick={() => openParticipant(s === viewerSeat ? 'you' : s)}><span className="avatar">{s === viewerSeat ? 'Y' : 'B'}</span><span><strong>{s === viewerSeat ? 'You' : bots[s]?.name}</strong><small>{(s === viewerSeat ? stack : bots[s]?.stack ?? 0).toLocaleString()} chips</small>{(s === viewerSeat ? pending || (sittingOut ? 'Sitting out' : '') : bots[s]?.pending || (bots[s]?.sittingOut ? 'Sitting out' : '')) && <small className="participant-state">{s === viewerSeat ? pending || 'Sitting out' : bots[s]?.pending || 'Sitting out'}</small>}</span></button> : <button className="open-seat plus-seat" aria-label={`Seat ${s} actions`} title={`Seat ${s} actions`} aria-haspopup="menu" aria-expanded={menuSeat === s} aria-controls={menuSeat === s ? `${id}-seat-menu` : undefined} disabled={!joined} onClick={() => openMenu(s)} onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); openMenu(s); } }}><Icon name="plus" size={24} /></button>}
+            {occupied(s) ? <button className="occupied-seat" data-participant={s === viewerSeat ? 'viewer' : s} aria-label={`${s === viewerSeat ? 'You' : bots[s]?.name} actions`} aria-haspopup="menu" aria-expanded={participantMenu === (s === viewerSeat ? 'viewer' : s)} onClick={() => openParticipant(s === viewerSeat ? 'viewer' : s)}><span className="avatar">{s === viewerSeat ? 'Y' : 'B'}</span><span><strong>{s === viewerSeat ? 'You' : bots[s]?.name}</strong><small>{(s === viewerSeat ? stack : bots[s]?.stack ?? 0).toLocaleString()} chips</small>{(s === viewerSeat ? pending || (sittingOut ? 'Sitting out' : '') : bots[s]?.pending || (bots[s]?.sittingOut ? 'Sitting out' : '')) && <small className="participant-state">{s === viewerSeat ? pending || 'Sitting out' : bots[s]?.pending || 'Sitting out'}</small>}</span></button> : <button className="open-seat plus-seat" aria-label={`Seat ${s} actions`} title={`Seat ${s} actions`} aria-haspopup="menu" aria-expanded={menuSeat === s} aria-controls={menuSeat === s ? `${id}-seat-menu` : undefined} disabled={!joined} onClick={() => openMenu(s)} onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); openMenu(s); } }}><Icon name="plus" size={24} /></button>}
           </div>)}
         </div>
-        <div className="action-tray"><div>{!viewerSeat && joined ? <button className="watching-participant" data-participant="you" aria-label="You actions" aria-haspopup="menu" aria-expanded={participantMenu === 'you'} onClick={() => openParticipant('you')}><span className="avatar">Y</span><span><strong>You</strong><small>Watching</small></span></button> : <><strong>{!joined ? 'You left the table.' : index === 0 && stack === 0 ? 'You’re out of chips.' : 'Ready when the table is.'}</strong><span>{index === 0 && stack === 0 ? 'Rebuy to be dealt into the next hand.' : 'Click a participant or an open seat.'}</span></>}</div>{!(index === 5 && joined && !viewerSeat) && <button className="primary" onClick={trayAction}>{!joined ? 'Return to table' : !viewerSeat ? 'Choose a seat' : index === 0 ? 'Rebuy' : index === 1 || index === 2 ? 'Choose a seat' : index === 6 ? 'Open Join Link' : 'Top up'}<Icon name="arrow" size={15} /></button>}</div>
+        <div className="action-tray"><div>{!viewerSeat && joined ? <button className="watching-participant" data-participant="viewer" aria-label="You actions" aria-haspopup="menu" aria-expanded={participantMenu === 'viewer'} onClick={() => openParticipant('viewer')}><span className="avatar">Y</span><span><strong>You</strong><small>Watching</small></span></button> : <><strong>{!joined ? 'You left the table.' : index === 0 && stack === 0 ? 'You’re out of chips.' : 'Ready when the table is.'}</strong><span>{index === 0 && stack === 0 ? 'Rebuy to be dealt into the next hand.' : 'Click a participant or an open seat.'}</span></>}</div>{!(index === 5 && joined && !viewerSeat) && <button className="primary" onClick={trayAction}>{!joined ? 'Return to table' : !viewerSeat ? 'Choose a seat' : index === 0 ? 'Rebuy' : index === 1 || index === 2 ? 'Choose a seat' : index === 6 ? 'Open Join Link' : 'Top up'}<Icon name="arrow" size={15} /></button>}</div>
       </div>
       {menuSeat !== null && panel === 'table' && <ContextMenu simulation={simulation} anchor={`.seat-${menuSeat}`} title={`Seat ${menuSeat}`} id={`${id}-seat-menu`} autoFocus={focusMenu.current} close={closeMenus}>
         {movingBot !== null ? <button role="menuitem" disabled={handOpen} onClick={moveHere}>Move {bots[movingBot]?.name} here{handOpen && <small>Available between hands</small>}</button> : viewerSeat ? <button role="menuitem" disabled={handOpen} onClick={moveHere}>Move here{handOpen && <small>Available between hands</small>}</button> : <button role="menuitem" onClick={() => chooseSeatAction('take-seat')}>Take this seat</button>}
         {owner && movingBot === null && <button role="menuitem" onClick={() => chooseSeatAction('add-bot')}>Add a Bot here</button>}
       </ContextMenu>}
       {participantMenu !== null && panel === 'table' && <ContextMenu simulation={simulation} anchor={participantAnchor(participantMenu)} title={participantName} id={`${id}-participant-menu`} autoFocus={focusMenu.current} close={closeMenus}>
-        {isSelf && !viewerSeat ? openSeats.length > 1 && <button role="menuitem" onClick={() => chooseSeats()}>Choose a seat</button> : (isSelf || owner) && <>
+        {isViewer && !viewerSeat ? openSeats.length > 1 && <button role="menuitem" onClick={() => chooseSeats()}>Choose a seat</button> : (isViewer || owner) && <>
           <button role="menuitem" disabled={handOpen || participantStack >= 4000 || !!participantPending} onClick={() => participantTask('top-up')}>{participantStack ? 'Top up' : 'Rebuy'}{handOpen && <small>Available between hands</small>}</button>
           <button role="menuitem" disabled={!!participantPending || !!participantOut && handOpen} onClick={() => sitOut(participantMenu)}>{participantOut ? 'Return to play' : handOpen ? 'Sit out after this hand' : 'Sit out'}</button>
-          <button role="menuitem" disabled={handOpen || !openSeats.length || !!participantPending} onClick={() => chooseSeats(isSelf ? null : participantMenu as number)}>Move seat{handOpen && <small>Available between hands</small>}</button>
-          {isSelf ? <button role="menuitem" disabled={!!participantPending} onClick={standUp}>{handOpen ? 'Stand up after this hand' : 'Stand up'}</button> : <><button role="menuitem" onClick={() => participantTask('strategy')}>Playing Strategy</button><button role="menuitem" disabled={!!participantPending} onClick={() => participantTask('remove-bot')}>Remove Bot</button></>}
+          <button role="menuitem" disabled={handOpen || !openSeats.length || !!participantPending} onClick={() => chooseSeats(isViewer ? null : participantMenu as number)}>Move seat{handOpen && <small>Available between hands</small>}</button>
+          {isViewer ? <button role="menuitem" disabled={!!participantPending} onClick={standUp}>{handOpen ? 'Stand up after this hand' : 'Stand up'}</button> : <><button role="menuitem" onClick={() => participantTask('strategy')}>Playing Strategy</button><button role="menuitem" disabled={!!participantPending} onClick={() => participantTask('remove-bot')}>Remove Bot</button></>}
         </>}
-        {isSelf && <button role="menuitem" onClick={() => participantTask('leave-table')}>{handOpen && viewerSeat ? 'Leave after this hand' : 'Leave table'}</button>}
-        {!isSelf && !owner && <div className="participant-summary">{participantStack.toLocaleString()} chips</div>}
+        {isViewer && <button role="menuitem" onClick={() => participantTask('leave-table')}>{handOpen && viewerSeat ? 'Leave after this hand' : 'Leave table'}</button>}
+        {!isViewer && !owner && <div className="participant-summary">{participantStack.toLocaleString()} chips</div>}
       </ContextMenu>}
       {panel !== 'table' && <div className="panel-layer"><section className="demo-dialog" tabIndex={-1} ref={dialog} aria-labelledby={`${id}-heading`} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); closePanel(); } }}>
         <div className="dialog-heading flex items-center justify-between"><h4 id={`${id}-heading`}>{panelTitle}</h4><button className="close-button" aria-label="Close panel" onClick={closePanel}><Icon name="close" /></button></div>
