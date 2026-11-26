@@ -22,9 +22,9 @@ import { nameKey, participantName, participantNameRules, validateTableOptionChan
 import { systemClock, type ServerClock } from './clock.js';
 import { announceNextHand, beforeActionWindow, beforeHandEnd, emptySchedule, nextWakeAt, pastActionDeadline, scheduleTransition, withoutNextHand, type CurrentDecision } from './schedule.js';
 import { phaseInputsReader } from './phase-inputs.js';
-import { ownDecisionIds } from '@poker/research';
 import { captureEvaluation } from './capture-evaluation.js';
-import { tableFormat, type ReadableTable } from './readable-table.js';
+import { createStudy, scoreSummaryOf } from './study.js';
+import { tableFormat } from './readable-table.js';
 import { applyAfterHandRequests, duringHand, handInProgress, recordAfterHandRequest, standUpAndLeave } from './after-hand.js';
 import { canDeal, dealingStep, stillDisconnected, type DealingParticipant } from './automatic-dealing.js';
 import { humanMutationDenial, malformedPokerRequest, type PokerMutationKind } from './permissions.js';
@@ -776,32 +776,10 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     promote(id, session);
     if (!stopped) queueMicrotask(() => queueSchedule(id));
   }
-    /**
-     * A table a Guest may read the history of, with their Participant there: a loaded table's committed copy, otherwise
-     * its stored record restored read-only. Anyone who has ever been a Participant there may read, after a Leave Table
-     * or Removal and at a Closed Table (ADR-0041). A read never loads the table, so it holds no handle, schedules
-     * nothing and subscribes to nothing.
-     */
-    async function readableTable(id: string, userId: string): Promise<ReadableTable | undefined> {
-      const member = await participant(id, userId);
-      if (!member) return undefined;
-      const session = tables.get(id) ?? await readCommitted(id);
-      return session && { participantId: member.participantId, aggregate: session.aggregate, game: session.game };
-    }
-    /**
-     * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
-     * Reference Strategy their Guest has now, or under the supported `strategy` the request names (Counterfactual
-     * Comparison: only the Strategy in the identity differs, so the frozen view and the seeds are the same). It follows
-     * the same rule as reading the history, so it loads nothing. `undefined` for a Guest who may not read the table;
-     * `null` for a decision that is not their own accepted one.
-     */
-    async function captureHistoryEvaluation(id: string, userId: string, decisionId: string, strategy?: StrategyDescriptor): Promise<FrozenEvaluationInput | null | undefined> {
-      const referenceStrategy = await trainerConfigurations.studyStrategy(userId, strategy);
-      const table = await readableTable(id, userId);
-      if (!table) return undefined;
-      const input = captureEvaluation(table, table.participantId, decisionId, referenceStrategy);
-      return input?.acceptedAction ? input : null;
-    }
+    const { readableTable, captureHistoryEvaluation, studying } = createStudy({
+      participant, access, asMember, trainerConfigurations, stopped: () => stopped,
+      committed: async id => tables.get(id) ?? await readCommitted(id),
+    });
     async function read(id: string, userId: string) {
       return asMember(id, userId, async () => {
         const trainerConfiguration = await trainerConfigurations.current(userId);
@@ -1338,30 +1316,6 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
       await Promise.allSettled([...queue.values(), sweeping]);
     }
   /**
-   * Study of a Guest's own decisions at a table. A joined Participant's request holds the table and is captured in its
-   * turn, as before. Anyone else who has been a Participant there, after leaving or at a Closed Table, is captured from
-   * the committed record without loading the table (ADR-0041): study outlasts play, and never schedules it.
-   * It studies under the Guest's Reference Strategy, or under `strategy` when one is named, without reading their
-   * Trainer Configuration.
-   */
-  async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: ReadableTable, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
-    const chosen = () => trainerConfigurations.studyStrategy(userId, strategy);
-    if (await access(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
-    const table = await readableTable(id, userId);
-    if (!table) return undefined;
-    const referenceStrategy = await chosen();
-    if (stopped) throw new Error('Table Session is unavailable.');
-    return former(table, referenceStrategy);
-  }
-  /** A summary of a Participant's own decisions in a scope, frozen from the committed table; null for a Hand it does not have. */
-  function scoreSummaryOf(session: CommittedSession, participantId: string, scope: ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
-    if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
-    const view = session.game.forParticipant(participantId).getView();
-    const decisionIds = ownDecisionIds(view.history, participantId, scope);
-    const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
-    return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members, ...(historyGuestId ? { historyGuestId } : {}) });
-  }
-  /**
    * A Score Summary request, frozen. It runs as the Guest's `history-analysis` (ADR-0041) when it is study from history:
    * when Table History asks (`history`), when it names a Strategy to compare, and always for a former Participant.
    */
@@ -1399,7 +1353,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
      * Strategy is asked for from history (`captureHistoryEvaluation`). A former Participant has no current decision, so
      * they study only decisions they made, and `former` marks it: their study is always `history-analysis` (ADR-0041).
      */
-    captureEvaluation: (id: string, userId: string, decisionId: string) => studying(id, userId, undefined, referenceStrategy => enqueue(id, async (): Promise<StudiedEvaluation | ApplicationRejection | null | undefined> => {
+    captureStudyEvaluation: (id: string, userId: string, decisionId: string) => studying(id, userId, undefined, referenceStrategy => enqueue(id, async (): Promise<StudiedEvaluation | ApplicationRejection | null | undefined> => {
       const session = tables.get(id);
       const participantId = viewer(session, userId);
       if (!session || !participantId) return undefined;
