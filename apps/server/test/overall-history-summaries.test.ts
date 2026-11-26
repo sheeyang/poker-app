@@ -253,38 +253,46 @@ test("a summary is only its Guest's: another Guest can't read or retry it, and a
   await completed(f, cookie, asked.requestId);
 });
 
-test('a large summary never has more than 8 history-analysis jobs outstanding for its Guest, while another Guest\'s summary proceeds, and both complete', async () => {
+test('a large summary never has more than 8 history-analysis jobs outstanding for its User, while another User\'s summary proceeds, and both complete', async () => {
   // Enough running slots that every submitted job runs at once, so the jobs waiting on the fake Strategy are all the outstanding ones.
   const g = await fixture(32);
   fixtures.push(g);
   const heavy = await g.guest('Ann'), light = await g.guest('Ben');
+  // The smallest sets past the cap: two checked-down Hands (4 decisions each) and a preflop fold make 9 decisions.
   const tables = [await g.practice(heavy), await g.practice(heavy)];
-  for (const t of tables) for (let hand = 0; hand < 3; hand++) await g.checkDown(t);
   const other = await g.practice(light);
-  for (let hand = 0; hand < 3; hand++) await g.checkDown(other);
+  // The Users' tables are independent, so the Hands are played side by side.
+  await Promise.all([
+    (async () => { await g.checkDown(tables[0]!); await g.checkDown(tables[0]!); })(),
+    g.foldPreflop(tables[1]!),
+    (async () => { await g.checkDown(other); await g.checkDown(other); await g.foldPreflop(other); })(),
+  ]);
   await g.idle();
   await g.configure(heavy, highestProbabilityPlayingStrategy);
   await g.configure(light, highestProbabilityPlayingStrategy);
   g.hold();
   const large = await g.summarize(heavy);
-  expect(large.summary).toMatchObject({ status: 'pending', decisionCount: 24, progress: { succeeded: 0, total: 24 } });
+  expect(large.summary).toMatchObject({ status: 'pending', decisionCount: 9, progress: { succeeded: 0, total: 9 } });
   const small = await g.summarize(light);
-  expect(small.summary).toMatchObject({ status: 'pending', decisionCount: 12 });
+  expect(small.summary).toMatchObject({ status: 'pending', decisionCount: 9 });
   const of = (guestTables: { human: string }[]) => () => g.waiting(highestProbabilityPlayingStrategy).filter(evaluation => guestTables.some(t => t.human === evaluation.view.state.actorId)).length;
   await expect.poll(of(tables)).toBe(8);
   await expect.poll(of([other])).toBe(8);
   await new Promise(resolve => setTimeout(resolve, 50));
   expect(of(tables)()).toBe(8);
   // As jobs finish, the rest of the set goes in, never past the bound.
-  for (let round = 0; round < 6; round++) {
+  for (let round = 0; round < 3; round++) {
     g.answer(g.waiting(highestProbabilityPlayingStrategy).find(evaluation => tables.some(t => t.human === evaluation.view.state.actorId))!);
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(of(tables)()).toBeLessThanOrEqual(8);
+    // The ninth job goes in as the first one finishes, back to exactly 8 outstanding.
+    if (round === 0) await expect.poll(of(tables)).toBe(8);
   }
   g.release();
   await completed(g, heavy, large.requestId);
   await completed(g, light, small.requestId);
-  expect((await g.current(heavy, large.requestId)).summary).toMatchObject({ progress: { succeeded: 24, total: 24 }, averages: { decisionScore: 1, actionRankScore: 1 } });
+  // Eight decisions scoring 1 and the fold scoring 0.
+  expect((await g.current(heavy, large.requestId)).summary).toMatchObject({ progress: { succeeded: 9, total: 9 }, averages: { decisionScore: expect.closeTo(8 / 9), actionRankScore: expect.closeTo(8 / 9) } });
 });
 
 test('a summary names a supported Strategy, and an unsupported one is refused', async () => {
