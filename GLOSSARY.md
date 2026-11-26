@@ -85,7 +85,7 @@ The private durable representation from which an authoritative Table Session can
 _Avoid_: Observable Session History, live Cash Game object, event log
 
 **Persisted Table Session**:
-The complete application-owned durable representation of a Table Session, containing its Table Session Record, its mode, and participant controller assignments with each player's User and membership.
+The complete application-owned durable representation of a Table Session, containing its Table Session Record, its mode, and each Participant's Controller, with each player's User and membership.
 _Avoid_: Table Session Record, Cash Game state
 
 **Table Owner**:
@@ -96,9 +96,9 @@ _Avoid_: Participant, host, button, dealer
 A player or Bot identified throughout a Table Session independently of the Seat they currently occupy.
 _Avoid_: Seat, Strategy
 
-**Human Controller**:
-The User who controls a player's decisions and observes the table as that Participant.
-_Avoid_: Owner, seat holder
+**Controller**:
+What decides a Participant's actions: a player's User, or a Bot's Playing Strategy. A player has exactly one, who alone acts for them, sees what they see, and studies their decisions.
+_Avoid_: Human Controller, owner, seat holder
 
 **User**:
 Anyone using the application. Tables, membership, study and settings belong to a User.
@@ -109,8 +109,8 @@ A User who has not logged in: every User, until accounts exist. A Guest is ident
 _Avoid_: Anonymous user, account
 
 **Player**:
-A human Participant, never a Bot.
-_Avoid_: Human Participant, hero
+A Participant whose Controller is a User, never a Bot.
+_Avoid_: Human, Human Participant, Human Controller, hero
 
 **Opponent**:
 One of the other Participants dealt into a Hand, player or Bot, from one Participant's point of view: the viewer's in the interface, the actor's in Strategies and analysis. A Participant not dealt in, such as a watcher, has no opponents in that Hand.
@@ -118,7 +118,7 @@ _Avoid_: Villain, other player, opponents in the Hand
 
 **Viewer**:
 The Participant, or away from a table the User, that a screen or response is built for.
-_Avoid_: Hero, me, current user
+_Avoid_: Hero, me, reader, current user
 
 **Table History**:
 Every completed Hand of a Table Session, which a viewer reviews from their own participant-safe view: public information for every Hand, and their own hole cards and decisions in the Hands they were dealt. It belongs to the table: anyone who has been a Participant there may read all of it, including Hands completed after their Leave Table and at a Closed Table.
@@ -269,11 +269,11 @@ The immutable participant-specific projection of every prior Hand of the Table S
 _Avoid_: Strategy Memory, unrestricted session history
 
 **Bot**:
-An automated participant controller that selects actions from a Strategy's distributions.
+A Participant whose Controller is its Playing Strategy, selecting actions from that Strategy's distributions.
 _Avoid_: Strategy, solver
 
 **Solver**:
-A computational system that produces a policy for a declared poker model together with the available evidence about its solution quality. A Solver's output may supply a Strategy, but the Solver is not itself a participant controller.
+A computational system that produces a policy for a declared poker model together with the available evidence about its solution quality. A Solver's output may supply a Strategy, but the Solver is not itself a Controller.
 _Avoid_: Strategy, bot
 
 **Solver-Derived Strategy**:
