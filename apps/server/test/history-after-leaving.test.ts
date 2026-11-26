@@ -55,7 +55,7 @@ const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000,
 
 /**
  * Ann's Online Table, with Ben and Cy joined through its Join Link, or with only those `joiners` named. All of them are
- * connected and seated, so the table deals by itself. Every decision each human makes is recorded, by Decision ID.
+ * connected and seated, so the table deals by itself. Every decision each player makes is recorded, by Decision ID.
  */
 async function threeHanded(joiners = ['Ben', 'Cy']) {
   const ann = await guest('Ann');
@@ -107,7 +107,7 @@ async function threeHanded(joiners = ['Ben', 'Cy']) {
 const history = (id: string, cookie: string) => get('/api/table-sessions/' + id + '/history', cookie);
 const listed = async (id: string, cookie: string): Promise<TableHistory> => { const response = await history(id, cookie); expect(response.status).toBe(200); return response.json(); };
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
-/** A Guest's user channel alone: the live connection that tells them of their own analyses, at no table. */
+/** A User's user channel alone: the live connection that tells them of their own analyses, at no table. */
 async function userChannel(cookie: string) {
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie } });
   const messages: ServerLiveMessage[] = [];
@@ -116,11 +116,11 @@ async function userChannel(cookie: string) {
   await expect.poll(() => messages[0]).toEqual({ type: 'user-channel-ready' });
   return { messages, close: () => socket.terminate() };
 }
-/** Sets the Guest's own Trainer Configuration, which applies at every table. */
+/** Sets the User's own Trainer Configuration, which applies at every table. */
 const study = async (cookie: string, referenceStrategy: StrategyDescriptor) => expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: true } }) })).status).toBe(200);
 /**
- * Requests analysis of the Guest's own decision under a Reference Strategy nothing has analyzed it under yet, and waits
- * for it to complete; the Guest's user channel is told.
+ * Requests analysis of the User's own decision under a Reference Strategy nothing has analyzed it under yet, and waits
+ * for it to complete; the User's user channel is told.
  */
 async function analyzed(id: string, cookie: string, decisionId: string, referenceStrategy: StrategyDescriptor = baselinePlayingStrategy) {
   await study(cookie, referenceStrategy);
@@ -133,7 +133,7 @@ async function analyzed(id: string, cookie: string, decisionId: string, referenc
     await expect.poll(() => channel.messages.some(message => message.type === 'analysis-update' && message.requestId === requestId && message.status === 'complete')).toBe(true);
   } finally { channel.close(); }
 }
-/** Requests a summary of the Guest's own decisions and waits for it to complete. */
+/** Requests a summary of the User's own decisions and waits for it to complete. */
 async function summarized(id: string, cookie: string, path: 'hand-summaries' | 'session-summaries', body: object) {
   const response = await post('/api/table-sessions/' + id + '/' + path, cookie, body);
   expect(response.status).toBe(200);
@@ -141,7 +141,7 @@ async function summarized(id: string, cookie: string, path: 'hand-summaries' | '
   await expect.poll(async () => ((await (await get('/api/table-sessions/' + id + '/summaries/' + requestId, cookie)).json()) as ScoreSummary).status).toBe('complete');
 }
 
-test('a Guest who left, and a Guest who was removed, read the whole Table History, Hands completed after they left included, and study their own decisions; they cannot act there', async () => {
+test('a User who left, and a User who was removed, read the whole Table History, Hands completed after they left included, and study their own decisions; they cannot act there', async () => {
   const t = await threeHanded();
   await t.playHand('hand-1');
   // Ben leaves between Hands; Ann and Cy play on.
@@ -155,8 +155,8 @@ test('a Guest who left, and a Guest who was removed, read the whole Table Histor
   expect(ben).not.toHaveProperty('closed');
   expect(ben.hands.map(hand => [hand.handNumber, hand.viewerDealtIn])).toEqual([[1, true], [2, false]]);
   // Ben's own cards in the Hand he was dealt; Hand 2 went to a showdown he was not in, which revealed Ann's and Cy's.
-  expect(ben.hands[0]!.dealtIn.find(player => player.participantId === t.ben.participantId)!.holeCards).toHaveLength(2);
-  expect(ben.hands[1]!.dealtIn.map(player => player.participantId)).not.toContain(t.ben.participantId);
+  expect(ben.hands[0]!.dealtIn.find(participant => participant.participantId === t.ben.participantId)!.holeCards).toHaveLength(2);
+  expect(ben.hands[1]!.dealtIn.map(participant => participant.participantId)).not.toContain(t.ben.participantId);
   expect(cy).toMatchObject({ viewerParticipantId: t.cy.participantId, left: true });
   expect(cy.hands.map(hand => [hand.handNumber, hand.viewerDealtIn])).toEqual([[1, true], [2, true]]);
   expect(await listed(t.id, t.ann.cookie)).not.toHaveProperty('left');
@@ -176,7 +176,7 @@ test('a Guest who left, and a Guest who was removed, read the whole Table Histor
       expect(await refusal(await post('/api/table-sessions/' + t.id + '/' + kind, former.cookie, { requestId: randomUUID(), expectedPokerRevision: (await t.view()).pokerRevision, ...fields }))).toEqual({ status: 404, code: 'not-found' });
     expect(await refusal(await post('/api/table-sessions/' + t.id + '/set-table-options', former.cookie, { requestId: randomUUID(), expectedSessionRevision: (await t.view()).sessionRevision, options: { allowLiveAnalysis: false } }))).toEqual({ status: 404, code: 'not-found' });
   }
-  // A Guest who was never a Participant learns nothing.
+  // A User who was never a Participant learns nothing.
   const dee = await guest('Dee');
   expect(await refusal(await history(t.id, dee))).toEqual({ status: 404, code: 'not-found' });
   expect(await refusal(await post('/api/table-sessions/' + t.id + '/session-summaries', dee, {}))).toEqual({ status: 404, code: 'not-found' });
@@ -223,9 +223,9 @@ const replayOf = (id: string, handId: string, cookie: string) => get('/api/table
 /** The Strategies a test can compare under that no post-action analysis has used: all but the default Reference Strategy. */
 const counterfactuals = supportedStrategies.filter(strategy => strategyToken(strategy) !== strategyToken(defaultPlayingStrategy));
 /**
- * Requests analysis of the Guest's own decision the way the replay does: from history, and under `strategy` when one is
+ * Requests analysis of the User's own decision the way the replay does: from history, and under `strategy` when one is
  * named (Counterfactual Comparison), or the same without `history` for a named Strategy at `from: 'table'`. Waits for it
- * to complete, then reads and retries it. A fresh request under a named Strategy tells the Guest's user channel.
+ * to complete, then reads and retries it. A fresh request under a named Strategy tells the User's user channel.
  */
 async function studiedFromHistory(id: string, cookie: string, decisionId: string, strategy?: StrategyDescriptor, from: 'history' | 'table' = 'history') {
   const channel = await userChannel(cookie);
@@ -242,7 +242,7 @@ async function studiedFromHistory(id: string, cookie: string, decisionId: string
     return requestId;
   } finally { channel.close(); }
 }
-/** A Guest who was never a Participant learns nothing of the table's Replay Steps or of anyone's study there. */
+/** A User who was never a Participant learns nothing of the table's Replay Steps or of anyone's study there. */
 async function strangerRefused(id: string, decisionId: string, requestId: string) {
   const dee = await guest('Dee');
   expect(await refusal(await replayOf(id, 'hand-1', dee))).toEqual({ status: 404, code: 'not-found' });
@@ -252,7 +252,7 @@ async function strangerRefused(id: string, decisionId: string, requestId: string
   expect(await refusal(await post('/api/table-sessions/' + id + '/analysis/' + requestId + '/retry', dee, {}))).toEqual({ status: 404, code: 'not-found' });
 }
 
-test('a Guest who left and a Guest who was removed step through their Hands and study their own decisions from history, under a named Strategy too; nothing plays', async () => {
+test('a User who left and a User who was removed step through their Hands and study their own decisions from history, under a named Strategy too; nothing plays', async () => {
   const t = await threeHanded();
   await t.playHand('hand-1');
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);

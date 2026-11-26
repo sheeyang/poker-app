@@ -68,9 +68,9 @@ function connect(t: Table) {
 }
 
 type Role = 'a' | 'b' | 'c' | 'd' | 'e';
-async function fixture(price = 200, human: Role = 'a', opening = false) {
+async function fixture(price = 200, player: Role = 'a', opening = false) {
   const t = await table(5);
-  const roles: Role[] = [human, ...(['a', 'b', 'c', 'd', 'e'] as const).filter(role => role !== human)];
+  const roles: Role[] = [player, ...(['a', 'b', 'c', 'd', 'e'] as const).filter(role => role !== player)];
   const ids = Object.fromEntries(roles.map((role, i) => [role, t.ids[i]!])) as Record<Role, string>;
   for (const [role, seat, buyIn] of [['e', 1, 1000], ['a', 2, 1000], ['b', 3, opening ? 25 : 170], ['c', 4, opening ? 35 : 1000], ['d', 5, price + 20]] as const)
     await command(t, 'seat-participant', { participantId: ids[role], seat, buyIn });
@@ -92,7 +92,7 @@ async function finish(t: Table) {
   }
 }
 
-test.each([[199, 99, undefined], [200, 100, 300], [201, 101, 301]] as const)('serialized human options at cumulative price %i agree with closed rejection or exact reopened minimum', async (price, owed, minimum) => {
+test.each([[199, 99, undefined], [200, 100, 300], [201, 101, 301]] as const)('serialized player options at cumulative price %i agree with closed rejection or exact reopened minimum', async (price, owed, minimum) => {
   const { t, ids } = await fixture(price);
   await act(t, ids.d, { type: 'raise', raiseTo: price }); await act(t, ids.e, { type: 'fold' });
   const before = await read(t); const live = connect(t);
@@ -109,14 +109,14 @@ test.each([[199, 99, undefined], [200, 100, 300], [201, 101, 301]] as const)('se
     expect(stale.status).toBe(409); expect(await read(t)).toEqual(before);
     const acceptedFields = { expectedPokerRevision: t.revision, participantId: ids.a, action: minimum ? { type: 'raise', raiseTo: minimum } : { type: 'call' } };
     const acceptedRevision = t.revision + 1;
-    const response = await submit(t, 'act', acceptedFields, 'human-reopened'); expect(response.status).toBe(200); t.revision = acceptedRevision;
+    const response = await submit(t, 'act', acceptedFields, 'player-reopened'); expect(response.status).toBe(200); t.revision = acceptedRevision;
     const committed = await read(t); expect((await live.next(acceptedRevision)).view).toEqual(committed.view);
     const done = await finish(t);
     expect(done.view.state.status).toBe('completed-hand');
     expect(done.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(3190 + price);
     expect(done.view.history[0]!.decisions.some(d => JSON.stringify(d.state) === JSON.stringify(before.view.state))).toBe(true);
     expect(done.view.history[0]!.decisions.every(d => d.state.participants.filter(p => p.holeCards).length === 1)).toBe(true);
-    expect(await (await submit(t, 'act', acceptedFields, 'human-reopened')).json()).toMatchObject({ ok: true, pokerRevision: acceptedRevision });
+    expect(await (await submit(t, 'act', acceptedFields, 'player-reopened')).json()).toMatchObject({ ok: true, pokerRevision: acceptedRevision });
     expect(await (await submit(t, 'act', rejectedFields, 'rejected-raise')).json()).toEqual(rejected);
     expect(await read(t)).toEqual(done);
     expect(JSON.stringify(done)).not.toMatch(/"(?:seed|deck|burns|commands|drawnCardCount)"\s*:/);
@@ -124,7 +124,7 @@ test.each([[199, 99, undefined], [200, 100, 300], [201, 101, 301]] as const)('se
   } finally { live.socket.terminate(); }
 });
 
-test('reopened human Raise is visible only after commit and a rolled-back attempt changes no cards, chips, history, or revisions', async () => {
+test('reopened player Raise is visible only after commit and a rolled-back attempt changes no cards, chips, history, or revisions', async () => {
   const { t, ids } = await fixture();
   await act(t, ids.d, { type: 'raise', raiseTo: 200 }); await act(t, ids.e, { type: 'fold' });
   const before = await read(t); const live = connect(t); const requestId = 'held-reopened-raise';
@@ -151,7 +151,7 @@ test('reopened human Raise is visible only after commit and a rolled-back attemp
   } finally { release.resolve(); beforeCommit = async () => {}; await held; live.socket.terminate(); }
 });
 
-test('a human who called at the later price remains closed when the earlier bettor is reopened', async () => {
+test('a player who called at the later price remains closed when the earlier bettor is reopened', async () => {
   const { t, ids } = await fixture(200, 'c');
   await act(t, ids.d, { type: 'raise', raiseTo: 200 }); await act(t, ids.e, { type: 'fold' }); await act(t, ids.a, { type: 'call' });
   const before = await read(t);
@@ -163,7 +163,7 @@ test('a human who called at the later price remains closed when the earlier bett
   const done = await finish(t); expect(done.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(3390);
 });
 
-test('unacted human rights and a genuine singleton short-all-in Raise use their exact serialized sizes', async () => {
+test('unacted player rights and a genuine singleton short-all-in Raise use their exact serialized sizes', async () => {
   const unacted = await fixture(199, 'e');
   await act(unacted.t, unacted.ids.d, { type: 'raise', raiseTo: 199 });
   const before = await read(unacted.t);
@@ -180,7 +180,7 @@ test('unacted human rights and a genuine singleton short-all-in Raise use their 
   expect((await finish(short.t)).view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(3389);
 });
 
-test.each([[19, false], [20, true]] as const)('a serialized human Check followed by incomplete opening price %i preserves the full-bet threshold', async (price, reopened) => {
+test.each([[19, false], [20, true]] as const)('a serialized player Check followed by incomplete opening price %i preserves the full-bet threshold', async (price, reopened) => {
   const { t, ids } = await fixture(price, 'a', true);
   await act(t, ids.d, { type: 'raise', raiseTo: price }); await act(t, ids.e, { type: 'call' });
   const before = await read(t);

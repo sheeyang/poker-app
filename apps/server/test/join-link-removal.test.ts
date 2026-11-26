@@ -43,15 +43,15 @@ async function onlineTable(...names: string[]) {
   const join = (cookie: string) => post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() });
   const preview = (cookie: string) => get('/api/table-sessions/' + id + '/join-preview', cookie);
   const as = async (cookie: string, kind: string, fields: object) => post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
-  const guests: Record<string, { cookie: string; participantId: string }> = {};
+  const joined: Record<string, { cookie: string; participantId: string }> = {};
   for (const name of names) {
     const cookie = await guest(name);
-    guests[name] = { cookie, participantId: (await (await join(cookie)).json()).participantId as string };
+    joined[name] = { cookie, participantId: (await (await join(cookie)).json()).participantId as string };
   }
-  return { ann, annId, id, view, join, preview, as, guests };
+  return { ann, annId, id, view, join, preview, as, joined };
 }
 
-/** Listens on a Guest's live connection to one table; `messages` collects everything the table sends them. */
+/** Listens on a User's live connection to one table; `messages` collects everything the table sends them. */
 async function listen(cookie: string, tableSessionId: string) {
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie } });
   const messages: ServerLiveMessage[] = [];
@@ -62,9 +62,9 @@ async function listen(cookie: string, tableSessionId: string) {
   return { messages, close: () => socket.close() };
 }
 
-test('between Hands, Removal stands the Guest up at once and leaves them as a Guest who has left, and the Join Link lets them back as the same Participant', async () => {
-  const { ann, annId, id, view, join, preview, as, guests } = await onlineTable('Ben', 'Cy');
-  const { cookie: ben, participantId: benId } = guests.Ben!, cy = guests.Cy!;
+test('between Hands, Removal stands the User up at once and leaves them as a User who has left, and the Join Link lets them back as the same Participant', async () => {
+  const { ann, annId, id, view, join, preview, as, joined } = await onlineTable('Ben', 'Cy');
+  const { cookie: ben, participantId: benId } = joined.Ben!, cy = joined.Cy!;
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 1 })).status).toBe(200);
   expect((await as(cy.cookie, 'seat-participant', { participantId: cy.participantId, seat: 2 })).status).toBe(200);
   expect(participant(await view(ann), benId)).toMatchObject({ seat: 1, stack: 1000 });
@@ -101,7 +101,7 @@ test('between Hands, Removal stands the Guest up at once and leaves them as a Gu
 async function onlineHand() {
   const table = await onlineTable('Ben');
   const { ann, annId, id, as, view } = table;
-  const { cookie: ben, participantId: benId } = table.guests.Ben!;
+  const { cookie: ben, participantId: benId } = table.joined.Ben!;
   await connectLive(base, ann, id); await connectLive(base, ben, id);
   expect((await as(ann, 'seat-participant', { participantId: annId, seat: 1 })).status).toBe(200);
   expect((await as(ben, 'seat-participant', { participantId: benId, seat: 2 })).status).toBe(200);
@@ -111,7 +111,7 @@ async function onlineHand() {
   return { ...table, ben, benId };
 }
 
-test('during a Hand, Removal is an After-Hand Request that outranks the Guest’s own, and applies once the Hand ends, even across a restart', async () => {
+test('during a Hand, Removal is an After-Hand Request that outranks the User’s own, and applies once the Hand ends, even across a restart', async () => {
   const { ann, annId, ben, benId, id, view, join, preview, as } = await onlineHand();
   // Ben asks to leave after the Hand; the owner's Removal replaces that, and nothing at the poker table changes yet.
   expect(await (await as(ben, 'leave-table', { participantId: benId })).json()).toMatchObject({ ok: true, afterHand: true });
@@ -125,7 +125,7 @@ test('during a Hand, Removal is an After-Hand Request that outranks the Guest’
     expect(seen.view).toEqual(views[name].view);
   }
   expect(participant(await view(ann), benId)).toMatchObject({ seat: 2, inHand: true });
-  // Nothing a Guest asks for undoes it, and asking for it again changes nothing.
+  // Nothing a User asks for undoes it, and asking for it again changes nothing.
   const waiting = await view(ann);
   for (const [cookie, kind, fields] of [[ben, 'leave-table', { participantId: benId }], [ben, 'stand-up-participant', { participantId: benId }], [ben, 'set-sitting-out', { participantId: benId, sittingOut: true }], [ann, 'remove-participant', { participantId: benId }]] as const) {
     expect(await (await as(cookie, kind, fields)).json()).toMatchObject({ ok: true, afterHand: true, sessionRevision: waiting.sessionRevision });
@@ -161,7 +161,7 @@ test('during a Hand, Removal is an After-Hand Request that outranks the Guest’
   expect((await get('/api/table-sessions/' + id, ben)).status).toBe(200);
 });
 
-test('during a Hand, Removal of a Guest without a Seat also waits for the Hand', async () => {
+test('during a Hand, Removal of a player without a Seat also waits for the Hand', async () => {
   const { ann, annId, ben, id, view, join, as } = await onlineHand();
   const cy = await guest('Cy');
   const cyId = (await (await join(cy)).json()).participantId as string;
@@ -176,7 +176,7 @@ test('during a Hand, Removal of a Guest without a Seat also waits for the Hand',
   expect(await (await join(cy)).json()).toMatchObject({ ok: true, participantId: cyId });
 });
 
-test('only the owner can remove a human, the owner cannot be removed, and only a joined human can be', async () => {
+test('only the owner can remove a player, the owner cannot be removed, and only a joined player can be', async () => {
   const bots = [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }];
   const ann = await guest('Ann'), ben = await guest('Ben');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online', bots })).json();
@@ -186,19 +186,19 @@ test('only the owner can remove a human, the owner cannot be removed, and only a
   const benId = (await (await join(ben)).json()).participantId as string;
   const as = async (cookie: string, fields: object) => post('/api/table-sessions/' + id + '/remove-participant', cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
   const before = await view(ann);
-  // A Guest cannot remove anyone: not the owner, and not themselves.
+  // A User cannot remove anyone: not the owner, and not themselves.
   expect(await rejection(await as(ben, { participantId: annId }))).toEqual({ status: 403, code: 'table-owner-required' });
   expect(await rejection(await as(ben, { participantId: benId }))).toEqual({ status: 403, code: 'table-owner-required' });
-  // The owner cannot be removed, and Removal is for humans.
+  // The owner cannot be removed, and Removal is for players.
   expect(await rejection(await as(ann, { participantId: annId }))).toEqual({ status: 400, code: 'cannot-remove-owner' });
-  expect(await rejection(await as(ann, { participantId: botId }))).toEqual({ status: 400, code: 'participant-not-human' });
+  expect(await rejection(await as(ann, { participantId: botId }))).toEqual({ status: 400, code: 'participant-not-player' });
   expect(await rejection(await as(ann, { participantId: randomUUID() }))).toEqual({ status: 400, code: 'participant-not-bound' });
   expect(await rejection(await as(ann, { participantId: benId, surplus: true }))).toEqual({ status: 400, code: 'invalid-mutation-request' });
   expect(await view(ann)).toEqual(before);
   // Once he is gone there is no one left to remove, and asking again is no different from asking about anyone who has left.
   expect((await as(ann, { participantId: benId })).status).toBe(200);
   expect(await rejection(await as(ann, { participantId: benId }))).toEqual({ status: 400, code: 'participant-not-joined' });
-  // A Guest who left on their own has already gone: Removal is for the people who are at the table.
+  // A User who left on their own has already gone: Removal is for the people who are at the table.
   const cy = await guest('Cy');
   const cyId = (await (await join(cy)).json()).participantId as string;
   expect((await post('/api/table-sessions/' + id + '/leave-table', cy, { requestId: randomUUID(), expectedPokerRevision: (await view(ann)).pokerRevision, participantId: cyId })).status).toBe(200);

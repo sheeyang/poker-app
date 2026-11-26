@@ -50,14 +50,14 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: botCount }, (_, index) => ({ name: 'Bot ' + (index + 1), playingStrategy: strategy })) }) });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) as string[] };
+    return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) as string[] };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const submit = (t: Table, kind: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + kind, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, contents: object = {}) { const before = await read(t); const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...contents }); expect(response.status).toBe(200); return response.json(); }
   async function configure(t: Table, kind: string, contents: object = {}, requestId: string = randomUUID()) { const before = await read(t); return submit(t, kind, { requestId, expectedSessionRevision: before.sessionRevision, participantId: t.bot, ...contents }); }
-  async function botDecision(t: Table) { await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); await command(t, 'act', { participantId: t.human, action: { type: 'call' } }); }
+  async function botDecision(t: Table) { await command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); await command(t, 'act', { participantId: t.player, action: { type: 'call' } }); }
   async function botOnlyDecision(t: Table) { await command(t, 'seat-participant', { participantId: t.bots[0], seat: 1 }); await command(t, 'seat-participant', { participantId: t.bots[1], seat: 2 }); await command(t, 'start-hand'); }
   function connect(t: Table) { const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/table-sessions/' + t.id + '/live', { headers: { cookie: t.cookie } }); const messages: TableLiveMessage[] = []; socket.on('message', data => messages.push(JSON.parse(data.toString()))); return { socket, messages }; }
   return { table, read, submit, command, configure, botDecision, botOnlyDecision, connect, evaluations, answerNext: (value: PolicyResult) => futureAnswers.push(value), get commands() { return commands!; }, stop: () => server.close(), async restart(automatic = true) { for (const item of evaluations) item.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await server.close(); evaluations.length = 0; await start(automatic); }, async close() { for (const item of evaluations) item.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
@@ -74,7 +74,7 @@ test('Bot inputs are the same frozen participant-safe view for compatibility/eva
     expect(Object.isFrozen(evaluation.view.history)).toBe(true);
     expect(Object.isFrozen(evaluation.view.state.participants[0])).toBe(true);
     expect(evaluation.view.state.participants.find(p => p.participantId === t.bot)?.holeCards).toHaveLength(2);
-    expect(evaluation.view.state.participants.find(p => p.participantId === t.human)).not.toHaveProperty('holeCards');
+    expect(evaluation.view.state.participants.find(p => p.participantId === t.player)).not.toHaveProperty('holeCards');
     expect(JSON.stringify(evaluation.view)).not.toMatch(/"(?:seed|pokerRevision|sessionRevision|evaluationRequestId|playingStrategy|deck|burns|commands)"\s*:/);
     expect(() => { (evaluation.view.state.board as string[]).push('As'); }).toThrow();
     evaluation.result.resolve(answer({ type: 'fold' }));
@@ -109,7 +109,7 @@ test.each([['incompatible', 'incompatible'], ['throw', 'failed'], ['invalid', 'i
 test('a Bot added after earlier Hands receives the whole Table Session in its Policy input, and its recorded action replays without new Policy work', async () => {
   const f = await fixture();
   try {
-    // Hand 1: the human calls and the first Bot folds.
+    // Hand 1: the player calls and the first Bot folds.
     const t = await f.table(); await f.botDecision(t);
     await expect.poll(() => f.evaluations.length).toBe(1);
     f.evaluations[0]!.result.resolve(answer({ type: 'fold' }));
@@ -125,7 +125,7 @@ test('a Bot added after earlier Hands receives the whole Table Session in its Po
     const input = f.evaluations[2]!.view;
     expect(input.state.actorId).toBe(late);
     expect(input.history.map(hand => [hand.handId, hand.result?.status])).toEqual([['hand-1', 'completed-hand'], ['hand-2', undefined]]);
-    expect(input.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.human, action: { type: 'call' } }, { participantId: t.bot, action: { type: 'fold' } }]);
+    expect(input.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.player, action: { type: 'call' } }, { participantId: t.bot, action: { type: 'fold' } }]);
     // Nobody's hole cards from Hand 1 reach the newcomer: no showdown revealed them.
     expect(JSON.stringify(input.history[0])).not.toContain('holeCards');
     expect(input.history[1]!.decisions.map(decision => decision.action)).toEqual([{ participantId: t.bot, action: { type: 'call' } }]);
@@ -219,14 +219,14 @@ test('timeouts retain executing capacity until late work settles, bounded retrie
   } finally { socket?.terminate(); await f.close(); }
 });
 
-test('startup resumes only the current Bot without a browser and human decisions continue to wait', async () => {
+test('startup resumes only the current Bot without a browser and player decisions continue to wait', async () => {
   const f = await fixture();
   try {
     const t = await f.table();
-    await f.command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await f.command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await f.command(t, 'start-hand');
+    await f.command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await f.command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await f.command(t, 'start-hand');
     expect(f.evaluations).toEqual([]);
     await f.restart(false);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'call' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'call' } });
     const current = await f.read(t); expect(current).toMatchObject({ pokerRevision: 4, view: { state: { actorId: t.bot } } });
     await f.restart(); await expect.poll(() => f.evaluations.length).toBe(1);
     expect(f.evaluations[0]?.view.state.decisionId).toBe(current.view.state.decisionId);
@@ -315,14 +315,14 @@ test('owner-only controller changes retain definitive request outcomes and exact
   } finally { await f.close(); }
 });
 
-test('a held Bot never blocks another table’s legal human decision, and reads/subscriptions cannot implicitly retry', async () => {
+test('a held Bot never blocks another table’s legal player decision, and reads/subscriptions cannot implicitly retry', async () => {
   const f = await fixture(); let socket: WebSocket | undefined;
   try {
     const t = await f.table(); await f.botDecision(t); await expect.poll(() => f.evaluations.length).toBe(1);
     for (let index = 0; index < 3; index++) await f.read(t);
     const live = f.connect(t); socket = live.socket; await expect.poll(() => live.messages.find(m => m.type === 'table-status')).toMatchObject({ status: { phase: 'thinking' } });
-    const other = await f.table(); await f.command(other, 'seat-participant', { participantId: other.human, seat: 1 }); await f.command(other, 'seat-participant', { participantId: other.bot, seat: 2 }); await f.command(other, 'start-hand');
-    await f.command(other, 'act', { participantId: other.human, action: { type: 'fold' } });
+    const other = await f.table(); await f.command(other, 'seat-participant', { participantId: other.player, seat: 1 }); await f.command(other, 'seat-participant', { participantId: other.bot, seat: 2 }); await f.command(other, 'start-hand');
+    await f.command(other, 'act', { participantId: other.player, action: { type: 'fold' } });
     expect(await f.read(other)).toMatchObject({ pokerRevision: 4, view: { state: { status: 'completed-hand' } } });
     expect(f.evaluations.map(e => e.view.state.decisionId)).toEqual(['hand-1/decision-2']);
     expect(await f.read(t)).toMatchObject({ pokerRevision: 4, view: { state: { actorId: t.bot } } });
@@ -450,10 +450,10 @@ test('Bot decisions have a slot of their own and run FIFO ahead of earlier inter
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 } });
   try {
     const completed = await f.table();
-    await f.command(completed, 'seat-participant', { participantId: completed.human, seat: 1 });
+    await f.command(completed, 'seat-participant', { participantId: completed.player, seat: 1 });
     await f.command(completed, 'seat-participant', { participantId: completed.bot, seat: 2 });
     await f.command(completed, 'start-hand');
-    await f.command(completed, 'act', { participantId: completed.human, action: { type: 'fold' } });
+    await f.command(completed, 'act', { participantId: completed.player, action: { type: 'fold' } });
     await expect.poll(async () => (await (await f.submit(completed, 'analysis', { decisionId: 'hand-1/decision-1' })).json()).status).toBe('complete');
     const beforeInspection = await f.read(completed);
     // One Bot decision takes the slot all computation shares; the next takes the one reserved for Bot decisions.

@@ -15,7 +15,7 @@ describe('CashGame creation', () => {
     expect(created.game.toRecord()).toEqual({
       schemaVersion: 2, engineVersion: 'v1', configuration, commands: [],
     });
-    expect(created.game.forParticipant('human').getView()).toEqual({
+    expect(created.game.forParticipant('viewer').getView()).toEqual({
       configuration: {
         seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
         minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,
@@ -42,7 +42,7 @@ test('a detached record restores the complete empty game and preserves independe
   const created = CashGame.create(configuration);
   if (!created.ok) throw new Error('Expected valid CashGame');
   configuration.smallBlind = 99;
-  expect(created.game.forParticipant('human').getView().configuration.smallBlind).toBe(10);
+  expect(created.game.forParticipant('viewer').getView().configuration.smallBlind).toBe(10);
   configuration.smallBlind = 10;
   const record = created.game.toRecord();
   const restored = CashGame.fromRecord(JSON.parse(JSON.stringify(record)));
@@ -52,7 +52,7 @@ test('a detached record restores the complete empty game and preserves independe
   expect(created.game.fork()).not.toBe(created.game);
   expect(created.game.fork().toRecord()).toEqual(record);
   expect(() => { (record.configuration as { seed: string }).seed = 'changed'; }).toThrow();
-  const view = created.game.forParticipant('human').getView();
+  const view = created.game.forParticipant('viewer').getView();
   expect(() => { (view.configuration as { smallBlind: number }).smallBlind = 99; }).toThrow();
   for (const invalid of [
     { ...record, schemaVersion: 3 }, { ...record, engineVersion: 'other' },

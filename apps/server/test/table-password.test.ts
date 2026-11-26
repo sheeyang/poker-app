@@ -130,7 +130,7 @@ test('the password fingerprints record only whether it is set: a request ID used
   expect(await rejection(await set(null))).toMatchObject({ status: 409, code: 'request-id-conflict' });
 });
 
-test('anyone not at the table needs the password: a Guest who left, a removed Guest and the Table Owner after leaving', async () => {
+test('anyone not at the table needs the password: a User who left, a removed User and the Table Owner after leaving', async () => {
   const { ann, annId, view, join, as, setPassword } = await onlineTable();
   const ben = await guest('Ben'), cy = await guest('Cy');
   const benId = (await (await join(ben)).json()).participantId as string;

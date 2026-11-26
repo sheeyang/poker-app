@@ -7,16 +7,16 @@ import { dealMs, payoutMs, showdownMs, streetMs } from './presentation.js';
  */
 
 /**
- * The shared length of a deal (of `players` dealt in, heads-up unless given) or a payout (to one winner). Street reveals
+ * The shared length of a deal (of `participants` dealt in, heads-up unless given) or a payout (to one winner). Street reveals
  * and showdowns: `streetMs`, `showdownMs`; a payout to more winners: `payoutMs`.
  */
-export const lengthOf = (kind: Exclude<PresentingPhaseKind, 'street' | 'showdown'>, players = 2): number => kind === 'deal' ? dealMs(players) : payoutMs();
+export const lengthOf = (kind: Exclude<PresentingPhaseKind, 'street' | 'showdown'>, participants = 2): number => kind === 'deal' ? dealMs(participants) : payoutMs();
 
 /** The length of the Settle after a phase of `kind` at a table of `mode` (Practice unless given). */
 export const settleOf = (kind: PresentingPhaseKind, mode: TableMode = 'practice'): number => settleAfter(kind, mode);
 
 /** A deal or payout and its Settle together: how long the table presents it before anything else happens. */
-export const presentedFor = (kind: Exclude<PresentingPhaseKind, 'street' | 'showdown'>, mode: TableMode = 'practice', players = 2): number => lengthOf(kind, players) + settleOf(kind, mode);
+export const presentedFor = (kind: Exclude<PresentingPhaseKind, 'street' | 'showdown'>, mode: TableMode = 'practice', participants = 2): number => lengthOf(kind, participants) + settleOf(kind, mode);
 
 /** A street reveal sweeping `swept` wagers and revealing `cardCount` board cards (the flop unless given), and its Settle. */
 export const presentedStreetFor = (swept: number, cardCount = 3, mode: TableMode = 'practice'): number => streetMs(swept, cardCount) + settleOf('street', mode);

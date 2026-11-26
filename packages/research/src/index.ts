@@ -3,7 +3,7 @@ export { handPositions } from './position.js';
 export { decisionSituation, type DecisionSituation } from './decision-facts.js';
 export {
   admittedByScores, filteredDecisions, historyBreakdownValue, inListOrder, matchesHistoryFilter, matchesScoreFilter, newestFirst, ownDecisionIds, ownDecisions,
-  scoreAdmission, summarySets, tableHandReplay, tableHistoryHands, type CompletedHand, type HistoryReader, type SummarySets,
+  scoreAdmission, summarySets, tableHandReplay, tableHistoryHands, type CompletedHand, type HistoryViewer, type SummarySets,
 } from './history.js';
 import type { ActionProbability, CompletedHandInspectionOutcome, ConcreteAction, DecisionScores, ObservableGameView, ReferenceStrategyEvaluation } from '@poker/contracts';
 

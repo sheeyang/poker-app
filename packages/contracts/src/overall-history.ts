@@ -1,7 +1,7 @@
 import type { AnalysisFailureCode, Card, ChipAmount, ConcreteAction, DecisionId, HandId, ScoreAverages, Stakes, StrategyDescriptor, Street, TableMode, TableSessionId } from './index.js';
 
 /**
- * Overall History (ADR-0041): the Guest's own decisions across every table they can read. The filter below is the
+ * Overall History (ADR-0041): the User's own decisions across every table they can read. The filter below is the
  * declared set a request names, kept as data so every operation that takes a "filtered set" shares it: the list, and
  * the Score Summaries and breakdowns built over it (#109–#111). Its one flat encoding (`historyFilterParams`) is used
  * by the browser's address and by the HTTP query alike.
@@ -108,7 +108,7 @@ const scoreFields = ['decisionScore', 'actionRankScore'] as const;
 export const hasScoreFilter = (filter: HistoryFilter): boolean => scoreFields.some(field => filter[field] !== undefined);
 
 /**
- * One of the reader's own decisions as Overall History lists it: from a Hand they were dealt into, at any table they
+ * One of the viewer's own decisions as Overall History lists it: from a Hand they were dealt into, at any table they
  * can read. It carries the facts the filters use and what the list shows; opening it is `step=decision-N` of its Hand's
  * Replay (`decisionStep`).
  */
@@ -120,13 +120,13 @@ export interface OverallHistoryDecision extends DecisionFacts {
   /** The table-wide Hand number. */
   readonly handNumber: number;
   readonly decisionId: DecisionId;
-  /** The reader's own hole cards, and the board as it was when they decided. */
+  /** The viewer's own hole cards, and the board as it was when they decided. */
   readonly holeCards: readonly Card[];
   readonly board: readonly Card[];
   /** The pot as faced, in chips; `potBigBlinds` is the same in big blinds. */
   readonly pot: ChipAmount;
 }
-/** The Guest-scoped list: the decisions passing `filter` (as normalized), newest Hand first, a page of them. */
+/** The User-scoped list: the decisions passing `filter` (as normalized), newest Hand first, a page of them. */
 export interface OverallHistory {
   readonly filter: HistoryFilter;
   /** How many decisions pass the filter, over every page. */
@@ -150,7 +150,7 @@ export const historyBreakdownValues: Readonly<Record<HistoryBreakdown, readonly 
 /** How far a summary has got: how many of the analyses it needs have succeeded, out of all of them. */
 export interface HistorySummaryProgress { readonly succeeded: number; readonly total: number }
 /**
- * One Score Summary over a frozen set of the Guest's own decisions, with the ordinary rules: complete only once every
+ * One Score Summary over a frozen set of the User's own decisions, with the ordinary rules: complete only once every
  * analysis has succeeded, Error ahead of Analyzing (`pending`), never a partial mean, and `empty` (no score) for a set
  * with no decisions. With score ranges, `progress` counts the analyses of the set the other filters admit, and the
  * ranges then decide which of those decisions the summary covers: `decisionCount` is absent until they are decided.
@@ -183,7 +183,7 @@ export interface OverallHistorySummary {
 }
 
 /**
- * `POST /api/overall-history/scored`: the decisions `filter` declares, score ranges included, under the Guest's Reference
+ * `POST /api/overall-history/scored`: the decisions `filter` declares, score ranges included, under the User's Reference
  * Strategy or the supported `strategy` named. A score range is decided by analysis, so nothing is listed until every analysis of the non-score set has
  * succeeded: Analyzing (`pending`) reports how many have, Error stays until a Retry succeeds, and a partial list is never
  * returned. `GET` (and the page of a complete one) takes `limit` and `offset`, as the plain list does.

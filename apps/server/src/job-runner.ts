@@ -23,7 +23,7 @@ export interface JobHandle<T> { readonly admitted: boolean; readonly result: Pro
 const advancesPlay = (purpose: JobPurpose) => purpose === 'bot-decision';
 /**
  * Purposes bounded before they reach the JobRunner, so its queue never refuses them and they never fill it for anyone
- * else: a table has at most one outstanding Bot decision, and a Guest at most 8 outstanding `history-analysis` jobs,
+ * else: a table has at most one outstanding Bot decision, and a User at most 8 outstanding `history-analysis` jobs,
  * which only the history-analysis scheduler submits (`createHistoryAnalysisScheduler`).
  */
 const boundedElsewhere = (purpose: JobPurpose) => advancesPlay(purpose) || purpose === 'history-analysis';

@@ -22,12 +22,12 @@ export interface StudySources {
 }
 
 /** A summary of a Participant's own decisions in a scope, frozen from the committed table; null for a Hand it does not have. */
-export function scoreSummaryOf(session: CapturableTable, participantId: string, scope: ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyGuestId: string | undefined): FrozenScoreSummary | null {
+export function scoreSummaryOf(session: CapturableTable, participantId: string, scope: ScoreSummaryScope, referenceStrategy: StrategyDescriptor, historyUserId: string | undefined): FrozenScoreSummary | null {
   if (scope.scope === 'hand' && !session.game.getHand(scope.handId)) return null;
   const view = session.game.forParticipant(participantId).getView();
   const decisionIds = ownDecisionIds(view.history, participantId, scope);
   const members = decisionIds.map(decisionId => captureEvaluation(session, participantId, decisionId, referenceStrategy)!);
-  return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members, ...(historyGuestId ? { historyGuestId } : {}) });
+  return immutableData({ participantId, tableSessionId: session.aggregate.tableSessionId, ...scope, capturedPokerRevision: session.aggregate.pokerRevision, referenceStrategy, decisionIds, members, ...(historyUserId ? { historyUserId } : {}) });
 }
 
 /**
@@ -48,7 +48,7 @@ export function createStudy({ participant, committed, access, asMember, stopped,
     return session && { participantId: member.participantId, aggregate: session.aggregate, game: session.game };
   }
   /**
-   * The frozen inputs of one of the reader's own accepted decisions, for analysis asked for from history, under the
+   * The frozen inputs of one of the viewer's own accepted decisions, for analysis asked for from history, under the
    * Reference Strategy their user has now, or under the supported `strategy` the request names (Counterfactual
    * Comparison: only the Strategy in the identity differs, so the frozen view and the seeds are the same). It follows
    * the same rule as reading the history, so it loads nothing. `undefined` for a user who may not read the table;

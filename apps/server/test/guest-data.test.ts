@@ -33,7 +33,7 @@ const create = async (cookie: string) => (await (await post('/api/table-sessions
 const opened = (cookie: string, id: string) => post('/api/table-sessions/' + id + '/opened', cookie);
 const saved = async (cookie: string) => (await (await get('/api/table-sessions', cookie)).json()).tables as { tableSessionId: string; openedAt?: number }[];
 
-test('a Guest’s saved list carries when each table was last opened, by the server’s clock', async () => {
+test('a User’s saved list carries when each table was last opened, by the server’s clock', async () => {
   const ann = await guest('Ann');
   const first = await create(ann), second = await create(ann);
   expect((await saved(ann)).map(table => table.openedAt)).toEqual([undefined, undefined]);
@@ -54,7 +54,7 @@ test('a Guest’s saved list carries when each table was last opened, by the ser
   expect(firstOpened).toBeLessThan(secondOpened);
 });
 
-test('opening needs a table the Guest has a place at, and only changes that Guest’s own time', async () => {
+test('opening needs a table the User has a place at, and only changes that User’s own time', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben');
   const table = await create(ann);
   const refused = await opened(ben, table);
@@ -119,7 +119,7 @@ test('a Guest seen within the last 90 days is kept, however empty', async () => 
   expect(await known(visitor)).toBe(true);
 });
 
-test('a Guest can open an Online Table they have left, and it is timed like any other', async () => {
+test('a User can open an Online Table they have left, and it is timed like any other', async () => {
   const ann = await guest('Ann');
   const table = (await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json()).tableSessionId as string;
   const view = await (await get('/api/table-sessions/' + table, ann)).json();

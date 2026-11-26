@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { dealBeats, payoutBeats, presentationPhaseLength, presentingPhase, readPhaseInputs, returnBeat, showdownBeats, streetBeats, type DealInputs, type PayoutInputs, type ShowdownBeats, type StreetBeats, type SweepBeats } from '../src/index.js';
 
-/** `players` dealt in clockwise, two cards each, the first two posting the blinds. */
-const deal = (players: number, refills: DealInputs['refills'] = []): DealInputs => {
-  const ids = Array.from({ length: players }, (_, i) => `p${i + 1}`);
+/** `participants` dealt in clockwise, two cards each, the first two posting the blinds. */
+const deal = (participants: number, refills: DealInputs['refills'] = []): DealInputs => {
+  const ids = Array.from({ length: participants }, (_, i) => `p${i + 1}`);
   return { dealt: ids.map(participantId => ({ participantId, cardCount: 2 })), blinds: ids.slice(0, 2), refills };
 };
 
@@ -61,7 +61,7 @@ describe('the deal’s beats', () => {
   });
 
   it('brings cards closer together as more are dealt', () => {
-    const gap = (players: number) => { const { cards } = dealBeats(deal(players)); return cards[1]!.startsAt - cards[0]!.startsAt; };
+    const gap = (participants: number) => { const { cards } = dealBeats(deal(participants)); return cards[1]!.startsAt - cards[0]!.startsAt; };
     expect(gap(9)).toBeLessThan(gap(2));
   });
 

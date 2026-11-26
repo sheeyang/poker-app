@@ -3,11 +3,11 @@ import { handEndsAt } from '@poker/contracts';
 
 /**
  * Automatic Dealing at Online Tables (ADR-0032). Pure: the caller supplies the committed table's public state,
- * who is human, who is connected (transient, never persisted) and the time from the injected clock.
+ * who is a player, who is connected (transient, never persisted) and the time from the injected clock.
  *
  * Between Hands the server announces a Next-Hand Countdown once the last Hand has ended (with the Settle after its
  * payout, a moment to see the result), its after-Hand requests have been applied, and the table can deal. When the
- * countdown expires it rechecks: humans still disconnected are sat out first, then the Hand starts if the table
+ * countdown expires it rechecks: players still disconnected are sat out first, then the Hand starts if the table
  * can still deal, and otherwise the countdown is cancelled. A cancelled countdown is replaced by a fresh one as
  * soon as a commit or a connection change lets the table deal again.
  */
@@ -15,12 +15,12 @@ export interface DealingParticipant extends EligibilityFacts {
   readonly participantId: ParticipantId;
 }
 
-/** The table deals only while at least two Eligible Participants remain, one of them human (contracts, which the Trainer shares). */
+/** The table deals only while at least two Eligible Participants remain, one of them a player (contracts, which the Trainer shares). */
 export const canDeal = (participants: readonly DealingParticipant[]): boolean => canDealNextHand(participants);
 
-/** The humans an expired countdown sits out first: seated, not sitting out, and still disconnected. */
+/** The players an expired countdown sits out first: seated, not sitting out, and still disconnected. */
 export function stillDisconnected(participants: readonly DealingParticipant[]): ParticipantId[] {
-  return participants.filter(participant => participant.human && participant.seat !== null && !participant.sittingOut && !participant.connected).map(participant => participant.participantId);
+  return participants.filter(participant => participant.player && participant.seat !== null && !participant.sittingOut && !participant.connected).map(participant => participant.participantId);
 }
 
 /**

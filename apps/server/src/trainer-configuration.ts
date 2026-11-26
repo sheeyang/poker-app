@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { defaultTrainerConfiguration, type StrategyDescriptor, type TrainerConfiguration, type TrainerConfigurationAcknowledgement, type TrainerConfigurationOutcome } from '@poker/contracts';
 import { immutableData, isSupportedStrategy } from '@poker/strategies';
 import type { openDatabase } from './db/database.js';
-import { guestRequests, localUsers } from './db/schema.js';
+import { userRequests, localUsers } from './db/schema.js';
 import { canonical } from './canonical.js';
 import { reject } from './rejections.js';
 import { validateTrainerConfiguration } from './validation.js';
@@ -15,18 +15,18 @@ export class TrainerConfigurationRestorationError extends Error {
 }
 
 /**
- * Each Guest's Trainer Configuration (ADR-0041): one Reference Strategy and Live Analysis setting for every table, kept
- * with their identity and never in a table's record. A Guest who never changed it has the default.
+ * Each User's Trainer Configuration (ADR-0041): one Reference Strategy and Live Analysis setting for every table, kept
+ * with their identity and never in a table's record. A User who never changed it has the default.
  *
- * Changing it is a Guest-scoped request, idempotent by request ID, and carries no table revision. Once a change has
- * committed, `announce` tells the Guest's connections, which read it again over HTTP. Table views and analysis read
- * the current value through `current`; a live table's synchronous projections use `known` for a Guest already read.
+ * Changing it is a User-scoped request, idempotent by request ID, and carries no table revision. Once a change has
+ * committed, `announce` tells the User's connections, which read it again over HTTP. Table views and analysis read
+ * the current value through `current`; a live table's synchronous projections use `known` for a User already read.
  */
-/** The Strategy a study runs under: the supported one the request names, else the Guest's Reference Strategy. Never changes the Trainer Configuration. */
+/** The Strategy a study runs under: the supported one the request names, else the User's Reference Strategy. Never changes the Trainer Configuration. */
 async function studyStrategyOf(strategy: StrategyDescriptor | undefined, current: () => Promise<TrainerConfiguration>): Promise<StrategyDescriptor> {
   return strategy ? immutableData(strategy) : (await current()).referenceStrategy;
 }
-/** Every Guest at the default Trainer Configuration, for table mutations built without stored configurations. */
+/** Every User at the default Trainer Configuration, for table mutations built without stored configurations. */
 export const defaultTrainerConfigurations = {
   current: async (_userId: string): Promise<TrainerConfiguration> => defaultTrainerConfiguration,
   known: (_userId: string): TrainerConfiguration | undefined => defaultTrainerConfiguration,
@@ -35,7 +35,7 @@ export const defaultTrainerConfigurations = {
 export function createTrainerConfigurations(db: Database, announce: (userId: string) => void, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy) {
   // This process is the only writer, so a value read or written here stays current until this process changes it.
   const cache = new Map<string, TrainerConfiguration>();
-  // A Guest's reads that miss the cache and their changes run one at a time, so a slow read never overwrites a change.
+  // A User's reads that miss the cache and their changes run one at a time, so a slow read never overwrites a change.
   const turns = new Map<string, Promise<unknown>>();
   function inTurn<T>(userId: string, operation: () => Promise<T>): Promise<T> {
     const next = (turns.get(userId) ?? Promise.resolve()).catch(() => undefined).then(operation);
@@ -71,18 +71,18 @@ export function createTrainerConfigurations(db: Database, announce: (userId: str
       let outcome: TrainerConfigurationOutcome;
       try {
         outcome = await db.transaction(async tx => {
-          // The Guest's row orders their concurrent changes, from this process or any other transaction.
+          // The User's row orders their concurrent changes, from this process or any other transaction.
           await tx.select({ id: localUsers.id }).from(localUsers).where(eq(localUsers.id, userId)).for('update');
-          const [prior] = await tx.select().from(guestRequests).where(and(eq(guestRequests.userId, userId), eq(guestRequests.requestId, requestId)));
+          const [prior] = await tx.select().from(userRequests).where(and(eq(userRequests.userId, userId), eq(userRequests.requestId, requestId)));
           if (prior) return prior.fingerprint === fingerprint ? prior.outcome : reject('request-id-conflict', 'This requestId was already used for a different Trainer Configuration.');
           const acknowledgement: TrainerConfigurationAcknowledgement = { ok: true, trainerConfiguration };
           await tx.update(localUsers).set({ trainerConfiguration }).where(eq(localUsers.id, userId));
-          await tx.insert(guestRequests).values({ userId, requestId, fingerprint, outcome: acknowledgement });
+          await tx.insert(userRequests).values({ userId, requestId, fingerprint, outcome: acknowledgement });
           applied = true;
           return acknowledgement;
         });
       } catch (error) {
-        // Whether it committed may be unknown: read the value again, in the Guest's next turn, rather than trust either
+        // Whether it committed may be unknown: read the value again, in the User's next turn, rather than trust either
         // one. A retry of the same request resolves its outcome from the record.
         void inTurn(userId, async () => { cache.set(userId, await stored(userId)); }).catch(() => cache.delete(userId));
         throw error;
@@ -94,9 +94,9 @@ export function createTrainerConfigurations(db: Database, announce: (userId: str
   return {
     current,
     set,
-    /** The Strategy a study runs under: the supported one the request names, else the Guest's Reference Strategy. Never changes the Trainer Configuration. */
+    /** The Strategy a study runs under: the supported one the request names, else the User's Reference Strategy. Never changes the Trainer Configuration. */
     studyStrategy: (userId: string, strategy?: StrategyDescriptor) => studyStrategyOf(strategy, () => current(userId)),
-    /** The Guest's configuration if this process has read or written it, for projections that cannot wait. */
+    /** The User's configuration if this process has read or written it, for projections that cannot wait. */
     known: (userId: string): TrainerConfiguration | undefined => cache.get(userId),
   };
 }

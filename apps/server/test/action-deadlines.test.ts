@@ -52,7 +52,7 @@ async function command(t: Table, kind: string, fields: object = {}) {
   const response = await submit(t, kind, fields); expect(response.status).toBe(200);
   const result = await response.json(); t.revision = result.pokerRevision; return result;
 }
-/** The human acts through HTTP; the Bot through the trusted controller commands. */
+/** The player acts through HTTP; the Bot through the trusted controller commands. */
 async function act(t: Table, participantId: string, action: ConcreteAction) {
   if (participantId === t.ids[0]) return submit(t, 'act', { participantId, action });
   const outcome = await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: t.revision, participantId, action });
@@ -62,22 +62,22 @@ async function accepted(t: Table, participantId: string, action: ConcreteAction)
   const response = await act(t, participantId, action); expect(response.status).toBe(200);
   t.revision = (await response.json()).pokerRevision;
 }
-/** A heads-up Practice Table: the human holds seat 1, so they act first preflop. */
+/** A heads-up Practice Table: the player holds seat 1, so they act first preflop. */
 async function headsUp(limit: ActionTimeLimitSeconds | null) {
-  const t = await table(limit); const [human, bot] = t.ids as [string, string];
-  await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
-  return { t, human, bot };
+  const t = await table(limit); const [player, bot] = t.ids as [string, string];
+  await command(t, 'seat-participant', { participantId: player, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
+  return { t, player, bot };
 }
 
-test('under an Action Time Limit each human Action Window opens when the Settle ends and carries an exact Action Deadline measured from then, and Bot windows have none', async () => {
-  const { t, human, bot } = await headsUp(30);
+test('under an Action Time Limit each player Action Window opens when the Settle ends and carries an exact Action Deadline measured from then, and Bot windows have none', async () => {
+  const { t, player, bot } = await headsUp(30);
   const dealt = clock.now(), settled = dealt + lengthOf('deal') + settleOf('deal');
   await command(t, 'start-hand');
   const view = await read(t);
   expect(view.schedule.phases.at(-1)).toMatchObject({ kind: 'settle', endsAt: settled });
-  expect(view.schedule.actionWindow).toEqual({ participantId: human, decisionId: 'hand-1/decision-1', opensAt: settled, deadlineAt: settled + 30_000 });
+  expect(view.schedule.actionWindow).toEqual({ participantId: player, decisionId: 'hand-1/decision-1', opensAt: settled, deadlineAt: settled + 30_000 });
   clock.advanceTo(settled);
-  await accepted(t, human, { type: 'call' });
+  await accepted(t, player, { type: 'call' });
   expect((await read(t)).schedule.actionWindow).toEqual({ participantId: bot, decisionId: 'hand-1/decision-2', opensAt: settled });
   await accepted(t, bot, { type: 'check' });
   // The flop's window opens when the Settle after its street reveal ends.
@@ -86,7 +86,7 @@ test('under an Action Time Limit each human Action Window opens when the Settle 
 
   const untimed = await headsUp(null);
   await command(untimed.t, 'start-hand');
-  expect((await read(untimed.t)).schedule.actionWindow).toEqual({ participantId: untimed.human, decisionId: 'hand-1/decision-1', opensAt: clock.now() + presentedFor('deal') });
+  expect((await read(untimed.t)).schedule.actionWindow).toEqual({ participantId: untimed.player, decisionId: 'hand-1/decision-1', opensAt: clock.now() + presentedFor('deal') });
 });
 
 test('a Practice Table offers an Action Time Limit of 15, 30 or 60 seconds, or none', async () => {
@@ -98,74 +98,74 @@ test('a Practice Table offers an Action Time Limit of 15, 30 or 60 seconds, or n
 });
 
 test('after the Action Deadline the server plays the Timeout Action, Fold when Check is not legal, and rejects the late action with its own code', async () => {
-  const { t, human } = await headsUp(15);
+  const { t, player } = await headsUp(15);
   await command(t, 'start-hand');
   const before = await read(t);
   clock.advanceTo(before.schedule.actionWindow!.deadlineAt! + 1);
-  const late = await submit(t, 'act', { participantId: human, action: { type: 'call' } });
+  const late = await submit(t, 'act', { participantId: player, action: { type: 'call' } });
   expect(late.status).toBe(409);
   expect(await late.json()).toMatchObject({ ok: false, rejection: { code: 'action-deadline-passed' } });
   const after = await read(t);
   expect(after.pokerRevision).toBe(before.pokerRevision + 1);
   expect(after.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
-  expect(after.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: human, action: { type: 'fold' } }]);
+  expect(after.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: player, action: { type: 'fold' } }]);
 });
 
 test('an action the server receives at its Action Deadline is accepted and never displaced, and a Bot never times out', async () => {
-  const { t, human, bot } = await headsUp(15);
+  const { t, player, bot } = await headsUp(15);
   await command(t, 'start-hand');
   clock.advanceTo((await read(t)).schedule.actionWindow!.deadlineAt!);
-  await accepted(t, human, { type: 'call' });
+  await accepted(t, player, { type: 'call' });
   clock.advance(10 * 60_000);
   const view = await read(t);
   expect(view.view.state).toMatchObject({ status: 'active-hand', actorId: bot });
-  expect(view.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: human, action: { type: 'call' } }]);
+  expect(view.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: player, action: { type: 'call' } }]);
 });
 
-test('every later decision the human misses in the Hand times out too, Check when legal; the human is not sat out and the table waits for Deal', async () => {
-  const { t, human, bot } = await headsUp(15);
+test('every later decision the player misses in the Hand times out too, Check when legal; the player is not sat out and the table waits for Deal', async () => {
+  const { t, player, bot } = await headsUp(15);
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  await accepted(t, human, { type: 'call' });
+  await accepted(t, player, { type: 'call' });
   await accepted(t, bot, { type: 'check' });
-  // On each street the Bot checks first, then the human lets the deadline pass.
+  // On each street the Bot checks first, then the player lets the deadline pass.
   for (const street of ['flop', 'turn', 'river']) {
     // The flop sweeps both preflop wagers: no street reveal takes longer here.
     clock.advance(presentedStreetFor(2));
     await accepted(t, bot, { type: 'check' });
     const waiting = await read(t);
-    expect(waiting.view.state).toMatchObject({ street, actorId: human });
-    expect(waiting.schedule.actionWindow).toMatchObject({ participantId: human, deadlineAt: waiting.schedule.actionWindow!.opensAt + 15_000 });
+    expect(waiting.view.state).toMatchObject({ street, actorId: player });
+    expect(waiting.schedule.actionWindow).toMatchObject({ participantId: player, deadlineAt: waiting.schedule.actionWindow!.opensAt + 15_000 });
     clock.advanceTo(waiting.schedule.actionWindow!.deadlineAt! + 1);
     await expect.poll(async () => (t.revision = (await read(t)).pokerRevision)).toBe(waiting.pokerRevision + 1);
   }
   const done = await read(t);
   expect(done.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
-  expect(done.view.history[0]!.decisions.filter(decision => decision.action.participantId === human).map(decision => decision.action.action)).toEqual([{ type: 'call' }, { type: 'check' }, { type: 'check' }, { type: 'check' }]);
-  expect(done.view.state.participants.find(p => p.participantId === human)).toMatchObject({ sittingOut: false });
-  // Nothing deals the next Hand until the human does.
+  expect(done.view.history[0]!.decisions.filter(decision => decision.action.participantId === player).map(decision => decision.action.action)).toEqual([{ type: 'call' }, { type: 'check' }, { type: 'check' }, { type: 'check' }]);
+  expect(done.view.state.participants.find(p => p.participantId === player)).toMatchObject({ sittingOut: false });
+  // Nothing deals the next Hand until the player does.
   clock.advance(10 * 60_000);
   expect(await read(t)).toMatchObject({ pokerRevision: done.pokerRevision, view: { state: { status: 'completed-hand', handId: 'hand-1' } } });
   await command(t, 'start-hand');
-  expect((await read(t)).view.state.participants.find(p => p.participantId === human)).toMatchObject({ inHand: true, sittingOut: false });
+  expect((await read(t)).view.state.participants.find(p => p.participantId === player)).toMatchObject({ inHand: true, sittingOut: false });
 });
 
 test('an Action Deadline that expired during an outage resolves after restart as exactly one Timeout Action, before any further action', async () => {
-  const { t, human, bot } = await headsUp(15);
+  const { t, player, bot } = await headsUp(15);
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  await accepted(t, human, { type: 'call' });
+  await accepted(t, player, { type: 'call' });
   await accepted(t, bot, { type: 'check' });
   clock.advance(presentedStreetFor(2));
   await accepted(t, bot, { type: 'check' });
   const waiting = await read(t);
-  expect(waiting.view.state).toMatchObject({ street: 'flop', actorId: human });
+  expect(waiting.view.state).toMatchObject({ street: 'flop', actorId: player });
   await server.close();
   clock.advanceTo(waiting.schedule.actionWindow!.deadlineAt! + 60_000);
   await startServer();
   // The restarted server has already settled the expired deadline when it serves its first request.
   const resumed = await read(t);
   expect(resumed.pokerRevision).toBe(waiting.pokerRevision + 1);
-  expect(resumed.view.history[0]!.decisions.at(-1)!.action).toEqual({ participantId: human, action: { type: 'check' } });
-  const late = await submit(t, 'act', { participantId: human, action: { type: 'bet', betTo: 40 } });
+  expect(resumed.view.history[0]!.decisions.at(-1)!.action).toEqual({ participantId: player, action: { type: 'check' } });
+  const late = await submit(t, 'act', { participantId: player, action: { type: 'bet', betTo: 40 } });
   expect(late.status).toBe(409);
   expect(await late.json()).toMatchObject({ ok: false, rejection: { code: 'action-deadline-passed' } });
   // Neither another restart nor later wake-ups repeat it.
@@ -173,13 +173,13 @@ test('an Action Deadline that expired during an outage resolves after restart as
   clock.advance(60_000);
   expect((await read(t)).pokerRevision).toBe(resumed.pokerRevision);
   const acts = (await controllers.readPersistedSession(t.id))!.pokerRecord.commands.filter(c => c.type === 'act');
-  expect(acts.map(c => c.type === 'act' && [c.participantId === human ? 'human' : 'bot', c.action.type])).toEqual([['human', 'call'], ['bot', 'check'], ['bot', 'check'], ['human', 'check']]);
+  expect(acts.map(c => c.type === 'act' && [c.participantId === player ? 'player' : 'bot', c.action.type])).toEqual([['player', 'call'], ['bot', 'check'], ['bot', 'check'], ['player', 'check']]);
 });
 
-const humanActs = async (t: Table, human: string) => (await controllers.readPersistedSession(t.id))!.pokerRecord.commands.filter(c => c.type === 'act' && c.participantId === human);
+const playerActs = async (t: Table, player: string) => (await controllers.readPersistedSession(t.id))!.pokerRecord.commands.filter(c => c.type === 'act' && c.participantId === player);
 
 test('a Timeout Action that could not be saved is tried again shortly, and plays once', async () => {
-  const { t, human } = await headsUp(15);
+  const { t, player } = await headsUp(15);
   await command(t, 'start-hand');
   const waiting = await read(t);
   let failures = 0;
@@ -189,15 +189,15 @@ test('a Timeout Action that could not be saved is tried again shortly, and plays
     await expect.poll(() => failures).toBe(1);
     expect((await read(t)).pokerRevision).toBe(waiting.pokerRevision);
     // While the Timeout Action is still due, a late action is refused just the same.
-    expect(await (await submit(t, 'act', { participantId: human, action: { type: 'call' } })).json()).toMatchObject({ ok: false, rejection: { code: 'action-deadline-passed' } });
+    expect(await (await submit(t, 'act', { participantId: player, action: { type: 'call' } })).json()).toMatchObject({ ok: false, rejection: { code: 'action-deadline-passed' } });
     await expect.poll(async () => { clock.advance(250); return (await read(t)).pokerRevision; }).toBe(waiting.pokerRevision + 1);
     expect(failures).toBe(2);
-    expect(await humanActs(t, human)).toHaveLength(1);
+    expect(await playerActs(t, player)).toHaveLength(1);
   } finally { beforeCommit = async () => {}; }
 });
 
 test('a Timeout Action whose COMMIT proves never to have applied is played once under a fresh derived request ID', async () => {
-  const { t, human } = await headsUp(15);
+  const { t, player } = await headsUp(15);
   await command(t, 'start-hand');
   const waiting = await read(t);
   let aborted = 0;
@@ -210,20 +210,20 @@ test('a Timeout Action whose COMMIT proves never to have applied is played once 
     clock.advanceTo(waiting.schedule.actionWindow!.deadlineAt! + 1);
     // Recovery proves the first attempt aborted, and the table resumes with the Timeout Action still due.
     await expect.poll(async () => (await read(t)).pokerRevision, { timeout: 5000 }).toBe(waiting.pokerRevision + 1);
-    expect((await read(t)).view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: human, action: { type: 'fold' } }]);
-    expect(await humanActs(t, human)).toHaveLength(1);
+    expect((await read(t)).view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: player, action: { type: 'fold' } }]);
+    expect(await playerActs(t, player)).toHaveLength(1);
   } finally { terminalCommit = async client => { await client.query('COMMIT'); }; }
 });
 
-test('a Timeout Action is scored as the human’s own decision: automatic analysis, its scores, and the Hand and Session summaries', async () => {
-  const { t, human } = await headsUp(15);
+test('a Timeout Action is scored as the player’s own decision: automatic analysis, its scores, and the Hand and Session summaries', async () => {
+  const { t, player } = await headsUp(15);
   await command(t, 'start-hand');
   const { decisionId, deadlineAt } = (await read(t)).schedule.actionWindow!;
   clock.advanceTo(deadlineAt! + 1);
-  // Post-action analysis starts by itself, as for an action the human chose.
-  await expect.poll(() => evaluations.some(e => e.decisionId === decisionId && e.participantIds.includes(human))).toBe(true);
+  // Post-action analysis starts by itself, as for an action the player chose.
+  await expect.poll(() => evaluations.some(e => e.decisionId === decisionId && e.participantIds.includes(player))).toBe(true);
   const analysis = await (await post(t, 'analysis', { decisionId })).json() as DecisionAnalysis;
-  expect(analysis).toMatchObject({ participantId: human, decisionId, scoredDecision: { acceptedAction: { type: 'fold' } } });
+  expect(analysis).toMatchObject({ participantId: player, decisionId, scoredDecision: { acceptedAction: { type: 'fold' } } });
   await expect.poll(async () => (await get<DecisionAnalysis>(t, 'analysis/' + analysis.requestId)).status).toBe('complete');
   expect(await get<DecisionAnalysis>(t, 'analysis/' + analysis.requestId)).toMatchObject({ scores: { decisionScore: expect.any(Number), actionRankScore: expect.any(Number) } });
   for (const [path, body] of [['hand-summaries', { handId: 'hand-1' }], ['session-summaries', {}]] as const) {
@@ -233,38 +233,38 @@ test('a Timeout Action is scored as the human’s own decision: automatic analys
   }
 });
 
-test('Practice Tables are never left: Leave Table is refused to the human, who can still stand up and sit out', async () => {
-  const { t, human } = await headsUp(null);
-  const left = await submit(t, 'leave-table', { participantId: human });
+test('Practice Tables are never left: Leave Table is refused to the player, who can still stand up and sit out', async () => {
+  const { t, player } = await headsUp(null);
+  const left = await submit(t, 'leave-table', { participantId: player });
   expect(left.status).toBe(403);
   expect(await left.json()).toMatchObject({ ok: false, rejection: { code: 'unavailable-at-practice-tables' } });
-  await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
-  await command(t, 'set-sitting-out', { participantId: human, sittingOut: false });
-  await command(t, 'stand-up-participant', { participantId: human });
-  // Still refused when unseated, and the table remains the human's.
-  expect((await submit(t, 'leave-table', { participantId: human })).status).toBe(403);
-  expect((await read(t)).viewerParticipantId).toBe(human);
+  await command(t, 'set-sitting-out', { participantId: player, sittingOut: true });
+  await command(t, 'set-sitting-out', { participantId: player, sittingOut: false });
+  await command(t, 'stand-up-participant', { participantId: player });
+  // Still refused when unseated, and the table remains the player's.
+  expect((await submit(t, 'leave-table', { participantId: player })).status).toBe(403);
+  expect((await read(t)).viewerParticipantId).toBe(player);
 });
 
-test('an untimed Practice Hand left unattended waits for the human, and no later Hand is dealt without Deal', async () => {
-  const { t, human } = await headsUp(null);
+test('an untimed Practice Hand left unattended waits for the player, and no later Hand is dealt without Deal', async () => {
+  const { t, player } = await headsUp(null);
   await command(t, 'start-hand');
   const waiting = await read(t);
   clock.advance(24 * 60 * 60_000);
-  expect(await read(t)).toMatchObject({ pokerRevision: waiting.pokerRevision, view: { state: { status: 'active-hand', actorId: human } } });
+  expect(await read(t)).toMatchObject({ pokerRevision: waiting.pokerRevision, view: { state: { status: 'active-hand', actorId: player } } });
   await server.close(); await startServer();
   clock.advance(60 * 60_000);
-  expect(await read(t)).toMatchObject({ pokerRevision: waiting.pokerRevision, view: { state: { status: 'active-hand', actorId: human } } });
+  expect(await read(t)).toMatchObject({ pokerRevision: waiting.pokerRevision, view: { state: { status: 'active-hand', actorId: player } } });
 });
 
 test('a timed Practice Hand with nobody connected finishes by Timeout Actions, and nothing more is dealt', async () => {
-  const { t, human } = await headsUp(15);
+  const { t, player } = await headsUp(15);
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   const dealt = await read(t);
-  // Nobody is connected: only time passes, and the server plays each missed decision for the human.
+  // Nobody is connected: only time passes, and the server plays each missed decision for the player.
   for (let step = 0; step < 12 && (await read(t)).view.state.status === 'active-hand'; step++) {
     const current = await read(t);
-    if (current.view.state.actorId === human) clock.advanceTo(current.schedule.actionWindow!.deadlineAt! + 1);
+    if (current.view.state.actorId === player) clock.advanceTo(current.schedule.actionWindow!.deadlineAt! + 1);
     else await accepted(t, current.view.state.actorId!, { type: 'check' });
     await expect.poll(async () => (await read(t)).pokerRevision).toBeGreaterThan(current.pokerRevision);
   }

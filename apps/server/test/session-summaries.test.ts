@@ -41,13 +41,13 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), configuration: { maximumBuyIn: 2000 }, bots: Array.from({length: botCount}, (_,index) => ({ name: 'Bot ' + (index + 1), playingStrategy: baselinePlayingStrategy })) }) });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: {participantId: string}) => binding.participantId) as string[] };
+    return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: {participantId: string}) => binding.participantId) as string[] };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const post = (t: Table, path: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); }
-  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
+  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
   async function configure(t: Table, referenceStrategy: StrategyDescriptor) { expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: false } }) })).status).toBe(200); }
   const request = (t: Table, decisionId = 'hand-1/decision-1') => post(t, 'analysis', { decisionId });
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
@@ -87,14 +87,14 @@ function independentPolicy(view: ObservableGameView): PolicyResult {
 }
 async function twoHands(f: Awaited<ReturnType<typeof fixture>>) {
   const t=await f.decision();
-  const human=()=>expect.poll(async()=>(await f.read(t)).view.state.actorId).toBe(t.human);
-  await f.command(t,'act',{participantId:t.human,action:{type:'fold'}});
-  await f.command(t,'start-hand');await human();
-  await f.command(t,'act',{participantId:t.human,action:{type:'check'}});await human();
+  const player=()=>expect.poll(async()=>(await f.read(t)).view.state.actorId).toBe(t.player);
+  await f.command(t,'act',{participantId:t.player,action:{type:'fold'}});
+  await f.command(t,'start-hand');await player();
+  await f.command(t,'act',{participantId:t.player,action:{type:'check'}});await player();
   expect((await f.read(t)).view.state.street).toBe('flop');
-  await f.command(t,'act',{participantId:t.human,action:{type:'check'}});await human();
+  await f.command(t,'act',{participantId:t.player,action:{type:'check'}});await player();
   expect((await f.read(t)).view.state.street).toBe('turn');
-  await f.command(t,'act',{participantId:t.human,action:{type:'fold'}});
+  await f.command(t,'act',{participantId:t.player,action:{type:'fold'}});
   return t;
 }
 test('unequal Hands produce decision-weighted session means and share member jobs with both Hand scopes without live subscriptions',async()=>{
@@ -131,19 +131,19 @@ test('a session summary requested mid-Hand covers only completed Hands and never
     const completed = await (await f.post(t, 'session-summaries', {})).json();
     expect(completed).toMatchObject({ decisionCount: 4, decisionIds: ['hand-1/decision-1', 'hand-2/decision-2', 'hand-2/decision-3', 'hand-2/decision-5'] });
     await f.command(t, 'start-hand');
-    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.player);
     const passive = (await f.read(t)).view.state.legalActions.some(action => action.type === 'check') ? 'check' : 'call';
-    await f.command(t, 'act', { participantId: t.human, action: { type: passive } });
-    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+    await f.command(t, 'act', { participantId: t.player, action: { type: passive } });
+    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.player);
     const current = await f.read(t);
     expect(current.view.state.status).toBe('active-hand');
-    expect(current.view.history.find(hand => hand.handId === 'hand-3')?.decisions.some(decision => decision.action.participantId === t.human)).toBe(true);
+    expect(current.view.history.find(hand => hand.handId === 'hand-3')?.decisions.some(decision => decision.action.participantId === t.player)).toBe(true);
     const midHand = await (await f.post(t, 'session-summaries', {})).json();
     expect(midHand).toMatchObject({ scope: 'table-session', decisionCount: 4, decisionIds: completed.decisionIds, capturedPokerRevision: current.pokerRevision });
     expect(midHand.decisionIds.some((id: string) => id.startsWith('hand-3/'))).toBe(false);
     // The Hand in progress alone leaves nothing to summarize.
-    const fresh = await f.table(); await f.command(fresh, 'seat-participant', { participantId: fresh.human, seat: 1 }); await f.command(fresh, 'seat-participant', { participantId: fresh.bot, seat: 2 }); await f.command(fresh, 'start-hand');
-    await f.command(fresh, 'act', { participantId: fresh.human, action: { type: 'call' } });
+    const fresh = await f.table(); await f.command(fresh, 'seat-participant', { participantId: fresh.player, seat: 1 }); await f.command(fresh, 'seat-participant', { participantId: fresh.bot, seat: 2 }); await f.command(fresh, 'start-hand');
+    await f.command(fresh, 'act', { participantId: fresh.player, action: { type: 'call' } });
     expect(await (await f.post(fresh, 'session-summaries', {})).json()).toMatchObject({ status: 'empty', decisionCount: 0, decisionIds: [] });
   } finally { await f.close(); }
 });
@@ -151,7 +151,7 @@ test('a session summary requested mid-Hand covers only completed Hands and never
 test('a new session snapshot reuses an individually completed member after an earlier derived lookup failure',async()=>{
   const f=await fixture();
   try{
-    const t=await f.decision();await f.command(t,'act',{participantId:t.human,action:{type:'fold'}});await f.configure(t,reference);
+    const t=await f.decision();await f.command(t,'act',{participantId:t.player,action:{type:'fold'}});await f.configure(t,reference);
     await administration.query('ALTER TABLE "'+f.schema+'".analysis_scores RENAME TO temporarily_unavailable_scores');
     const failed=await(await f.post(t,'hand-summaries',{handId:'hand-1'})).json();
     await expect.poll(async()=>(await(await f.summary(t,failed.requestId)).json()).status).toBe('error');
@@ -186,8 +186,8 @@ test('session failure takes precedence and Retry preserves a frozen cross-Hand s
     // Accepted actions and settings continue while the captured summary has failed.
     await f.configure(t, baselinePlayingStrategy);
     await f.command(t, 'start-hand');
-    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.player);
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const retried = await (await f.post(t, 'summaries/' + original.requestId + '/retry', {})).json();
     expect(retried).toMatchObject({ requestId: original.requestId, status: 'pending', scope: 'table-session', decisionIds: original.decisionIds, decisionCount: 4, capturedPokerRevision: captured.pokerRevision, referenceStrategy: reference });
     expect(retried.attemptId).not.toBe(original.attemptId); expect(f.evaluations).toHaveLength(4);

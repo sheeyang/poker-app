@@ -79,7 +79,7 @@ test('an all-in Hand has a step for each runout street, and its hands are turned
   expect(facts.payouts.reduce((total, p) => total + p.amount, 0)).toBe(2000);
 });
 
-test('a Hand whose blinds put a player all-in has no decisions: its first step is the flop, carrying the deal', () => {
+test('a Hand whose blinds put a Participant all-in has no decisions: its first step is the flop, carrying the deal', () => {
   const created = CashGame.create({ ...configuration, minimumBuyIn: 1 });
   if (!created.ok) throw new Error('Expected valid CashGame.');
   const cashGame = created.game;
@@ -127,7 +127,7 @@ test('no step exposes burn cards, deck order or hole cards not yet revealed, and
     for (const viewer of ['alice', 'bob', 'carol', 'early', 'gone', 'late']) {
       const { steps } = replay(cashGame, viewer, handId);
       const own = facts.participants.find(p => p.participantId === viewer);
-      // Everyone sees the same steps; a player's differ from a watcher's only by their own cards and legal actions.
+      // Everyone sees the same steps; a dealt-in Participant's differ from a watcher's only by their own cards and legal actions.
       expect(steps.map(step => [step.kind, step.state.board, step.transition])).toEqual(watched.steps.map(step => [step.kind, step.state.board, step.transition]));
       for (const [index, step] of steps.entries()) {
         const json = JSON.stringify(step), at = { viewer, handId, index };

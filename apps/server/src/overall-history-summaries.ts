@@ -4,15 +4,15 @@ import { immutableData } from '@poker/strategies';
 import { scoreAdmission } from '@poker/research';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { AcceptTableJobResult } from './mutations.js';
-import { pendingRequest, type GuestDelivery } from './pending-request.js';
+import { pendingRequest, type UserDelivery } from './pending-request.js';
 import { progressOf, type Entry, type SharedAnalysisCoordinator } from './shared-analyses.js';
 /**
- * An Overall History summary request, frozen (ADR-0041): the Guest's own decisions across every table they may read, as
+ * An Overall History summary request, frozen (ADR-0041): the User's own decisions across every table they may read, as
  * `filter` declared them under one Strategy, and, with a breakdown, the same decisions in one set per bucket. Only that
- * Guest reads or retries it. Its members may come from many tables: each carries its own table and Participant.
+ * User reads or retries it. Its members may come from many tables: each carries its own table and Participant.
  */
 export interface FrozenHistorySummary {
-  readonly guestId: string;
+  readonly userId: string;
   readonly filter: HistoryFilter;
   readonly breakdown?: HistoryBreakdown;
   readonly referenceStrategy: StrategyDescriptor;
@@ -29,13 +29,13 @@ function membershipsOf(members: readonly FrozenEvaluationInput[]): Membership[] 
 }
 interface HistoryRequest { readonly input: FrozenHistorySummary; readonly requestId: string; attemptId: string; follow: () => void; whole: Entry; buckets: readonly { readonly value: string; readonly entry: Entry }[] }
 /**
- * Overall History Score Summaries (ADR-0041): the Guest's own decisions across every table they may read. Every
- * analysis they need is asked for as the Guest's `history-analysis`; the shared analyses are reused. While the whole
- * set's summary is pending its count travels on the Guest's progress channel, and each summary of the request, the
+ * Overall History Score Summaries (ADR-0041): the User's own decisions across every table they may read. Every
+ * analysis they need is asked for as the User's `history-analysis`; the shared analyses are reused. While the whole
+ * set's summary is pending its count travels on the User's progress channel, and each summary of the request, the
  * whole set's and every bucket's, publishes its completion or failure.
  */
-export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator, acceptJobResult: AcceptTableJobResult, delivery: GuestDelivery) {
-  const { reduce, forGuest, retryEntry } = shared;
+export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator, acceptJobResult: AcceptTableJobResult, delivery: UserDelivery) {
+  const { reduce, forUser, retryEntry } = shared;
   const historyRequests = new Map<string, HistoryRequest>();
   const historySummary = (entry: Entry): HistoryScoreSummary => {
     const decisionCount = entry.admits ? entry.admitted : entry.members.length;
@@ -49,9 +49,9 @@ export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator,
   });
   return {
     /**
-     * Starts an Overall History summary request. Every analysis it needs is asked for as the Guest's `history-analysis`,
-     * reusing any matching analysis or stored result; the per-Guest bound holds back the rest. It answers at once; its
-     * count travels on the Guest's progress channel while it runs, each of its summaries publishes its completion or
+     * Starts an Overall History summary request. Every analysis it needs is asked for as the User's `history-analysis`,
+     * reusing any matching analysis or stored result; the per-User bound holds back the rest. It answers at once; its
+     * count travels on the User's progress channel while it runs, each of its summaries publishes its completion or
      * failure, and `readHistory` reads it. Its results are accepted only while every table its decisions come from still
      * accepts its Participant's results, each checked as `acceptJobResult` checks one table's. With score ranges, every
      * summary of it waits for all of its set's analyses and then covers only the decisions the ranges admit.
@@ -59,34 +59,34 @@ export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator,
     createHistory(input: FrozenHistorySummary): OverallHistorySummary {
       const admits = scoreAdmission(input.filter);
       const memberships = membershipsOf(input.members);
-      const guestId = input.guestId;
+      const userId = input.userId;
       // Readable before its sets are followed, so every notice names a request that can be read.
       const request = { input, requestId: randomUUID(), attemptId: randomUUID() } as HistoryRequest;
       historyRequests.set(request.requestId, request);
       // The request's count is the whole set's summary's, which every bucket's analyses are part of.
       const { owner, follow } = pendingRequest({
-        guestId, requestId: request.requestId, resource: 'overall-history-summary', progress: delivery.progress, runAs: guestId, counted: () => request.whole,
+        userId, requestId: request.requestId, resource: 'overall-history-summary', progress: delivery.progress, runAs: userId, counted: () => request.whole,
         async accept(change) {
           for (const { tableSessionId, participantId } of memberships) if (!await acceptJobResult(tableSessionId, participantId, () => true)) return false;
           return change();
         },
-        publish: entry => delivery.publish(guestId, { type: 'overall-history-update', resource: 'overall-history-summary', requestId: request.requestId, attemptId: request.attemptId, status: entry.outcome.status === 'error' ? 'error' : 'complete' }),
+        publish: entry => delivery.publish(userId, { type: 'overall-history-update', resource: 'overall-history-summary', requestId: request.requestId, attemptId: request.attemptId, status: entry.outcome.status === 'error' ? 'error' : 'complete' }),
       });
       request.follow = () => follow(request.whole);
       // Each bucket's decisions are among the whole set's, so asking for the whole set asks for every one of them.
-      request.whole = forGuest(owner, input.members, { admits });
-      request.buckets = (input.buckets ?? []).map(bucket => ({ value: bucket.value, entry: forGuest(owner, bucket.members, { admits }) }));
+      request.whole = forUser(owner, input.members, { admits });
+      request.buckets = (input.buckets ?? []).map(bucket => ({ value: bucket.value, entry: forUser(owner, bucket.members, { admits }) }));
       request.follow();
       return overallSummary(request);
     },
-    readHistory(requestId: string, guestId: string): OverallHistorySummary | undefined {
+    readHistory(requestId: string, userId: string): OverallHistorySummary | undefined {
       const request = historyRequests.get(requestId);
-      return request?.input.guestId === guestId ? overallSummary(request) : undefined;
+      return request?.input.userId === userId ? overallSummary(request) : undefined;
     },
     /** Retries every failed summary of the request, asking again for each failed analysis it needs; its count is followed again. */
-    retryHistory(requestId: string, guestId: string): OverallHistorySummary | undefined {
+    retryHistory(requestId: string, userId: string): OverallHistorySummary | undefined {
       const request = historyRequests.get(requestId);
-      if (request?.input.guestId !== guestId) return undefined;
+      if (request?.input.userId !== userId) return undefined;
       const entries = [request.whole, ...request.buckets.map(bucket => bucket.entry)];
       if (entries.map(retryEntry).some(Boolean)) request.attemptId = randomUUID();
       request.follow();

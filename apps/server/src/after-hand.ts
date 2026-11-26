@@ -1,6 +1,6 @@
 import { afterHandRequestStrength, type AfterHandRequest, type AfterHandRequestKind, type ApplicationRejection, type ObservableCashGameState, type ParticipantId, type PokerMutationRequest, type RemoveParticipantRequest, type ServerTime, type SetSittingOutRequest, type TableSchedule } from '@poker/contracts';
 import type { CashGame, CashGameEvent, CashGameResult } from '@poker/engine';
-import { isBot, isHuman, type PersistedBinding, type PersistedTableSession } from './aggregate.js';
+import { isBot, isPlayer, type PersistedBinding, type PersistedTableSession } from './aggregate.js';
 import type { PokerMutationKind } from './permissions.js';
 import { reject } from './rejections.js';
 import { beforeHandEnd } from './schedule.js';
@@ -47,13 +47,13 @@ export function afterHandRequestFor(kind: PokerMutationKind, request: PokerMutat
 const managementKinds: ReadonlySet<PokerMutationKind> = new Set(['stand-up-participant', 'move-participant', 'set-sitting-out', 'top-up-to', 'set-button', 'leave-table', 'remove-participant', 'remove-bot']);
 
 /**
- * What a human's request that manages a Participant becomes while a Hand is in progress (being played, or its payout
+ * What a player's request that manages a Participant becomes while a Hand is in progress (being played, or its payout
  * being presented), judged on the table's public `state`. `undefined`: it proceeds normally. A rejection: the table
  * refuses it until the Hand ends, as CashGame does mid-Hand. `pending`: the After-Hand Requests with this one recorded.
  *
- * A human's own sit-out, Stand Up and Leave Table, and the owner's Removal of a Guest, wait for the Hand; so do the
+ * A player's own sit-out, Stand Up and Leave Table, and the owner's Removal of a player, wait for the Hand; so do the
  * owner's sit-out and removal of a seated Bot. A Participant without a Seat has nothing at stake and leaves at once,
- * and so does a Bot without one. Removal waits whether or not the Guest has a Seat, and outranks any weaker request.
+ * and so does a Bot without one. Removal waits whether or not the player has a Seat, and outranks any weaker request.
  */
 export function duringHand(state: ObservableCashGameState, aggregate: PersistedTableSession, kind: PokerMutationKind, target: PersistedBinding | undefined, request: PokerMutationRequest, now: ServerTime): { rejection: ApplicationRejection } | { pending: readonly AfterHandRequest[] } | undefined {
   if (!managementKinds.has(kind) || !handInProgress(state.status, aggregate.schedule, now)) return undefined;
@@ -61,7 +61,7 @@ export function duringHand(state: ObservableCashGameState, aggregate: PersistedT
   if (kind === 'remove-participant') return { pending: recordAfterHandRequest(aggregate.pendingChanges, (request as RemoveParticipantRequest).participantId, 'remove') };
   if ((kind === 'remove-bot' || kind === 'leave-table') && mine?.seat == null) return undefined;
   // The owner can ask for a Bot's sit-out or removal now too; everything else about a Bot waits for the Hand.
-  const change = isHuman(target) || isBot(target) && (kind === 'set-sitting-out' || kind === 'remove-bot') ? afterHandRequestFor(kind, request) : undefined;
+  const change = isPlayer(target) || isBot(target) && (kind === 'set-sitting-out' || kind === 'remove-bot') ? afterHandRequestFor(kind, request) : undefined;
   if (!target || !change) return { rejection: reject('active-hand', 'Manage Participants between Hands.') };
   if (mine?.seat == null) return { rejection: { ok: false, rejection: { code: 'participant-not-seated', message: 'Choose a seated Participant.', field: 'participantId' } } };
   if (kind === 'set-sitting-out' && mine.sittingOut) return { rejection: reject('sitting-out-unchanged', 'This Participant already has the requested sitting-out status.') };
@@ -95,7 +95,7 @@ export function applyAfterHandRequests(game: CashGame, pending: readonly AfterHa
 /**
  * Stand Up if seated, then Leave Table, on `game` (a working copy): how a Participant leaves, by their own Leave
  * Table, the owner's Removal or a Bot's removal, at once or after the Hand. A Participant CashGame never counted as
- * joined (a Practice human who never sat down, a Bot never seated) has nothing to leave there: only their binding's
+ * joined (a Practice player who never sat down, a Bot never seated) has nothing to leave there: only their binding's
  * membership ends, so that is no rejection. Returns the accepted events, or the rejection that stopped it.
  */
 export function standUpAndLeave(game: CashGame, participantId: ParticipantId): CashGameResult {

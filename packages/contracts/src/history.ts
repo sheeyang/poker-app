@@ -34,7 +34,7 @@ export interface TableHistoryOutcome {
 }
 /** One completed Hand of a Table Session, as the reading Participant may see it (ADR-0040). */
 export interface TableHistoryHand extends TableHistoryHandHead, TableHistoryOutcome {
-  /** Everyone dealt into the Hand, in seat order, with the hole cards the reader may see. */
+  /** Everyone dealt into the Hand, in seat order, with the hole cards the viewer may see. */
   readonly dealtIn: readonly TableHistoryParticipant[];
 }
 /**
@@ -93,10 +93,10 @@ export interface ObservableHandReplay {
 }
 /**
  * How a replayed Hand ended, carried by its result step alone: the final board, whether it reached a showdown, who won
- * what, and the hole cards the reader may see by then.
+ * what, and the hole cards the viewer may see by then.
  */
 export interface TableHistoryResult extends TableHistoryOutcome {
-  /** The hole cards the reader may see at the result: their own, and those a showdown revealed. */
+  /** The hole cards the viewer may see at the result: their own, and those a showdown revealed. */
   readonly holeCards: readonly { readonly participantId: ParticipantId; readonly cards: readonly Card[] }[];
 }
 /** A Replay Step as Table History serves it: the result step also says how the Hand ended. */
@@ -106,7 +106,7 @@ export interface TableReplayStep extends ReplayStep {
 }
 /**
  * One completed Hand of Table History, replayed: its Replay Steps as the reading Participant may see them, with
- * everything the Trainer needs to draw them without the live table, which a reader may no longer be at. Nothing outside
+ * everything the Trainer needs to draw them without the live table, which a viewer may no longer be at. Nothing outside
  * the result step gives away the board the Hand ended on or who won it (ADR-0041).
  */
 export interface TableHandReplay extends Omit<ObservableHandReplay, 'steps'> {
@@ -117,7 +117,7 @@ export interface TableHandReplay extends Omit<ObservableHandReplay, 'steps'> {
   /** The Hand as the Table History list shows it, before its outcome: its number, completion time and who was dealt in. */
   readonly hand: TableHistoryHandHead;
   /**
-   * Everyone seated at any step, by name and whether they are a Bot, in seat order at their first step: departed Guests
+   * Everyone seated at any step, by name and whether they are a Bot, in seat order at their first step: departed Users
    * and removed Bots included. Every step's actor, and everyone whose decision a transition records, is one of them.
    */
   readonly participants: readonly ReplayParticipant[];

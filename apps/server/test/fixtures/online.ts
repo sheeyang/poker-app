@@ -15,9 +15,9 @@ export async function announcedCountdown(read: () => Promise<{ readonly schedule
 }
 
 /**
- * One live connection (one device or tab) of a Guest, subscribed to a table through `/api/live`. At an Online
- * Table a human counts as connected while at least one such connection of their Guest is subscribed, and
- * Automatic Dealing deals only to connected humans. The connection ends with the test, if not before.
+ * One live connection (one device or tab) of a User, subscribed to a table through `/api/live`. At an Online
+ * Table a player counts as connected while at least one such connection of their User is subscribed, and
+ * Automatic Dealing deals only to connected players. The connection ends with the test, if not before.
  */
 export async function connectLive(base: string, cookie: string, tableSessionId: string) {
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie } });

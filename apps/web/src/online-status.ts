@@ -17,7 +17,7 @@ export function connectionOf(table: ObservableTableSession, participantId: strin
 function eligibilityFacts(table: ObservableTableSession): (EligibilityFacts & { readonly participantId: string })[] {
   return table.view.state.participants.map(p => {
     const connection = connectionOf(table, p.participantId);
-    return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, human: connection !== undefined, connected: connection === 'connected' };
+    return { participantId: p.participantId, seat: p.seat, stack: p.stack, sittingOut: p.sittingOut, player: connection !== undefined, connected: connection === 'connected' };
   });
 }
 
@@ -53,7 +53,7 @@ export function waitingReason(table: ObservableTableSession): WaitingReason | un
     .flatMap(p => present.find(b => b.participantId === p.participantId)?.name ?? []);
   return {
     kind: 'players', needed: Math.max(1, 2 - facts.filter(isEligibleParticipant).length),
-    reconnecting: named(p => p.human && !p.connected && !p.sittingOut),
+    reconnecting: named(p => p.player && !p.connected && !p.sittingOut),
     sittingOut: named(p => p.sittingOut),
   };
 }

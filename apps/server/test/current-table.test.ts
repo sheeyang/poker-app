@@ -44,10 +44,10 @@ async function leave(cookie: string, id: string) {
 }
 const outcome = async (response: Response) => ({ status: response.status, body: await response.json() });
 const savedIds = async (cookie: string) => ((await (await get('/api/table-sessions', cookie)).json()).tables as { tableSessionId: string; left?: true }[]);
-/** The refusal of a Guest who is joined at another open Online Table, their Current Table, which it names. */
+/** The refusal of a User who is joined at another open Online Table, their Current Table, which it names. */
 const atCurrentTable = (currentTableId: string) => ({ status: 409, body: { ok: false, rejection: { code: 'current-table-elsewhere', currentTableId, message: expect.stringContaining('Leave') } } });
 
-test('a Guest at an Online Table cannot create another one: the refusal names their Current Table', async () => {
+test('a User at an Online Table cannot create another one: the refusal names their Current Table', async () => {
   const ann = await guest('Ann');
   const current = await createOnline(ann);
   expect(await outcome(await create(ann, { mode: 'online' }))).toEqual(atCurrentTable(current));
@@ -55,7 +55,7 @@ test('a Guest at an Online Table cannot create another one: the refusal names th
   expect((await savedIds(ann)).map(saved => saved.tableSessionId)).toEqual([current]);
 });
 
-test('joining another Online Table is refused while the Guest is at one, and allowed once they leave it', async () => {
+test('joining another Online Table is refused while the User is at one, and allowed once they leave it', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben');
   const anns = await createOnline(ann), bens = await createOnline(ben);
   const requestId = randomUUID();
@@ -74,7 +74,7 @@ test('joining another Online Table is refused while the Guest is at one, and all
   expect(await outcome(await create(ann, { mode: 'online' }))).toEqual(atCurrentTable(bens));
 });
 
-test('returning to an Online Table the Guest left is refused while they are at another one', async () => {
+test('returning to an Online Table the User left is refused while they are at another one', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben');
   const bens = await createOnline(ben);
   expect((await join(ann, bens)).status).toBe(200);
@@ -86,7 +86,7 @@ test('returning to an Online Table the Guest left is refused while they are at a
   expect(await outcome(await join(ann, bens))).toMatchObject({ status: 200, body: { ok: true } });
 });
 
-test('a Guest at an Online Table creates and plays Practice Tables freely', async () => {
+test('a User at an Online Table creates and plays Practice Tables freely', async () => {
   const ann = await guest('Ann');
   const current = await createOnline(ann);
   const created = await create(ann, { bots: [{ name: 'Bot 1', playingStrategy: baselinePlayingStrategy }] });

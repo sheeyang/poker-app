@@ -19,7 +19,7 @@ afterAll(async () => { await Promise.all(fixtures.map(fixture => fixture.close()
 /** One Reference Strategy Evaluation the fake Strategy was asked for. */
 interface Evaluation { readonly decisionId: string; readonly descriptor: StrategyDescriptor; readonly view: ObservableGameView; readonly result: ReturnType<typeof Promise.withResolvers<PolicyResult>>; answered: boolean }
 /**
- * The fake Strategy puts all its probability on the passive action, checking or calling. A Guest who checks or calls
+ * The fake Strategy puts all its probability on the passive action, checking or calling. A User who checks or calls
  * therefore scores 1 on both scores, and one who folds scores 0 on both: fold has none of the probability, and ranks
  * last of the two distinct probabilities.
  */
@@ -55,11 +55,11 @@ async function fixture(concurrency = 2) {
     await nameGuest(base, cookie, name);
     return cookie;
   }
-  /** A heads-up Practice Table of the Guest's, the Guest on the button (BTN/SB) and the Bot in the big blind. */
+  /** A heads-up Practice Table of the User's, the User on the button (BTN/SB) and the Bot in the big blind. */
   async function practice(cookie: string) {
     const created = await (await post('/table-sessions', cookie, { requestId: randomUUID(), bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] })).json();
-    const t = { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
-    await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+    const t = { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
     await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
     return t;
   }
@@ -69,25 +69,25 @@ async function fixture(concurrency = 2) {
     const response = await post('/table-sessions/' + t.id + '/' + kind, t.cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, ...contents });
     expect(response.status).toBe(200);
   }
-  const humanAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.human, action });
+  const playerAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.player, action });
   const botAct = async (t: Table, action: ConcreteAction) => expect(await controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId: t.bot, action })).toMatchObject({ ok: true });
   /**
-   * A Hand checked down to showdown. On the button the Guest calls preflop and checks the flop, turn and river: four
+   * A Hand checked down to showdown. On the button the User calls preflop and checks the flop, turn and river: four
    * decisions, each scoring 1.
    */
   async function checkDown(t: Table) {
     await command(t, 'start-hand');
     for (let state = (await read(t)).view.state; state.status === 'active-hand'; state = (await read(t)).view.state) {
-      if (state.actorId === t.human) { await humanAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
-      const bot = state.participants.find(participant => participant.participantId === t.bot)!, human = state.participants.find(participant => participant.participantId === t.human)!;
-      await botAct(t, { type: (bot.wager ?? 0) < (human.wager ?? 0) ? 'call' : 'check' });
+      if (state.actorId === t.player) { await playerAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
+      const bot = state.participants.find(participant => participant.participantId === t.bot)!, player = state.participants.find(participant => participant.participantId === t.player)!;
+      await botAct(t, { type: (bot.wager ?? 0) < (player.wager ?? 0) ? 'call' : 'check' });
     }
   }
-  /** A Hand the Guest, on the button, folds preflop: one decision, scoring 0. */
+  /** A Hand the User, on the button, folds preflop: one decision, scoring 0. */
   async function foldPreflop(t: Table) {
     await command(t, 'start-hand');
-    expect((await read(t)).view.state.actorId).toBe(t.human);
-    await humanAct(t, { type: 'fold' });
+    expect((await read(t)).view.state.actorId).toBe(t.player);
+    await playerAct(t, { type: 'fold' });
   }
   const configure = async (cookie: string, referenceStrategy: StrategyDescriptor) => expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy } }) })).status).toBe(200);
   /** Asks for a Score Summary over the decisions `filter` declares, broken down by `breakdown` when it is given. */
@@ -119,7 +119,7 @@ let f: Fixture;
 beforeAll(async () => { f = await fixture(); fixtures.push(f); });
 
 /**
- * A Guest who played two Practice Tables: at the first a Hand checked down (preflop call, then checks on the flop, turn
+ * A User who played two Practice Tables: at the first a Hand checked down (preflop call, then checks on the flop, turn
  * and river, all scoring 1), at the second a preflop fold (scoring 0). Their Reference Strategy is then one no
  * post-action analysis ran under, so every decision needs a new analysis.
  */
@@ -191,11 +191,11 @@ test('a failed analysis makes the summary an Error, which stays until a Retry su
 
 test('a set with no decisions has no score', async () => {
   const { cookie } = await twoTables();
-  // The Guest never folded on the river.
+  // The User never folded on the river.
   const asked = await f.summarize(cookie, { street: ['river'], action: ['fold'] });
   expect(asked.summary).toEqual({ status: 'empty', decisionCount: 0, progress: { succeeded: 0, total: 0 } });
   expect(await f.current(cookie, asked.requestId)).toEqual(asked);
-  // A Guest who never played has none either.
+  // A User who never played has none either.
   const nobody = await f.summarize(await f.guest('Zed'), {}, 'street');
   expect(nobody).toMatchObject({ breakdown: 'street', summary: { status: 'empty', decisionCount: 0 }, buckets: [] });
 });
@@ -219,7 +219,7 @@ test('each breakdown gives one complete summary per bucket the set has, in decla
   expect(street.summary).toMatchObject({ decisionCount: 5, averages: { decisionScore: 0.8, actionRankScore: 0.8 } });
   expect(buckets(street)).toEqual([['preflop', 2, 0.5, 0.5], ['flop', 1, 1, 1], ['turn', 1, 1, 1], ['river', 1, 1, 1]]);
   expect(buckets(await brokenDown(cookie, 'action'))).toEqual([['fold', 1, 0, 0], ['check', 3, 1, 1], ['call', 1, 1, 1]]);
-  // Heads-up, the Guest on the button is BTN/SB.
+  // Heads-up, the User on the button is BTN/SB.
   expect(buckets(await brokenDown(cookie, 'position'))).toEqual([['BTN/SB', 5, 0.8, 0.8]]);
   expect(buckets(await brokenDown(cookie, 'mode'))).toEqual([['practice', 5, 0.8, 0.8]]);
   // A breakdown of a filtered set buckets only that set.
@@ -232,7 +232,7 @@ test('a summary under the Strategy post-action analysis already used completes f
   const t = await f.practice(cookie);
   await f.checkDown(t);
   await f.idle();
-  // Post-action analysis ran under the default Reference Strategy, the one this Guest still has.
+  // Post-action analysis ran under the default Reference Strategy, the one this User still has.
   const before = f.evaluations.length;
   const asked = await f.summarize(cookie);
   await completed(f, cookie, asked.requestId);
@@ -240,7 +240,7 @@ test('a summary under the Strategy post-action analysis already used completes f
   expect(f.evaluations).toHaveLength(before);
 });
 
-test("a summary is only its Guest's: another Guest can't read or retry it, and a request names only a filter and a breakdown", async () => {
+test("a summary is only its User's: another User can't read or retry it, and a request names only a filter and a breakdown", async () => {
   const { cookie } = await twoTables();
   const asked = await f.summarize(cookie);
   const other = await f.guest('Zed');
@@ -275,14 +275,14 @@ test('a large summary never has more than 8 history-analysis jobs outstanding fo
   expect(large.summary).toMatchObject({ status: 'pending', decisionCount: 9, progress: { succeeded: 0, total: 9 } });
   const small = await g.summarize(light);
   expect(small.summary).toMatchObject({ status: 'pending', decisionCount: 9 });
-  const of = (guestTables: { human: string }[]) => () => g.waiting(highestProbabilityPlayingStrategy).filter(evaluation => guestTables.some(t => t.human === evaluation.view.state.actorId)).length;
+  const of = (userTables: { player: string }[]) => () => g.waiting(highestProbabilityPlayingStrategy).filter(evaluation => userTables.some(t => t.player === evaluation.view.state.actorId)).length;
   await expect.poll(of(tables)).toBe(8);
   await expect.poll(of([other])).toBe(8);
   await new Promise(resolve => setTimeout(resolve, 50));
   expect(of(tables)()).toBe(8);
   // As jobs finish, the rest of the set goes in, never past the bound.
   for (let round = 0; round < 3; round++) {
-    g.answer(g.waiting(highestProbabilityPlayingStrategy).find(evaluation => tables.some(t => t.human === evaluation.view.state.actorId))!);
+    g.answer(g.waiting(highestProbabilityPlayingStrategy).find(evaluation => tables.some(t => t.player === evaluation.view.state.actorId))!);
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(of(tables)()).toBeLessThanOrEqual(8);
     // The ninth job goes in as the first one finishes, back to exactly 8 outstanding.

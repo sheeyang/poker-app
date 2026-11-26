@@ -66,7 +66,7 @@ export function validateCreationRequest(request: CreateTableSessionRequest, supp
   if (request.bots !== undefined) {
     if (!Array.isArray(request.bots)) return reject('bots', 'Supply a list of configured Bots.');
     const seatCount = request.configuration?.seatCount ?? defaultConfiguration.seatCount;
-    if (request.bots.length > seatCount - 1) return reject('bots', 'Reserve one Participant for the human and at most one Bot per remaining seat.');
+    if (request.bots.length > seatCount - 1) return reject('bots', 'Reserve one Participant for the player and at most one Bot per remaining seat.');
     for (const bot of request.bots) {
       if (!object(bot) || Object.keys(bot).some(key => !['name', 'playingStrategy'].includes(key)) || participantName(bot.name) === undefined)
         return reject('bots', 'Each Bot requires a name and a Playing Strategy. ' + participantNameRules);

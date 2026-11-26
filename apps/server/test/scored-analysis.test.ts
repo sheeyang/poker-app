@@ -34,13 +34,13 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), configuration: { maximumBuyIn: 2000 }, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const post = (t: Table, path: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); }
-  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
+  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
   async function configure(t: Table, referenceStrategy: StrategyDescriptor) { expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: false } }) })).status).toBe(200); }
   const request = (t: Table, decisionId = 'hand-1/decision-1') => post(t, 'analysis', { decisionId });
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
@@ -50,7 +50,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
 }
 const distribution: PolicyResult = { choices: [{ action: { type: 'fold' }, probability: .25 }, { action: { type: 'call' }, probability: .25 }, { action: { type: 'raise', raiseTo: 40 }, probability: .4 }, { action: { type: 'raise', raiseTo: 100 }, probability: .1 }] };
 
-test('an accepted human decision reuses its completed pre-action evaluation and retains a separate reproducible score after restart', async () => {
+test('an accepted player decision reuses its completed pre-action evaluation and retains a separate reproducible score after restart', async () => {
   const f = await fixture();
   try {
     const t = await f.decision();
@@ -58,7 +58,7 @@ test('an accepted human decision reuses its completed pre-action evaluation and 
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(async () => (await (await f.result(t, evaluation.requestId)).json()).status).toBe('complete');
     expect(await (await f.result(t, evaluation.requestId)).json()).not.toHaveProperty('scores');
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'raise', raiseTo: 70 } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'raise', raiseTo: 70 } });
     const before = await f.read(t);
     const response = await f.request(t); expect(response.status).toBe(200);
     const scored = await response.json();
@@ -84,7 +84,7 @@ test('concurrent accepted requests share an in-flight evaluation and publish rea
     await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
     await expect.poll(() => stranger.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
     const preAction = await (await f.request(t)).json(); await expect.poll(() => f.evaluations.length).toBe(1);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const before = await f.read(t);
     const [first, second] = await Promise.all([f.request(t).then(response => response.json()), f.request(t).then(response => response.json())]);
     expect(first).toEqual(second);
@@ -104,28 +104,28 @@ test('concurrent accepted requests share an in-flight evaluation and publish rea
 
 test('historical scoring captures the original safe view after showdown, inspection, management and later play, with the current complete reference', async () => {
   const inputs: ObservableGameView[] = [];
-  let human = '';
+  let player = '';
   const reference: StrategyDescriptor = { policy: { id: 'fixture', version: 'v1', configuration: { history: true } }, selector: highestProbabilityPlayingStrategy.selector };
   const f = await fixture({ automaticBots: true, strategyFactory: descriptor => ({ policy: { checkCompatibility: () => ({ compatible: true }), evaluate: view => {
-    if (view.state.actorId === human && (descriptor.policy.id === 'fixture' || descriptor.selector.id === 'highest-probability')) inputs.push(view);
+    if (view.state.actorId === player && (descriptor.policy.id === 'fixture' || descriptor.selector.id === 'highest-probability')) inputs.push(view);
     if (descriptor.policy.id === 'fixture') return distribution;
     const passive = view.state.legalActions.find(action => action.type === 'call' || action.type === 'check')!;
     return { choices: [{ action: { type: passive.type as 'call' | 'check' }, probability: 1 }] };
   } }, actionSelector: new HighestProbabilitySelector() }) });
   try {
-    const t = await f.decision(); human = t.human;
+    const t = await f.decision(); player = t.player;
     const original = (await f.read(t)).view;
     for (let count = 0; count < 8 && (await f.read(t)).view.state.status !== 'completed-hand'; count++) {
-      await expect.poll(async () => { const state = (await f.read(t)).view.state; return state.actorId === t.human || state.status === 'completed-hand'; }).toBe(true);
+      await expect.poll(async () => { const state = (await f.read(t)).view.state; return state.actorId === t.player || state.status === 'completed-hand'; }).toBe(true);
       const state = (await f.read(t)).view.state;
       if (state.status === 'completed-hand') break;
       const passive = state.legalActions.find(action => action.type === 'call' || action.type === 'check')!;
-      await f.command(t, 'act', { participantId: t.human, action: { type: passive.type } });
+      await f.command(t, 'act', { participantId: t.player, action: { type: passive.type } });
     }
     await expect.poll(async () => (await f.read(t)).view.state.status).toBe('completed-hand');
     expect((await f.post(t, 'inspect-hand', { handId: 'hand-1' })).status).toBe(200);
-    await f.command(t, 'top-up-to', { participantId: t.human, targetStack: 1200 });
-    await f.command(t, 'move-participant', { participantId: t.human, seat: 3 });
+    await f.command(t, 'top-up-to', { participantId: t.player, targetStack: 1200 });
+    await f.command(t, 'move-participant', { participantId: t.player, seat: 3 });
     await f.command(t, 'set-button', { seat: 3 });
     await f.command(t, 'start-hand');
     await f.configure(t, reference);
@@ -161,7 +161,7 @@ test('a score persistence failure retains its successful evaluation, is readable
     await expect.poll(() => live.messages.some(message => message.type === 'user-channel-ready')).toBe(true);
     await administration.query('CREATE FUNCTION "' + f.schema + '".reject_score() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION \'private score diagnostic\'; END $$');
     await administration.query('CREATE TRIGGER reject_score BEFORE INSERT ON "' + f.schema + '".analysis_scores FOR EACH ROW EXECUTE FUNCTION "' + f.schema + '".reject_score()');
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const before = await f.read(t);
     const requested = await (await f.request(t)).json();
     await expect.poll(() => live.messages.find(message => message.type === 'analysis-update' && message.requestId === requested.requestId)).toMatchObject({ status: 'error' });
@@ -192,7 +192,7 @@ test('a failed evaluation remains a safe failed score dependency without implici
   let compatible = false;
   const f = await fixture({ strategyFactory: () => ({ policy: { checkCompatibility: () => { compatibilityChecks++; return compatible ? { compatible: true } : { compatible: false, reasons: [{ code: 'private', message: 'private diagnostics' }] }; }, evaluate: () => distribution }, actionSelector: new HighestProbabilitySelector() }) });
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); const before = await f.read(t);
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); const before = await f.read(t);
     const requested = await (await f.request(t)).json();
     await expect.poll(async () => (await (await f.result(t, requested.requestId)).json()).status).toBe('error');
     const failure = await (await f.result(t, requested.requestId)).json();
@@ -213,7 +213,7 @@ test('a failed evaluation remains a safe failed score dependency without implici
 test('shutdown releases a waiting score dependency and restart creates no work until the historical target is requested', async () => {
   const f = await fixture();
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const old = await (await f.request(t)).json(); await expect.poll(() => f.evaluations.length).toBe(1);
     await f.restart();
     expect(f.evaluations).toHaveLength(0);
@@ -232,7 +232,7 @@ test('an unavailable evaluation store produces a readable scored error rather th
     await administration.query('ALTER TABLE "' + f.schema + '".analysis_evaluations RENAME TO unavailable_evaluations');
     let failure: { requestId: string };
     try {
-      await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });      failure = await (await f.request(t)).json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'persistence-unavailable' } });
+      await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });      failure = await (await f.request(t)).json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'persistence-unavailable' } });
     }
     finally { await administration.query('ALTER TABLE "' + f.schema + '".unavailable_evaluations RENAME TO analysis_evaluations'); }
     expect(await (await f.result(t, failure.requestId)).json()).toEqual(failure);
@@ -252,7 +252,7 @@ test('scoring a cached evaluation uses shared bounded capacity and returns an ex
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve(distribution);
     await expect.poll(async () => (await (await f.result(t, evaluation.requestId)).json()).status).toBe('complete');
     const other = await f.decision(); await f.request(other); await expect.poll(() => f.evaluations.length).toBe(2);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const rejected = await f.request(t); expect(rejected.status).toBe(503);
     const failure = await rejected.json(); expect(failure).toMatchObject({ status: 'error', error: { code: 'capacity' }, evaluationRequestId: evaluation.requestId });
     expect(await (await f.result(t, evaluation.requestId)).json()).toMatchObject({ status: 'complete' });
