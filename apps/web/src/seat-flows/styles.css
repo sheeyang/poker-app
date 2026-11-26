@@ -86,7 +86,7 @@ h1 { font-size: 28px; letter-spacing: -.025em; line-height: 1.25; font-weight: 6
 .seat-6 { bottom: 84px; right: 0; }
 .occupied-seat, .open-seat { min-height: 43px; width: 100%; border: 1px solid #46594d; border-radius: 8px; background: #202e27; padding: 7px; display: flex; align-items: center; gap: 6px; }
 .occupied-seat strong, .open-seat strong { display: block; font-size: 10px; font-weight: 600; }
-.occupied-seat small, .open-seat small { display: block; font-size: 9px; color: #c1cfb9; margin-top: 2px; }
+.occupied-seat small, .open-seat small { display: block; font-size: 9px; color: var(--tag-text); margin-top: 2px; }
 .avatar { display: grid; place-items: center; border-radius: 50%; width: 23px; height: 23px; background: #43513d; color: #ddc28b; font-size: 9px; }
 .hero-seat .occupied-seat { border-color: var(--color-gold); }
 .open-seat { flex-direction: column; gap: 0; border-style: dashed; background: #182a21; color: var(--color-muted); }
