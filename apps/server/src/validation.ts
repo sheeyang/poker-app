@@ -5,7 +5,7 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 /** The key by which two Participant names at one table are the same name, ignoring case. */
 export const nameKey = (name: string) => name.normalize('NFC').toLowerCase();
 /**
- * Every Participant's name, a Guest's display name or a Bot's: trimmed, 1-20 characters of letters, digits, spaces
+ * Every Participant's name, a User's display name or a Bot's: trimmed, 1-20 characters of letters, digits, spaces
  * and basic punctuation. Control, format and invisible characters are not letters, so no name can look like another.
  * `undefined` when the value is no such name.
  */
