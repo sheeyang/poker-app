@@ -5,8 +5,8 @@ import { followedTableSummary } from './table-history.js';
 import { useFollowedRequest } from './use-followed-request.js';
 
 /**
- * A Score Summary of the reader's own decisions across the table's completed Hands, under one Strategy (the Guest's
- * Reference Strategy when none is named). While it is Analyzing its count follows the Guest's `progress` messages, and its
+ * A Score Summary of the reader's own decisions across the table's completed Hands, under one Strategy (the User's
+ * Reference Strategy when none is named). While it is Analyzing its count follows the User's `progress` messages, and its
  * completion or failure notice reads it again; nothing reads it on a timer. Retry runs only the failed analyses again. A
  * new completed Hand asks again, since the summary is frozen when it is asked for.
  */

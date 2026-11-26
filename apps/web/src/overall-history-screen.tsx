@@ -113,7 +113,7 @@ function DecisionEntry({ row }: { row: DecisionRow }) {
 
 /**
  * The decisions a filter with score ranges admits, under the Reference Strategy. Asking starts the analyses; while they
- * run the count follows the Guest's `progress` messages, and the list is read once its completion or failure notice
+ * run the count follows the User's `progress` messages, and the list is read once its completion or failure notice
  * comes, arriving only once every analysis has succeeded. `limit` grows with Show more, which reads it again.
  */
 function useScoredHistory(filter: HistoryFilter, enabled: boolean, limit: number) {
@@ -147,7 +147,7 @@ function ListSkeleton() {
 }
 
 /**
- * Overall History (ADR-0041): the Guest's own decisions from every Hand they were dealt into, at every table they can
+ * Overall History (ADR-0041): the User's own decisions from every Hand they were dealt into, at every table they can
  * read. The filters apply at once and live in the address, so a reload keeps them; each decision opens at its Replay
  * Step in its table's Table History. A Score Summary over the decisions shown, and its breakdown, sits above them;
  * the breakdown lives in the address too. A score range, in the list and in every summary, waits on the analyses of the

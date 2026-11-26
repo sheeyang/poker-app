@@ -25,14 +25,14 @@ import { useHandSummary, useTableSessionSummary } from './summaries.js';
 import { AnalysisPanel, AnalysisPanelSkeleton } from './analysis-panel.js';
 import { TableSkeleton } from './loading-skeleton.js';
 import { SeatGlyph } from './felt.js';
-import { actionLabel, chips, modeLabel, playerName } from './table-model.js';
+import { actionLabel, chips, modeLabel, participantName, tableFormat } from './table-model.js';
 import { usePresentation } from './use-presentation.js';
 import { EASE, EASE_IN } from './motion.js';
 import { foldRemovedNotices } from './overlay-motion.js';
 
 /**
  * A table's own page, `/practice/<id>` or `/online/<id>`: the table named by the address, shown to its Participants.
- * An Online Table's address is its Join Link, so a Guest who is not at it gets the join form. Anyone else is told it
+ * An Online Table's address is its Join Link, so a User who is not at it gets the join form. Anyone else is told it
  * doesn't exist; a Participant who opened it under the other mode is moved to its one address.
  */
 export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSessionId: string }) {
@@ -67,11 +67,11 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   }));
   useEffect(() => () => consumeLive(null), [consumeLive]);
   useEffect(() => { window.scrollTo({ top: 0 }); }, []);
-  // Opening a table, one this Guest is at and can see, tells the server: it keeps when, and orders the saved lists by it.
+  // Opening a table, one this User is at and can see, tells the server: it keeps when, and orders the saved lists by it.
   const opened = outcome?.show === 'table';
   useEffect(() => { if (opened) void api.markOpened(selected).then(() => queryClient.invalidateQueries({ queryKey: ['table-sessions'] }), () => {}); }, [opened, selected, queryClient]);
   usePageTitle(missing ? { page: 'missing-table' } : closed ? { page: 'closed-table' } : table.data ? { page: 'table', ...table.data.view.configuration } : undefined);
-  /** Joined through the Join Link: the same address is now the Guest's table, read and followed live. */
+  /** Joined through the Join Link: the same address is now the User's table, read and followed live. */
   async function joined() {
     // The form stays, its button busy, until the table can replace it.
     await queryClient.invalidateQueries({ queryKey: ['table-session', selected] });
@@ -89,13 +89,13 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   const handIndex = current ? current.view.history.findIndex(h => h.handId === current.view.state.handId) : -1;
   const handNumber = handIndex >= 0 ? handIndex + 1 : (current?.view.history.length ?? 0) + 1;
   const currentHistory = current?.view.history.find(h => h.handId === current.view.state.handId);
-  const humanId = current?.viewerParticipantId;
+  const viewerId = current?.viewerParticipantId;
   // The table as the server's schedule presents it now; `current` stays the committed authority.
-  const presentation = usePresentation(current, humanId);
+  const presentation = usePresentation(current, viewerId);
   const shown = presentation?.table;
   const handDecisions = analysis.acceptedDecisions.filter(d => d.handId === current?.view.state.handId);
   const handOpen = current?.view.state.status === 'active-hand' || presentation?.handEnded === false;
-  // At an Online Table: whose table it is, who is watching, and the ways in for a Guest without a Seat.
+  // At an Online Table: whose table it is, who is watching, and the ways in for a User without a Seat.
   const online = current?.mode === 'online';
   const owner = !!current && current.viewerParticipantId === current.ownerParticipantId;
   const ownerName = current?.bindings.find(b => b.participantId === current.ownerParticipantId)?.name;
@@ -184,7 +184,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
           {ownerNotice && <div className="ownership-notice" role="status"><Icon name="info" size={18} /><span>{ownerNotice}</span><button type="button" className="text-button" onClick={() => setOwnerNotice(undefined)}>Dismiss</button></div>}
           {current && interactions.choosing && <div className="seat-selection-prompt"><span role="status">Choose an open seat{interactions.choosing === current.viewerParticipantId ? '.' : ` for ${current.bindings.find(b => b.participantId === interactions.choosing)?.name ?? 'the participant'}.`}</span><button className="text-button" onClick={interactions.cancelChoosing}>Cancel</button></div>}
         </div>
-        <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}{online && !owner && ownerName ? ` · ${ownerName}’s table` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{online && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}{online && current && <button className="quiet-button" disabled={!participantActions(current, current.viewerParticipantId, handOpen).some(item => item.id === 'leave')} onClick={interactions.leave}><span>Leave table</span></button>}{current && <HistoryLink className="quiet-button" mode={current.mode} tableSessionId={current.tableSessionId}><Icon name="cards" size={18} /><span>History</span></HistoryLink>}<button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings('all')}><Icon name="settings" /></button></div></div>
+        <div className="table-toolbar"><div className="table-title"><h1>{current ? `${tableFormat(current.view.configuration.seatCount)} table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}{online && !owner && ownerName ? ` · ${ownerName}’s table` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{online && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}{online && current && <button className="quiet-button" disabled={!participantActions(current, current.viewerParticipantId, handOpen).some(item => item.id === 'leave')} onClick={interactions.leave}><span>Leave table</span></button>}{current && <HistoryLink className="quiet-button" mode={current.mode} tableSessionId={current.tableSessionId}><Icon name="cards" size={18} /><span>History</span></HistoryLink>}<button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings('all')}><Icon name="settings" /></button></div></div>
         {!current && !table.error && !identity.isError && <TableSkeleton />}
         {table.error && <div className="table-error notice-error" role="alert"><h2>Couldn’t open this table.</h2><p>{table.error.message}</p><div className="button-row"><button onClick={() => void table.refetch()}>Retry</button><Link className="button-link" to={listPath(mode)}>Choose another table</Link></div></div>}
         {current && shown && presentation && <>
@@ -194,13 +194,13 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
             : <span><strong>{shown.view.state.handId ? `Hand ${String(handNumber).padStart(2, '0')}` : 'Your practice'}</strong><span className="status-separator">·</span>{shown.view.state.status === 'completed-hand' ? 'Complete' : shown.view.state.status === 'between-hands' ? 'Getting ready' : shown.view.state.street ? shown.view.state.street[0]!.toUpperCase() + shown.view.state.street.slice(1) : 'In play'}{result && <><span className="status-separator">·</span><span className="hand-status-result">{result.headline} {result.detail}</span></>}</span>}
             {/* The tray announces the next Hand; this is its glanceable echo beside the Hand it follows. */}
             {nextHandShort && <span className="hand-status-next" aria-hidden="true">{nextHandShort}</span>}</div>
-          {preparing ? <section className="practice-preparing" role="status"><Icon name="cards" size={38} /><h2>{setup.paused ? 'Your setup is saved.' : setup.afterHandId === undefined ? 'Getting everyone to the table…' : 'Preparing the next hand…'}</h2><p>{setup.paused ?? (setup.afterHandId === undefined ? `${current.view.state.participants.filter(p => p.seat !== null).length} of ${current.bindings.length} players seated. Your hand starts next.` : 'Returning players and refilling empty stacks before the deal.')}</p>{setup.paused && <div className="button-row"><button className="primary" disabled={command.busy} onClick={() => { command.dismiss(); useSession.getState().setSetup({ ...setup, paused: undefined }); }}>Continue setup</button><button onClick={() => { useSession.getState().setSetup(null); setSettings('all'); }}>Table options</button></div>}</section> : <>
+          {preparing ? <section className="practice-preparing" role="status"><Icon name="cards" size={38} /><h2>{setup.paused ? 'Your setup is saved.' : setup.afterHandId === undefined ? 'Getting everyone to the table…' : 'Preparing the next hand…'}</h2><p>{setup.paused ?? (setup.afterHandId === undefined ? `${current.view.state.participants.filter(p => p.seat !== null).length} of ${current.bindings.length} participants seated. Your hand starts next.` : 'Returning participants and refilling empty stacks before the deal.')}</p>{setup.paused && <div className="button-row"><button className="primary" disabled={command.busy} onClick={() => { command.dismiss(); useSession.getState().setSetup({ ...setup, paused: undefined }); }}>Continue setup</button><button onClick={() => { useSession.getState().setSetup(null); setSettings('all'); }}>Table options</button></div>}</section> : <>
             <PokerTable felt={liveFelt(shown)} serverNow={presentation.serverNow} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} nextHand={presentation.nextHand} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} actionable={participantId => participantActions(shown, participantId, handOpen).length > 0} />
 
           </>}
           <div className="table-dock"><div className="table-dock-inner">
             {!preparing && <div id="play-controls" className="play-controls" data-timed={shown.options.actionTimeLimitSeconds ? '' : undefined} tabIndex={-1}><ActionTray table={shown} actionOpen={presentation.actionOpen} countdown={presentation.countdown} dealOpen={presentation.dealOpen} nextHand={presentation.nextHand} command={command} openSettings={() => interactions.chooseSeats()} review={review} online={onlineActions} /></div>}
-          <div className="below-table">{watching.length > 0 && <p className="table-watchers"><span>Watching</span>{watching.map(binding => participantActions(current, binding.participantId, handOpen).length ? <button key={binding.participantId} className="watching-player" data-table-participant={binding.participantId} aria-label={`${playerName(current, binding)} actions`} aria-haspopup="menu" onClick={event => interactions.openParticipant(binding.participantId, event.currentTarget)}>{playerName(current, binding)}</button> : <span key={binding.participantId}>{playerName(current, binding)}</span>)}</p>}<details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === humanId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details></div>
+          <div className="below-table">{watching.length > 0 && <p className="table-watchers"><span>Watching</span>{watching.map(binding => participantActions(current, binding.participantId, handOpen).length ? <button key={binding.participantId} className="watching-player" data-table-participant={binding.participantId} aria-label={`${participantName(current, binding)} actions`} aria-haspopup="menu" onClick={event => interactions.openParticipant(binding.participantId, event.currentTarget)}>{participantName(current, binding)}</button> : <span key={binding.participantId}>{participantName(current, binding)}</span>)}</p>}<details className="hand-activity"><summary>Hand activity{currentHistory ? <span>{currentHistory.decisions.length} actions</span> : null}</summary><ol>{currentHistory?.decisions.map(d => <li key={d.decisionId}><span>{d.state.street}</span><strong>{d.action.participantId === viewerId ? 'You' : current.bindings.find(b => b.participantId === d.action.participantId)?.name}</strong><span>{actionLabel(d.action.action)}</span></li>)}</ol>{!currentHistory?.decisions.length && <p className="muted">Actions from this hand will appear here.</p>}</details></div>
           <footer className="table-footer"><span>All amounts in chips</span></footer>
           </div></div>
         </>}

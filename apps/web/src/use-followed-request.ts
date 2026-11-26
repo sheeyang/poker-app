@@ -18,7 +18,7 @@ export interface FollowedRequestOptions<T> {
 const idle: FollowerSnapshot<never> = { asking: false, retrying: false };
 
 /**
- * A transient request the server answers at once and finishes in the background, followed on the Guest's user channel
+ * A transient request the server answers at once and finishes in the background, followed on the User's user channel
  * (`request-progress`): asked for once `enabled`, its count raised by `progress`, and read again over HTTP only on its
  * notices and when the channel is ready again. Nothing reads it on a timer. Retry retries it, and `again` asks anew.
  */
@@ -60,7 +60,7 @@ export function useFollowedRequest<T extends { readonly requestId: string }>(opt
 /**
  * The count of a request another hook reads over HTTP, kept current by `progress` messages (ADR-0026): the same client
  * rules as a followed request. `data` is the request as last read; the state returned is that read with the latest
- * count the Guest was told of, which only rises while the request is pending, and which a request held as complete or
+ * count the User was told of, which only rises while the request is pending, and which a request held as complete or
  * failed never takes. It reads nothing itself: the reads still come on the request's notices and reconnects.
  */
 export function useFollowedCount<T extends { readonly requestId: string }>(model: Followed<T>, data: T | undefined): T | undefined {

@@ -41,7 +41,7 @@ test('completing a Hand refreshes an open tab, and another table does not share 
   expect(sessionSummaryRefreshKey(table([], 'table-2'), true)).not.toBe(sessionSummaryRefreshKey(table([], 'table-1'), true));
 });
 
-test('changing the Guest’s Reference Strategy, in this tab or another, refreshes an open tab, and Live Analysis alone does not', () => {
+test('changing the User’s Reference Strategy, in this tab or another, refreshes an open tab, and Live Analysis alone does not', () => {
   const history = [{ handId: 'hand-1', decisions: 1, completed: true }];
   const configured = (trainerConfiguration: object) => ({ ...table(history), trainerConfiguration }) as never as Parameters<typeof sessionSummaryRefreshKey>[0] & object;
   const before = configured({ referenceStrategy: simpleHeuristicPlayingStrategy, liveAnalysis: true });

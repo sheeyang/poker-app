@@ -1,7 +1,7 @@
 import type { JoinTableRequest } from '@poker/contracts';
 
 /**
- * The join form's decisions, as pure functions. What a Guest types lives only in the form's memory for the life of
+ * The join form's decisions, as pure functions. What a User types lives only in the form's memory for the life of
  * the page: nothing reaches browser storage.
  */
 
@@ -10,11 +10,11 @@ export function joinRequest(requestId: string, form: { passwordRequired: boolean
   return form.passwordRequired ? { requestId, tablePassword: form.tablePassword } : { requestId };
 }
 
-/** Where a refused join is explained: under the field the Guest should fix, or for the whole form. */
+/** Where a refused join is explained: under the field the User should fix, or for the whole form. */
 export type JoinProblemField = 'tablePassword' | 'displayName' | 'form';
 
 /**
- * What a refused join tells the Guest, and where. A missing or wrong Table Password names the Table Owner, who is
+ * What a refused join tells the User, and where. A missing or wrong Table Password names the Table Owner, who is
  * the one to ask; the server's own words cover everything else. `undefined`: the join failed without an answer.
  */
 export function joinProblem(rejection: { code: string; message: string } | undefined, ownerName: string): { field: JoinProblemField; message: string } {

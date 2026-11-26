@@ -5,7 +5,7 @@ import { browserBinding, DisplayNameForm, useDisplayName } from './display-name.
 const initialOf = (name: string | undefined) => name?.trim()[0]?.toUpperCase();
 
 /**
- * The Guest's profile: the name they sit down with. Reachable from every page, so it opens
+ * The User's profile: the name they sit down with. Reachable from every page, so it opens
  * from the header; Table options holds only what is about one table.
  */
 export function MySettings() {
@@ -29,7 +29,7 @@ export function MySettings() {
 function ProfilePopover({ displayName, close }: { displayName: string | undefined; close: () => void }) {
   return <div className="profile-pop" role="dialog" aria-labelledby="profile-title">
     <div className="profile-pop-heading"><h2 id="profile-title">Profile</h2><button type="button" className="icon-button" aria-label="Close Profile" onClick={close}><Icon name="close" /></button></div>
-    <div className="profile-hero">
+    <div className="profile-header">
       <span className="profile-avatar" aria-hidden="true">{initialOf(displayName) ?? '?'}</span>
       <div><DisplayNameForm current={displayName} autoFocus /></div>
     </div>

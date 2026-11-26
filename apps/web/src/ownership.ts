@@ -2,7 +2,7 @@ import type { ObservableTableSession } from '@poker/contracts';
 
 /**
  * Table Ownership as the Trainer words it. When the owner of an Online Table leaves, ownership passes to the
- * earliest-joined human still at it, or the table closes (ADR-0034). The server works that out and puts it in the
+ * earliest-joined player still at it, or the table closes (ADR-0034). The server works that out and puts it in the
  * owner's own view (`ownerSuccession`); these only say it.
  */
 

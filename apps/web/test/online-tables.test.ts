@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, simpleHeuristicPlayingStrategy, type ObservableTableSession } from '@poker/contracts';
 import { defaultOnlineSetup, onlineCreationRequest, onlineSetupProblem } from '../src/online-setup.js';
-import { canManage, modeLabel, playerName } from '../src/table-model.js';
+import { canManage, modeLabel, participantName } from '../src/table-model.js';
 
 function table(overrides: Partial<ObservableTableSession> = {}): ObservableTableSession {
   return {
@@ -14,7 +14,7 @@ function table(overrides: Partial<ObservableTableSession> = {}): ObservableTable
 }
 
 describe('creating an Online Table', () => {
-  it('asks only for the table size by default: 30 second limit, Live Analysis and seat changes allowed, no Bots', () => {
+  it('asks only for the Table Format by default: 30 second limit, Live Analysis and seat changes allowed, no Bots', () => {
     expect(onlineSetupProblem(defaultOnlineSetup)).toBeUndefined();
     expect(onlineCreationRequest(defaultOnlineSetup, 'r')).toEqual({
       requestId: 'r', mode: 'online',
@@ -53,13 +53,13 @@ describe('creating an Online Table', () => {
 
 describe('who a Participant may manage', () => {
   it('lets everyone manage only themselves, and the owner also manage Bots', () => {
-    const guest = table(), owner = table({ viewerParticipantId: 'ann' });
-    const [ann, ben, rex] = guest.bindings as [typeof guest.bindings[number], typeof guest.bindings[number], typeof guest.bindings[number]];
-    expect([ann, ben, rex].map(binding => canManage(guest, binding))).toEqual([false, true, false]);
+    const player = table(), owner = table({ viewerParticipantId: 'ann' });
+    const [ann, ben, rex] = player.bindings as [typeof player.bindings[number], typeof player.bindings[number], typeof player.bindings[number]];
+    expect([ann, ben, rex].map(binding => canManage(player, binding))).toEqual([false, true, false]);
     expect([ann, ben, rex].map(binding => canManage(owner, binding))).toEqual([true, false, true]);
   });
   it('names the viewer "You" and everyone else by name, and labels the mode', () => {
-    expect(table().bindings.map(binding => playerName(table(), binding))).toEqual(['Ann', 'You', 'Rex']);
+    expect(table().bindings.map(binding => participantName(table(), binding))).toEqual(['Ann', 'You', 'Rex']);
     expect([modeLabel('online'), modeLabel('practice')]).toEqual(['Online', 'Practice']);
   });
 });

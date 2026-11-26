@@ -14,7 +14,7 @@ function table(viewer = 'you'): ObservableTableSession {
 const withPlayers = (t: ObservableTableSession, participants: ObservableTableSession['view']['state']['participants']): ObservableTableSession => ({ ...t, view: { ...t.view, state: { ...t.view.state, participants } } });
 
 describe('contextual Seat actions', () => {
-  it('asks a seated Guest explicitly to move, while an owner also has Add a Bot', () => {
+  it('asks a seated player explicitly to move, while an owner also has Add a Bot', () => {
     expect(seatActions(table(), 4, false).map(a => a.id)).toEqual(['move']);
     expect(seatActions(table('owner'), 4, false).map(a => a.id)).toEqual(['move', 'add-bot']);
   });
@@ -27,12 +27,12 @@ describe('contextual Seat actions', () => {
     const original = table(), t = { ...original, view: { ...original.view, configuration: { ...original.view.configuration, allowSeatChanges: false } } };
     expect(seatActions(t, 4, false)[0]).toMatchObject({ timing: 'unavailable', reason: 'Seat changes aren’t allowed' });
   });
-  it('retains the selected Bot for the owner without granting control over other humans', () => {
+  it('retains the selected Bot for the owner without granting control over other players', () => {
     expect(seatActions(table('owner'), 4, false, 'bot')[0]).toMatchObject({ id: 'move', label: 'Move Bot 1 here', timing: 'now' });
     expect(seatActions(table('owner'), 4, false, 'you').map(a => a.id)).toEqual(['add-bot']);
     expect(seatActions(table(), 4, false, 'bot')).toEqual([]);
   });
-  it('allows watching online Guests to sit during a Hand, but waits at Practice Tables', () => {
+  it('allows watching players to sit during a Hand, but waits at Practice Tables', () => {
     const original = table(), t = withPlayers(original, original.view.state.participants.map(p => p.participantId === 'you' ? { ...p, seat: null } : p));
     expect(seatActions(t, 2, true)[0]).toMatchObject({ id: 'take-seat', timing: 'now' });
     expect(seatActions({ ...t, mode: 'practice' }, 2, true)[0]).toMatchObject({ id: 'take-seat', timing: 'unavailable' });
@@ -40,7 +40,7 @@ describe('contextual Seat actions', () => {
 });
 
 describe('Participant actions', () => {
-  it('gives Guests only their own controls and owners Bot controls plus human Removal', () => {
+  it('gives players only their own controls and owners Bot controls plus player Removal', () => {
     expect(participantActions(table(), 'you', false).map(a => a.id)).toEqual(['stack', 'sit-out', 'move', 'stand-up', 'leave']);
     expect(participantActions(table(), 'bot', false)).toEqual([]);
     expect(participantActions(table(), 'owner', false)).toEqual([]);

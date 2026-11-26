@@ -17,14 +17,14 @@ const decisions = [
   { street: 'River', you: 'Call 210', grade: 'ok', note: 'Close; priced at 28% equity needed.' },
 ] as const;
 
-function Seat({ n, name, stack, hero }: { n: number; name: string; stack: string; hero?: boolean }) {
-  return <div className={`pe-seat pe-seat-${n}${hero ? ' is-hero' : ''}`}><span className="pe-avatar" /><b>{name}</b><span>{stack}</span></div>;
+function Seat({ n, name, stack, viewer }: { n: number; name: string; stack: string; viewer?: boolean }) {
+  return <div className={`pe-seat pe-seat-${n}${viewer ? ' is-viewer' : ''}`}><span className="pe-avatar" /><b>{name}</b><span>{stack}</span></div>;
 }
 
 function Table({ compact }: { compact: boolean }) {
   return <div className={`pe-stage${compact ? ' is-compact' : ''}`}>
     <div className="pe-felt"><div className="pe-board">{['A♠', 'K♦', '7♣', '2♥', ' '].map((c, i) => <i key={i} className={c.trim() ? 'pe-card' : 'pe-card pe-empty'}>{c}</i>)}</div><span className="pe-pot">Pot 420</span></div>
-    <Seat n={1} name="You" stack="1,840" hero /><Seat n={2} name="Mara" stack="2,100" /><Seat n={3} name="Bot Ellis" stack="960" /><Seat n={4} name="Jun" stack="1,300" />
+    <Seat n={1} name="You" stack="1,840" viewer /><Seat n={2} name="Mara" stack="2,100" /><Seat n={3} name="Bot Ellis" stack="960" /><Seat n={4} name="Jun" stack="1,300" />
     <div className="pe-tray"><button>Fold</button><button>Call 210</button><button className="primary">Raise to 600</button></div>
   </div>;
 }
@@ -38,7 +38,7 @@ function Panel({ close, focus }: { close: () => void; focus?: number }) {
   </aside>;
 }
 
-const Toolbar = ({ children }: { children?: React.ReactNode }) => <div className="table-toolbar pe-toolbar"><div className="table-title"><h1>4-player table</h1><span>No-limit Hold’em · 10 / 20</span><span className="mode-badge mode-online">Online</span></div><div className="toolbar-actions">{children}</div></div>;
+const Toolbar = ({ children }: { children?: React.ReactNode }) => <div className="table-toolbar pe-toolbar"><div className="table-title"><h1>4-max table</h1><span>No-limit Hold’em · 10 / 20</span><span className="mode-badge mode-online">Online</span></div><div className="toolbar-actions">{children}</div></div>;
 
 /* A: one vertical tab on the viewport edge. The toolbar keeps only Join link / Leave table. */
 function VariantA() {

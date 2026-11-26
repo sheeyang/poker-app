@@ -20,28 +20,28 @@ describe('practice preparation from confirmed state', () => {
       expect(practiceStep(started, 'h1', 'r')).toBeNull();
     }
   });
-  it('refills a busted opponent with the deal itself (Rebuy & deal)', () => {
+  it('refills a busted Bot with the deal itself (Rebuy & deal)', () => {
     const t = table();
     const ended = { ...t, view: { ...t.view, state: { ...t.view.state, status: 'completed-hand' as const, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 4000, sittingOut: false }, { participantId: 'bot', seat: 2, stack: 0, sittingOut: false }] } } };
     expect(practiceStep(ended, 'h1', 'r')).toEqual({ kind: 'start', tableId: 't', body: { requestId: 'r', expectedPokerRevision: 7, refills: [{ participantId: 'bot', targetStack: 2000 }] } });
     expect(practiceStep({ ...ended, view: { ...ended.view, state: { ...ended.view.state, participants: ended.view.state.participants.map(p => ({ ...p, stack: 2000 })) } } }, 'h1', 'r')).toEqual({ kind: 'start', tableId: 't', body: { requestId: 'r', expectedPokerRevision: 7 } });
   });
-  it('leaves a sitting-out human to the Deal, which resumes them, but preserves deliberately removed opponents', () => {
+  it('leaves a sitting-out player to the Deal, which resumes them, but preserves deliberately removed Bots', () => {
     const t = table();
     const paused = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 1000, sittingOut: true }] } } };
-    // A sitting-out human still counts as a player: only an opponent is missing.
-    expect(() => practiceStep(paused, 'h1', 'r')).toThrow('Add an opponent');
-    const withOpponent = { ...paused, view: { ...paused.view, state: { ...paused.view.state, participants: [...paused.view.state.participants, { participantId: 'bot', seat: 2, stack: 1000, sittingOut: false }] } } };
-    expect(practiceStep(withOpponent, 'h1', 'r')).toMatchObject({ kind: 'start', body: { expectedPokerRevision: 7 } });
+    // A sitting-out player still counts as a player: only a Bot is missing.
+    expect(() => practiceStep(paused, 'h1', 'r')).toThrow('Add a Bot');
+    const withBot = { ...paused, view: { ...paused.view, state: { ...paused.view.state, participants: [...paused.view.state.participants, { participantId: 'bot', seat: 2, stack: 1000, sittingOut: false }] } } };
+    expect(practiceStep(withBot, 'h1', 'r')).toMatchObject({ kind: 'start', body: { expectedPokerRevision: 7 } });
   });
-  it('rebuys a busted human who sat out before the Deal resumes them', () => {
+  it('rebuys a busted player who sat out before the Deal resumes them', () => {
     const t = table();
     const busted = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 0, sittingOut: true }, { participantId: 'bot', seat: 2, stack: 1000, sittingOut: false }] } } };
     expect(practiceStep(busted, 'h1', 'r')).toMatchObject({ kind: 'start', body: { refills: [{ participantId: 'you', targetStack: 2000 }] } });
   });
-  it('needs an opponent with chips or a refill to deal', () => {
+  it('needs a Bot with chips or a refill to deal', () => {
     const t = table();
     const alone = { ...t, view: { ...t.view, state: { ...t.view.state, handId: 'h1', participants: [{ participantId: 'you', seat: 1, stack: 0, sittingOut: false }] } } };
-    expect(() => practiceStep(alone, 'h1', 'r')).toThrow('Add an opponent');
+    expect(() => practiceStep(alone, 'h1', 'r')).toThrow('Add a Bot');
   });
 });

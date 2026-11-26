@@ -5,14 +5,14 @@ import { chips, formatAndStakes } from './table-model.js';
 import { parseAddress, tablePath } from './table-address.js';
 
 /**
- * The Guest's Current Table, from their saved tables: the one Online Table they are at and have not left. Undefined
+ * The User's Current Table, from their saved tables: the one Online Table they are at and have not left. Undefined
  * while they are at none, or the list has not been read.
  */
 export function currentTableId(saved: readonly SavedTable[] | undefined): string | undefined {
   return saved?.find(table => table.mode === 'online' && !table.left)?.tableSessionId;
 }
 
-/** The saved tables once the server says the Guest is no longer at `tableSessionId`: it stays listed, as left. */
+/** The saved tables once the server says the User is no longer at `tableSessionId`: it stays listed, as left. */
 export function withMembershipEnded(saved: SavedTables | undefined, tableSessionId: string): SavedTables | undefined {
   return saved && { ...saved, tables: saved.tables.map(table => table.tableSessionId === tableSessionId ? { ...table, left: true } : table) };
 }

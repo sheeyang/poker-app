@@ -3,7 +3,7 @@ import { afterHandRequestOf } from './self-service.js';
 import { hasDeparted } from './owner-controls.js';
 
 /**
- * Whether the viewer may ask to remove this Participant: only the Table Owner, only another human who is still
+ * Whether the viewer may ask to remove this Participant: only the Table Owner, only another player who is still
  * at the table, and not again once a Removal is pending. The server decides; the Trainer just does not offer
  * what it will refuse.
  */

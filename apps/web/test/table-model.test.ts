@@ -23,7 +23,7 @@ describe('poker presentation boundaries', () => {
     expect(retainNewestTable(table, { ...table, runtimeStatus: { phase: 'recovering' } }).runtimeStatus?.phase).toBe('recovering');
     expect(retainNewestTable(table, { ...table, sessionRevision: 6, pokerRevision: 5 }).pokerRevision).toBe(5);
   });
-  it('presents the Guest’s changed Trainer Configuration from a read at the same revision, since changing it advances none', () => {
+  it('presents the User’s changed Trainer Configuration from a read at the same revision, since changing it advances none', () => {
     const table: ObservableTableSession = { tableSessionId: 'table', pokerRevision: 4, sessionRevision: 5, bindings: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] }, view: { configuration: defaultConfiguration, state: { status: 'between-hands', buttonSeat: 1, participants: [], board: [], pots: [], actorId: null, legalActions: [] }, history: [] } };
     const changed = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: false };
     const reread = retainNewestTable(table, { ...table, trainerConfiguration: changed });

@@ -33,7 +33,7 @@ export interface FeltParticipant {
   readonly participantId: string;
   readonly name: string;
   readonly bot: boolean;
-  /** A human at an Online Table with no live connection to it. Never a Bot, and never anyone in a replay. */
+  /** A player at an Online Table with no live connection to it. Never a Bot, and never anyone in a replay. */
   readonly disconnected: boolean;
   /** The After-Hand Request waiting for them, public to everyone at the table. */
   readonly pending?: AfterHandRequestKind;
