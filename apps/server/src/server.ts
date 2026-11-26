@@ -26,7 +26,8 @@ import { createTableSessionMutations, TableSessionRestorationError, type Mutatio
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 import { createUserQueue } from './user-queue.js';
 import { validateDisplayName } from './validation.js';
-import { isSuppliedRequestId, recordOpened, requestIdPattern, tableSessionIdPattern } from './membership.js';
+import { recordOpened, tableSessionIdPattern } from './membership.js';
+import { isSuppliedRequestId, requestIdPattern } from './request-id.js';
 import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './guests.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
