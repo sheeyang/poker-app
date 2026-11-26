@@ -2,7 +2,7 @@
 
 **Amended by [ADR-0041](0041-add-table-history-replay-and-overall-history.md):** a Closed Table opens read-only into its Table History, and its former Participants may still study their decisions there. It still cannot be joined or played.
 
-[ADR-0032](0032-extend-table-sessions-for-shared-online-play.md) loaded every table at server startup and capped each Guest at 10 owned tables with a seated human, so that one Guest could not exhaust the single server. Practice Tables are now never left or closed, so a cap would end a Guest's practice history and loading every table would grow without bound. Instead, there is no cap, and a table is in memory only while something needs it.
+[ADR-0032](0032-extend-table-sessions-for-shared-online-play.md) loaded every table at server startup and capped each User at 10 owned tables with a seated human, so that one User could not exhaust the single server. Practice Tables are now never left or closed, so a cap would end a User's practice history and loading every table would grow without bound. Instead, there is no cap, and a table is in memory only while something needs it.
 
 ## Decisions
 

@@ -45,13 +45,13 @@ Validation completed on 8 October 2026:
   arbitrary multiway Bet/Raise matching, folded contributions, conservation,
   replay, and frozen historical ante/Call/privacy facts.
 - Literal card fixtures use the independently documented `heads-up-fixture`
-  v1 deck. Three-player sparse seats button 7 / SB 9 / BB 2 get holes `(5d,9c)`,
+  v1 deck. Three-Participant sparse seats button 7 / SB 9 / BB 2 get holes `(5d,9c)`,
   `(4s,Ah)`, `(2c,3d)` respectively; burns are `4d,5s,9s`, board
-  `Tc Qh Jc 3c 6d`. Carol's pair of threes wins the 60-chip pot. Nine-player
+  `Tc Qh Jc 3c 6d`. Carol's pair of threes wins the 60-chip pot. Nine-Participant
   dealing consumes eighteen hole cards, then burns `7h,Jh,7s` and board
   `Kc As 2h 6c Ts`; seat 5 pairs the ace and wins 180. Production RNG or ranking
   does not calculate test expectations.
-- Real HTTP/PostgreSQL fixtures exercise three and nine players through
+- Real HTTP/PostgreSQL fixtures exercise three and nine Participants through
   showdown, safe public serialization, capped real Call 15, atomic active-Hand
   management rejection, movement/leave button continuity, frozen old seats,
   and server restart. Real transaction hooks prove rollback and held COMMIT

@@ -16,5 +16,5 @@ status: accepted
 ## Consequences
 
 - Parallel runs, in one checkout or several, cannot collide on a database, a lock or a port.
-- A run starts empty: a new Guest, no saved tables. Anything that needs data creates it.
+- A run starts empty: a new User, no saved tables. Anything that needs data creates it.
 - A crash leaves only that run's own database and directory, and `pnpm dev:stop` removes them.

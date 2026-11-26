@@ -29,7 +29,7 @@ motion uses safe events and never controls confirmed state or legal actions.
   suite then passed serially.
 - Frontend boundary tests cover pot conservation in presentation, total-commitment
   presets, short all-ins, integer bounds and stale snapshot protection.
-- Real browser flow: create and seat six players; explicitly deal; accept a Call;
+- Real browser flow: create and seat six Participants; explicitly deal; accept a Call;
   show real showdown and payouts; receive automatic post-action and Hand scores;
   explicitly finish and display the frozen Table Session summary.
 - Heads-up flow verifies Live Analysis, an expanded Raise parent with its exact
@@ -64,13 +64,13 @@ Revision verification:
 - Web TypeScript check, production build and workspace boundaries pass.
 - Two frontend test files pass: eight tests, including resumed seating,
   duplicate-deal prevention, busted-opponent recovery and sitting-out behavior.
-- Real server: Start practice reaches a playable six-player Hand without manual
+- Real server: Start practice reaches a playable six-Participant Hand without manual
   seating; Fold produces a visible recap and complete numerical summary.
 - Rebuy & deal replenishes a busted opponent and starts Hand 2 while Hand 1 review
   stays pinned with its original cards and action.
 - At 390×844, active betting controls occupy y=520–744 and the document has no
   horizontal overflow. Opening review focuses the panel at y=12; closing it returns
-  to play. Nine-player seating also completes from Start practice.
+  to play. Nine-Participant seating also completes from Start practice.
 - Desktop and mobile lobby, active play, completed Hand and contextual review
   captures are stored under `.impeccable/review/` as local development evidence.
 - One mechanical scan exited 0 with advisory design-system documentation drift
@@ -108,7 +108,7 @@ update):
   `pnpm test --maxWorkers=2` with a temporary PostgreSQL database.
 - All **16 frontend tests** passed; web TypeScript, production build and workspace
   dependency-boundary checks passed.
-- Real browser checks confirmed a six-player Hand, automatic post-action and Hand
+- Real browser checks confirmed a six-Participant Hand, automatic post-action and Hand
   scores, the relocated Review hand control opening its selected decision, and
   explicit Deal next hand reaching Hand 2.
 - Desktop and 390×844 mobile checks confirmed the compact recap, paired actions,
