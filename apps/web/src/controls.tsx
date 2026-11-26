@@ -4,7 +4,7 @@ import { RequestFailure } from '@poker/client';
 import { Icon } from './icons.js';
 import { actionLabel, chips, potTotal, presetTotal, type SizedAction } from './table-model.js';
 import { useSession, type Command } from './session.js';
-import { nextHandLabel, waitingDetail, waitingReason, type NextHandStatus } from './online-status.js';
+import { nextHandLabel, waitingDetail, type NextHandStatus } from './online-status.js';
 import { afterHandRequestOf, afterHandRequestLabel } from './self-service.js';
 
 /** Ways out of the tray at an Online Table: sitting down, sharing the Join Link (owner only) and adding a Bot (owner only). */
@@ -77,7 +77,7 @@ function OnlineBetweenHands({ table, nextHand, busy, handEnded, command, openSet
   const sittingOut = seated && you.sittingOut;
   const pending = afterHandRequestOf(table, table.viewerParticipantId);
   // While the table cannot deal, the tray names what it is waiting for and offers the way forward.
-  const reason = nextHand?.kind === 'waiting' ? waitingReason(table) : undefined;
+  const reason = nextHand?.kind === 'waiting' ? nextHand.reason : undefined;
   const needsParticipants = reason?.kind === 'participants';
   const resume = () => command.submit({ tableId: table.tableSessionId, kind: 'manage', operation: 'set-sitting-out', body: { requestId: crypto.randomUUID(), expectedPokerRevision: table.pokerRevision, participantId: table.viewerParticipantId, sittingOut: false } });
   const detail = pending ? `${afterHandRequestLabel(pending)}.` : reason ? waitingDetail(reason, table.viewerParticipantId === table.ownerParticipantId, !!online?.addBot) : sittingOut ? 'You’re sitting out, so you’re not dealt in until you return.' : seated ? 'Hands at an online table are dealt automatically.' : 'You’re watching. Take an open seat to play; you’re dealt in from the next hand.';

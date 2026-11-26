@@ -66,28 +66,44 @@ export function watchingNames(table: ObservableTableSession): string[] {
   return presentBindings(table).filter(b => b.controller.kind === 'human' && b.participantId !== table.viewerParticipantId && !seated.has(b.participantId)).map(b => b.name);
 }
 
-export type NextHandStatus = { readonly kind: 'countdown'; readonly seconds: number } | { readonly kind: 'soon' | 'waiting' } | undefined;
+export type NextHandStatus = { readonly kind: 'countdown'; readonly seconds: number } | { readonly kind: 'soon' } | { readonly kind: 'waiting'; readonly reason: WaitingReason } | undefined;
 
 /**
  * What happens next between Hands at an Online Table at server time `serverNow`:
  * - `countdown`: the Next-Hand Countdown is running, with whole seconds left;
  * - `soon`: the table can deal, so the server announces a countdown once the last Hand has ended;
- * - `waiting`: it cannot, until two Eligible Participants, at least one of them a connected player, are ready.
+ * - `waiting`: it cannot, until two Eligible Participants, at least one of them a connected player, are ready; `reason`
+ *   is what is missing, from the viewer's side.
  * `undefined` during a Hand and at Practice Tables, where the player deals.
  */
 export function nextHandStatus(table: ObservableTableSession, serverNow: number): NextHandStatus {
   if (table.mode !== 'online' || table.view.state.status === 'active-hand') return undefined;
   const seconds = nextHandCountdown(table, serverNow);
   if (seconds !== undefined) return { kind: 'countdown', seconds };
-  return { kind: canDeal(table) ? 'soon' : 'waiting' };
+  const reason = waitingReason(table);
+  return reason ? { kind: 'waiting', reason } : { kind: 'soon' };
 }
 
-/** What everyone at the table is told about the next Hand; `first` before any Hand has been dealt. */
+/** "one more participant" or "N more participants": how many more Eligible Participants a waiting table needs. */
+function moreParticipants(needed: number): string {
+  return needed === 1 ? 'one more participant' : `${needed} more participants`;
+}
+
+/**
+ * What the viewer is told about the next Hand; `first` before any Hand has been dealt. A waiting table names what would
+ * let it deal: the viewer's own way in, or how many more Participants it needs.
+ */
 export function nextHandLabel(status: NextHandStatus, first = false): string | undefined {
   if (!status) return undefined;
   const hand = first ? 'First hand' : 'Next hand';
   if (status.kind === 'countdown') return status.seconds > 0 ? `${hand} in ${status.seconds}s` : 'Dealing…';
-  return status.kind === 'soon' ? `${hand} coming up` : 'Waiting for participants';
+  if (status.kind === 'soon') return `${hand} coming up`;
+  switch (status.reason.kind) {
+    case 'take-seat': return 'Take an open seat';
+    case 'no-chips': return 'Waiting for your rebuy';
+    case 'sitting-out': return 'Waiting for you to return';
+    case 'participants': return `Waiting for ${moreParticipants(status.reason.needed)}`;
+  }
 }
 
 /**
@@ -100,7 +116,7 @@ export function waitingDetail(reason: WaitingReason, owner: boolean, canAddBot =
     case 'sitting-out': return 'You’re sitting out, so you’re not dealt in. Return to play when you’re ready.';
     case 'no-chips': return 'You’re out of chips. Rebuy to be dealt in.';
     case 'participants': {
-      const one = reason.needed === 1, others = one ? 'one more participant' : `${reason.needed} more participants`;
+      const one = reason.needed === 1, others = moreParticipants(reason.needed);
       const state = (names: readonly string[], what: string) => names.length ? `${names.join(', ')} ${names.length === 1 ? 'is' : 'are'} ${what}. ` : '';
       const absent = state(reason.reconnecting, 'disconnected') + state(reason.sittingOut, 'sitting out');
       const invite = owner ? canAddBot ? ' Share the join link, or add a Bot.' : ' Manage participants directly from the table.' : '';

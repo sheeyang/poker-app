@@ -45,7 +45,7 @@ export function PokerTable({ felt, serverNow, actorWindowOpen, countdown, nextHa
         <div className="deck-area" aria-label="Deck and face-down burn pile"><Card small attrs={{ 'data-motion': 'deck' }} /><span className="burn-pile">{state.board.length > 0 && <Card small attrs={{ 'data-motion': 'burn' }} />}</span></div>
       </> : felt.mode === 'online'
         // Before the first Hand the felt is empty, so it says what the table is waiting for.
-        ? <div className="table-ready"><strong>{viewerSeat === null && nextHand?.kind !== 'countdown' ? 'Take an open seat' : nextHandLabel(nextHand, true) ?? 'Waiting for participants'}</strong><p>{viewerSeat === null ? 'Hands are dealt once two participants are ready, one of them a player.' : 'Hands are dealt automatically.'}</p></div>
+        ? <div className="table-ready"><strong>{viewerSeat === null && nextHand?.kind !== 'countdown' ? 'Take an open seat' : nextHandLabel(nextHand, true) ?? 'Waiting for the first hand'}</strong><p>{viewerSeat === null ? 'Hands are dealt once two participants are ready, one of them a player.' : 'Hands are dealt automatically.'}</p></div>
         : <div className="table-ready"><strong>A place at the table.</strong><p>Seat the participants, then deal the first hand.</p></div>}
     </div>
     {/* Travelling cards pass under the seats, as dealt cards sit; chips and labels travel over everything. */}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, type ObservableParticipant, type ObservableTableSession, type TableSchedule } from '@poker/contracts';
-import { connectionOf, nextHandLabel, nextHandStatus, waitingDetail, waitingReason, watchingNames } from '../src/online-status.js';
+import { connectionOf, nextHandLabel, nextHandStatus, waitingDetail, waitingReason, watchingNames, type WaitingReason } from '../src/online-status.js';
 
 const seated = (participantId: string, seat: number, extra: Partial<ObservableParticipant> = {}): ObservableParticipant => ({ participantId, seat, stack: 1000, sittingOut: false, ...extra });
 function table(participants: ObservableParticipant[], connected: string[], schedule: TableSchedule = { phases: [], actionWindow: null }, mode: 'online' | 'practice' = 'online'): ObservableTableSession {
@@ -30,9 +30,9 @@ describe('the next Hand at an Online Table, between Hands', () => {
   });
   it('waits for two Eligible Participants, one of them a connected player, when no countdown is announced', () => {
     // Ann is disconnected, and you are sitting out: only the Bot could play.
-    expect(nextHandStatus(table([seated('ann', 1), seated('you', 2, { sittingOut: true }), seated('rex', 3)], ['you']), 0)).toEqual({ kind: 'waiting' });
+    expect(nextHandStatus(table([seated('ann', 1), seated('you', 2, { sittingOut: true }), seated('rex', 3)], ['you']), 0)).toEqual({ kind: 'waiting', reason: { kind: 'sitting-out' } });
     // Bots never play on alone.
-    expect(nextHandStatus(table([seated('ann', 1, { stack: 0 }), seated('rex', 3)], ['ann']), 0)).toEqual({ kind: 'waiting' });
+    expect(nextHandStatus(table([seated('ann', 1, { stack: 0 }), seated('rex', 3)], ['ann']), 0)).toEqual({ kind: 'waiting', reason: { kind: 'take-seat' } });
   });
   it('expects a countdown soon while the table can deal, as during the Settle after a payout', () => {
     const paid = table([seated('ann', 1), seated('rex', 2)], ['ann'], { phases: [{ kind: 'payout', handId: 'hand-1', street: 'preflop', startsAt: 0, endsAt: 2_000, durationMs: 2_000 }, { kind: 'settle', handId: 'hand-1', street: 'preflop', startsAt: 2_000, endsAt: 5_000, durationMs: 3_000 }], actionWindow: null });
@@ -40,8 +40,18 @@ describe('the next Hand at an Online Table, between Hands', () => {
     expect(nextHandStatus(settling, 3_000)).toEqual({ kind: 'soon' });
   });
   it('is told in words everyone can follow', () => {
-    expect([nextHandLabel({ kind: 'countdown', seconds: 3 }), nextHandLabel({ kind: 'countdown', seconds: 5 }, true), nextHandLabel({ kind: 'countdown', seconds: 0 }), nextHandLabel({ kind: 'soon' }), nextHandLabel({ kind: 'waiting' }), nextHandLabel(undefined)])
-      .toEqual(['Next hand in 3s', 'First hand in 5s', 'Dealing…', 'Next hand coming up', 'Waiting for participants', undefined]);
+    expect([nextHandLabel({ kind: 'countdown', seconds: 3 }), nextHandLabel({ kind: 'countdown', seconds: 5 }, true), nextHandLabel({ kind: 'countdown', seconds: 0 }), nextHandLabel({ kind: 'soon' }), nextHandLabel(undefined)])
+      .toEqual(['Next hand in 3s', 'First hand in 5s', 'Dealing…', 'Next hand coming up', undefined]);
+  });
+  it('names what a waiting table needs in its headline: the viewer’s way in, or how many more participants', () => {
+    const waiting = (reason: WaitingReason) => nextHandLabel({ kind: 'waiting', reason }, true);
+    expect([
+      waiting({ kind: 'take-seat' }), waiting({ kind: 'no-chips' }), waiting({ kind: 'sitting-out' }),
+      waiting({ kind: 'participants', needed: 1, reconnecting: ['Ann'], sittingOut: [] }), waiting({ kind: 'participants', needed: 2, reconnecting: [], sittingOut: [] }),
+    ]).toEqual(['Take an open seat', 'Waiting for your rebuy', 'Waiting for you to return', 'Waiting for one more participant', 'Waiting for 2 more participants']);
+    // You are seated and sitting out beside one Bot: the table waits for you, not for more participants.
+    const besideBot = nextHandStatus(table([seated('you', 1, { sittingOut: true }), seated('rex', 2)], ['you']), 0);
+    expect(nextHandLabel(besideBot, true)).toBe('Waiting for you to return');
   });
   it('names what a waiting table needs from the viewer, or from others', () => {
     // You are watching: sitting down is your way in.
