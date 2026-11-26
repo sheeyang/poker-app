@@ -10,6 +10,10 @@ const maxWorkers = Number.isInteger(configuredWorkers) && configuredWorkers >= 1
 export default defineConfig({
   test: {
     testTimeout: 15000, hookTimeout: 15000,
+    // `expect.poll` waits for an observable outcome (a job settling, a WebSocket message, a Bot acting). Vitest's default
+    // of 1 second is shorter than a loaded machine needs for work that passes alone, so a poll gives up only after 5
+    // seconds. A poll that succeeds still returns at once; waits that prove something does NOT happen use their own timers.
+    expect: { poll: { timeout: 5000 } },
     maxWorkers,
     globalSetup: ['scripts/vitest-slot.ts'],
     projects: [

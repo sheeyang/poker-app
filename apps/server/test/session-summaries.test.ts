@@ -14,18 +14,25 @@ const clock = new InstantClock();
 const databaseUrl = process.env.TEST_DATABASE_URL!;
 const administration = new Pool({ connectionString: databaseUrl });
 afterAll(() => administration.end());
-interface Evaluation { readonly view: ObservableGameView; readonly seed: string; readonly signal?: AbortSignal; readonly result: ReturnType<typeof Promise.withResolvers<PolicyResult>> }
+interface Evaluation { readonly view: ObservableGameView; readonly descriptor: StrategyDescriptor; readonly seed: string; readonly signal?: AbortSignal; readonly result: ReturnType<typeof Promise.withResolvers<PolicyResult>> }
+/** What every Strategy but the held 'fixture' one answers at once: it calls or checks, and bets or raises the least. */
+function callOrCheck(view: ObservableGameView): PolicyResult {
+  const action = view.state.legalActions.find(action => action.type === 'call' || action.type === 'check') ?? view.state.legalActions[0]!;
+  return { choices: [{ action: action.type === 'bet' ? { type: 'bet', betTo: action.minimum } : action.type === 'raise' ? { type: 'raise', raiseTo: action.minimum } : { type: action.type }, probability: 1 }] };
+}
 async function fixture(options: Partial<ServerOptions> = {}) {
   const schema = 'test_' + randomUUID().replaceAll('-', '');
   await administration.query('CREATE SCHEMA "' + schema + '"');
   const evaluations: Evaluation[] = [];
   const held = new Set<Evaluation>();
   const sockets: WebSocket[] = [];
+  /** Whether the Strategies other than 'fixture' wait to be answered too, as 'fixture' always does. */
+  let holdingOthers = false;
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   async function start() {
-    server = await createServer({ clock, databaseUrl, schema, automaticBots: false, supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id), strategyFactory: descriptor => ({
-      policy: { checkCompatibility: () => ({ compatible: true }), evaluate: (view, execution) => { if (descriptor.policy.id !== 'fixture') { const action = view.state.legalActions.find(action => action.type === 'call' || action.type === 'check') ?? view.state.legalActions[0]!; return { choices: [{ action: action.type === 'bet' ? { type: 'bet', betTo: action.minimum } : action.type === 'raise' ? { type: 'raise', raiseTo: action.minimum } : { type: action.type }, probability: 1 }] }; } const result = Promise.withResolvers<PolicyResult>(); const evaluation = { view, seed: execution.evaluationSeed, signal: execution.signal, result }; evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation), () => held.delete(evaluation)); return result.promise; } }, actionSelector: new HighestProbabilitySelector(),
+    server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id), strategyFactory: descriptor => ({
+      policy: { checkCompatibility: () => ({ compatible: true }), evaluate: (view, execution) => { if (descriptor.policy.id !== 'fixture' && !holdingOthers) return callOrCheck(view); const result = Promise.withResolvers<PolicyResult>(); const evaluation = { view, descriptor, seed: execution.evaluationSeed, signal: execution.signal, result }; evaluations.push(evaluation); held.add(evaluation); void result.promise.then(() => held.delete(evaluation), () => held.delete(evaluation)); return result.promise; } }, actionSelector: new HighestProbabilitySelector(),
     }), ...options });
     base = await server.listen({ host: '127.0.0.1', port: 0 });
   }
@@ -41,12 +48,12 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   const post = (t: Table, path: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); }
   async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
-  async function configure(t: Table, referenceStrategy: StrategyDescriptor) { const before = await read(t); expect((await post(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis: false } })).status).toBe(200); }
+  async function configure(t: Table, referenceStrategy: StrategyDescriptor) { expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: false } }) })).status).toBe(200); }
   const request = (t: Table, decisionId = 'hand-1/decision-1') => post(t, 'analysis', { decisionId });
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
   function connect(t: Table) { const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: t.cookie } }); sockets.push(socket); const messages: ServerLiveMessage[] = []; socket.on('error', () => {}); socket.on('message', data => messages.push(JSON.parse(data.toString()))); return { socket, messages }; }
   async function stop() { for (const socket of sockets) socket.terminate(); const closing = server.close(); await expect.poll(() => [...held].every(evaluation => evaluation.signal?.aborted)).toBe(true); for (const evaluation of held) evaluation.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await closing; }
-  return { table, decision, read, post, command, configure, request, result, summary: (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/summaries/' + requestId, { headers: { cookie } }), connect, evaluations, schema, async restart() { await stop(); evaluations.length = 0; await start(); }, async close() { await stop(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
+  return { base: () => base, table, decision, read, post, command, configure, request, result, summary: (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/summaries/' + requestId, { headers: { cookie } }), connect, evaluations, schema, holdOthers(value: boolean) { holdingOthers = value; }, async restart() { await stop(); evaluations.length = 0; await start(); }, async close() { await stop(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); } };
 }
 
 
@@ -219,5 +226,41 @@ test('cold restart loses the exact session request and an explicit new snapshot 
     await expect.poll(async () => (await (await f.summary(t, fresh.requestId)).json()).status).toBe('complete');
     expect((await (await f.summary(t, fresh.requestId)).json()).averages).toEqual({ decisionScore: .325, actionRankScore: .375 });
     expect(f.evaluations).toHaveLength(0); expect(await f.read(t)).toEqual(before);
+  } finally { await f.close(); }
+});
+
+test('a table summary names a supported Strategy: the same frozen decisions, its own request and result, and the Trainer Configuration is untouched', async () => {
+  // Room for every held analysis: the Reference Strategy's four and the named Strategy's four, each then scored.
+  const f = await fixture({ automaticBots: true, jobRunnerOptions: { concurrency: 16, maximumQueued: 16 } });
+  try {
+    const t = await twoHands(f);
+    await f.configure(t, reference);
+    const named = baselinePlayingStrategy;
+    // The named Strategy's analyses wait to be answered, as the Reference Strategy's do, so its summaries are still
+    // pending when they are asked for and cannot complete before their responses: nothing here depends on timing.
+    f.holdOthers(true);
+    const [held, other, hand] = await Promise.all([f.post(t, 'session-summaries', {}), f.post(t, 'session-summaries', { strategy: named }), f.post(t, 'hand-summaries', { handId: 'hand-2', strategy: named })].map(async response => (await response).json()));
+    expect(held).toMatchObject({ scope: 'table-session', status: 'pending', decisionCount: 4, referenceStrategy: reference });
+    expect(other).toMatchObject({ scope: 'table-session', status: 'pending', decisionCount: 4, referenceStrategy: named, decisionIds: held.decisionIds });
+    expect(other.requestId).not.toBe(held.requestId);
+    expect(hand).toMatchObject({ scope: 'hand', referenceStrategy: named });
+    // The Reference Strategy's analyses fail; that is its summary's Error alone: the named Strategy's summaries stay pending, and then complete.
+    const failed = new Set<unknown>();
+    const statuses = () => Promise.all([held, other, hand].map(async summary => (await (await f.summary(t, summary.requestId)).json()).status));
+    await expect.poll(async () => { for (const evaluation of f.evaluations) if (evaluation.descriptor.policy.id === 'fixture' && !failed.has(evaluation)) { failed.add(evaluation); evaluation.result.reject(new Error('Controlled Strategy failure.')); } return statuses(); }).toEqual(['error', 'pending', 'pending']);
+    await expect.poll(() => f.evaluations.filter(evaluation => evaluation.descriptor.policy.id !== 'fixture').length).toBe(4);
+    for (const evaluation of f.evaluations.filter(evaluation => evaluation.descriptor.policy.id !== 'fixture')) evaluation.result.resolve(callOrCheck(evaluation.view));
+    await expect.poll(statuses).toEqual(['error', 'complete', 'complete']);
+    f.holdOthers(false);
+    // Naming the Reference Strategy is asking for none.
+    expect((await (await f.post(t, 'session-summaries', { strategy: reference })).json()).referenceStrategy).toEqual(reference);
+    for (const strategy of [{}, null, 'x', { policy: { id: 'unknown', version: 'v1', configuration: {} }, selector: named.selector }]) {
+      const refused = await f.post(t, 'session-summaries', { strategy });
+      expect(refused.status, JSON.stringify(strategy)).toBe(400);
+      expect(await refused.json()).toMatchObject({ rejection: { code: 'unsupported-strategy' } });
+    }
+    expect((await f.post(t, 'session-summaries', { strategy: named, other: 1 })).status).toBe(400);
+    const configuration = await (await fetch(f.base() + '/api/trainer-configuration', { headers: { cookie: t.cookie } })).json();
+    expect(JSON.stringify(configuration)).toContain('"fixture"');
   } finally { await f.close(); }
 });

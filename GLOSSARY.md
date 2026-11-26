@@ -69,7 +69,7 @@ The one Online Table a Guest is at, from creating, joining or returning to it un
 _Avoid_: Current game, active table
 
 **Closed Table**:
-An Online Table that has ended, after 24 hours without activity or when its Table Owner left with no other human at it. No one can open, join, or act at it, and its completed Hands remain recorded. Practice Tables never close.
+An Online Table that has ended, after 24 hours without activity or when its Table Owner left with no other human at it. No one can join or act at it, and its Table History stays readable. Practice Tables never close.
 _Avoid_: Archived table, ended session
 
 **Join Link**:
@@ -85,7 +85,7 @@ The private durable representation from which an authoritative Table Session can
 _Avoid_: Observable Session History, live Cash Game object, event log
 
 **Persisted Table Session**:
-The complete application-owned durable representation of a Table Session, containing its Table Session Record, its mode, participant controller assignments with each human Participant's Guest and membership, and each human Participant's Trainer configuration needed to continue the session.
+The complete application-owned durable representation of a Table Session, containing its Table Session Record, its mode, and participant controller assignments with each human Participant's Guest and membership.
 _Avoid_: Table Session Record, Cash Game state
 
 **Table Owner**:
@@ -104,9 +104,29 @@ _Avoid_: Player, owner, seat holder
 An application user who has not logged in, identified only by their browser and a display name they choose. Clearing the browser's site data, or using another browser, makes them a new Guest, who cannot reach the old one's tables.
 _Avoid_: Anonymous user, account
 
+**Table History**:
+Every completed Hand of a Table Session, which a viewer reviews from their own participant-safe view: public information for every Hand, and their own hole cards and decisions in the Hands they were dealt. It belongs to the table: anyone who has been a Participant there may read all of it, including Hands completed after their Leave Table and at a Closed Table.
+_Avoid_: Hand log, Observable Session History, Table Session Record
+
+**Replay**:
+Stepping through a completed Hand of Table History one Replay Step at a time, seeing only what the viewer could see at that point, never what was revealed later.
+_Avoid_: Counterfactual Comparison, simulation, hand reconstruction
+
+**Replay Step**:
+One point in a Replay: before each decision, after each street reveal including every all-in runout street, and the Hand's result.
+_Avoid_: Frame, event, Beat
+
+**Overall History**:
+Every Table History a Guest can read, with its filters and Score Summaries across Table Sessions. It lists only the Guest's own decisions, from Hands they were dealt into; its non-score filters (street, Position, action type, table mode, completion date, pot in big blinds) apply at once. Its score filters (Decision Score and Action Rank Score ranges) narrow the list and its Score Summaries only once every analysis of the set the other filters admit has succeeded; until then they show Analyzing or Error.
+_Avoid_: Session summary, account history
+
 **Seat**:
 A numbered table position that may be occupied by at most one Participant and may change between Hands.
 _Avoid_: Participant, position name
+
+**Position**:
+A dealt-in Participant's place in a Hand relative to the button, fixed when the Hand is dealt: BTN, SB, BB, then UTG, UTG+1, UTG+2, LJ, HJ, CO, with middle positions dropped at smaller tables: two seats between the big blind and the button are UTG and CO, and a lone one (four dealt in) is CO. Heads-up, the button posts the small blind and is BTN/SB. Participants not dealt in have no Position.
+_Avoid_: Seat, seat number
 
 **Hand**:
 One complete deal of Hold'em, from its initial forced bets through award of its pots.
@@ -201,8 +221,12 @@ The Strategy assigned to control a Bot's decisions.
 _Avoid_: Reference Strategy
 
 **Reference Strategy**:
-The human-selected Strategy used independently of every Bot's Playing Strategy to supply Policy distributions, concrete selected actions, alignment scores, and counterfactual comparison.
+The Strategy in a Guest's Trainer Configuration, used independently of every Bot's Playing Strategy to supply Policy distributions, concrete selected actions, alignment scores, and the baseline of each Counterfactual Comparison.
 _Avoid_: Playing Strategy
+
+**Trainer Configuration**:
+A Guest's Reference Strategy and Live Analysis setting, chosen once and used at every table, in review and in every summary. Changing it never changes analysis already requested.
+_Avoid_: Table settings, per-table Reference Strategy
 
 **Live Analysis**:
 Optional evaluation of the Reference Strategy for the human's current decision before they act. Its numerical results comprise the Policy's action probabilities and concrete sizings together with the Action Selector's selected action.
@@ -210,14 +234,14 @@ _Avoid_: Advice, best-action instruction
 
 **Allow Live Analysis**:
 An Online Table option, visible to everyone at the table, that the Table Owner changes between Hands. Each Action Window captures it when it opens, so a change applies from the next decision; while it is off, Live Analysis is refused, and post-action analysis and scoring continue.
-_Avoid_: Live Analysis setting (that is each Participant's own preference)
+_Avoid_: Live Analysis setting (that is part of each Guest's Trainer Configuration)
 
 **Reference Strategy Evaluation**:
 The Policy Result and Action Selector's selected concrete action for one fixed observable decision situation and one complete Reference Strategy. Alignment scores additionally depend on the human's accepted concrete action.
 _Avoid_: Decision Score, selected action alone
 
 **Observable Session History**:
-The immutable participant-specific projection of prior Table Session information that was legally observable to a Participant at each point after they joined. Strategies may derive adaptive information from it but do not own persistent cross-hand memory.
+The immutable participant-specific projection of every prior Hand of the Table Session, including Hands before the Participant joined: public information for every Hand, and the Participant's own hole cards in the Hands they were dealt. Every Participant sees the same public history. Strategies may derive adaptive information from it but do not own persistent cross-hand memory.
 _Avoid_: Strategy Memory, unrestricted session history
 
 **Bot**:

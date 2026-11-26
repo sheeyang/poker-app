@@ -23,7 +23,7 @@ let controllers: TableSessionControllerCommands;
 let analysisGate: ReturnType<typeof Promise.withResolvers<void>> | undefined;
 let evaluationsStarted = 0;
 async function startServer() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; },
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; },
     strategyFactory: descriptor => {
       const strategy = createStrategy(descriptor);
       return { actionSelector: strategy.actionSelector, policy: {
@@ -178,7 +178,6 @@ test('a request from anyone not at a table never loads it; a join to an Online T
   const at = (path: string) => '/api/table-sessions/' + t.id + path;
   expect((await get(at(''), stranger)).status).toBe(404);
   expect((await post(at('/seat-participant'), stranger, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(404);
-  expect((await post(at('/set-trainer-configuration'), stranger, { requestId: randomUUID(), expectedSessionRevision: 0, trainerConfiguration: {} })).status).toBe(404);
   expect((await post(at('/analysis'), stranger, { decisionId: 'hand-1/decision-1' })).status).toBe(404);
   expect((await post(at('/session-summaries'), stranger, {})).status).toBe(404);
   expect(await subscription(stranger, t.id)).toMatchObject({ status: 'rejected', code: 'not-found' });

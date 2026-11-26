@@ -1,4 +1,4 @@
-import type { JoinLinkPreview, OpenJoinLinkPreview, ProtectedJoinLinkPreview, SavedTable, TableMode } from '@poker/contracts';
+import { maximumComparedStrategies, strategyFromToken, strategyToken, type JoinLinkPreview, type OpenJoinLinkPreview, type ProtectedJoinLinkPreview, type SavedTable, type StrategyDescriptor, type TableMode } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
 import { formatAndStakes, modeLabel } from './table-model.js';
 
@@ -7,13 +7,23 @@ export const listPath = (mode: TableMode) => `/${mode}` as const;
 /** A table's one address, under its own mode. */
 export const tablePath = (mode: TableMode, tableSessionId: string) => `/${mode}/${tableSessionId}`;
 /**
+ * A table's Table History: its own screen, under its own address and mode. `hand` opens it at that Hand's replay, and
+ * `step` at that Replay Step of it (`stepKey`); a step needs its Hand.
+ */
+export const historyPath = (mode: TableMode, tableSessionId: string, handId?: string, step?: string, compare?: readonly StrategyDescriptor[]) => {
+  const compared = compareParam(compare ?? []);
+  const query = [handId ? `hand=${handId}` : '', handId && step ? `step=${step}` : '', compared ? `compare=${compared}` : ''].filter(Boolean).join('&');
+  return `${tablePath(mode, tableSessionId)}/history${query ? `?${query}` : ''}`;
+};
+/**
  * What an address's path names, the inverse of `listPath` and `tablePath`: a mode's section, and the table in it when
  * there is one; undefined outside the two modes. The table ID is as written: whether it names a table is for the server.
  */
-export function parseAddress(pathname: string): { readonly mode: TableMode; readonly tableSessionId?: string } | undefined {
-  const [, first, second] = pathname.split('/');
+export function parseAddress(pathname: string): { readonly mode: TableMode; readonly tableSessionId?: string; readonly history?: true } | undefined {
+  const [, first, second, third] = pathname.split('/');
   if (first !== 'practice' && first !== 'online') return undefined;
-  return second ? { mode: first, tableSessionId: second } : { mode: first };
+  if (!second) return { mode: first };
+  return third === 'history' ? { mode: first, tableSessionId: second, history: true } : { mode: first, tableSessionId: second };
 }
 
 /** An Online Table's Join Link: its own address, which never changes and which anyone at the table can pass on (ADR-0033). */
@@ -84,10 +94,45 @@ export function tableSearch(search: Record<string, unknown>): { analysis?: Analy
   return analysis ? { analysis } : {};
 }
 
+/**
+ * The Strategies a Counterfactual Comparison holds beside the Reference Strategy, as the address's `compare`: supported
+ * Strategies' tokens (`strategyToken`), comma-separated in the order chosen. Anything unsupported or repeated is dropped,
+ * and no more than the maximum are kept. Undefined when none are left. Selecting Strategies never touches the Guest's
+ * Trainer Configuration: the address is the only place they live.
+ */
+export function compareParam(strategies: readonly StrategyDescriptor[]): string | undefined {
+  const tokens = strategies.map(strategyToken).filter((token, index, all) => strategyFromToken(token) && all.indexOf(token) === index).slice(0, maximumComparedStrategies);
+  return tokens.length ? tokens.join(',') : undefined;
+}
+/** The Strategies a `compare` value names, in order; none for anything that is not a text of supported tokens. */
+export function comparedStrategies(compare: unknown): StrategyDescriptor[] {
+  if (typeof compare !== 'string') return [];
+  const named = compare.split(',').map(strategyFromToken).filter((strategy): strategy is StrategyDescriptor => !!strategy);
+  return named.filter((strategy, index) => named.indexOf(strategy) === index).slice(0, maximumComparedStrategies);
+}
+
+/**
+ * The search a Table History route accepts: `hand=hand-N`, the Hand to replay, and with it `step`, the Replay Step to open
+ * it at: `decision-N` (before that decision), `flop`, `turn`, `river` (after that street's reveal) or `result`; and
+ * `compare`, the Strategies compared beside the Reference Strategy (`compareParam`), at the reader's decisions and in the
+ * table's Score Summary. Only the step needs its Hand.
+ */
+export function historySearch(search: Record<string, unknown>): { hand?: string; step?: string; compare?: string } {
+  const compare = compareParam(comparedStrategies(search.compare));
+  if (typeof search.hand !== 'string' || !/^hand-[0-9]+$/.test(search.hand)) return compare ? { compare } : {};
+  return {
+    hand: search.hand,
+    ...(typeof search.step === 'string' && /^(?:decision-[0-9]+|flop|turn|river|result)$/.test(search.step) ? { step: search.step } : {}),
+    ...(compare ? { compare } : {}),
+  };
+}
+
 const app = 'Poker Trainer';
 export type Page =
   | { readonly page: 'list'; readonly mode: TableMode }
   | { readonly page: 'table'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
+  | { readonly page: 'history'; readonly seatCount: number; readonly smallBlind: number; readonly bigBlind: number }
+  | { readonly page: 'overall-history' }
   | { readonly page: 'join'; readonly ownerName: string }
   | { readonly page: 'missing-table' }
   | { readonly page: 'closed-table' }
@@ -98,6 +143,8 @@ export function pageTitle(page: Page): string {
   switch (page.page) {
     case 'list': return `${modeLabel(page.mode)} · ${app}`;
     case 'table': return `${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
+    case 'history': return `Table History · ${formatAndStakes(page.seatCount, page.smallBlind, page.bigBlind)} · ${app}`;
+    case 'overall-history': return `History · ${app}`;
     case 'join': return `Join ${page.ownerName}’s table · ${app}`;
     case 'missing-table': return `Table not found · ${app}`;
     case 'closed-table': return `Table closed · ${app}`;

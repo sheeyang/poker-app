@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { defaultConfiguration, type JoinLinkPreview, type SavedTable } from '@poker/contracts';
+import { baselinePlayingStrategy, defaultConfiguration, highestProbabilityPlayingStrategy, supportedStrategies, type JoinLinkPreview, type SavedTable, type StrategyDescriptor } from '@poker/contracts';
 import { RequestFailure } from '@poker/client';
-import { analysisTabParam, currentTableRefusal, joinLink, joinPreviewWanted, listPath, pageTitle, parseAddress, tableAddress, tablePath, tableSearch } from '../src/table-address.js';
+import { analysisTabParam, comparedStrategies, currentTableRefusal, historyPath, historySearch, joinLink, joinPreviewWanted, listPath, pageTitle, parseAddress, tableAddress, tablePath, tableSearch } from '../src/table-address.js';
 
 describe('the analysis tab kept in a table address', () => {
   it('accepts live, hand and session, and ignores anything else', () => {
@@ -111,5 +111,62 @@ describe('reading an address', () => {
   });
   it('names nothing outside the two modes', () => {
     for (const path of ['/', '/somewhere', '/somewhere/' + id, '/join/token']) expect(parseAddress(path)).toBeUndefined();
+  });
+});
+
+describe('a table’s Table History address', () => {
+  it('lives under the table’s own address, under its own mode, and names the Hand to open when it has one', () => {
+    expect(historyPath('practice', id)).toBe(`/practice/${id}/history`);
+    expect(historyPath('online', id)).toBe(`/online/${id}/history`);
+    expect(historyPath('online', id, 'hand-37')).toBe(`/online/${id}/history?hand=hand-37`);
+  });
+  it('is read back as the table’s history section, so the table’s own page is not mistaken for it', () => {
+    expect(parseAddress(`/online/${id}/history`)).toEqual({ mode: 'online', tableSessionId: id, history: true });
+    expect(parseAddress(`/practice/${id}`)).toEqual({ mode: 'practice', tableSessionId: id });
+    expect(parseAddress(`/practice/${id}/elsewhere`)).toEqual({ mode: 'practice', tableSessionId: id });
+  });
+  it('keeps a valid Hand in the route search and drops anything else', () => {
+    expect(historySearch({ hand: 'hand-12', other: 1 })).toEqual({ hand: 'hand-12' });
+    for (const bad of ['', 'hand-', 'hand-0x', 'Hand-1', 12, undefined, ['hand-1']]) expect(historySearch({ hand: bad })).toEqual({});
+  });
+  it('holds the Replay Step beside its Hand, so a reload reopens both', () => {
+    for (const step of ['decision-4', 'flop', 'turn', 'river', 'result']) {
+      const address = historyPath('online', id, 'hand-37', step);
+      expect(address).toBe(`/online/${id}/history?hand=hand-37&step=${step}`);
+      expect(historySearch(Object.fromEntries(new URL(address, 'https://trainer.test').searchParams))).toEqual({ hand: 'hand-37', step });
+    }
+    // A step means nothing without its Hand, and an unknown step is dropped.
+    expect(historySearch({ step: 'flop' })).toEqual({});
+    for (const bad of ['', 'preflop', 'decision-', 'decision-x', 'Flop', 3, ['flop']]) expect(historySearch({ hand: 'hand-1', step: bad })).toEqual({ hand: 'hand-1' });
+    expect(historyPath('practice', id, undefined, 'flop')).toBe(`/practice/${id}/history`);
+  });
+  it('holds the compared Strategies beside the Hand and step, in the order chosen, so a reload reproduces the comparison', () => {
+    const compared = [baselinePlayingStrategy, highestProbabilityPlayingStrategy];
+    const address = historyPath('online', id, 'hand-37', 'decision-4', compared);
+    expect(address).toBe(`/online/${id}/history?hand=hand-37&step=decision-4&compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability`);
+    const search = historySearch(Object.fromEntries(new URL(address, 'https://trainer.test').searchParams));
+    expect(search).toEqual({ hand: 'hand-37', step: 'decision-4', compare: 'uniform-choice:seeded-sampling,uniform-choice:highest-probability' });
+    expect(comparedStrategies(search.compare)).toEqual(compared);
+    // The comparison survives a Hand with no step named, and stepping away from it.
+    expect(historyPath('practice', id, 'hand-2', undefined, compared)).toBe(`/practice/${id}/history?hand=hand-2&compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability`);
+    expect(historyPath('practice', id, 'hand-2', 'flop', [])).toBe(`/practice/${id}/history?hand=hand-2&step=flop`);
+    // It is also the table's own comparison, held without a Hand.
+    expect(historyPath('practice', id, undefined, undefined, compared)).toBe(`/practice/${id}/history?compare=uniform-choice:seeded-sampling,uniform-choice:highest-probability`);
+    expect(historySearch({ compare: 'uniform-choice:seeded-sampling', step: 'flop' })).toEqual({ compare: 'uniform-choice:seeded-sampling' });
+  });
+  it('compares only supported Strategies, each once, at most 3', () => {
+    const token = (strategy: StrategyDescriptor) => `${strategy.policy.id}:${strategy.selector.id}`;
+    const [a, b, c, d] = supportedStrategies;
+    const all = [a!, b!, c!, d!].map(token);
+    expect(historySearch({ hand: 'hand-1', compare: all.join(',') })).toEqual({ hand: 'hand-1', compare: all.slice(0, 3).join(',') });
+    expect(historySearch({ hand: 'hand-1', compare: `${all[1]},nonsense,${all[1]},uniform-choice:unknown,${all[0]}` })).toEqual({ hand: 'hand-1', compare: `${all[1]},${all[0]}` });
+    for (const bad of ['', 'nonsense', 7, ['uniform-choice:seeded-sampling'], undefined]) expect(historySearch({ hand: 'hand-1', compare: bad })).toEqual({ hand: 'hand-1' });
+    expect(historySearch({ compare: all[0] })).toEqual({ compare: all[0] });
+    expect(historySearch({ compare: 'nonsense' })).toEqual({});
+    expect(comparedStrategies(undefined)).toEqual([]);
+    expect(comparedStrategies(7)).toEqual([]);
+  });
+  it('titles its page by the table’s format and stakes', () => {
+    expect(pageTitle({ page: 'history', seatCount: 6, smallBlind: 10, bigBlind: 20 })).toBe('Table History · 6-max Hold’em · 10 / 20 · Poker Trainer');
   });
 });

@@ -19,7 +19,7 @@ const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 async function start() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, automaticBots: false, databaseUrl: databaseUrl!, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await start(); });
@@ -124,7 +124,6 @@ test('a Guest who has not joined a table is refused every route and live subscri
       ['POST', '/set-button', { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, seat: 2 }],
       ['POST', '/set-playing-strategy', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, participantId: owner.bot, playingStrategy: highestProbabilityPlayingStrategy }],
       ['POST', '/retry-bot', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, participantId: owner.bot }],
-      ['POST', '/set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true } }],
       ['POST', '/analysis', { decisionId: 'hand-1/decision-1' }],
       ['GET', '/analysis/' + analysisRequestId],
       ['POST', '/analysis/' + analysisRequestId + '/retry', {}],
@@ -169,8 +168,9 @@ test('each human acts, manages and studies only through their own Participant, a
   const ben = { ...owner, cookie: otherCookie };
 
   const seen = await read(ben);
-  // Joining after the Hand, Ben observes none of it.
-  expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [] } });
+  // Joining after the Hand, Ben reads it in the table's history, with nobody's hole cards.
+  expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [{ handId: 'hand-1', result: { status: 'completed-hand' } }] } });
+  expect(JSON.stringify(seen.view.history)).not.toContain('holeCards');
   expect(seen.view.state.participants).toEqual(expect.arrayContaining([{ participantId: owner.human, seat: 1, stack: 990, sittingOut: false }, { participantId: owner.bot, seat: 2, stack: 1010, sittingOut: false }]));
   expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
   for (const cookie of [leftCookie, removedCookie]) {
@@ -181,16 +181,15 @@ test('each human acts, manages and studies only through their own Participant, a
   expect(await (await get('/api/table-sessions', otherCookie)).json()).toMatchObject({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
   expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: owner.id, mode: 'online' }));
 
-  // Trainer configuration belongs to each Participant. Another Guest's identical retry never receives its outcome.
+  // The Trainer Configuration belongs to each Guest: the same table presents each viewer their own.
   const ownerStudy = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true };
   const otherStudy = { referenceStrategy: baselinePlayingStrategy, liveAnalysis: false };
-  const study = { requestId: 'study', expectedSessionRevision: (await read(owner)).sessionRevision, trainerConfiguration: ownerStudy };
-  const configure = (cookie: string, body: object) => post('/api/table-sessions/' + owner.id + '/set-trainer-configuration', cookie, body);
-  expect((await configure(owner.cookie, study)).status).toBe(200);
-  expect(await refusal(await configure(otherCookie, study))).toEqual({ status: 409, code: 'request-id-conflict' });
+  const configure = (cookie: string, trainerConfiguration: object) => fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'study', trainerConfiguration }) });
+  const unchanged = await read(owner);
+  expect((await configure(owner.cookie, ownerStudy)).status).toBe(200);
   expect(await read(ben)).toMatchObject({ trainerConfiguration: defaultTrainerConfiguration });
-  expect((await configure(otherCookie, { requestId: randomUUID(), expectedSessionRevision: (await read(ben)).sessionRevision, trainerConfiguration: otherStudy })).status).toBe(200);
-  expect(await read(owner)).toMatchObject({ trainerConfiguration: ownerStudy });
+  expect((await configure(otherCookie, otherStudy)).status).toBe(200);
+  expect(await read(owner)).toMatchObject({ pokerRevision: unchanged.pokerRevision, sessionRevision: unchanged.sessionRevision, trainerConfiguration: ownerStudy });
   expect(await read(ben)).toMatchObject({ trainerConfiguration: otherStudy });
 
   // Nobody acts for or manages another human, the owner included; only the owner deals and manages Bots.

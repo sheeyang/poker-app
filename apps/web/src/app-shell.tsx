@@ -11,6 +11,7 @@ import { currentTableId, withMembershipEnded } from './current-table.js';
 import { MySettings } from './my-settings.js';
 import { OverlayScroll } from './overlay-scroll.js';
 import { CurrentTableBanner } from './current-table-banner.js';
+import type { UserChannelListener } from './request-progress.js';
 
 type TableConsumers = Pick<LiveConsumers, 'onReady' | 'onAnalysisUpdate'>;
 interface Shell {
@@ -19,6 +20,11 @@ interface Shell {
   readonly live: ReturnType<typeof useTableSynchronization>;
   /** The open table's analysis consumers: the table page registers them, the shell's one live connection feeds them. */
   readonly consumeLive: (consumers: TableConsumers | null) => void;
+  /**
+   * Has a followed request hear the user channel: its readiness, `progress` and request notices, alongside every other
+   * one on show. Returns the way to stop.
+   */
+  readonly followRequests: (listener: UserChannelListener) => () => void;
 }
 const ShellContext = createContext<Shell | null>(null);
 export function useShell(): Shell {
@@ -27,9 +33,9 @@ export function useShell(): Shell {
   return shell;
 }
 
-/** The section an address belongs to: each mode's list and tables, an Online Table's Join Link included. */
-function sectionOf(pathname: string): TableMode | undefined {
-  return parseAddress(pathname)?.mode;
+/** The section an address belongs to: each mode's list and tables (an Online Table's Join Link included), or Overall History. */
+function sectionOf(pathname: string): TableMode | 'history' | undefined {
+  return pathname === '/history' ? 'history' : parseAddress(pathname)?.mode;
 }
 
 /** Sets the browser-tab title while a page is shown. */
@@ -51,6 +57,8 @@ export function AppShell() {
   const command = useCommand();
   const consumers = useRef<TableConsumers | null>(null);
   const [consumeLive] = useState(() => (next: TableConsumers | null) => { consumers.current = next; });
+  const requestListeners = useRef(new Set<UserChannelListener>());
+  const [followRequests] = useState(() => (listener: UserChannelListener) => { requestListeners.current.add(listener); return () => { requestListeners.current.delete(listener); }; });
   // The saved tables say which Online Table is the Guest's Current Table; the shell follows it live from every page.
   const saved = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
   const currentTable = currentTableId(saved.data?.tables) ?? null;
@@ -65,11 +73,15 @@ export function AppShell() {
       void queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       setNotice(ended.closed ? 'That table closed, so you are no longer at it.' : 'You are no longer at that table.');
     },
-    onReady: lifecycle => consumers.current?.onReady?.(lifecycle),
-    onAnalysisUpdate: (update, lifecycle) => consumers.current?.onAnalysisUpdate?.(update, lifecycle),
+    onReady: lifecycle => { consumers.current?.onReady?.(lifecycle); for (const listener of requestListeners.current) listener.ready(); },
+    // A table summary's notice is also the followed request's: the table's own analysis resources hear it as before.
+    onAnalysisUpdate: (update, lifecycle) => { consumers.current?.onAnalysisUpdate?.(update, lifecycle); for (const listener of requestListeners.current) listener.notice(update); },
+    onProgress: update => { for (const listener of requestListeners.current) listener.progress(update); },
+    onOverallHistoryUpdate: update => { for (const listener of requestListeners.current) listener.notice(update); },
   }, currentTable);
-  const shell: Shell = { identity, command, live, consumeLive };
-  const atTable = tableSessionId !== null;
+  const shell: Shell = { identity, command, live, consumeLive, followRequests };
+  // Table History is a page of its own: it follows the table live, but is laid out as a page, not as the table.
+  const atTable = tableSessionId !== null && !parseAddress(pathname)?.history;
   // A notice about leaving belongs to the list it returned to, not to the next table.
   useEffect(() => { if (atTable) setNotice(null); }, [atTable]);
   const section = sectionOf(pathname);
@@ -81,6 +93,7 @@ export function AppShell() {
         <nav aria-label="Sections">
           <Link to="/practice" className={section === 'practice' ? 'nav-active' : undefined} aria-current={pathname === '/practice' ? 'page' : section === 'practice' ? 'location' : undefined}><Icon name="cards" size={18} /><span>Practice</span></Link>
           <Link to="/online" className={section === 'online' ? 'nav-active' : undefined} aria-current={pathname === '/online' ? 'page' : section === 'online' ? 'location' : undefined}><Icon name="tables" size={18} /><span>Online</span></Link>
+          <Link to="/history" className={section === 'history' ? 'nav-active' : undefined} aria-current={section === 'history' ? 'page' : undefined}><Icon name="history" size={18} /><span>History</span></Link>
         </nav>
         <span className="identity-status">{!identity.isSuccess && <span className="identity-text">{identity.isError ? 'Connection unavailable' : 'Connecting…'}</span>}{identity.isSuccess && <MySettings />}</span>
       </header>

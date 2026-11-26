@@ -88,28 +88,36 @@ test('button rotation starts clockwise from the frozen previous button, skips in
   expect(cashGame.getHand('hand-4')).toMatchObject({ buttonSeat: 5 });
 });
 
-test('Participant observations follow identity across movement and rejoining, exclude absence, and include seated sit-out observation', () => {
+test('Participant histories follow identity across movement, absence and rejoining, cover the whole Table Session, and include seated sit-out observation', () => {
   const cashGame = game(); cashGame.seatParticipant('observer', 3); cashGame.setSittingOut('observer', true);
   cashGame.startHand(); cashGame.act('alice', { type: 'fold' });
   const old = cashGame.forParticipant('alice').getView().history;
   expect(old.map(h => h.handId)).toEqual(['hand-1']);
+  expect(old[0]!.decisions[0]!.state.participants.find(p => p.participantId === 'alice')!.holeCards).toHaveLength(2);
   expect(cashGame.forParticipant('observer').getView().history.map(h => h.handId)).toEqual(['hand-1']);
-  expect(cashGame.forParticipant('stranger').getView().history).toEqual([]);
+  // Public history needs no membership; only a Participant's own hole cards depend on who they are.
+  const publicHandOne = cashGame.forParticipant('stranger').getView().history[0]!;
+  expect(publicHandOne.decisions[0]!.state.participants.some(p => p.holeCards)).toBe(false);
   cashGame.moveParticipant('alice', 2); cashGame.standUpParticipant('alice'); cashGame.leaveTable('alice');
   cashGame.seatParticipant('newcomer', 1);
   cashGame.startHand(); cashGame.act('bob', { type: 'fold' });
-  expect(cashGame.forParticipant('alice').getView().history).toEqual(old);
-  expect(cashGame.forParticipant('newcomer').getView().history.map(h => h.handId)).toEqual(['hand-2']);
+  // Alice keeps her own view of Hand 1 and sees Hand 2, completed while she was away. The newcomer in her old Seat sees Hand 1 without her cards.
+  const away = cashGame.forParticipant('alice').getView().history;
+  expect(away.map(h => h.handId)).toEqual(['hand-1', 'hand-2']);
+  expect(away[0]).toEqual(old[0]);
+  const newcomer = cashGame.forParticipant('newcomer').getView().history;
+  expect(newcomer.map(h => h.handId)).toEqual(['hand-1', 'hand-2']);
+  expect(newcomer[0]).toEqual(publicHandOne);
   cashGame.seatParticipant('alice', 5); cashGame.startHand();
   while (cashGame.forParticipant('bob').getView().state.actorId) cashGame.act(cashGame.forParticipant('bob').getView().state.actorId!, { type: 'fold' });
-  expect(cashGame.forParticipant('alice').getView().history).toMatchObject([old[0], { handId: 'hand-3', description: 'Completed Hand 3' }]);
+  expect(cashGame.forParticipant('alice').getView().history).toMatchObject([old[0], away[1], { handId: 'hand-3', description: 'Completed Hand 3' }]);
   expect(old).toHaveLength(1);
   const restored = CashGame.fromRecord(cashGame.toRecord());
   if (!restored.ok) throw new Error('Expected complete management replay.');
   expect(restored.game.forParticipant('alice').getView()).toEqual(cashGame.forParticipant('alice').getView());
 });
 
-test('presentation events preserve the originating Hand’s observer membership after absence and later rejoining', () => {
+test('presentation events reach a Participant only while they are joined, and a Hand completed during their absence still enters their history', () => {
   const cashGame = game({ ...configuration, ante: 10, minimumBuyIn: 10, defaultBuyIn: 10 });
   cashGame.seatParticipant('observer', 3, 10);
   const stood = cashGame.standUpParticipant('observer');
@@ -119,10 +127,10 @@ test('presentation events preserve the originating Hand’s observer membership 
   const missed = cashGame.startHand();
   if (!missed.ok) throw new Error('Expected forced all-in Hand.');
   expect(cashGame.getHand('hand-1')?.completed).toBe(true);
-  const copiedEvents = structuredClone(missed.events);
-  expect(cashGame.forParticipant('observer').getView()).toMatchObject({ state: { board: [], actorId: null }, history: [] });
-  expect(cashGame.forParticipant('observer').projectEvents(copiedEvents)).toEqual([]);
-  expect(cashGame.forParticipant('alice').projectEvents(copiedEvents).filter(event => event.type === 'hole-cards-revealed')).toHaveLength(2);
+  expect(cashGame.forParticipant('observer').getView()).toMatchObject({ state: { board: [], actorId: null } });
+  expect(cashGame.forParticipant('observer').getView().history.map(hand => hand.handId)).toEqual(['hand-1']);
+  expect(cashGame.forParticipant('observer').projectEvents(structuredClone(missed.events))).toEqual([]);
+  expect(cashGame.forParticipant('alice').projectEvents(structuredClone(missed.events)).filter(event => event.type === 'hole-cards-revealed')).toHaveLength(2);
   cashGame.seatParticipant('observer', 3, 10);
   cashGame.setSittingOut('observer', true);
   for (const participant of ['alice', 'bob']) { cashGame.standUpParticipant(participant); cashGame.seatParticipant(participant, participant === 'alice' ? 1 : 4, 10); }
@@ -130,8 +138,7 @@ test('presentation events preserve the originating Hand’s observer membership 
   if (!observed.ok) throw new Error('Expected next all-in Hand.');
   expect(cashGame.forParticipant('observer').projectEvents(observed.events).filter(event => event.type === 'board-dealt')).toHaveLength(3);
   expect(cashGame.forParticipant('observer').projectEvents(observed.events).filter(event => event.type === 'card-burned')).toEqual([{ type: 'card-burned', street: 'flop' }, { type: 'card-burned', street: 'turn' }, { type: 'card-burned', street: 'river' }]);
-  expect(cashGame.forParticipant('observer').projectEvents(copiedEvents)).toEqual([]);
-  expect(cashGame.forParticipant('observer').getView().history.map(hand => hand.handId)).toEqual(['hand-2']);
+  expect(cashGame.forParticipant('observer').getView().history.map(hand => hand.handId)).toEqual(['hand-1', 'hand-2']);
 });
 
 test('every between-Hand command rejects active changes atomically and complete command replay and forks stay independent', () => {

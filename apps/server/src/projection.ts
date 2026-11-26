@@ -1,4 +1,4 @@
-import { presentingPhase, readPhaseInputs, type ConcreteAction, type ObservableTableOptions, type ObservableCashGameState, type ObservableGameConfiguration, type ObservablePresentationEvent, type ObservableTableSession, type ObservableTableUpdate, type ParticipantBinding, type PresentedPhase, type StrategyDescriptor, type TableOptions, type TableSchedule } from '@poker/contracts';
+import { presentingPhase, readPhaseInputs, type ConcreteAction, type ObservableTableOptions, type ObservableCashGameState, type ObservableGameConfiguration, type ObservablePresentationEvent, type ObservableTableSession, type ObservableTableUpdate, type ParticipantBinding, type PresentedPhase, type StrategyDescriptor, type TableOptions, type TableSchedule, type TrainerConfiguration } from '@poker/contracts';
 import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
 import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
 import { handInProgress } from './after-hand.js';
@@ -69,11 +69,11 @@ function projectSchedule(schedule: TableSchedule): TableSchedule {
   };
 }
 /**
- * Projects the table for one viewing human Participant, including only that Participant's own study settings.
+ * Projects the table for one viewing human Participant, with their Guest's current Trainer Configuration.
  * `serverTime` is the injected clock's time at projection; `connected` lists the human Participants with a live
  * connection to the table at that time, which an Online Table's view shows.
  */
-export function projectTableSession(aggregate: PersistedTableSession, participantId: string, game: CashGame | undefined, serverTime: number, adminMode = true, connected: readonly string[] = []): ObservableTableSession {
+export function projectTableSession(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame | undefined, serverTime: number, adminMode = false, connected: readonly string[] = []): ObservableTableSession {
   const viewer = findBinding(aggregate, participantId);
   if (!isHuman(viewer)) throw new Error('Table views are projected only for a human Participant.');
   if (!game) {
@@ -93,7 +93,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectTableOptions(aggregate), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
-    trainerConfiguration: { referenceStrategy: projectStrategy(viewer.trainerConfiguration.referenceStrategy), liveAnalysis: viewer.trainerConfiguration.liveAnalysis },
+    trainerConfiguration: { referenceStrategy: projectStrategy(trainerConfiguration.referenceStrategy), liveAnalysis: trainerConfiguration.liveAnalysis },
     schedule: projectSchedule(aggregate.schedule), serverTime,
     pendingChanges: aggregate.pendingChanges.map(entry => ({ participantId: entry.participantId, change: entry.change })),
     ...(aggregate.mode === 'online' ? { connectedParticipantIds: [...connected] } : {}),
@@ -110,7 +110,7 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
     },
   };
 }
-export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = true, connected: readonly string[] = []): ObservableTableUpdate {
+export function projectTableUpdate(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame, serverTime: number, events: readonly CashGameEvent[] = [], adminMode = false, connected: readonly string[] = []): ObservableTableUpdate {
   // biome-ignore lint/suspicious/useIterableCallbackReturn: exhaustive switch over the event union; the compiler rejects a missing case.
   const presentationEvents = game.forParticipant(participantId).projectEvents(events).map((event): ObservablePresentationEvent => {
     switch (event.type) {
@@ -133,5 +133,5 @@ export function projectTableUpdate(aggregate: PersistedTableSession, participant
       case 'hand-completed': return { type: event.type, handId: event.handId };
     }
   });
-  return { type: 'table-update', ...projectTableSession(aggregate, participantId, game, serverTime, adminMode, connected), presentationEvents };
+  return { type: 'table-update', ...projectTableSession(aggregate, participantId, trainerConfiguration, game, serverTime, adminMode, connected), presentationEvents };
 }

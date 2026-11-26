@@ -21,7 +21,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controller: TableSessionControllerCommands;
 async function start() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controller = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, adminMode: true, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controller = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await start(); });
@@ -193,7 +193,6 @@ test('a Guest who left returns through the same Join Link as the same Participan
   expect((await command(table, ben, 'leave-table', { participantId: benId })).status).toBe(200);
   expect(await refusal(await get('/api/table-sessions/' + table.id, ben))).toEqual({ status: 404, code: 'not-found' });
   expect(await refusal(await post('/api/table-sessions/' + table.id + '/set-sitting-out', ben, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: benId, sittingOut: true }))).toEqual({ status: 404, code: 'not-found' });
-  expect(await refusal(await post('/api/table-sessions/' + table.id + '/set-trainer-configuration', ben, { requestId: randomUUID(), expectedSessionRevision: 0, trainerConfiguration: {} }))).toEqual({ status: 404, code: 'not-found' });
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: ben } });
   const messages: { type: string; status?: string; code?: string }[] = [];
   socket.on('message', data => messages.push(JSON.parse(data.toString())));
@@ -252,7 +251,7 @@ async function deal(t: Table) {
 }
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000 };
 
-test('unseated Participants see the public table and the Hand in progress, and their history begins when they join', async () => {
+test('unseated Participants see the public table and the Hand in progress, and the whole Table Session\'s history, Hands from before they joined included', async () => {
   const table = await online(await guest('Ann'), { configuration: stakes, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }, { name: 'Tim', playingStrategy: baselinePlayingStrategy }] });
   const [ann, rex] = table.bindings.map(binding => binding.participantId) as [string, string, string];
   expect((await command(table, table.owner, 'seat-participant', { participantId: rex, seat: 1 })).status).toBe(200);
@@ -274,7 +273,7 @@ test('unseated Participants see the public table and the Hand in progress, and t
   expect(actor).toBe(rex);
   expect(watching.view.history.flatMap(hand => hand.decisions)).toEqual([]);
 
-  // A Bot's accepted action and the Hand's result are public to everyone who was joined for them.
+  // A Bot's accepted action and the Hand's result are public to everyone at the table, whenever they joined.
   const accepted = await controller.submitAction(table.id, { requestId: randomUUID(), expectedPokerRevision: watching.pokerRevision, participantId: actor, action: { type: 'fold' } });
   expect(accepted.ok).toBe(true);
   const cy = await guest('Cy');
@@ -284,10 +283,12 @@ test('unseated Participants see the public table and the Hand in progress, and t
     expect(seen.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
     expect(seen.view.history).toMatchObject([{ handId: 'hand-1', decisions: [{ action: { participantId: actor, action: { type: 'fold' } } }], result: { status: 'completed-hand' } }]);
   }
-  // Cy joined after the Hand and observes none of it.
+  // Cy joined after the Hand: it is not on his live table, but he reads it as Ben, who watched it, does. No showdown revealed anyone's cards.
   const late = await read(table, cy);
-  expect(late.view.history).toEqual([]);
   expect(late.view.state.handId).toBeUndefined();
+  expect(late.view.history).toEqual((await read(table, ben)).view.history);
+  expect(JSON.stringify(late.view.history)).not.toContain('holeCards');
+  expect(JSON.stringify(late)).not.toMatch(/"(?:seed|deck|burns|commands)"\s*:/);
 });
 
 test('any Participant takes an empty Seat within the buy-in limits, even during a Hand, and only for themselves', async () => {

@@ -15,7 +15,7 @@ const schema = 'test_' + randomUUID().replaceAll('-', '');
 const administration = new Pool({ connectionString: databaseUrl });
 let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
-beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); server = await createServer({ clock, databaseUrl, schema }); base = await server.listen({ host: '127.0.0.1', port: 0 }); });
+beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, databaseUrl, schema }); base = await server.listen({ host: '127.0.0.1', port: 0 }); });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
 async function table(botCount = 1, configuration?: { ante: number; minimumBuyIn: number; defaultBuyIn: number }) {
   const identity = await fetch(base + '/api/identity');
@@ -59,7 +59,8 @@ test('Bots automatically complete a Hand while the Table Owner’s human Partici
   await command(t, 'start-hand');
   await expect.poll(async () => (await read(t)).inspection.completedHands).toEqual([{ handId: 'hand-1', sequence: 1 }]);
   await expect.poll(async () => (await read(t)).runtimeStatus?.phase).toBe('idle');
-  expect(await read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, runtimeStatus: { phase: 'idle' }, view: { state: { status: 'completed-hand', actorId: null, legalActions: [] }, history: [] } });
+  // The owner's history covers the whole Table Session, so it holds the Bots' Hand, though the owner was never dealt in.
+  expect(await read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, runtimeStatus: { phase: 'idle' }, view: { state: { status: 'completed-hand', actorId: null, legalActions: [] }, history: [{ handId: 'hand-1', description: 'Completed Hand 1', result: { status: 'completed-hand' } }] } });
   expect((await read(t)).view.state).not.toHaveProperty('handId');
   expect(JSON.stringify((await read(t)).view)).not.toMatch(/"(?:holeCards|seed|deck|burns)"\s*:/);
 });

@@ -25,7 +25,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let server: Awaited<ReturnType<typeof createServer>>;
   let base: string;
   async function start() {
-    server = await createServer({ clock, databaseUrl, schema, automaticBots: false,
+    server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false,
       supportsStrategy: value => !!value && typeof value === 'object' && ['fixture', 'uniform-choice', 'simple-heuristic'].includes((value as StrategyDescriptor).policy?.id),
       strategyFactory: descriptor => {
         let compatibilityView: ObservableGameView;
@@ -56,7 +56,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   const post = (t: Table, path: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); }
   async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
-  async function configure(t: Table, referenceStrategy: StrategyDescriptor) { const before = await read(t); expect((await post(t, 'set-trainer-configuration', { requestId: randomUUID(), expectedSessionRevision: before.sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis: false } })).status).toBe(200); }
+  async function configure(t: Table, referenceStrategy: StrategyDescriptor) { expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: false } }) })).status).toBe(200); }
   const request = async (t: Table) => post(t, 'analysis', { decisionId: (await read(t)).view.state.decisionId });
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
   function connect(t: Table) { const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: t.cookie } }); sockets.push(socket); const messages: ServerLiveMessage[] = []; socket.on('message', data => messages.push(JSON.parse(data.toString()))); return { socket, messages }; }

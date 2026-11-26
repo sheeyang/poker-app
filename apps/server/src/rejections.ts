@@ -7,6 +7,8 @@ import { onlineTableCapacity, type ApplicationRejection } from '@poker/contracts
 export const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 export const requestIdConflict = () => reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
 export const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
+/** A request without an established local identity: the Trainer establishes one when it opens. */
+export const unauthenticated = () => reject('unauthenticated', 'Open the Trainer to establish your local identity.');
 export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options.');
 export const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
 /** A Guest is at one Online Table at a time: creating, joining or returning to another waits until they leave it. */

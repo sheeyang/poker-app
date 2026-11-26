@@ -93,6 +93,14 @@ function ghost(ctx: MotionContext, kind: GhostKind, b: Box, opts: { readonly tex
   (kind === 'back' || kind === 'small-back' ? ctx.under : ctx.fx).append(g);
   return g;
 }
+/**
+ * A ghost of motion whose moment is still to come (`elapsed` below 0, as a replay times a step's later phases) stays
+ * unseen until that moment, as it would if the motion started then. Delays within the motion still show it waiting.
+ */
+function unseenUntilDue(ctx: MotionContext, g: HTMLElement, t: Timing) {
+  const wait = -(t.elapsed ?? 0);
+  if (wait > 0) play(ctx, g, [{ visibility: 'hidden' }, { visibility: 'hidden' }], { duration: wait, easing: 'linear', fill: 'none' });
+}
 function disposeWith(g: HTMLElement, animation: Animation | undefined) {
   if (!animation) { g.remove(); return; }
   animation.addEventListener('finish', () => g.remove());
@@ -112,6 +120,7 @@ export function fly(ctx: MotionContext, kind: GhostKind, from: Box | undefined, 
   const mid: Keyframe[] = t.arc ? [{ offset: .5, translate: `${dx / 2}px ${dy / 2 - t.arc}px`, scale: String((s + 1) / 2), rotate: `${(r0 + r1) / 2}deg` }] : [];
   const start: Keyframe = { translate: `${dx}px ${dy}px`, scale: String(s), rotate: `${r0}deg`, opacity: 1 };
   const frames: Keyframe[] = [...(t.hideBefore ? [{ ...start, opacity: 0 }, { ...start, offset: .01 }] : [start]), ...mid, { translate: '0px 0px', scale: '1', rotate: `${r1}deg`, opacity: t.fadeOut ? 0 : 1 }];
+  unseenUntilDue(ctx, g, t);
   disposeWith(g, play(ctx, g, frames, { fill: 'both', ...t }));
 }
 
@@ -119,6 +128,7 @@ export function fly(ctx: MotionContext, kind: GhostKind, from: Box | undefined, 
 export function stay(ctx: MotionContext, kind: GhostKind, b: Box | undefined, frames: Keyframe[], t: Timing & { readonly text?: string; readonly html?: string; readonly className?: string }) {
   if (!b || over(t)) return;
   const g = ghost(ctx, kind, b, { text: t.text, html: t.html, className: t.className });
+  unseenUntilDue(ctx, g, t);
   disposeWith(g, play(ctx, g, frames, { fill: 'both', ...t }));
 }
 

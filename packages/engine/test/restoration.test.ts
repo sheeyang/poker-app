@@ -99,7 +99,7 @@ test('restoration accepts plain replay data only, rejecting accessors and non-da
   ]) expect(CashGame.fromRecord(malformed)).toMatchObject({ ok: false, rejection: { code: 'invalid-record' } });
 });
 
-test('history retains full original observed decisions and results without transferring observations to a new seat occupant', () => {
+test('history retains full original decisions and results, and a new Seat occupant sees them publicly without the earlier occupant\'s cards', () => {
   const cashGame = game(); cashGame.seatParticipant('observer', 3); cashGame.setSittingOut('observer', true);
   cashGame.startHand();
   const first = cashGame.forParticipant('alice').getView();
@@ -110,15 +110,21 @@ test('history retains full original observed decisions and results without trans
   expect(observer.history[0].decisions[0].state.participants.every(p => !p.holeCards)).toBe(true);
   expect(observer.history[0].decisions[0].state.legalActions).toEqual([]);
   cashGame.standUpParticipant('alice'); cashGame.leaveTable('alice'); cashGame.seatParticipant('newcomer', 1);
-  expect(cashGame.forParticipant('newcomer').getView().history).toEqual([]);
-  expect(cashGame.forParticipant('newcomer').getView().state).not.toHaveProperty('handId');
-  expect(() => cashGame.forParticipant('newcomer').getView({ at: { decisionId: 'hand-1/decision-1' } })).toThrow(RangeError);
+  // The newcomer in Alice's old Seat sees Hand 1 as the observer does, never with Alice's cards.
+  const newcomer = cashGame.forParticipant('newcomer').getView();
+  expect(newcomer.history).toEqual(observer.history);
+  expect(newcomer.state).not.toHaveProperty('handId');
+  expect(newcomer.state.participants.some(p => p.holeCards)).toBe(false);
+  expect(cashGame.forParticipant('newcomer').getView({ at: { decisionId: 'hand-1/decision-1' } })).toEqual(cashGame.forParticipant('observer').getView({ at: { decisionId: 'hand-1/decision-1' } }));
   cashGame.startHand(); cashGame.act('bob', { type: 'fold' });
-  expect(cashGame.forParticipant('alice').getView().history).toEqual(completed.history);
-  expect(() => cashGame.forParticipant('alice').getView({ at: { decisionId: 'hand-2/decision-1' } })).toThrow(RangeError);
+  // Alice, away for Hand 2, keeps her own Hand 1 and sees Hand 2 publicly.
+  const away = cashGame.forParticipant('alice').getView().history;
+  expect(away.map(h => h.handId)).toEqual(['hand-1', 'hand-2']);
+  expect(away[0]).toEqual(completed.history[0]);
+  expect(cashGame.forParticipant('alice').getView({ at: { decisionId: 'hand-2/decision-1' } }).state).toEqual(cashGame.forParticipant('observer').getView({ at: { decisionId: 'hand-2/decision-1' } }).state);
   cashGame.seatParticipant('alice', 2); cashGame.setButton(2); cashGame.startHand();
   const rejoined = cashGame.forParticipant('alice').getView();
-  expect(rejoined.history.map(h => h.handId)).toEqual(['hand-1']);
+  expect(rejoined.history).toEqual(away);
   expect(cashGame.forParticipant('alice').getView({ at: { decisionId: 'hand-1/decision-1' } })).toEqual(first);
   expect(cashGame.forParticipant('observer').getView().history.map(h => h.handId)).toEqual(['hand-1', 'hand-2']);
   expect(() => { (completed.history[0].decisions[0].state.board as string[]).push('As'); }).toThrow();

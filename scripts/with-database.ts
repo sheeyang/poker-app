@@ -196,6 +196,8 @@ async function run() {
       process.env.PORT ??= await free();
       process.env.POKER_WEB_PORT ??= await free();
       process.env.POKER_API_TARGET ??= `http://127.0.0.1:${process.env.PORT}`;
+      // Development is the only place Admin Mode (completed-Hand inspection) is on; an explicit value wins.
+      process.env.POKER_ADMIN_MODE ??= 'true';
       const webUrl = `http://127.0.0.1:${process.env.POKER_WEB_PORT}/`, apiUrl = `http://127.0.0.1:${process.env.PORT}/`;
       await register({ webUrl, apiUrl });
       console.log(`[dev] Isolated run ${record!.id}. Web: ${webUrl}  API: ${apiUrl}  Stop: pnpm dev:stop ${record!.id}`);

@@ -7,7 +7,8 @@ export interface ServerClock {
   now(): number;
   /**
    * Calls `callback` once, at or after server time `at`. The returned function cancels it. `purpose` tells play
-   * timing (the default) from housekeeping that nobody at a table sees, such as unloading an idle table.
+   * timing (the default) from housekeeping that nobody at a table sees, such as unloading an idle table or spacing a
+   * Guest's `progress` messages.
    */
   setTimer(at: number, callback: () => void, purpose?: TimerPurpose): () => void;
 }

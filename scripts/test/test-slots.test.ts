@@ -80,7 +80,10 @@ test('callers waiting for a slot report who holds the busy ones', async () => {
   await take({ slots: 1 });
   const reports: string[] = [];
   const waiting = acquireSlot({ directory, slots: 1, pollMs: 10, onWait: holders => reports.push(holders) });
-  expect(await settlesWithin(waiting, 100)).toBe(false);
+  // Wait for the report itself, however long the machine takes; the slot stays held, so the caller is still waiting.
+  await expect.poll(() => reports.length, { timeout: 10_000 }).toBe(1);
+  expect(await settlesWithin(waiting, 50)).toBe(false);
+  // Reported once, not on every poll.
   expect(reports).toHaveLength(1);
   expect(reports[0]).toContain(String(process.pid));
   await held[0].release();

@@ -42,6 +42,38 @@ must be 1-20 characters of letters, digits, spaces and basic punctuation
 until a name exists, and the human Participant takes the Guest's name at creation
 and keeps it when the Guest later edits their name.
 
+The Guest's Trainer Configuration (their Reference Strategy and Live Analysis
+setting) belongs to the Guest, not to any table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+It is stored with their identity; a Guest who never changed it has the default,
+with Live Analysis on. `GET /api/trainer-configuration` answers `{ ok: true,
+trainerConfiguration }`. `PUT /api/trainer-configuration` with `{ requestId,
+trainerConfiguration }` changes it for every table and answers the same shape.
+It carries no table revision. The same `requestId` and configuration apply once
+and answer the original outcome again; the same `requestId` with another
+configuration is 409 `request-id-conflict`. Anything but a complete
+`referenceStrategy` and boolean `liveAnalysis` is 400
+`invalid-trainer-configuration`, and an unsupported Strategy 400
+`unsupported-strategy`. Both routes answer 401 without an identity. Once a change
+commits, every `/api/live` connection of that Guest receives
+`{ type: 'trainer-configuration-changed' }`, with nothing else: each tab reads the
+configuration and its table views and analysis again over HTTP. Every analysis or
+summary request captures the Reference Strategy at request time, and keeps it
+after later changes.
+
+#### Progress on the user channel
+
+A Score Summary request that is pending (an Overall History summary or score-filtered list, or a table's Hand,
+Session or Table History summary) reports how many of the analyses it needs have succeeded, out of all of them, as
+`progress: { succeeded, total }` in every HTTP response ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+Each Guest's `/api/live` connections also hear it as `{ type: 'progress', progress: [{ resource, requestId, succeeded,
+total }, …] }`, where `resource` is `overall-history-summary`, `overall-history-scored` or `summary` (a table's). The
+message carries the latest running count of every request of that Guest's still pending, and counts only, never a
+result. The first change is sent at once; later changes are coalesced into one message a second, by the server clock. A
+request leaves it when its notice is sent: `overall-history-update` for the Overall History resources, and the
+`analysis-update` of `resource: 'summary'` for a table's, each `complete` or `error`. Only the requesting Guest's
+connections receive any of it. Progress is never stored: after a reconnect the client reads each request once over
+HTTP. Nothing polls ([ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)).
+
 An Online Table's address is its Join Link ([ADR-0033](adr/0033-use-the-online-table-address-as-its-join-link.md)):
 the web Trainer's `/online/:tableSessionId`, which shows the table to its Participants and the
 join form to any other Guest. It never changes, and every Participant can pass it on, since
@@ -67,7 +99,9 @@ the request gave none) and 403 `wrong-table-password` (see [Table Password](#tab
 remembered per request ID, so retry with a new one after fixing the cause. The two password rejections are the
 exception: they are definitive but never remembered, so the same request ID can be tried again with the right password. A
 Participant's name is fixed when they join. Joining is a CashGame `join-table`
-command, so it advances both revisions and the Participant observes from that point.
+command, so it advances both revisions and the Participant observes the live table from that point. The view's
+history covers the whole Table Session, including Hands from before they joined and the earlier actions of a Hand in
+progress ([ADR-0040](adr/0040-cover-the-whole-table-session-in-observable-session-history.md)).
 
 A Guest is at no more than one open Online Table at a time, their Current Table, watching
 included; Practice Tables don't count. Creating an Online Table, and joining or returning to
@@ -85,16 +119,17 @@ All table paths below start with `/api/table-sessions`:
 | --- | --- |
 | `POST` to the base path | There is no per-Guest table cap, so a Guest may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`), `bots`, each with `name` and `playingStrategy`, and an Online Table's `tablePassword` (see [Table Password](#table-password)). An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, closed?, seatCount, stakes, playState }] }`: the tables the Guest owns, even after leaving them, plus the tables where the Guest's Participant is joined. An owned table the Guest has left carries `left: true`, and a [Closed Table](#closed-tables) `closed: true` as well. Each table's public facts come with it, so a table the Guest has left still shows them: `stakes` (`smallBlind`, `bigBlind`, `ante`) and `playState` (`status`, `completedHands` at the table, `seatedParticipants`, and `viewerStack` while the Guest's own Participant has a Seat). They are omitted only for a table that cannot be restored. |
-| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and that Participant's own `trainerConfiguration`. At an Online Table `inspection.adminMode` is always `false`. |
+| `GET /:id` | Returns the committed participant-safe view for the Guest's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and the viewing Guest's current `trainerConfiguration`, beside the table's Allow Live Analysis in `options`. At an Online Table `inspection.adminMode` is always `false`. |
+| `GET /:id/history` | Table History: `{ tableSessionId, viewerParticipantId, mode, seatCount, stakes, left?, closed?, hands }`, every completed Hand oldest first, each with its table-wide `handNumber`, `completedAt` (absent for Hands completed before completion times were recorded), `dealtIn` with names, `viewerDealtIn`, the final `board`, `showdown` and `payouts`. Cards show only where they are the reader's own or a showdown revealed them. Any Guest who has ever been a Participant at the table reads it, after leaving and at a Closed Table (see [Table History](#table-history)); anyone else gets 404 `not-found`. Reading never loads the table. |
+| `GET /:id/history/:handId` | One completed Hand's Replay Steps ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)), under the same access as the list: `{ tableSessionId, mode, viewerParticipantId, handId, hand, configuration, participants, steps }`. `hand` is the Hand's list row and `participants` names everyone seated in it, and says whether each is a Bot; every step's actor is one of them. Each step is `{ kind, state, transition, viewerDecisionId? }`: `kind` is `decision` (the table as that decision opened, any actor's, with legal actions only for the reader's own), `street` (after each street reveal, every all-in runout street included) or `result`. `state` shows only the reader's own hole cards before the result; a showdown's reveals appear at the result only. `transition` is what the step presents: the decision taken at the step before (`acted`), and the `deal`, `street`, `showdown` and `payout` in the shapes of Presentation Phase inputs. `viewerDecisionId` marks the reader's own decisions. A Hand that is not complete, or not at the table, is 404 `hand-not-found`. Reading never loads the table. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its human never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A human may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. When the Table Owner's Leave Table takes effect, ownership passes or the table closes in the same transition, see [Ownership](#ownership). Naming a Bot is 400 `participant-not-human`. A response without `afterHand` means the change has been applied. |
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until the Settle after its payout ends. They are never deferred. |
-| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the Hand ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list. |
+| `POST /:id/remove-participant` | Removal. Table Owner only (403 `table-owner-required` for anyone else, themselves included). Requires `requestId`, `expectedPokerRevision` and the `participantId` of a joined human. 400 `cannot-remove-owner` for the owner and `participant-not-human` for a Bot; 400 `participant-not-joined` for a human who has already left. Between Hands it applies at once: the Guest stands up (cashing out) and leaves the table, exactly as by Leave Table, and nothing records that the owner did it. During a Hand, seat or not, it is an After-Hand Request (`change: 'remove'`, answering `afterHand: true`) that applies when the Hand ends, see [After-Hand requests](#after-hand-requests). A removed Guest can no longer read the live table until they join again, which the Join Link allows like anyone else (same Participant); the table stays in their saved list, and its [Table History](#table-history) stays open to them. |
 | `POST /:id/add-bot`, `/remove-bot` | Table Owner only, either mode, at any time. Add a Bot (seated at once, dealt in from the next Hand) or remove one (after a Hand in progress). See [Owner controls](#owner-controls-bots-and-table-options). |
 | `POST /:id/set-table-options` | Table Owner only, Online Tables only, between Hands. Requires `requestId`, `expectedSessionRevision` and a non-empty partial `options` (`actionTimeLimitSeconds`, `allowLiveAnalysis`, `allowSeatChanges`). See [Owner controls](#owner-controls-bots-and-table-options) and [Allow Live Analysis](#allow-live-analysis). |
 | `POST /:id/set-table-password` | Table Owner only, Online Tables only, at any time, even during a Hand. Requires `requestId` and `tablePassword`, a string to set or change the password or `null` to remove it; there is no expected revision. See [Table Password](#table-password). |
-| `POST /:id/set-trainer-configuration` | Requires `requestId`, `expectedSessionRevision`, and a complete `trainerConfiguration` containing `referenceStrategy` and boolean `liveAnalysis`. Changes only the requesting Guest's own Participant. |
-| `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and an optional `live: true` that schedules it as Live Analysis. Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
+| `POST /:id/analysis` | Requires `decisionId`, the requesting Guest's own current or accepted decision (400 `decision-unavailable` otherwise), and either an optional `live: true` that schedules it as Live Analysis or an optional `history: true` for a request from Table History. A history request names one of the Guest's own accepted decisions in a table whose history they may read (404 `not-found` otherwise, 400 `decision-unavailable` for anyone else's decision or one not yet taken), captures it without loading the table, and schedules it as `history-analysis` (see [Computation and inspection](#computation-and-inspection)). An optional `strategy` (a complete supported Strategy descriptor; 400 `unsupported-strategy` otherwise) analyzes an accepted decision under that Strategy instead of the Guest's Reference Strategy, for a Counterfactual Comparison: the same frozen inputs and seeds, so each Strategy is its own request with its own result, Retry and cached result (identity includes the Strategy), and the Guest's Trainer Configuration never changes. It names only an accepted decision (400 `decision-unavailable` for the current one, a Bot's or anyone else's) and cannot be combined with `live` (400 `invalid-analysis-request`). Returns the analysis state (see [ADR-0026](adr/0026-retain-numerical-trainer-analysis-independently-of-gameplay.md)). Analysis of the current decision before it is accepted is Live Analysis, `live` or not: 403 `live-analysis-disallowed` when its Action Window captured Allow Live Analysis as off. |
 | `POST /:id/inspect-hand` | Accepts only `handId`; requires Table Ownership, a completed Hand, and enabled Admin Mode. Always 403 `unavailable-at-online-tables` at an Online Table. |
 | `POST /:id/analysis/:requestId/retry` | Accepts an empty object. Reuses successful/active analysis or retries a failure with its original immutable inputs and seeds and a new execution attempt. This path ID identifies analysis work, not a poker mutation. |
 | `POST /:id/start-hand` | Table Owner only, at Practice Tables only: 403 `unavailable-at-online-tables` at an Online Table, where the server deals (see [Automatic Dealing](#automatic-dealing-at-online-tables)). Accepted once the previous Hand has ended, with the Settle after its payout (409 `hand-not-ended` before), see [Play timing](#play-timing). Rebuy & deal sends optional `refills`, each a `participantId` with no chips (the requester's own, or a Bot's) and a `targetStack`, rebought in the commit that deals so the deal presents them; a Participant who still has chips is 400 `refill-not-empty`, and a target outside the buy-in limits is 400 `invalid-top-up`. |
@@ -126,20 +161,95 @@ allowed to make that request:
 At a Practice Table the owner is the only human, so neither applies there. Acting
 for a Bot remains the definitive rejection 403 `actor-not-authorized`.
 
+### Overall History
+
+`GET /api/overall-history` is Guest-scoped, not table-scoped ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+It answers `{ filter, total, offset, decisions }`: every decision the Guest made in a Hand they were dealt into, at
+every table they have ever been a Participant at (Practice Tables, tables they left, Closed Tables), newest Hand first
+(Hands without a completion time last), decisions in the order they were made. The tables come from the membership
+index in any status, and each is read through the same rule as Table History, so the list loads no table and shows no
+decision of anyone else's. 401 for a stranger to the service; a Guest with no tables gets an empty list.
+
+The query holds the filter in the one flat encoding the browser's address uses (`historyFilterParams` /
+`decodeHistoryFilter` in contracts), plus `limit` (1–200, default 50) and `offset`. Unknown values are dropped and `filter`
+echoes what was applied:
+
+| Parameter | Meaning |
+| --- | --- |
+| `street`, `position`, `action`, `mode` | Comma-separated values; a decision passes when it has any of them. Positions are BTN, SB, BB, UTG, UTG+1, UTG+2, LJ, HJ, CO and (heads-up) BTN/SB. |
+| `completedFrom`, `completedTo` | Server milliseconds, inclusive. A Hand with no completion time passes neither side, so it is excluded whenever either is set. |
+| `potMin`, `potMax` | Pot in big blinds as the actor faced it before deciding: every chip committed to the Hand so far, antes, blinds and current-street wagers included. Inclusive. |
+
+Each decision carries the table (`tableSessionId`, `mode`, `seatCount`, `stakes`), the Hand (`handId`, `handNumber`,
+`completedAt?`), `decisionId`, the facts the filters read (`street`, `position`, `action`, `pot`, `potBigBlinds`) and the
+reader's own `holeCards` and the `board` as it was. A listed decision opens at `step=decision-N` of its Hand's Replay.
+Position is derived in Research from the dealt-in Participants and the button; the browser receives the label.
+
+#### Overall History Score Summaries
+
+`POST /api/overall-history/summaries` `{ filter?, breakdown? }` asks for a Score Summary over the decisions the list
+gives for `filter` (the same flat encoding, as an object of strings), under the Guest's Reference Strategy at request
+time. `breakdown` is one of `street`, `position`, `action` (the action type taken) or `mode`. Anything else is 400
+`invalid-summary-request`. It answers at once with `OverallHistorySummary { ok, requestId, attemptId, filter,
+breakdown?, referenceStrategy, summary, buckets? }`. `summary` covers the whole set; with a breakdown, `buckets` holds one
+`{ value, summary }` per value the set has, in declared order. Each is an ordinary Score Summary over its own frozen
+set: `{ status, decisionCount, progress: { succeeded, total } }` plus `averages` when `complete` or `error` when one of
+its analyses failed (Error takes precedence over Analyzing; never a partial mean; `empty`, with no score, for no
+decisions). Like every summary, the request is transient.
+
+The body may also carry `strategy`, a complete supported Strategy (otherwise 400 `unsupported-strategy`), to summarize the
+same set under it instead of the Guest's Reference Strategy (side-by-side comparison). Each Strategy is its own request,
+with its own `requestId`, progress, Error and Retry; they share the frozen decisions and the cached analyses, and none
+reads or changes the Guest's Trainer Configuration. `POST /:id/session-summaries` and `POST /:id/hand-summaries` take the
+same optional `strategy` for a table's own summaries (Table History compares those).
+
+Every analysis a summary needs is the Guest's `history-analysis`: matching cached analyses and stored results are
+reused, and the rest are submitted under the per-Guest bound of 8 outstanding jobs, which holds back the remainder
+without a capacity error. `GET /api/overall-history/summaries/:requestId` reads its state and progress; the web app reads
+it again on its notices and reconnects, never on a timer (see [Progress on the user channel](#progress-on-the-user-channel)). `POST /api/overall-history/summaries/:requestId/retry` (empty body)
+asks again for every failed analysis and starts a new `attemptId`. Both answer 404 to any other Guest and 401 to a
+stranger. A result is accepted only while every table its decisions come from still accepts its Participant's results
+(the same check each table's own results pass); reading the tables loads none of them.
+
+#### Overall History score filters
+
+A Decision Score or Action Rank Score range (`decisionScoreMin`/`decisionScoreMax`, `actionRankScoreMin`/`actionRankScoreMax`, on a 0 to 1 scale, inclusive) is part of the filter encoding but is decided only by analysis. `GET /api/overall-history` therefore answers 400 `score-filter-needs-analysis` for a filter holding one.
+
+A summary request keeps its score ranges (its echoed `filter` holds them). Every summary in it (the whole set and each bucket, under the request's Strategy) needs the analyses of the decisions the non-score restrictions admit, and `progress` counts those. It stays `pending` (Analyzing) or `error` until every one of them has succeeded. Then the ranges decide which decisions it covers: it is `complete` with the mean over those, or `empty` when none fall in the ranges. Until then `decisionCount` is absent, so a count is never shown that the ranges have not decided.
+
+`POST /api/overall-history/scored` `{ filter, strategy? }` (a filter with at least one score range, else 400 `invalid-scored-request`) freezes the decisions the non-score restrictions admit, under the Guest's Reference Strategy or the complete supported `strategy` named (else 400 `unsupported-strategy`; the Trainer Configuration is never read or changed for it), and asks for each one's analysis as `history-analysis` (cached and stored results reused, under the per-Guest bound). It answers at once with `ScoredOverallHistory { ok, requestId, attemptId, filter, referenceStrategy, progress: { succeeded, total } }` and a `status`: `pending` (Analyzing), `error` (an analysis failed; it stays until a Retry succeeds) or `complete` with `total`, `offset` and the page of `decisions` the ranges admit, in the list's order. Nothing is listed before every analysis has succeeded. `GET /api/overall-history/scored/:requestId?limit&offset` reads it (the web app reads it after each notice, never on a timer); `POST …/:requestId/retry` (empty body) asks again only for the failed analyses and starts a new `attemptId`. 404 to another Guest, 401 to a stranger. Transient, like a summary.
+
+### Table History
+
+Table History belongs to the table ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)).
+Anyone who has ever been a Participant there reads all of it, read-only: after a Leave Table or a Removal, Hands
+completed since included, and at a [Closed Table](#closed-tables). That is the one exception to joined-only
+authorization above, and it covers only reading history and studying one's own decisions: `GET /:id/history` and its
+Replay Steps `GET /:id/history/:handId`, and the `analysis` (history requests and named Strategies included), `hand-summaries` and `session-summaries` routes with their reads and retries. Everything else,
+the live view and subscription included, still needs a joined Participant at a table that is not closed. A former
+Participant studies only decisions they made, never a current one. The response says `left: true` for a former
+Participant and `closed: true` (with `left: true`) at a Closed Table.
+
+Reading never loads a table. A loaded table serves the read from its committed copy; any other table is rebuilt
+read-only from its record, with no handle, subscription, schedule or scheduled work. Study works the same way for a
+former Participant, and accepting an analysis result writes only derived analysis, never poker state, so it is
+accepted at a Closed Table too.
+
 Analysis Results, scores and summaries belong to the Participant whose decisions
-they analyze. Each one uses that Participant's own Reference Strategy, and only
+they analyze. Each one uses the Reference Strategy its Guest had when it was requested, and only
 that Participant's Human Controller can capture, read or retry it or receive its
 `analysis-update`. Its inputs are the Participant's own observable view at the
 original decision (`getView({ at })`), so later streets, showdown reveals and later
 Hands never reach it. Responses carry no game view, cards, deck or master seed, only
 the derived evaluation and selection seeds that reproduce them.
 
-The Persisted Table Session is version 2. It records the table `mode`, and each
-human binding's Guest, `membership` (`joined` or `left`) and Trainer
-configuration, the table `options`, and the
-`pendingChanges` (after-Hand requests, empty by default). Version-1 records load as Practice Tables whose human takes the
-table-level Trainer configuration, and are rewritten at their next commit. Each version names one
-format: a version-2 row that lacks part of it fails restoration (503 `record-restoration-failed`)
+The Persisted Table Session is version 3. It records the table `mode`, and each
+human binding's Guest and `membership` (`joined` or `left`), the table `options`, and the
+`pendingChanges` (after-Hand requests, empty by default). It holds no Trainer Configuration.
+Version-2 records, whose human bindings each kept one, and version-1 records, which kept one
+for the table, load with it discarded, so their Guests use their own; version 1 loads as a
+Practice Table. Both are rewritten at their next commit. Each version names one
+format: a row that lacks part of its version's format fails restoration (503 `record-restoration-failed`)
 rather than receiving defaults ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)
 on ADR-0014). The
 `table_memberships` index (Guest, table, Participant, status, last-opened time) is written in the
@@ -350,10 +460,11 @@ not loaded closes with a database update and is never loaded.
 Closing ends every membership (the bindings and the membership index become `left`),
 clears the After-Hand Requests and `load_at_startup`, and publishes
 `table-membership-ended` with `closed: true` to everyone subscribed. A Closed Table is
-never loaded again. Its reads, subscriptions and every other route answer 404
+never loaded again. Its live reads, subscriptions and every route except Table History and study answer 404
 `not-found`, as to anyone not at a table; its Join Link preview and joining answer 410
 `table-closed`. It stays in the saved lists of everyone who was at it, marked
-`left: true, closed: true`, until replay arrives in M6. Its Guests are free to create or
+`left: true, closed: true`, and its [Table History](#table-history) stays readable to every former
+Participant, who can still study their own decisions there. Its Guests are free to create or
 join another Online Table.
 
 ### Owner controls: Bots and table options
@@ -482,7 +593,7 @@ one of them human.
 - **Restarts.** A persisted countdown survives a restart. One that expired during
   the outage runs its recheck at startup, before any request is served; as every
   human then counts as disconnected, the seated humans are sat out and nothing is
-  dealt (fairer outage handling belongs to M11).
+  dealt (fairer outage handling belongs to M12).
 
 **Connection status.** A human is connected while at least one live connection of
 their Guest (`/api/live` subscription or the table socket) is subscribed to the
@@ -632,7 +743,12 @@ The [JobRunner](../apps/server/src/job-runner.ts) defaults to two active jobs,
 sixteen queued jobs, and a ten-second logical timeout. Running work retains
 capacity until it actually settles. Bot decisions have one more running slot that
 no other work may use, and are admitted however full the queue is, so analysis
-never delays or refuses one: a Bot decision never fails for capacity. Arbitrary CPU backends require an isolated
+never delays or refuses one: a Bot decision never fails for capacity. Analysis
+asked for from history runs as `history-analysis`, at priority 3 behind every play
+and live-study purpose (simulation is 4). Each Guest has at most 8 such jobs queued
+or running; the rest wait in the server, in order, and are submitted as earlier
+ones settle, so they never fail for capacity either
+([history-analysis.ts](../apps/server/src/history-analysis.ts)). Arbitrary CPU backends require an isolated
 execution adapter because timers cannot preempt synchronous JavaScript.
 [ADR-0019](adr/0019-route-computation-through-one-job-runner.md) defines scheduling,
 immutable inputs, and result validity.

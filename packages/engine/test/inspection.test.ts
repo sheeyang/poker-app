@@ -14,7 +14,8 @@ test('completed-Hand enumeration is immutable and independent of Participant mem
   expect(() => (list as { handId: string; sequence: number }[]).push({ handId: 'fake', sequence: 2 })).toThrow();
   game.startHand();
   expect(game.getCompletedHands()).toEqual(list);
-  expect(game.forParticipant('absent-owner').getView().history).toEqual([]);
+  // Every completed Hand is public history, even to someone never at the table; the Hand in progress is not.
+  expect(game.forParticipant('absent-owner').getView().history.map(h => h.handId)).toEqual(['hand-1']);
   expect(game.forParticipant('alice').getView({ at: { decisionId: 'hand-1/decision-1' } })).toEqual(decision);
   const restored = CashGame.fromRecord(game.toRecord());
   if (!restored.ok) throw new Error('Expected restoration.');

@@ -1,5 +1,5 @@
 import { useOverlayScrollbar } from './overlay-scroll.js';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { hashKey } from '@tanstack/react-query';
 import type { DecisionAnalysis, ObservableTableSession, ScoreSummary, StrategyDescriptor } from '@poker/contracts';
 import { policyName, strategyName, StrategySelect } from './strategy-select.js';
@@ -9,6 +9,7 @@ import type { useDecisionAnalysis } from './analysis.js';
 import type { useHandSummary, useTableSessionSummary } from './summaries.js';
 import type { Command } from './session.js';
 import { sessionSummaryRefreshKey } from './session-summary.js';
+import { Progress } from './history-summary.js';
 import { DecisionSituation, EarlierActions } from './decision-situation.js';
 import { AnalysisSkeleton, ScoreSkeleton, Skeleton } from './loading-skeleton.js';
 import { liveAnalysisAllowed, tableLiveAnalysisNote } from './live-analysis.js';
@@ -17,7 +18,8 @@ type Analysis = ReturnType<typeof useDecisionAnalysis>;
 type HandSummary = ReturnType<typeof useHandSummary>;
 type SessionSummary = ReturnType<typeof useTableSessionSummary>;
 
-export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void }) {
+/** `historyLink`: the link into the table's Table History, offered beside the review of its latest completed Hand. */
+export function AnalysisPanel({ table, analysis, summary, sessionSummary, command, close, historyLink }: { table: ObservableTableSession; analysis: Analysis; summary: HandSummary; sessionSummary: SessionSummary; command: Command; close: () => void; historyLink?: (handId: string) => ReactNode }) {
   const panel = useRef<HTMLElement>(null), panelThumb = useRef<HTMLDivElement>(null), viewTabs = useRef<HTMLDivElement>(null);
   // The Session summary tab is part of the address, so a refresh keeps it.
   const sessionTab = analysis.addressTab === 'session';
@@ -36,11 +38,12 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     observer.observe(tabs);
     return () => observer.disconnect();
   }, []);
+  // The Guest's Trainer Configuration, one choice for every table. A table can still disallow Live Analysis; the
+  // Guest's own setting is kept for when it is allowed again, and for every other table.
   const configuration = table.trainerConfiguration;
-  // The table can disallow Live Analysis; the viewer's own setting is kept for when it is allowed again.
   const allowed = liveAnalysisAllowed(table), liveOn = configuration.liveAnalysis && allowed, tableNote = tableLiveAnalysisNote(table);
   function configure(referenceStrategy: StrategyDescriptor, liveAnalysis: boolean) {
-    command.submit({ tableId: table.tableSessionId, kind: 'trainer', body: { requestId: crypto.randomUUID(), expectedSessionRevision: table.sessionRevision, trainerConfiguration: { referenceStrategy, liveAnalysis } } });
+    command.submit({ tableId: table.tableSessionId, kind: 'trainer', body: { requestId: crypto.randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis } } });
   }
   const accepted = analysis.acceptedDecisions.filter(d => d.handId === table.view.state.handId);
   const liveView = analysis.view === 'live';
@@ -68,7 +71,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
   const street = context.street ?? 'decision';
   const handSummary = summary.handId === table.view.state.handId ? summary : undefined;
   const content = <>
-    {data?.status === 'complete' && data.scores && <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(data.scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(data.scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
+    {data?.status === 'complete' && data.scores && <DecisionScores scores={data.scores} />}
     {analysis.display?.error && <div className="notice-error" role="alert"><p>{analysis.display.error}</p><button onClick={analysis.evaluate}>Retry analysis</button></div>}
     {loadingAnalysis && <AnalysisSkeleton actions={context.legalActions} scores={!!selected} sampled={reference.selector.id === 'seeded-sampling'} />}
     {analysisError && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{analysisError.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
@@ -82,7 +85,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     <div className="panel-thumb-rail" aria-hidden="true"><div className="shell-thumb" ref={panelThumb} hidden /></div>
     <div className="panel-heading"><div><Icon name="chart" /><h2>{handNumber > 0 ? `Hand ${handNumber} analysis` : selected ? `Hand ${selected.handNumber} analysis` : 'Current hand'}</h2></div><div className="panel-actions"><button className="icon-button analysis-settings-trigger" aria-label="Analysis settings" title="Analysis settings" aria-haspopup="dialog" popoverTarget="analysis-settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Close analysis" onClick={close}><Icon name="close" size={18} /></button></div></div>
     <div className="analysis-meta"><span>Reference: <strong>{strategyName(reference)}</strong></span><span>Amounts in chips</span></div>
-    <section id="analysis-settings" popover="auto" role="dialog" className="analysis-settings" onToggle={event => { if (event.newState === 'open') event.currentTarget.querySelector<HTMLButtonElement>('button')?.focus(); }} aria-labelledby="analysis-settings-title"><div className="analysis-settings-heading"><h3 id="analysis-settings-title">Analysis settings</h3><button className="icon-button" aria-label="Close analysis settings" popoverTarget="analysis-settings" popoverTargetAction="hide"><Icon name="close" size={18} /></button></div><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">Changing the reference recalculates your scores. Bot strategies stay the same.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy || !allowed} checked={liveOn} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label>{tableNote && <p className="muted">{tableNote}</p>}</section>
+    <section id="analysis-settings" popover="auto" role="dialog" className="analysis-settings" aria-describedby="analysis-settings-scope" onToggle={event => { if (event.newState === 'open') event.currentTarget.querySelector<HTMLButtonElement>('button')?.focus(); }} aria-labelledby="analysis-settings-title"><div className="analysis-settings-heading"><div><h3 id="analysis-settings-title">Trainer Configuration</h3><p id="analysis-settings-scope" className="muted">Applies at every table, in review and in every summary.</p></div><button className="icon-button" aria-label="Close analysis settings" popoverTarget="analysis-settings" popoverTargetAction="hide"><Icon name="close" size={18} /></button></div><label>Reference Strategy<StrategySelect value={configuration.referenceStrategy} disabled={command.busy} onChange={strategy => configure(strategy, configuration.liveAnalysis)} /></label><p className="muted">Changing it recalculates your scores here and at your other tables. Bot strategies stay the same.</p><label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" disabled={command.busy || !allowed} checked={liveOn} onChange={e => configure(configuration.referenceStrategy, e.target.checked)} /></label>{tableNote && <p className="muted">{tableNote}</p>}</section>
     <div ref={viewTabs} className="analysis-view-tabs" role="tablist" aria-label="Analysis view" onKeyDown={event => {
       const order = ['live', 'hand', 'session'] as const, index = order.indexOf(tab);
       const next = event.key === 'Home' ? 'live' : event.key === 'End' ? 'session' : event.key === 'ArrowRight' ? order[(index + 1) % order.length] : event.key === 'ArrowLeft' ? order[(index + order.length - 1) % order.length] : undefined;
@@ -91,6 +94,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     {tab === 'live' && <div className="analysis-mode-line">{!allowed ? 'Live Analysis isn’t allowed at this table' : !configuration.liveAnalysis ? 'Live Analysis is off' : liveDecision ? `Live · ${street[0]!.toUpperCase()}${street.slice(1)} · Your turn` : table.view.state.status === 'completed-hand' ? 'Hand complete' : 'Waiting for your turn'}</div>}
     <section id="analysis-live-panel" role="tabpanel" aria-labelledby="analysis-live-tab" tabIndex={0} hidden={tab !== 'live'}>{tab === 'live' && (!allowed ? <div className="analysis-empty"><strong>Live Analysis isn’t allowed at this table.</strong><p>{tableNote ?? 'Your decisions are still analyzed and scored after you act.'}</p></div> : configuration.liveAnalysis ? <div className="decision-section">{content}</div> : <div className="analysis-empty"><strong>Live Analysis is off.</strong><p>Enable it to see reference probabilities before you act.</p><button disabled={command.busy} onClick={() => configure(configuration.referenceStrategy, true)}>Enable Live Analysis</button></div>)}</section>
     <section id="analysis-hand-panel" role="tabpanel" aria-labelledby="analysis-hand-tab" tabIndex={0} hidden={tab !== 'hand'}>{tab === 'hand' && <>
+    {table.view.state.status === 'completed-hand' && table.view.state.handId && historyLink?.(table.view.state.handId)}
     {showFollow && <button className="text-button follow-play" onClick={() => analysis.selectDecision('')}>Latest decision <Icon name="arrow" size={15} /></button>}
     {handDecisions.length === 0 && !handSummary && content}
     {(handDecisions.length > 0 || handSummary) && <section className="decision-section decision-review"><div className={`section-heading${handSummary ? ' hand-summary-heading' : ''}`}><div className="decision-heading-copy"><h3>Your decisions</h3><span className="muted">{handDecisions.length} to review</span></div>
@@ -117,18 +121,27 @@ export function AnalysisPanelSkeleton({ close }: { close: () => void }) {
   return <aside id="analysis-panel" tabIndex={-1} className="analysis-panel" aria-label="Strategy analysis" aria-busy="true"><div className="panel-heading"><Skeleton className="skeleton-panel-title" /><div className="panel-actions"><button className="icon-button" disabled aria-label="Analysis settings"><Icon name="settings" size={18} /></button><button className="icon-button" aria-label="Close analysis" onClick={close}><Icon name="close" size={18} /></button></div></div><div className="analysis-meta"><span>Reference: <Skeleton className="skeleton-reference" /></span><span>Amounts in chips</span></div><div className="analysis-view-tabs" role="tablist" aria-label="Analysis view"><button role="tab" aria-selected="false" disabled>Live</button><button role="tab" aria-selected="false" disabled>This hand</button></div><section className="decision-section"><AnalysisSkeleton actions={[]} scores sampled={false} /></section></aside>;
 }
 
-function DecisionResult({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
+/** A scored decision's two scores, the Decision Score the larger. */
+export function DecisionScores({ scores }: { scores: NonNullable<Extract<DecisionAnalysis, { status: 'complete' }>['scores']> }) {
+  return <div className="decision-scores" aria-live="polite" aria-atomic="true"><div className="score-main"><span>Decision Score</span><strong>{(scores.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div className="score-secondary"><span>Action Rank Score</span><strong>{(scores.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>;
+}
+
+/**
+ * A Policy's distribution, its sizings and its selected action, with the player's own action marked. `reference` is false
+ * for a Strategy compared beside the Reference Strategy, which then isn't called the Reference.
+ */
+export function DecisionResult({ data, reference = true }: { data: Extract<DecisionAnalysis, { status: 'complete' }>; reference?: boolean }) {
   const accepted = data.scoredDecision?.acceptedAction;
   return <>
-    <div className="distribution-heading"><h3>Reference actions</h3><span>Probability</span></div>
-    <ul className="probability-tree" aria-label="Reference Policy distribution">{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
+    <div className="distribution-heading"><h3>{reference ? 'Reference actions' : 'Policy actions'}</h3><span>Probability</span></div>
+    <ul className="probability-tree" aria-label={reference ? 'Reference Policy distribution' : 'Policy distribution'}>{data.evaluation.actionProbabilities.map(parent => <li key={parent.type} className={`probability-group probability-${parent.type}`}><div className="probability-row"><span>{parent.type[0]!.toUpperCase() + parent.type.slice(1)}{accepted?.type === parent.type && <span className="you-marker">You</span>}</span><strong>{parent.probability.toFixed(2)}</strong></div><meter min="0" max="1" value={parent.probability} aria-label={`${parent.type} probability`} />
       {(parent.type === 'raise' || parent.type === 'bet') && <ul>{data.evaluation.policyResult.choices.filter(c => c.action.type === parent.type).map(choice => <li key={actionLabel(choice.action)}><span>{actionLabel(choice.action)}{accepted && JSON.stringify(accepted) === JSON.stringify(choice.action) && <span className="you-marker">You</span>}</span><strong>{choice.probability.toFixed(2)}</strong></li>)}</ul>}
     </li>)}</ul>
     <div className="reference-selected"><span>{data.referenceStrategy.selector.id === 'seeded-sampling' ? 'Sampled action' : 'Selected action'}</span><strong>{actionLabel(data.evaluation.selectedAction)}</strong></div>
   </>;
 }
 
-function AnalysisDetails({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
+export function AnalysisDetails({ data }: { data: Extract<DecisionAnalysis, { status: 'complete' }> }) {
   return <details className="analysis-provenance"><summary>Analysis details</summary><div className="details-content"><p>{data.referenceStrategy.selector.id === 'seeded-sampling' ? 'The sampled action is a reproducible draw from the full distribution. It may differ from the most likely action.' : 'The selected action is chosen by the configured Action Selector.'}</p><p>Policy: {data.referenceStrategy.policy.id} · {data.referenceStrategy.policy.version}<br />Selector: {data.referenceStrategy.selector.id} · {data.referenceStrategy.selector.version}</p></div></details>;
 }
 
@@ -152,6 +165,7 @@ export function SummaryResult({ summary, currentReference }: { summary: HandSumm
   const differentReference = data && currentReference && hashKey([data.referenceStrategy]) !== hashKey([currentReference]);
   return <>
     {!display?.error && (!data || data.status === 'pending') && (display?.loading || data?.status === 'pending' || !display && summary.canRequest) && <div className="summary-averages" role="status" aria-label="Loading complete summary"><div><span>Mean Decision Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong><ScoreSkeleton /><small>/100</small></strong></div></div>}
+    {!display?.error && data?.status === 'pending' && <Progress summary={data} />}
     {display?.error && <div className="notice-error" role="alert"><p>{display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message}</p><button disabled={display?.retrying} onClick={() => void summary.retry()}>{display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
     {data?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}

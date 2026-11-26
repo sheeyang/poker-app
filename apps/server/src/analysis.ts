@@ -10,17 +10,33 @@ import { analysisEvaluations, analysisScores } from './db/schema.js';
 import { canonical } from './canonical.js';
 import { executeStrategy } from './strategy-execution.js';
 import type { AcceptTableJobResult } from './mutations.js';
+import { createHistoryAnalysisScheduler, type HistoryAnalysisScheduler } from './history-analysis.js';
 
 /** Frozen analysis inputs. `identity.participantId` keys the result: only that Participant's Human Controller reads or retries it. */
 export interface FrozenEvaluationInput { readonly identity: EvaluationIdentity; readonly view: ObservableGameView; readonly acceptedAction?: ConcreteAction }
-export type AnalysisPurpose = Extract<JobPurpose, 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis'>;
-function matchingKey(input: FrozenEvaluationInput): string {
+export type AnalysisPurpose = Extract<JobPurpose, 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis' | 'history-analysis'>;
+/**
+ * How analysis is scheduled: a purpose, or for `history-analysis` the purpose with the Guest who asked, whose
+ * outstanding history jobs are bounded (`createHistoryAnalysisScheduler`). That Guest is the Participant's own, so a
+ * history entry also notifies them directly, whether or not the table is loaded or they are still joined at it.
+ */
+export type AnalysisSchedule = Exclude<AnalysisPurpose, 'history-analysis'> | { readonly purpose: 'history-analysis'; readonly guestId: string };
+function canonicalAnalysisKey(input: FrozenEvaluationInput): string {
   return createHash('sha256').update(canonical({ ...input.identity, ...(input.acceptedAction ? { scoredDecision: { acceptedAction: input.acceptedAction, scoringMethodVersion } } : {}) })).digest('hex');
 }
 type Database = ReturnType<typeof openDatabase>['db'];
-interface Entry { readonly input: FrozenEvaluationInput; readonly purpose: AnalysisPurpose; state: DecisionAnalysis }
-/** Owns matching, execution and successful retention, independently of connections and poker. Notifications go to the Participant. */
-export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (participantId: string, update: AnalysisUpdate) => void, acceptJobResult: AcceptTableJobResult) {
+interface Entry { readonly input: FrozenEvaluationInput; readonly schedule: AnalysisSchedule; state: DecisionAnalysis; guestId?: string }
+/**
+ * Owns matching, execution and successful retention, independently of connections and poker. Notifications go to the
+ * Participant: to `guestId` when a history request named their Guest, otherwise to whoever `publish` resolves.
+ */
+export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (participantId: string, update: AnalysisUpdate, guestId?: string) => void, acceptJobResult: AcceptTableJobResult, history: HistoryAnalysisScheduler = createHistoryAnalysisScheduler(runner)) {
+  /** Submits one job of an entry under its schedule. */
+  function submit<I, O>(schedule: AnalysisSchedule, input: I, execute: (input: I, options: { readonly signal: AbortSignal }) => O | Promise<O>): JobHandle<O> {
+    return typeof schedule === 'string' ? runner.submit(schedule, input, execute) : history.submit(schedule.guestId, input, execute);
+  }
+  /** A request may reuse an entry another schedule made; one that names the Guest lets that entry notify them directly. */
+  function adopt(entry: Entry, schedule: AnalysisSchedule) { if (typeof schedule !== 'string') entry.guestId ??= schedule.guestId; return entry; }
   const entries = new Map<string, Entry>();
   const byRequest = new Map<string, Entry>();
   const initializing = new Map<string, Promise<Entry>>();
@@ -37,7 +53,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const state = entry.state;
     for (const resolve of terminalWaiters.get(state.requestId) ?? []) resolve(state);
     terminalWaiters.delete(state.requestId);
-    try { publish(entry.input.identity.participantId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }); } catch { /* Delivery cannot change a readable result. */ }
+    try { publish(entry.input.identity.participantId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }, entry.guestId); } catch { /* Delivery cannot change a readable result. */ }
   }
   function accept(entry: Entry, attemptId: string, operation: () => void = () => {}): Promise<boolean> {
     return acceptJobResult(entry.input.identity.tableSessionId, entry.input.identity.participantId, () => {
@@ -45,18 +61,18 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
       operation(); return true;
     });
   }
-  async function initialize(input: FrozenEvaluationInput, fingerprint: string, purpose: AnalysisPurpose): Promise<Entry> {
+  async function initialize(input: FrozenEvaluationInput, fingerprint: string, schedule: AnalysisSchedule): Promise<Entry> {
     const stored = await db.select().from(analysisEvaluations).where(eq(analysisEvaluations.fingerprint, fingerprint));
     if (stopped) throw new Error('Analysis is closing.');
     const state: DecisionAnalysis = stored.at(0)?.result ?? { ok: true, ...input.identity, requestId: randomUUID(), attemptId: randomUUID(), status: 'pending' };
-    const entry: Entry = { input: immutableData(input), purpose, state: immutableData(state) };
+    const entry = adopt({ input: immutableData(input), schedule, state: immutableData(state) }, schedule);
     entries.set(fingerprint, entry); byRequest.set(state.requestId, entry);
     if (state.status === 'complete') return entry;
     return start(entry, fingerprint);
   }
   async function start(entry: Entry, fingerprint: string): Promise<Entry> {
     const { input, state } = entry;
-    const handle = runner.submit(entry.purpose, input, async (frozen, execution): Promise<ReferenceStrategyEvaluation> => {
+    const handle = submit(entry.schedule, input, async (frozen, execution): Promise<ReferenceStrategyEvaluation> => {
       const { policyResult, selectedAction } = await executeStrategy(strategyFactory(frozen.identity.referenceStrategy), frozen.view, { evaluationSeed: frozen.identity.evaluationSeed, selectionSeed: frozen.identity.selectionSeed, signal: execution.signal });
       return { policyResult: { choices: policyResult.choices }, selectedAction, actionProbabilities: calculateActionProbabilities(frozen.view, policyResult.choices) };
     });
@@ -91,11 +107,11 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     completions.add(completion); void completion.finally(() => completions.delete(completion));
     return entry;
   }
-  async function initializeScore(input: FrozenEvaluationInput, fingerprint: string, purpose: AnalysisPurpose): Promise<Entry> {
+  async function initializeScore(input: FrozenEvaluationInput, fingerprint: string, schedule: AnalysisSchedule): Promise<Entry> {
     const stored = await db.select().from(analysisScores).where(eq(analysisScores.fingerprint, fingerprint));
     if (stopped) throw new Error('Analysis is closing.');
     const state: DecisionAnalysis = stored.at(0)?.result ?? { ok: true, ...input.identity, scoredDecision: { acceptedAction: input.acceptedAction!, scoringMethodVersion }, requestId: randomUUID(), attemptId: randomUUID(), status: 'pending' };
-    const entry: Entry = { input: immutableData(input), purpose, state: immutableData(state) };
+    const entry = adopt({ input: immutableData(input), schedule, state: immutableData(state) }, schedule);
     scores.set(fingerprint, entry); byRequest.set(state.requestId, entry);
     if (state.status === 'complete') return entry;
     return startScore(entry, fingerprint);
@@ -104,7 +120,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const state = entry.state;
     const { acceptedAction: _action, ...evaluationInput } = entry.input;
     try {
-      let dependency = await operations.getOrStart(evaluationInput, entry.purpose);
+      let dependency = await operations.getOrStart(evaluationInput, entry.schedule);
       if (retryFailed && dependency.status === 'error') dependency = (await operations.retry(state.tableSessionId, dependency.requestId, entry.input.identity.participantId))!;
       if (!await accept(entry, state.attemptId, () => { entry.state = immutableData({ ...state, evaluationRequestId: dependency.requestId }); })) return entry;
       let physical = Promise.resolve();
@@ -141,7 +157,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     }
     if (dependency.status !== 'complete') return;
     const input = entry.input;
-    const handle = runner.submit(entry.purpose, { view: input.view, choices: dependency.evaluation.policyResult.choices, action: input.acceptedAction! }, frozen => calculateDecisionScores(frozen.view, frozen.choices, frozen.action));
+    const handle = submit(entry.schedule, { view: input.view, choices: dependency.evaluation.policyResult.choices, action: input.acceptedAction! }, frozen => calculateDecisionScores(frozen.view, frozen.choices, frozen.action));
     admitted(handle);
     const result = await handle.result;
     if (!await accept(entry, state.attemptId)) return;
@@ -167,7 +183,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     return scored[0]?.result;
   }
   async function lookup(input: FrozenEvaluationInput): Promise<DecisionAnalysis | undefined> {
-    const fingerprint = matchingKey(input);
+    const fingerprint = canonicalAnalysisKey(input);
     const memory = (input.acceptedAction ? scores : entries).get(fingerprint);
     if (memory) return memory.state;
     const initializingEntry = (input.acceptedAction ? initializingScores : initializing).get(fingerprint);
@@ -184,29 +200,30 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     return undefined;
   }
   const operations = {
-    lookup, matchingKey,
-    async getOrStart(input: FrozenEvaluationInput, purpose: AnalysisPurpose = 'interactive-analysis'): Promise<DecisionAnalysis> {
+    lookup, canonicalAnalysisKey,
+    /** The analysis matching `input`, started under `schedule` unless matching work or a stored result exists. */
+    async getOrStart(input: FrozenEvaluationInput, schedule: AnalysisSchedule = 'interactive-analysis'): Promise<DecisionAnalysis> {
       if (stopped) throw new Error('Analysis is closing.');
       if (input.acceptedAction) {
-        const fingerprint = matchingKey(input);
+        const fingerprint = canonicalAnalysisKey(input);
         const pendingInitialization = initializingScores.get(fingerprint);
-        if (pendingInitialization) return (await pendingInitialization).state;
+        if (pendingInitialization) return adopt(await pendingInitialization, schedule).state;
         let entry = scores.get(fingerprint);
         if (!entry) {
           let operation = initializingScores.get(fingerprint);
-          if (!operation) { operation = initializeScore(input, fingerprint, purpose); initializingScores.set(fingerprint, operation); }
+          if (!operation) { operation = initializeScore(input, fingerprint, schedule); initializingScores.set(fingerprint, operation); }
           try { entry = await operation; } finally { if (initializingScores.get(fingerprint) === operation) initializingScores.delete(fingerprint); }
         }
-        return entry.state;
+        return adopt(entry, schedule).state;
       }
-      const fingerprint = matchingKey(input);
+      const fingerprint = canonicalAnalysisKey(input);
       let entry = entries.get(fingerprint);
       if (!entry) {
         let operation = initializing.get(fingerprint);
-        if (!operation) { operation = initialize(input, fingerprint, purpose); initializing.set(fingerprint, operation); }
+        if (!operation) { operation = initialize(input, fingerprint, schedule); initializing.set(fingerprint, operation); }
         try { entry = await operation; } finally { if (initializing.get(fingerprint) === operation) initializing.delete(fingerprint); }
       }
-      return entry.state;
+      return adopt(entry, schedule).state;
     },
     read,
     async waitForSettlement(tableSessionId: string, requestId: string, participantId: string, attemptId: string): Promise<void> {
@@ -230,7 +247,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
         // Inputs and matching identity remain frozen; only execution gets a new identity.
         const scoredDecision = entry.input.acceptedAction ? { acceptedAction: entry.input.acceptedAction, scoringMethodVersion } : undefined;
         entry.state = immutableData({ ok: true, ...entry.input.identity, ...(scoredDecision ? { scoredDecision } : {}), requestId, attemptId: randomUUID(), status: 'pending' });
-        const fingerprint = matchingKey(entry.input);
+        const fingerprint = canonicalAnalysisKey(entry.input);
         operation = scoredDecision ? startScore(entry, fingerprint, true) : start(entry, fingerprint); retrying.set(requestId, operation);
       }
       try { return (await operation).state; }

@@ -19,7 +19,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 let controllers: TableSessionControllerCommands;
 async function startServer() {
-  server = await createServer({ clock, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, automaticBots: false, databaseUrl: databaseUrl!, schema, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 }
 beforeAll(async () => { await administration.query('CREATE SCHEMA "' + schema + '"'); await startServer(); });
@@ -414,8 +414,6 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   for (const [kind, fields] of requests) expect({ kind, ...await refusal(await t.as(t.ann, kind, fields)) }).toEqual({ kind, status: 403, code: 'not-your-participant' });
   expect({ kind: 'set-playing-strategy', ...await refusal(await t.configure(t.ann, 'set-playing-strategy', { ...target, playingStrategy: highestProbabilityPlayingStrategy })) }).toEqual({ kind: 'set-playing-strategy', status: 400, code: 'participant-not-bot' });
   expect({ kind: 'retry-bot', ...await refusal(await t.configure(t.ann, 'retry-bot', target)) }).toEqual({ kind: 'retry-bot', status: 403, code: 'unavailable-at-online-tables' });
-  // A Trainer configuration is the requester's own: it names no Participant.
-  expect(await refusal(await t.configure(t.ann, 'set-trainer-configuration', { ...target, trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true } }))).toEqual({ status: 400, code: 'invalid-trainer-configuration' });
   expect(await t.view(ben.cookie)).toEqual(before);
 
   // Ben acts for himself, and his analysis is his alone.

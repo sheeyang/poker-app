@@ -16,7 +16,7 @@ let evaluations = 0;
 let mode: 'baseline' | 'passive' | 'numerical' = 'baseline';
 const humans = new Set<string>();
 async function start() {
-  const server = await createServer({ databaseUrl, schema, automaticBots: true, strategyFactory: descriptor => {
+  const server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, automaticBots: true, strategyFactory: descriptor => {
     const strategy = createStrategy(descriptor);
     return { ...strategy, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, execution) => {
       const controlled = mode === 'baseline' || humans.has(view.state.actorId!);

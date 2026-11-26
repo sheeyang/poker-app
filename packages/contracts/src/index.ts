@@ -1,5 +1,7 @@
 /** Participant-safe wire contracts. This package imports no authoritative code. */
 import type { PresentedPhase } from './presentation.js';
+import type { Stakes } from './history.js';
+import type { HistorySummaryProgress } from './overall-history.js';
 export type ParticipantId = string;
 export type TableSessionId = string;
 export type ChipAmount = number;
@@ -101,7 +103,10 @@ export interface StrategyDescriptor {
   readonly policy: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
   readonly selector: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
 }
-/** One human Participant's study preferences, independent of other Participants and every Bot's Playing Strategy. */
+/**
+ * A Guest's study preferences, chosen once and used at every table, in review and in every summary (ADR-0041).
+ * Independent of every Bot's Playing Strategy. An Online Table's Allow Live Analysis can still refuse Live Analysis.
+ */
 export interface TrainerConfiguration {
   readonly referenceStrategy: StrategyDescriptor;
   readonly liveAnalysis: boolean;
@@ -294,7 +299,7 @@ export interface SavedTable {
   /** When the Guest last opened this table, by the server's clock in epoch milliseconds; absent until they have. */
   readonly openedAt?: number;
   readonly seatCount?: number;
-  readonly stakes?: { readonly smallBlind: ChipAmount; readonly bigBlind: ChipAmount; readonly ante: ChipAmount };
+  readonly stakes?: Stakes;
 }
 export interface SavedTables { readonly tables: readonly SavedTable[] }
 /**
@@ -410,7 +415,10 @@ export interface ObservableTableSession {
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
-  /** The viewing Participant's own Trainer configuration. */
+  /**
+   * The viewing Guest's current Trainer Configuration, presented beside the table's Allow Live Analysis. It belongs to
+   * the Guest, not the table: changing it advances no revision (see `TrainerConfigurationChanged`).
+   */
   readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
   /** The committed schedule, durable with the revisions above. */
@@ -461,7 +469,45 @@ export interface AnalysisUpdate {
   readonly attemptId: string;
   readonly status: 'complete' | 'error';
 }
+/**
+ * A Guest-scoped request the user channel reports on, named by its HTTP resource: an Overall History Score Summary
+ * request (`/api/overall-history/summaries`) or a score-filtered Overall History list (`/api/overall-history/scored`).
+ */
+export type OverallHistoryResource = 'overall-history-summary' | 'overall-history-scored';
+/**
+ * One of the Guest's Overall History requests reached a terminal state: one of its summaries completed (or its score
+ * ranges left it empty), the score-filtered list was decided, or it failed. Sent on the Guest's user channel only, once
+ * that state is readable; like every notice it carries no result, and the client reads the request again over HTTP.
+ */
+export interface OverallHistoryUpdate {
+  readonly type: 'overall-history-update';
+  readonly resource: OverallHistoryResource;
+  readonly requestId: string;
+  readonly attemptId: string;
+  readonly status: 'complete' | 'error';
+}
+/**
+ * A request whose pending count travels on the user channel, in `progress` messages: an Overall History request, or a
+ * table's Score Summary (`summary`: a Hand's, the Session's, or Table History's). Each one also publishes a completion
+ * or failure notice (`OverallHistoryUpdate`, or an `AnalysisUpdate` of the `summary` resource), so a pending request is
+ * never left waiting on progress alone.
+ */
+export type ProgressResource = OverallHistoryResource | 'summary';
+/** How far one pending request has got: how many of the analyses it needs have succeeded, out of all of them. */
+export interface RequestProgress { readonly resource: ProgressResource; readonly requestId: string; readonly succeeded: number; readonly total: number }
+/**
+ * The latest count of every pending request of the Guest's, sent on their user channel at most once a second while
+ * counts change (ADR-0026: results still refresh over HTTP after notices, and nothing polls). It carries counts only,
+ * never results, and is never stored: after a reconnect the client reads each request over HTTP. A request leaves it
+ * once its completion or failure notice is sent.
+ */
+export interface ProgressUpdate { readonly type: 'progress'; readonly progress: readonly RequestProgress[] }
 export interface UserChannelReady { readonly type: 'user-channel-ready' }
+/**
+ * The Guest's Trainer Configuration changed, sent on their user channel to every one of their connections once the
+ * change is readable. It carries nothing: each tab reads the configuration and its analysis state again over HTTP.
+ */
+export interface TrainerConfigurationChanged { readonly type: 'trainer-configuration-changed' }
 export interface SubscribeTable { readonly type: 'subscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
 export interface UnsubscribeTable { readonly type: 'unsubscribe-table'; readonly requestId: string; readonly tableSessionId: TableSessionId }
 export type ClientLiveMessage = SubscribeTable | UnsubscribeTable;
@@ -487,7 +533,7 @@ export interface TableMembershipEnded {
  */
 export interface TablePresence { readonly type: 'table-presence'; readonly tableSessionId: TableSessionId; readonly connectedParticipantIds: readonly ParticipantId[] }
 export type TableLiveMessage = ObservableTableUpdate | TableRuntimeStatus | AnalysisUpdate | TableMembershipEnded | TablePresence;
-export type ServerLiveMessage = UserChannelReady | TableSubscriptionResult | TableLiveMessage;
+export type ServerLiveMessage = UserChannelReady | TrainerConfigurationChanged | ProgressUpdate | OverallHistoryUpdate | TableSubscriptionResult | TableLiveMessage;
 export const defaultConfiguration: Readonly<ObservableGameConfiguration> = Object.freeze({
   seatCount: 6, smallBlind: 10, bigBlind: 20, ante: 0,
   minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000,
@@ -507,12 +553,17 @@ export const defaultTrainerConfiguration: TrainerConfiguration = Object.freeze({
 export interface ControllerMutationMetadata { readonly requestId: string; readonly expectedSessionRevision: Revision; readonly participantId: ParticipantId }
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
 export interface RetryBotRequest extends ControllerMutationMetadata {}
-/** Sets the requesting Guest's own Participant's Trainer configuration. */
+/**
+ * Sets the requesting Guest's Trainer Configuration, for every table. A Guest-scoped request, not a table mutation: it
+ * carries no revision, and repeating it with the same request ID applies it once.
+ */
 export interface SetTrainerConfigurationRequest {
   readonly requestId: string;
-  readonly expectedSessionRevision: Revision;
   readonly trainerConfiguration: TrainerConfiguration;
 }
+/** The Guest's Trainer Configuration, as read or as a change left it. */
+export interface TrainerConfigurationAcknowledgement { readonly ok: true; readonly trainerConfiguration: TrainerConfiguration }
+export type TrainerConfigurationOutcome = TrainerConfigurationAcknowledgement | ApplicationRejection;
 /**
  * The options the Table Owner can change at an Online Table, between Hands. Each is optional; the request names only
  * what it changes. There is no way to turn the Action Time Limit off: an Online Table always has one.
@@ -542,6 +593,22 @@ export interface SetTablePasswordRequest {
   readonly tablePassword: string | null;
 }
 export const highestProbabilityPlayingStrategy: StrategyDescriptor = Object.freeze({ policy: baselinePlayingStrategy.policy, selector: Object.freeze({ id: 'highest-probability', version: 'v1', configuration: Object.freeze({}) }) });
+/**
+ * Every Strategy the server supports: two Policies under two selectors. The browser may offer only these. The server
+ * (`isSupportedStrategy`) remains the authority and refuses anything else.
+ */
+export const supportedStrategies: readonly StrategyDescriptor[] = Object.freeze([
+  simpleHeuristicPlayingStrategy,
+  Object.freeze({ policy: simpleHeuristicPlayingStrategy.policy, selector: highestProbabilityPlayingStrategy.selector }),
+  baselinePlayingStrategy,
+  highestProbabilityPlayingStrategy,
+]);
+/** A Counterfactual Comparison holds the Reference Strategy and at most this many more Strategies (ADR-0041). */
+export const maximumComparedStrategies = 3;
+/** A supported Strategy's name in an address, `policy:selector`; stable, and the same for the same Strategy everywhere. */
+export const strategyToken = (strategy: StrategyDescriptor): string => `${strategy.policy.id}:${strategy.selector.id}`;
+/** The supported Strategy a token names, or undefined for anything else. */
+export const strategyFromToken = (token: unknown): StrategyDescriptor | undefined => typeof token === 'string' ? supportedStrategies.find(strategy => strategyToken(strategy) === token) : undefined;
 
 /** Reproducible evaluation identity; effective seeds never enter a game view. */
 export interface EvaluationIdentity {
@@ -580,11 +647,21 @@ export type DecisionAnalysis = AnalysisRequestIdentity & (
   | { readonly status: 'complete'; readonly evaluation: ReferenceStrategyEvaluation; readonly scores?: DecisionScores }
   | { readonly status: 'error'; readonly error: { readonly code: AnalysisFailureCode; readonly message: string } }
 );
-export interface GetOrStartAnalysisRequest { readonly decisionId: string }
+/**
+ * `POST /table-sessions/:id/analysis`. `live` asks for Live Analysis, `history` asks from Table History. `strategy`
+ * (optional, supported Strategies only) names the Strategy to analyze an accepted decision under instead of the Guest's
+ * Reference Strategy, for a Counterfactual Comparison: each Strategy is its own request and its own result, on the same
+ * frozen inputs and seeds. Absent, the Guest's Reference Strategy applies. It cannot be combined with `live`.
+ */
+export interface GetOrStartAnalysisRequest { readonly decisionId: string; readonly live?: true; readonly history?: true; readonly strategy?: StrategyDescriptor }
 
-/** One immutable, explicitly requested set of accepted human decisions. */
+/**
+ * One immutable, explicitly requested set of accepted human decisions. `progress` is how many of the analyses it needs
+ * have succeeded, out of all of them: while it is Analyzing the same count travels on the user channel (`progress`
+ * messages of the `summary` resource), and every HTTP response reports the latest one.
+ */
 interface ScoreSummaryMetadata {
-  readonly ok: true; readonly tableSessionId: TableSessionId;
+  readonly ok: true; readonly tableSessionId: TableSessionId; readonly progress: HistorySummaryProgress;
   readonly requestId: string; readonly attemptId: string; readonly capturedPokerRevision: Revision;
   readonly decisionIds: readonly string[]; readonly decisionCount: number; readonly referenceStrategy: StrategyDescriptor;
 }
@@ -602,3 +679,5 @@ export type TableSessionScoreSummary = ScoreSummary & { readonly scope: 'table-s
 export interface ScoreAverages { readonly decisionScore: number; readonly actionRankScore: number }
 
 export * from './presentation.js';
+export * from './history.js';
+export * from './overall-history.js';

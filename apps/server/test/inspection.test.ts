@@ -23,7 +23,7 @@ let controllers: TableSessionControllerCommands;
 const botParticipants = new Set<string>();
 beforeAll(async () => {
   await administration.query('CREATE SCHEMA "' + schema + '"');
-  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, adminMode: true, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
 });
 afterAll(async () => { await server?.close(); await administration.query('DROP SCHEMA "' + schema + '" CASCADE'); await administration.end(); });
@@ -111,21 +111,21 @@ test('admitted completed-Hand inspection replays once from immutable durable inp
   expect(await controllers.readPersistedSession(t.id)).toEqual(before);
 });
 
-test('owner selection lists completed Bot-only Hands outside the filtered Participant history, including reconnect', async () => {
+test('owner selection lists completed Bot-only Hands, which the owner\'s whole-session history also holds, including reconnect', async () => {
   const t = await table(2);
   for (let i = 0; i < 2; i++) await command(t, 'seat-participant', { participantId: t.bots[i], seat: i + 1 });
   await command(t, 'start-hand');
   expect(await read(t)).toMatchObject({ inspection: { adminMode: true, completedHands: [] } });
   await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: 3, participantId: t.bots[0]!, action: { type: 'fold' } });
   const view = await read(t);
-  expect(view.view.history).toEqual([]);
+  expect(view.view.history.map(hand => [hand.handId, hand.result?.status])).toEqual([['hand-1', 'completed-hand']]);
   expect(view.inspection).toEqual({ adminMode: true, completedHands: [{ handId: 'hand-1', sequence: 1 }] });
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/table-sessions/' + t.id + '/live', { headers: { cookie: t.cookie } });
   const frames: TableLiveMessage[] = [];
   socket.on('message', data => frames.push(JSON.parse(data.toString())));
   try {
     await expect.poll(() => frames.find(f => f.type === 'table-update')).toBeDefined();
-    expect(frames[0]).toMatchObject({ inspection: view.inspection, view: { history: [] } });
+    expect(frames[0]).toMatchObject({ inspection: view.inspection, view: { history: view.view.history } });
     expect((await inspect(t)).status).toBe(200);
     expect(JSON.stringify(frames)).not.toMatch(/"(?:deck|burns|seed|pokerRecord)"\s*:/);
   } finally { socket.terminate(); }
@@ -146,7 +146,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   expect(await read(t)).toEqual(before);
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, adminMode: false, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(t)).toEqual({ ...before, inspection: { adminMode: false, completedHands: [] } });
   expect(await (await inspect(t)).json()).toMatchObject({ ok: false, rejection: { code: 'admin-mode-disabled' } });
@@ -159,7 +159,7 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
   } finally { socket.terminate(); }
   expect(await controllers.readPersistedSession(t.id)).toEqual(record);
   await server.close();
-  server = await createServer({ clock, databaseUrl, schema, automaticBots: false, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, adminMode: true, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, participantId: t.bots[0]!, action: { type: 'fold' } });
 });
@@ -243,7 +243,7 @@ async function holdSharedSlot(t: Table, shared: ReturnType<typeof sharedSlotStra
 test('queued inspection retains its captured active-Hand rejection after the live Hand completes', async () => {
   await server.close();
   const shared = sharedSlotStrategy();
-  server = await createServer({ clock, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();
@@ -279,7 +279,7 @@ test('queued inspection retains its captured active-Hand rejection after the liv
 test('inspection shares the analysis capacity of the one JobRunner, waits outside mutation acceptance and retains a completed result when later poker advances', async () => {
   await server.close();
   const shared = sharedSlotStrategy();
-  server = await createServer({ clock, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
+  server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, adminMode: true, databaseUrl, schema, jobRunnerOptions: { concurrency: 1, maximumQueued: 1, timeoutMs: 30000 }, strategyFactory: () => shared.strategy, onControllerCommandsReady: commands => { controllers = commands; } });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   try {
     const t = await completed();

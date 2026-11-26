@@ -48,6 +48,8 @@ export async function writeTableSession(tx: Database, previous: PersistedTableSe
  * and is answered as a table that doesn't exist is.
  */
 export const tableSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A request ID as the server issues it: a lowercase UUID, as a Table Session ID is. */
+export const requestIdPattern = tableSessionIdPattern;
 /**
  * The stored aggregate of the Online Table a Join Link names, read without loading the table; undefined for an ID that
  * names no table, or names a Practice Table, which has no Join Link.
@@ -76,6 +78,22 @@ export async function membership(db: Database, tableSessionId: string, userId: s
   return rows[0] && { participantId: rows[0].participantId, owner: rows[0].ownerUserId === userId, mode: rows[0].mode ?? legacyTableMode };
 }
 /**
+ * The Guest's Participant at a table they have ever joined, however their membership ended (Leave Table, Removal or
+ * the table closing), from the index alone: it loads nothing. Having been a Participant is what reading Table History
+ * and studying one's own decisions require (ADR-0041); play requires `membership`.
+ */
+export async function participation(db: Database, tableSessionId: string, userId: string): Promise<{ participantId: string } | undefined> {
+  const rows = await db.select({ participantId: tableMemberships.participantId }).from(tableMemberships)
+    .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId)));
+  return rows[0] && { participantId: rows[0].participantId };
+}
+/** The Guest who was ever the human Participant `participantId` at a table, from the index alone. */
+export async function participantGuest(db: Database, tableSessionId: string, participantId: string): Promise<string | undefined> {
+  const rows = await db.select({ userId: tableMemberships.userId }).from(tableMemberships)
+    .where(and(eq(tableMemberships.tableSessionId, tableSessionId), eq(tableMemberships.participantId, participantId)));
+  return rows[0]?.userId;
+}
+/**
  * Every table the Guest has joined, with the Guest's Participant at each, however their membership ended (Leave Table
  * or Removal, which are the same, or the table closing). A table they have left is marked `left`: its Join Link
  * returns them. A Closed Table is marked `closed` as well, its memberships all ended. Each carries its stored aggregate,
@@ -90,8 +108,16 @@ export async function savedTableEntries(db: Database, userId: string): Promise<(
 }
 /** Notes that the Guest opened a table they have a membership at: its time is the server's `at`. False when they have none. */
 export async function recordOpened(db: Database, userId: string, tableSessionId: string, at: number): Promise<boolean> {
-  if (!/^[0-9a-f-]{36}$/.test(tableSessionId)) return false;
+  if (!tableSessionIdPattern.test(tableSessionId)) return false;
   const rows = await db.update(tableMemberships).set({ openedAt: at })
     .where(and(eq(tableMemberships.userId, userId), eq(tableMemberships.tableSessionId, tableSessionId))).returning({ id: tableMemberships.tableSessionId });
   return rows.length > 0;
+}
+/**
+ * Every table the Guest has ever been a Participant at, with that Participant, however their membership ended and
+ * Closed Tables included: the tables whose history they may read (ADR-0041). From the index alone, so it loads nothing.
+ */
+export async function participations(db: Database, userId: string): Promise<{ tableSessionId: string; participantId: string }[]> {
+  return db.select({ tableSessionId: tableMemberships.tableSessionId, participantId: tableMemberships.participantId }).from(tableMemberships)
+    .where(eq(tableMemberships.userId, userId));
 }

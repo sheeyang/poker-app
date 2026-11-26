@@ -2,16 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { api, RequestFailure, retainNewestTable } from '@poker/client';
-import type { TableMode } from '@poker/contracts';
+import type { SavedTables, TableMode } from '@poker/contracts';
 import { Icon } from './icons.js';
 import { usePageTitle, useShell } from './app-shell.js';
 import { useSession } from './session.js';
 import { analysisTabParam, joinPreviewWanted, listPath, tableAddress, type AnalysisTab } from './table-address.js';
 import { usePracticeSetup } from './practice-setup.js';
 import { PokerTable } from './poker-table.js';
+import { liveFelt } from './felt-view.js';
 import { ActionTray, CommandFeedback } from './controls.js';
 import { TableSettings } from './settings.js';
 import { JoinLinkDialog, JoinTable, JoinTableSkeleton } from './join-table.js';
+import { HistoryLink } from './table-history-screen.js';
 import { handResult } from './hand-result.js';
 import { nextHandLabel } from './online-status.js';
 import { useTableInteractions } from './table-interactions.js';
@@ -49,6 +51,8 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
     ? preview.error.code === 'not-found' ? 'not-found' : 'closed' : preview.data;
   const outcome = unread ? tableAddress(mode, selected, 'not-found', previewed) : read.data ? tableAddress(mode, selected, read.data) : undefined;
   const missing = outcome?.show === 'missing', closed = outcome?.show === 'closed';
+  // A Closed Table still opens into its Table History for anyone who played there: the shell's saved tables say who did.
+  const playedHere = useQuery<SavedTables>({ queryKey: ['table-sessions'], enabled: false }).data?.tables.some(saved => saved.tableSessionId === selected);
   const correctedTo = outcome?.show === 'corrected' ? outcome.to : undefined;
   // The analysis tab lives in the address; choosing one replaces the history entry so Back still leaves the table.
   const addressTab = analysisTabParam(useSearch({ strict: false }).analysis);
@@ -152,8 +156,10 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
   if (closed) return <main id="main-table" className="address-missing address-closed">
     <SeatGlyph seats={0} dim />
     <h1>This table closed.</h1>
-    <p>Nobody can join or play at it any more. An Online Table closes after 24 hours without play, or when its owner leaves with no one else at it. It stays in your Online tables.</p>
-    <Link className="primary address-missing-link" to={listPath('online')}>Go to Online tables <Icon name="arrow" size={18} /></Link>
+    <p>Nobody can join or play at it any more. An Online Table closes after 24 hours without play, or when its owner leaves with no one else at it.{playedHere ? ' Its hands stay in its Table History for everyone who played.' : ''}</p>
+    {playedHere
+      ? <div className="button-row address-missing-link"><HistoryLink className="primary" mode="online" tableSessionId={selected}>Open Table History <Icon name="arrow" size={18} /></HistoryLink><Link className="button-link" to={listPath('online')}>Go to Online tables</Link></div>
+      : <Link className="primary address-missing-link" to={listPath('online')}>Go to Online tables <Icon name="arrow" size={18} /></Link>}
   </main>;
   if (missing) return <main id="main-table" className="address-missing">
     <Icon name="cards" size={34} />
@@ -178,7 +184,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
           {ownerNotice && <div className="ownership-notice" role="status"><Icon name="info" size={18} /><span>{ownerNotice}</span><button type="button" className="text-button" onClick={() => setOwnerNotice(undefined)}>Dismiss</button></div>}
           {current && interactions.choosing && <div className="seat-selection-prompt"><span role="status">Choose an open seat{interactions.choosing === current.viewerParticipantId ? '.' : ` for ${current.bindings.find(b => b.participantId === interactions.choosing)?.name ?? 'the participant'}.`}</span><button className="text-button" onClick={interactions.cancelChoosing}>Cancel</button></div>}
         </div>
-        <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}{online && !owner && ownerName ? ` · ${ownerName}’s table` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{online && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}{online && current && <button className="quiet-button" disabled={!participantActions(current, current.viewerParticipantId, handOpen).some(item => item.id === 'leave')} onClick={interactions.leave}><span>Leave table</span></button>}<button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings('all')}><Icon name="settings" /></button></div></div>
+        <div className="table-toolbar"><div className="table-title"><h1>{current ? current.view.configuration.seatCount === 2 ? 'Heads-up' : `${current.view.configuration.seatCount}-player table` : 'Your table'}</h1><span>No-limit Hold’em{current ? ` · ${chips(current.view.configuration.smallBlind)} / ${chips(current.view.configuration.bigBlind)}` : ''}{online && !owner && ownerName ? ` · ${ownerName}’s table` : ''}</span>{current && <span className={`mode-badge mode-${current.mode}`}>{modeLabel(current.mode)}{current.options.actionTimeLimitSeconds ? ` · ${current.options.actionTimeLimitSeconds}s to act` : ''}</span>}</div><div className="toolbar-actions">{online && <button className="quiet-button" onClick={() => setJoinLinkOpen(true)}><Icon name="link" size={18} /><span>Join link</span></button>}{online && current && <button className="quiet-button" disabled={!participantActions(current, current.viewerParticipantId, handOpen).some(item => item.id === 'leave')} onClick={interactions.leave}><span>Leave table</span></button>}{current && <HistoryLink className="quiet-button" mode={current.mode} tableSessionId={current.tableSessionId}><Icon name="cards" size={18} /><span>History</span></HistoryLink>}<button className="icon-button" disabled={!current || preparing} aria-label="Table options" onClick={() => setSettings('all')}><Icon name="settings" /></button></div></div>
         {!current && !table.error && !identity.isError && <TableSkeleton />}
         {table.error && <div className="table-error notice-error" role="alert"><h2>Couldn’t open this table.</h2><p>{table.error.message}</p><div className="button-row"><button onClick={() => void table.refetch()}>Retry</button><Link className="button-link" to={listPath(mode)}>Choose another table</Link></div></div>}
         {current && shown && presentation && <>
@@ -189,7 +195,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
             {/* The tray announces the next Hand; this is its glanceable echo beside the Hand it follows. */}
             {nextHandShort && <span className="hand-status-next" aria-hidden="true">{nextHandShort}</span>}</div>
           {preparing ? <section className="practice-preparing" role="status"><Icon name="cards" size={38} /><h2>{setup.paused ? 'Your setup is saved.' : setup.afterHandId === undefined ? 'Getting everyone to the table…' : 'Preparing the next hand…'}</h2><p>{setup.paused ?? (setup.afterHandId === undefined ? `${current.view.state.participants.filter(p => p.seat !== null).length} of ${current.bindings.length} players seated. Your hand starts next.` : 'Returning players and refilling empty stacks before the deal.')}</p>{setup.paused && <div className="button-row"><button className="primary" disabled={command.busy} onClick={() => { command.dismiss(); useSession.getState().setSetup({ ...setup, paused: undefined }); }}>Continue setup</button><button onClick={() => { useSession.getState().setSetup(null); setSettings('all'); }}>Table options</button></div>}</section> : <>
-            <PokerTable table={shown} serverNow={presentation.serverNow} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} nextHand={presentation.nextHand} handOpen={handOpen} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} />
+            <PokerTable felt={liveFelt(shown)} serverNow={presentation.serverNow} actorWindowOpen={presentation.actorWindowOpen} countdown={presentation.countdown} nextHand={presentation.nextHand} choosing={!!interactions.choosing} openSeat={interactions.openSeat} openParticipant={interactions.openParticipant} actionable={participantId => participantActions(shown, participantId, handOpen).length > 0} />
 
           </>}
           <div className="table-dock"><div className="table-dock-inner">
@@ -199,7 +205,7 @@ export function TableScreen({ mode, tableSessionId }: { mode: TableMode; tableSe
           </div></div>
         </>}
       </div>
-      {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} />}
+      {current && analysisOpen && !preparing && <AnalysisPanel table={current} analysis={analysis} summary={summary} sessionSummary={sessionSummary} command={command} close={closeAnalysis} historyLink={handId => <HistoryLink className="text-button history-link" mode={current.mode} tableSessionId={current.tableSessionId} handId={handId}>Open in Table History <Icon name="arrow" size={15} /></HistoryLink>} />}
       {!current && analysisOpen && !table.error && !identity.isError && <AnalysisPanelSkeleton close={closeAnalysis} />}
       {(current || analysisOpen) && <button type="button" className="analysis-tab" aria-expanded={analysisOpen} aria-controls="analysis-panel" aria-label={analysisOpen ? 'Close analysis' : handDecisions.length ? 'Open analysis, review decisions' : 'Open analysis'} onClick={() => analysisOpen ? closeAnalysis() : review()}><Icon name="chart" size={18} /><span>Analysis</span><Icon name="chevron" size={14} /></button>}
     </main>
