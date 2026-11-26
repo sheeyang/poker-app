@@ -140,7 +140,7 @@ function PracticeComposer({ id, command, ready, launch }: { id: string; command:
   const [timeLimit, setTimeLimit] = useState<ActionTimeLimitSeconds | null>(null);
   const valid = [smallBlind, bigBlind, ante, depth, minimumBB, maximumBB].every(Number.isSafeInteger) && smallBlind > 0 && bigBlind >= smallBlind && ante >= 0 && depth >= minimumBB && minimumBB > 0 && depth <= maximumBB && Number.isSafeInteger(bigBlind * maximumBB);
   const bots = seatCount - 1, others = `You and ${bots} ${bots === 1 ? 'Bot' : 'Bots'}`;
-  const seats = Array.from({ length: seatCount }, (_, i): SeatMark => i === 0 ? 'you' : 'taken');
+  const seats = Array.from({ length: seatCount }, (_, i): SeatMark => i === 0 ? 'viewer' : 'taken');
   return <Composer id={id} label="New practice table" seats={seats} felt={`${tableFormat(seatCount)} table: ${others.replace('You', 'you')}`} summary={feltCentre(smallBlind, bigBlind, bigBlind * depth)}>
     <form onSubmit={e => { e.preventDefault(); if (!valid) return; launch({ requestId: crypto.randomUUID(), configuration: { ...defaultConfiguration, seatCount, smallBlind, bigBlind, ante, minimumBuyIn: bigBlind * minimumBB, defaultBuyIn: bigBlind * depth, maximumBuyIn: bigBlind * maximumBB, allowSeatChanges: seatChanges }, bots: Array.from({ length: bots }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: strategy })), ...(timeLimit ? { options: { actionTimeLimitSeconds: timeLimit } } : {}) }); }}>
       <fieldset disabled={command.busy || !ready}>
@@ -172,7 +172,7 @@ function OnlineComposer({ id, command, ready, displayName, launch }: { id: strin
   const passwordProblem = tablePasswordProblem(setup.tablePassword);
   const number = (key: keyof typeof setup) => (e: { target: { value: string } }) => setSetup({ ...setup, [key]: Number(e.target.value) });
   const resize = (seatCount: number) => setSetup({ ...setup, seatCount, bots: Math.min(setup.bots, seatCount - 1) });
-  const seats = Array.from({ length: setup.seatCount }, (_, i): SeatMark => i === 0 ? 'you' : i <= setup.bots ? 'taken' : 'open');
+  const seats = Array.from({ length: setup.seatCount }, (_, i): SeatMark => i === 0 ? 'viewer' : i <= setup.bots ? 'taken' : 'open');
   const botCount = setup.bots ? ` · ${setup.bots} ${setup.bots === 1 ? 'Bot' : 'Bots'}` : '';
   return <Composer id={id} label="New online table" seats={seats} felt={`${tableFormat(setup.seatCount)} table with ${setup.seatCount} seats${botCount}`} summary={feltCentre(setup.smallBlind, setup.bigBlind, setup.bigBlind * setup.startingStackBB)}>
     <form onSubmit={e => { e.preventDefault(); const request = onlineCreationRequest(setup, crypto.randomUUID()); if (request) launch(request); }}>

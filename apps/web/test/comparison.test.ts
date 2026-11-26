@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { baselinePlayingStrategy, defaultConfiguration, defaultTrainerConfiguration, highestProbabilityPlayingStrategy, simpleHeuristicPlayingStrategy, supportedStrategies, type ConcreteAction, type DecisionAnalysis, type ObservableCashGameState, type ReplayStep, type Street, type TableHandReplay } from '@poker/contracts';
 import { addableStrategies, comparisonTargets, comparisonOrder } from '../src/comparison.js';
 
-// One Hand as the server replays it for "you": you call preflop, check the flop, fold the turn. Rex's decisions are not yours.
+// One Hand as the server replays it for the viewer ("you"): they call preflop, check the flop, fold the turn. Rex's decisions are not theirs.
 function state(street: Street, actorId: string | null, decision: number | null): ObservableCashGameState {
   return {
     status: 'active-hand', buttonSeat: 1, board: [], pots: [], actorId, legalActions: [], handId: 'hand-3', decisionId: decision === null ? null : 'hand-3/decision-' + decision, street,

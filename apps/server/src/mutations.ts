@@ -835,8 +835,8 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         const denial = requester && playerMutationDenial(session.aggregate, requester, kind, request);
         if (denial) return denial;
         const { requestId, ...contents } = request;
-        // The fingerprint's `source` names who asked: a player (through their User), a Bot or the server. A fingerprint stored
-        // with the old source `'human'` no longer matches: a pre-release record may break (ADR-0014).
+        // The fingerprint's `source` names who asked: a player (through their User), a Bot or the server. A request ID stored with
+        // the old source `'human'` now conflicts when retried, not replays: a pre-release record may break (ADR-0014).
         const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: authority.kind === 'user' ? 'player' : authority.kind, kind, contents })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
         session = tables.get(id)!;

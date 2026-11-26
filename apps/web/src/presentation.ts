@@ -34,7 +34,7 @@ export function presentTable(table: ObservableTableSession, serverNow: number): 
         const { holeCards: _hidden, ...rest } = shown;
         return { ...rest, cardCount: 0 };
       }
-      // Hands turned up at showdown stay face down until its phase starts; your own cards were dealt to you.
+      // Hands turned up at showdown stay face down until its phase starts; the viewer's own cards were dealt to them.
       if (unrevealed && p.participantId !== table.viewerParticipantId) {
         const { holeCards: _unrevealed, ...rest } = shown;
         return rest;

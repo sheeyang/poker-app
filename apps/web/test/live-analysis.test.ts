@@ -14,24 +14,24 @@ function table({ mode = 'online', allowLiveAnalysis = true, liveAnalysis = true,
     view: { configuration: defaultConfiguration, state: { status: 'active-hand', handId: 'hand-2', street: 'preflop', buttonSeat: 1, actorId: actionWindow?.participantId ?? null, decisionId: actionWindow?.decisionId ?? null, legalActions: actionWindow?.participantId === 'you' ? [{ type: 'fold' }, { type: 'call' }] : [], board: [], pots: [], participants: [] }, history: [] },
   };
 }
-const yours = (window: Partial<ActionWindow> = {}): ActionWindow => ({ participantId: 'you', decisionId: 'hand-2/decision-1', opensAt: 1500, deadlineAt: 31_500, ...window });
+const viewersWindow = (window: Partial<ActionWindow> = {}): ActionWindow => ({ participantId: 'you', decisionId: 'hand-2/decision-1', opensAt: 1500, deadlineAt: 31_500, ...window });
 
 test('the table allows Live Analysis unless its owner disallowed it', () => {
   expect(liveAnalysisAllowed(table())).toBe(true);
   expect(liveAnalysisAllowed(table({ allowLiveAnalysis: false }))).toBe(false);
   // Someone else's turn: the table's setting is what the viewer's next decision captures.
-  expect(liveAnalysisAllowed(table({ allowLiveAnalysis: false, actionWindow: yours({ participantId: 'owner' }) }))).toBe(false);
+  expect(liveAnalysisAllowed(table({ allowLiveAnalysis: false, actionWindow: viewersWindow({ participantId: 'owner' }) }))).toBe(false);
 });
 
 test('for the viewer’s own decision, what its Action Window captured when it opened decides', () => {
-  expect(liveAnalysisAllowed(table({ actionWindow: yours({ liveAnalysisDisallowed: true }) }))).toBe(false);
-  expect(liveAnalysisAllowed(table({ allowLiveAnalysis: false, actionWindow: yours() }))).toBe(true);
+  expect(liveAnalysisAllowed(table({ actionWindow: viewersWindow({ liveAnalysisDisallowed: true }) }))).toBe(false);
+  expect(liveAnalysisAllowed(table({ allowLiveAnalysis: false, actionWindow: viewersWindow() }))).toBe(true);
 });
 
 test('Live Analysis runs only while the viewer has it on and the table allows it', () => {
-  expect(liveAnalysisOn(table({ actionWindow: yours() }))).toBe(true);
-  expect(liveAnalysisOn(table({ liveAnalysis: false, actionWindow: yours() }))).toBe(false);
-  expect(liveAnalysisOn(table({ actionWindow: yours({ liveAnalysisDisallowed: true }) }))).toBe(false);
+  expect(liveAnalysisOn(table({ actionWindow: viewersWindow() }))).toBe(true);
+  expect(liveAnalysisOn(table({ liveAnalysis: false, actionWindow: viewersWindow() }))).toBe(false);
+  expect(liveAnalysisOn(table({ actionWindow: viewersWindow({ liveAnalysisDisallowed: true }) }))).toBe(false);
 });
 
 test('everyone at an Online Table is told the table’s setting; a Practice Table has none to tell', () => {
@@ -43,12 +43,12 @@ test('everyone at an Online Table is told the table’s setting; a Practice Tabl
 test('when the table disallows it, the analysis panel shows that and disables the Live Analysis switch', () => {
   type Props = ComponentProps<typeof AnalysisPanel>;
   const render = (current: ObservableTableSession) => renderToStaticMarkup(createElement(AnalysisPanel, { table: current, analysis: { view: 'live', acceptedDecisions: [], selectedDecisionId: '' } as unknown as Props['analysis'], summary: { handId: 'hand-2' } as Props['summary'], sessionSummary: {} as Props['sessionSummary'], command: { busy: false } as Props['command'], close: () => {} }));
-  const disallowed = render(table({ actionWindow: yours({ liveAnalysisDisallowed: true }) }));
+  const disallowed = render(table({ actionWindow: viewersWindow({ liveAnalysisDisallowed: true }) }));
   expect(disallowed).toContain('Live Analysis isn’t allowed at this table.');
   expect(disallowed).toContain('The Table Owner has turned off Live Analysis at this table.');
   expect(disallowed).toMatch(/<input type="checkbox" role="switch" disabled=""/);
   expect(disallowed).not.toContain('Enable Live Analysis');
-  const allowed = render(table({ actionWindow: yours() }));
+  const allowed = render(table({ actionWindow: viewersWindow() }));
   expect(allowed).not.toContain('isn’t allowed');
   expect(allowed).toMatch(/<input type="checkbox" role="switch" checked=""/);
 });

@@ -90,12 +90,12 @@ describe('a Hand is dealt and played', () => {
     const hidden = table({ state: { participants: [seat('you', 1, { cardCount: 0, wager: 10 }), seat('ada', 2, { cardCount: 0, wager: 20 }), seat('cy', 3, { cardCount: 0 })] } });
     expect(kinds(planMotion(sceneOf(hidden), table({ phases: [deal(9_000)] })))).toEqual(['deal']);
   });
-  it('sends a bet’s chips to the line, mucks an opponent’s fold and keeps yours, each from the view that carried it', () => {
+  it('sends a bet’s chips to the line, mucks an opponent’s fold and keeps the viewer’s, each from the view that carried it', () => {
     const before = sceneOf(table());
     const cues = planMotion(before, table({ serverTime: 12_000, decisions: [['cy', 'fold'], ['you', 'raise']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 60 }), seat('ada', 2, { wager: 20 }), seat('cy', 3, { folded: true })] } }));
     expect(cues).toEqual([{ kind: 'fold', participantId: 'cy', muck: true, cards: 2, at: 12_000 }, { kind: 'bet', participantId: 'you', toPot: false, at: 12_000 }]);
-    const yours = planMotion(before, table({ decisions: [['you', 'fold']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10, folded: true }), seat('ada', 2, { wager: 20 }), seat('cy', 3)] } }));
-    expect(yours).toContainEqual(expect.objectContaining({ kind: 'fold', participantId: 'you', muck: false }));
+    const viewerMotion = planMotion(before, table({ decisions: [['you', 'fold']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 10, folded: true }), seat('ada', 2, { wager: 20 }), seat('cy', 3)] } }));
+    expect(viewerMotion).toContainEqual(expect.objectContaining({ kind: 'fold', participantId: 'you', muck: false }));
   });
   it('sweeps the line and deals the flop from its street phase’s own beats; a call that closed the street goes straight to the pot', () => {
     const before = sceneOf(table({ decisions: [['you', 'call']], state: { participants: [seat('you', 1, { holeCards: ['As', 'Kd'], wager: 20 }), seat('ada', 2, { wager: 20 }), seat('cy', 3, { folded: true })] } }));

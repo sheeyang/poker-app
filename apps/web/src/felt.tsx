@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 /** Who holds a place in a table preview: the viewer, someone else (a Bot, say), or nobody yet. */
-export type SeatMark = 'you' | 'taken' | 'open';
+export type SeatMark = 'viewer' | 'taken' | 'open';
 
 /** Seat `index` of `count` around an oval, the first at the bottom centre, where the viewer sits at the table. */
 function around(index: number, count: number) {
