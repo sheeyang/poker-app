@@ -32,7 +32,7 @@ import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './gues
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
-import { notFound, outcomeStatus, reject, unauthenticated } from './rejections.js';
+import { analysisNotFound, notFound, outcomeStatus, overallSummaryNotFound, reject, scoredRequestNotFound, tableSummaryNotFound, unauthenticated } from './rejections.js';
 
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string;
   /** How long the acceptance journal waits to open a connection. Defaults to 2 seconds; test fixtures on a loaded machine raise it. Journal statements stay bounded at 2 seconds regardless. */
@@ -422,28 +422,28 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { requestId: string }; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
-    return scoredHistory.read(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(scoredRequestNotFound());
+    return scoredHistory.read(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send(scoredRequestNotFound());
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never>; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(scoredRequestNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Retry uses the captured request. Supply an empty request.' } });
-    return scoredHistory.retry(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    return scoredHistory.retry(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send(scoredRequestNotFound());
   });
   app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
-    return overallSummaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(overallSummaryNotFound());
+    return overallSummaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send(overallSummaryNotFound());
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never> }>('/api/overall-history/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(overallSummaryNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
-    return overallSummaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    return overallSummaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send(overallSummaryNotFound());
   });
   /** One completed Hand of Table History, replayed: its Replay Steps as the viewer may see them (ADR-0041). */
   app.get<{ Params: { id: string; handId: string } }>('/api/table-sessions/:id/history/:handId', async (request, reply) => {
@@ -507,31 +507,31 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(tableSummaryNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && await summaries.retry(request.params.id, request.params.requestId, participantId);
-      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+      if (!state) return reply.code(404).send(tableSummaryNotFound());
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be retried. Read its state before trying again.' } }); }
   });
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(tableSummaryNotFound());
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && summaries.read(request.params.id, request.params.requestId, participantId);
-      return state || reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+      return state || reply.code(404).send(tableSummaryNotFound());
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
   // `history: true` asks from Table History: run as the viewer's `history-analysis`, under their per-User bound, as is
   // any summary naming a Strategy to compare and any summary a former Participant asks for (ADR-0041).
   app.post<{ Params: { id: string }; Body: { strategy?: StrategyDescriptor; history?: true } }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (request.body !== undefined && (!plain(request.body) || request.body.history !== undefined && request.body.history !== true || Object.keys(request.body).some(key => key !== 'strategy' && key !== 'history'))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request, or a Strategy to summarize them under and whether Table History asks.' } });
     const unsupported = unsupportedStrategy(request.body ?? {}, reply);
@@ -545,7 +545,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string }; Body: { handId: string; strategy?: StrategyDescriptor } }>('/api/table-sessions/:id/hand-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId' && key !== 'strategy')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply the Hand ID, and optionally a Strategy.' } });
     const unsupported = unsupportedStrategy(request.body ?? {}, reply);
@@ -566,7 +566,7 @@ export async function createServer(options: ServerOptions) {
   // the flag: a named Strategy, and any study by a former Participant, is always `history-analysis` (ADR-0041).
   app.post<{ Params: { id: string }; Body: GetOrStartAnalysisRequest }>('/api/table-sessions/:id/analysis', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || request.body.history !== undefined && request.body.history !== true || request.body.live && request.body.history || request.body.live && 'strategy' in request.body || Object.keys(request.body).some(key => !['decisionId', 'live', 'history', 'strategy'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and either an optional Live Analysis request or an optional history request, with an optional Strategy for an accepted decision.' } });
     const unsupported = unsupportedStrategy(request.body ?? {}, reply);
@@ -589,24 +589,24 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/analysis/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send(analysisNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Retry uses the original analysis inputs. Supply an empty request.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && await analysis.retry(request.params.id, request.params.requestId, participantId);
-      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+      if (!state) return reply.code(404).send(analysisNotFound());
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be retried. Try reading it again.' } }); }
   });
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/analysis/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send(analysisNotFound());
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && await analysis.read(request.params.id, request.params.requestId, participantId);
-      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+      if (!state) return reply.code(404).send(analysisNotFound());
       return state;
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });

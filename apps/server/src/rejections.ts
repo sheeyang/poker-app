@@ -9,7 +9,15 @@ export const requestIdConflict = () => reject('request-id-conflict', 'This reque
 export const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
 /** A request without an established local identity: the Trainer establishes one when it opens. */
 export const unauthenticated = () => reject('unauthenticated', 'Open the Trainer to establish your local identity.');
-export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove players, or change table options.');
+/**
+ * A transient request the server does not hold for this User, or an ID it never issued: 404, telling them how to ask
+ * again. One per kind of request.
+ */
+export const scoredRequestNotFound = () => reject('not-found', 'This transient request is unavailable. Ask for the filtered list again.');
+export const overallSummaryNotFound = () => reject('not-found', 'This transient summary request is unavailable. Request a new summary explicitly.');
+export const tableSummaryNotFound = () => reject('not-found', 'This transient summary request is unavailable. Request a new snapshot explicitly.');
+export const analysisNotFound = () => reject('not-found', 'This analysis is unavailable.');
+export const ownerRequired =() => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove players, or change table options.');
 export const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
 /** A User is at one Online Table at a time: creating, joining or returning to another waits until they leave it. */
 export const currentTableElsewhere = (currentTableId: string): ApplicationRejection => ({ ok: false, rejection: { code: 'current-table-elsewhere', currentTableId,
