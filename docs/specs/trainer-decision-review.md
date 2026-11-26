@@ -66,7 +66,7 @@ ADR-0028, without introducing a historical replay workspace.
   label when relevant. Folded and all-in states remain visible. The selected action
   and later actions never supply these captions. Opponent cards are not revealed.
 - Earlier actions is a collapsed disclosure containing only the preceding actions
-  of that Hand, in order. No earlier player action is inferred when history is absent.
+  of that Hand, in order. No earlier Participant action is inferred when history is absent.
 - The full Reference Strategy distribution, concrete sizing choices, selected
   reference action, scores, loading/error states and retry controls remain tied
   to the selected decision. The snapshot remains useful while analysis is pending.

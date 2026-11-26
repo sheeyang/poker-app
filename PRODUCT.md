@@ -12,7 +12,7 @@ The primary users are poker players studying their decisions on desktop and
 mobile browsers. They play Texas Hold'em against Bots, and examine numerical
 outputs from a selected Reference Strategy. They can also play other people at
 Online Tables. The hosted product is open to the public, and anyone can create a
-table as a Guest. A specific skill level, or a need for instruction in poker
+table without an account. A specific skill level, or a need for instruction in poker
 basics, has not been established.
 
 ## Product Purpose

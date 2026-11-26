@@ -73,7 +73,7 @@ play → review → continue**. Classic materials and table-led composition rema
   selection applies within the current Hand until another human action is
   accepted. A new Hand clears the previous review; the sidebar follows the current
   Hand and latest accepted decision. Latest decision restores following on request.
-- Saved tables show observable stakes, players, completed-Hand count, progress and
+- Saved tables show observable stakes, Table Format, completed-Hand count, progress and
   the human stack. Session IDs are secondary details, not navigation labels.
 - The mobile table is composed around seeing cards and actions together. Review
   focuses analysis, and closing review returns focus to the play controls without

@@ -14,7 +14,7 @@ export function AfterPreview({ index }: { index: number }) {
   return <>
     <AfterSimulation key={`${viewer}-${handOpen}`} index={index} viewer={viewer} handOpen={handOpen} />
     {[1, 2, 3, 4, 5].includes(index) && <div className="demo-conditions">
-      <label>Try After as<select name="demoViewer" value={viewer} onChange={e => setViewer(e.target.value as Viewer)}><option value="guest-seated">Seated guest</option><option value="guest-watching">Watching guest</option><option value="owner-seated">Seated owner</option><option value="owner-watching">Watching owner</option></select></label>
+      <label>Try After as<select name="demoViewer" value={viewer} onChange={e => setViewer(e.target.value as Viewer)}><option value="guest-seated">Seated player</option><option value="guest-watching">Watching player</option><option value="owner-seated">Seated owner</option><option value="owner-watching">Watching owner</option></select></label>
       <label className="demo-hand-toggle"><input name="demoHand" type="checkbox" checked={handOpen} onChange={e => setHandOpen(e.target.checked)} />Hand in progress</label>
     </div>}
   </>;
@@ -148,7 +148,7 @@ function AfterSimulation({ index, viewer, handOpen }: { index: number; viewer: V
   return <>
     <div className={`simulation after-simulation ${choosing ? 'choosing-seats' : ''}`} ref={simulation}>
       <div inert={panel !== 'table'}>
-        <div className="sim-toolbar flex items-center justify-between"><div><strong>6-player table</strong><span>10 / 20 · Online · {owner ? 'Table Owner' : 'Guest'}</span></div></div>
+        <div className="sim-toolbar flex items-center justify-between"><div><strong>6-max table</strong><span>10 / 20 · Online · {owner ? 'Table Owner' : 'Player'}</span></div></div>
         <div className="table-area">
           <span className="hand-label">{handOpen ? 'Hand in progress' : 'Between hands'}</span>
           <div className="felt"><div className="felt-copy"><Icon name="spade" size={22} /><span>No-limit Hold’em</span><strong>{choosing ? movingBot !== null ? `Choose a seat for ${bots[movingBot]?.name}` : 'Choose an open seat' : handOpen ? 'Hand in progress' : 'Waiting for the next hand'}</strong></div></div>

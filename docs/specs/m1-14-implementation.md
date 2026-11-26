@@ -23,7 +23,7 @@ game object, unrestricted record, current decision, or live hidden-information s
 Hand IDs and sequences. This avoids deriving domain IDs from accepted commands.
 Safe owner inspection metadata is outside `ObservableGameView`; it neither widens
 Participant history nor enters Policy inputs. It includes completed Bot-only Hands
-when the owner's human Participant was absent. Admin Mode off returns an empty list.
+when the owner's player was absent. Admin Mode off returns an empty list.
 
 The exact per-server JobRunner already used by Bots owns Research execution. No
 second runner or mutation FIFO was added. Inputs and outputs use its detached,
