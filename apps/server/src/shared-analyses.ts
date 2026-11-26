@@ -34,6 +34,8 @@ export interface Owner {
   /** One of the entry's analyses succeeded (or stopped counting as succeeded): its running total changed. */
   progress?(entry: Entry): void;
 }
+/** An owner whose summary runs as a named Guest's `history-analysis`. */
+export type GuestOwner = Owner & { readonly guestId: string };
 /**
  * One ordinary Score Summary over a frozen set: a table's Hand or Session summary, or one set of a history request.
  * The score-filtered list is one too, taking no mean (`list`), so it shares every rule of a summary's state.
@@ -228,7 +230,7 @@ export function createSharedAnalyses(analysis: ReturnType<typeof createAnalysis>
    * `history-analysis` unless it has already succeeded (matching analyses and stored results are reused), and an entry
    * whose members have all settled already can settle now.
    */
-  function forGuest(owner: Owner & { readonly guestId: string }, inputs: readonly FrozenEvaluationInput[], set: GuestSet = {}): Entry {
+  function forGuest(owner: GuestOwner, inputs: readonly FrozenEvaluationInput[], set: GuestSet = {}): Entry {
     const members = dependenciesOf(inputs, owner.guestId);
     const entry = entryOf(owner, members, set);
     for (const member of members) if (!succeeded(member)) ask(member);

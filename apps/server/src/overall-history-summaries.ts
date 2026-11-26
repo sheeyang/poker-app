@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistorySummary, OverallHistoryUpdate, StrategyDescriptor } from '@poker/contracts';
+import type { HistoryBreakdown, HistoryFilter, HistoryScoreSummary, OverallHistorySummary, StrategyDescriptor } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
 import { scoreAdmission } from '@poker/research';
 import type { FrozenEvaluationInput } from './analysis.js';
 import type { AcceptTableJobResult } from './mutations.js';
-import type { ProgressChannel } from './progress.js';
-import { progressOf, type Entry, type Owner, type SharedAnalysisCoordinator } from './shared-analyses.js';
+import { pendingRequest, type GuestDelivery } from './pending-request.js';
+import { progressOf, type Entry, type SharedAnalysisCoordinator } from './shared-analyses.js';
 /**
  * An Overall History summary request, frozen (ADR-0041): the Guest's own decisions across every table they may read, as
  * `filter` declared them under one Strategy, and, with a breakdown, the same decisions in one set per bucket. Only that
@@ -19,12 +19,6 @@ export interface FrozenHistorySummary {
   readonly members: readonly FrozenEvaluationInput[];
   readonly buckets?: readonly { readonly value: string; readonly members: readonly FrozenEvaluationInput[] }[];
 }
-/** Where a Guest's Overall History requests are told of: their notices, and their pending counts. */
-export interface GuestDelivery {
-  /** Sends a notice on the Guest's user channel, to every connection of theirs and nobody else's. */
-  readonly publish: (guestId: string, update: OverallHistoryUpdate) => void;
-  readonly progress: ProgressChannel;
-}
 /** A Participant at a table: whose results a history summary's decisions are accepted for. */
 interface Membership { readonly tableSessionId: string; readonly participantId: string }
 /** The distinct memberships the decisions of `members` come from, each once. */
@@ -33,7 +27,7 @@ function membershipsOf(members: readonly FrozenEvaluationInput[]): Membership[] 
   for (const { identity } of members) byTable.set(identity.tableSessionId, (byTable.get(identity.tableSessionId) ?? new Set()).add(identity.participantId));
   return [...byTable].flatMap(([tableSessionId, participants]) => [...participants].map(participantId => ({ tableSessionId, participantId })));
 }
-interface HistoryRequest { readonly input: FrozenHistorySummary; readonly requestId: string; attemptId: string; whole: Entry; buckets: readonly { readonly value: string; readonly entry: Entry }[] }
+interface HistoryRequest { readonly input: FrozenHistorySummary; readonly requestId: string; attemptId: string; follow: () => void; whole: Entry; buckets: readonly { readonly value: string; readonly entry: Entry }[] }
 /**
  * Overall History Score Summaries (ADR-0041): the Guest's own decisions across every table they may read. Every
  * analysis they need is asked for as the Guest's `history-analysis`; the shared analyses are reused. While the whole
@@ -53,11 +47,6 @@ export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator,
     summary: historySummary(request.whole),
     ...(request.input.breakdown ? { buckets: request.buckets.map(bucket => ({ value: bucket.value, summary: historySummary(bucket.entry) })) } : {}),
   });
-  /** The request's count is the whole set's summary's, which every bucket's analyses are part of. */
-  function follow(request: HistoryRequest) {
-    if (request.whole.outcome.status !== 'pending') return;
-    delivery.progress.follow(request.input.guestId, { resource: 'overall-history-summary', requestId: request.requestId, count: () => progressOf(request.whole) });
-  }
   return {
     /**
      * Starts an Overall History summary request. Every analysis it needs is asked for as the Guest's `history-analysis`,
@@ -74,22 +63,20 @@ export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator,
       // Readable before its sets are followed, so every notice names a request that can be read.
       const request = { input, requestId: randomUUID(), attemptId: randomUUID() } as HistoryRequest;
       historyRequests.set(request.requestId, request);
-      const owner: Owner & { readonly guestId: string } = {
-        guestId,
+      // The request's count is the whole set's summary's, which every bucket's analyses are part of.
+      const { owner, follow } = pendingRequest({
+        guestId, requestId: request.requestId, resource: 'overall-history-summary', progress: delivery.progress, runAs: guestId, counted: () => request.whole,
         async accept(change) {
           for (const { tableSessionId, participantId } of memberships) if (!await acceptJobResult(tableSessionId, participantId, () => true)) return false;
           return change();
         },
-        notify: entry => {
-          if (entry === request.whole) delivery.progress.settled(guestId, request.requestId);
-          delivery.publish(guestId, { type: 'overall-history-update', resource: 'overall-history-summary', requestId: request.requestId, attemptId: request.attemptId, status: entry.outcome.status === 'error' ? 'error' : 'complete' });
-        },
-        progress: entry => { if (entry === request.whole && entry.outcome.status === 'pending') delivery.progress.changed(guestId, request.requestId); },
-      };
+        publish: entry => delivery.publish(guestId, { type: 'overall-history-update', resource: 'overall-history-summary', requestId: request.requestId, attemptId: request.attemptId, status: entry.outcome.status === 'error' ? 'error' : 'complete' }),
+      });
+      request.follow = () => follow(request.whole);
       // Each bucket's decisions are among the whole set's, so asking for the whole set asks for every one of them.
       request.whole = forGuest(owner, input.members, { admits });
       request.buckets = (input.buckets ?? []).map(bucket => ({ value: bucket.value, entry: forGuest(owner, bucket.members, { admits }) }));
-      follow(request);
+      request.follow();
       return overallSummary(request);
     },
     readHistory(requestId: string, guestId: string): OverallHistorySummary | undefined {
@@ -102,7 +89,7 @@ export function createOverallHistorySummaries(shared: SharedAnalysisCoordinator,
       if (request?.input.guestId !== guestId) return undefined;
       const entries = [request.whole, ...request.buckets.map(bucket => bucket.entry)];
       if (entries.map(retryEntry).some(Boolean)) request.attemptId = randomUUID();
-      follow(request);
+      request.follow();
       for (const entry of entries) void reduce(entry);
       return overallSummary(request);
     },

@@ -4,7 +4,8 @@ import { immutableData } from '@poker/strategies';
 import type { createAnalysis, FrozenEvaluationInput } from './analysis.js';
 import type { AcceptTableJobResult } from './mutations.js';
 import type { ProgressChannel } from './progress.js';
-import { progressOf, type Owner, type Entry, type SharedAnalysisCoordinator } from './shared-analyses.js';
+import { pendingRequest } from './pending-request.js';
+import { progressOf, type Entry, type SharedAnalysisCoordinator } from './shared-analyses.js';
 /** `participantId` keys the summary: only that Participant's Human Controller reads or retries it. */
 interface FrozenSummaryMetadata {
   readonly participantId: string; readonly tableSessionId: string;
@@ -17,7 +18,7 @@ interface FrozenSummaryMetadata {
   readonly historyGuestId?: string;
 }
 export type FrozenScoreSummary = FrozenSummaryMetadata & ScoreSummaryScope;
-interface TableRequest { readonly input: FrozenScoreSummary; identity: Omit<ScoreSummary, 'status' | 'progress'>; readonly entry: Entry; readonly guestId: string }
+interface TableRequest { readonly input: FrozenScoreSummary; identity: Omit<ScoreSummary, 'status' | 'progress'>; readonly entry: Entry; readonly guestId: string; readonly follow: () => void }
 /**
  * A table's Score Summaries: a Hand's or the Table Session's, read and retried by the Participant they are for. Its
  * results are accepted while that Participant may still be told of them; its analyses are the shared ones. Each is the
@@ -28,28 +29,19 @@ export function createTableSummaries(analysis: ReturnType<typeof createAnalysis>
   const { ask, watch, reduce, pump, dependenciesOf, entryOf, retryEntry } = shared;
   const requests = new Map<string, TableRequest>();
   const tableSummary = (request: TableRequest): ScoreSummary => immutableData({ ...request.identity, attemptId: request.entry.attempt, progress: progressOf(request.entry), ...request.entry.outcome } as ScoreSummary);
-  /** Follows the request's count while it is pending; a request already decided has nothing to follow. */
-  function follow(requestId: string, request: TableRequest) {
-    if (request.entry.outcome.status !== 'pending') return;
-    progress.follow(request.guestId, { resource: 'summary', requestId, count: () => progressOf(request.entry) });
-  }
   return {
     /** Starts the summary `input` froze, for the Guest `guestId` that asked for it: they alone are told of it. */
     async create(input: FrozenScoreSummary, guestId: string): Promise<ScoreSummary> {
       const { participantId: _participant, members: _members, historyGuestId, ...metadata } = input;
       const requestId = randomUUID();
-      const owner: Owner = {
-        ...(historyGuestId ? { guestId: historyGuestId } : {}),
+      const { owner, follow } = pendingRequest({
+        guestId, requestId, resource: 'summary', progress, runAs: historyGuestId,
         accept: change => acceptJobResult(input.tableSessionId, input.participantId, change),
-        notify: entry => {
-          progress.settled(guestId, requestId);
-          publish(input.participantId, { type: 'analysis-update', resource: 'summary', tableSessionId: input.tableSessionId, requestId, attemptId: entry.attempt, status: entry.outcome.status as 'complete' | 'error' }, guestId);
-        },
-        progress: entry => { if (entry.outcome.status === 'pending') progress.changed(guestId, requestId); },
-      };
+        publish: entry => publish(input.participantId, { type: 'analysis-update', resource: 'summary', tableSessionId: input.tableSessionId, requestId, attemptId: entry.attempt, status: entry.outcome.status as 'complete' | 'error' }, guestId),
+      });
       const members = dependenciesOf(input.members, historyGuestId);
       const entry = entryOf(owner, members);
-      const request: TableRequest = { input, guestId, identity: immutableData({ ok: true as const, ...metadata, requestId, attemptId: entry.attempt, decisionCount: input.decisionIds.length }), entry };
+      const request: TableRequest = { input, guestId, follow: () => follow(entry), identity: immutableData({ ok: true as const, ...metadata, requestId, attemptId: entry.attempt, decisionCount: input.decisionIds.length }), entry };
       // Inspect every existing match without submitting missing work or changing its purpose.
       // Passive observations also expose failures beyond the globally bounded admission batch.
       for (const member of members) {
@@ -63,7 +55,7 @@ export function createTableSummaries(analysis: ReturnType<typeof createAnalysis>
       }
       requests.set(requestId, request);
       if (members.length) { await reduce(entry); await pump(); await reduce(entry); }
-      follow(requestId, request);
+      request.follow();
       return tableSummary(request);
     },
     async retry(tableSessionId: string, requestId: string, participantId: string): Promise<ScoreSummary | undefined> {
@@ -71,7 +63,7 @@ export function createTableSummaries(analysis: ReturnType<typeof createAnalysis>
       if (!request || request.input.participantId !== participantId || request.input.tableSessionId !== tableSessionId) return undefined;
       if (!retryEntry(request.entry)) return tableSummary(request);
       await reduce(request.entry); await pump(); await reduce(request.entry);
-      follow(requestId, request);
+      request.follow();
       return tableSummary(request);
     },
     read(tableSessionId: string, requestId: string, participantId: string) {
