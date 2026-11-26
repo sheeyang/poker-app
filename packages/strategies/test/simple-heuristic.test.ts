@@ -93,7 +93,7 @@ test('clamped short all-in sizes remain unique and weak hands check instead of a
 
 test.each([2, 6, 9])('Simple Heuristic plays complete legal hands with both selectors at a %i-seat table', async seats => {
   for (const selector of ['seeded-sampling', 'highest-probability']) {
-    const participants = Array.from({ length: seats }, (_, i) => `player-${i}`);
+    const participants = Array.from({ length: seats }, (_, i) => `participant-${i}`);
     const strategy = createStrategy({ ...defaultPlayingStrategy, selector: { id: selector, version: 'v1', configuration: {} } });
     let boards = 0;
     for (let hand = 0; hand < 3; hand++) {

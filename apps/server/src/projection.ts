@@ -1,6 +1,6 @@
 import { presentingPhase, readPhaseInputs, type ConcreteAction, type ObservableTableOptions, type ObservableCashGameState, type ObservableGameConfiguration, type ObservablePresentationEvent, type ObservableTableSession, type ObservableTableUpdate, type ParticipantBinding, type PresentedPhase, type StrategyDescriptor, type TableOptions, type TableSchedule, type TrainerConfiguration } from '@poker/contracts';
 import { CashGame, type CashGameEvent, type TableSessionRecord } from '@poker/engine';
-import { findBinding, humanBindings, isHuman, type PersistedTableSession } from './aggregate.js';
+import { findBinding, playerBindings, isPlayer, type PersistedTableSession } from './aggregate.js';
 import { handInProgress } from './after-hand.js';
 import { ownerSuccession } from './ownership.js';
 function projectAction(action: ConcreteAction): ConcreteAction {
@@ -69,13 +69,13 @@ function projectSchedule(schedule: TableSchedule): TableSchedule {
   };
 }
 /**
- * Projects the table for one viewing human Participant, with their Guest's current Trainer Configuration.
- * `serverTime` is the injected clock's time at projection; `connected` lists the human Participants with a live
+ * Projects the table for one viewing player, with their User's current Trainer Configuration.
+ * `serverTime` is the injected clock's time at projection; `connected` lists the players with a live
  * connection to the table at that time, which an Online Table's view shows.
  */
 export function projectTableSession(aggregate: PersistedTableSession, participantId: string, trainerConfiguration: TrainerConfiguration, game: CashGame | undefined, serverTime: number, adminMode = false, connected: readonly string[] = []): ObservableTableSession {
   const viewer = findBinding(aggregate, participantId);
-  if (!isHuman(viewer)) throw new Error('Table views are projected only for a human Participant.');
+  if (!isPlayer(viewer)) throw new Error('Table views are projected only for a player.');
   if (!game) {
     const restored = CashGame.fromRecord(aggregate.pokerRecord);
     if (!restored.ok) throw new Error('Committed CashGame record could not be restored.');
@@ -84,13 +84,13 @@ export function projectTableSession(aggregate: PersistedTableSession, participan
   const view = game.forParticipant(participantId).getView();
   // Admin Mode is never available at an Online Table, whatever the server allows.
   const inspectable = adminMode && aggregate.mode === 'practice';
-  // Humans who left or were removed, and Bots the owner removed: public, so nobody is offered what no longer applies.
-  const departed = aggregate.bindings.filter(binding => isHuman(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
+  // Players who left or were removed, and Bots the owner removed: public, so nobody is offered what no longer applies.
+  const departed = aggregate.bindings.filter(binding => isPlayer(binding) ? binding.membership !== 'joined' : binding.removed).map(binding => binding.participantId);
   // The owner's own view says what their Leave Table would do to ownership: it waits for the Hand if they are seated in one.
   const succession = aggregate.mode === 'online' && viewer.userId === aggregate.ownerUserId
     ? ownerSuccession(aggregate, view.state.participants.some(p => p.participantId === participantId && p.seat !== null) && handInProgress(view.state.status, aggregate.schedule, serverTime)) : undefined;
   return {
-    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectTableOptions(aggregate), viewerParticipantId: participantId, ownerParticipantId: humanBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
+    tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, options: projectTableOptions(aggregate), viewerParticipantId: participantId, ownerParticipantId: playerBindings(aggregate).find(binding => binding.userId === aggregate.ownerUserId)!.participantId,
     pokerRevision: aggregate.pokerRevision, sessionRevision: aggregate.sessionRevision,
     bindings: projectBindings(aggregate.bindings),
     trainerConfiguration: { referenceStrategy: projectStrategy(trainerConfiguration.referenceStrategy), liveAnalysis: trainerConfiguration.liveAnalysis },

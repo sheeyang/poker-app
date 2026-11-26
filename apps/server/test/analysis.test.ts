@@ -49,13 +49,13 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const post = (t: Table, path: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); }
-  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
+  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
   async function configure(t: Table, referenceStrategy: StrategyDescriptor) { expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: false } }) })).status).toBe(200); }
   const request = async (t: Table) => post(t, 'analysis', { decisionId: (await read(t)).view.state.decisionId });
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
@@ -65,7 +65,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
 }
 const distribution: PolicyResult = { choices: [{ action: { type: 'raise', raiseTo: 100 }, probability: .25 }, { action: { type: 'call' }, probability: .75 }] };
 
-test('explicit evaluation freezes the current human decision, returns numerical output separately from play, and persists exact matching reuse', async () => {
+test('explicit evaluation freezes the current player decision, returns numerical output separately from play, and persists exact matching reuse', async () => {
   const f = await fixture();
   try {
     const t = await f.decision(); const before = await f.read(t);
@@ -75,7 +75,7 @@ test('explicit evaluation freezes the current human decision, returns numerical 
     const evaluation = f.evaluations[0]!;
     expect(evaluation.view).toBe(evaluation.compatibilityView);
     expect(Object.isFrozen(evaluation.view.state.participants[0])).toBe(true);
-    expect(evaluation.view.state.participants.find(p => p.participantId === t.human)?.holeCards).toHaveLength(2);
+    expect(evaluation.view.state.participants.find(p => p.participantId === t.player)?.holeCards).toHaveLength(2);
     expect(evaluation.view.state.participants.find(p => p.participantId === t.bot)).not.toHaveProperty('holeCards');
     expect(JSON.stringify(evaluation.view)).not.toMatch(/"(?:seed|pokerRevision|sessionRevision|commands|deck|burns|trainerConfiguration)"\s*:/);
     expect(await (await f.request(t)).json()).toEqual(pending);
@@ -108,7 +108,7 @@ test('concurrent consumers share work and only the owner receives readable compl
     expect((await f.result(t, one.requestId, '')).status).toBe(401);
     const atNotification: Promise<unknown>[] = [];
     ownerLive.socket.on('message', data => { const frame = JSON.parse(data.toString()); if (frame.type === 'analysis-update' && frame.requestId === one.requestId) atNotification.push(f.result(t, frame.requestId).then(r => r.json())); });
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     await f.configure(t, highestProbabilityPlayingStrategy);
     const advanced = await f.read(t);
     f.evaluations[0]!.result.resolve(distribution);
@@ -137,7 +137,7 @@ test('full shared capacity is an explicit admission error and a timed-out evalua
     f.evaluations[0]!.result.resolve(distribution);
     expect(await (await f.result(t, pending.requestId)).json()).toMatchObject({ status: 'error', error: { code: 'timeout' } });
     expect(await (await f.request(other)).json()).toEqual(capacity);
-    expect(await f.read(t)).toMatchObject({ pokerRevision: 3, sessionRevision: 3, view: { state: { actorId: t.human } } });
+    expect(await f.read(t)).toMatchObject({ pokerRevision: 3, sessionRevision: 3, view: { state: { actorId: t.player } } });
   } finally { await f.close(); }
 });
 
@@ -240,7 +240,7 @@ test('failed-only Retry preserves its immutable request while concurrent consume
     const failed = await (await f.result(t, pending.requestId)).json();
     expect(await (await f.request(t)).json()).toEqual(failed);
     await f.configure(t, highestProbabilityPlayingStrategy);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const before = await f.read(t);
     const retry = () => f.post(t, 'analysis/' + pending.requestId + '/retry', {});
     expect((await f.post(t, 'analysis/' + pending.requestId + '/retry', {}, stranger.cookie)).status).toBe(404);
@@ -341,12 +341,12 @@ test('Retry after a real PostgreSQL result failure saves a new attempt and makes
 
 test.each(['complete', 'error'] as const)('historical evaluation %s waits behind the Table Session acceptance queue', async status => {
   const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
-  const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => { if (context.requestId === 'held-human') { entered.resolve(); await release.promise; } } } });
+  const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => { if (context.requestId === 'held-player') { entered.resolve(); await release.promise; } } } });
   try {
     const t = await f.decision(); const before = await f.read(t);
     const pending = await (await f.request(t)).json(); await expect.poll(() => f.evaluations.length).toBe(1);
     const live = f.connect(t); await expect.poll(() => live.messages.some(frame => frame.type === 'user-channel-ready')).toBe(true);
-    const accepted = f.post(t, 'act', { requestId: 'held-human', expectedPokerRevision: before.pokerRevision, participantId: t.human, action: { type: 'fold' } });
+    const accepted = f.post(t, 'act', { requestId: 'held-player', expectedPokerRevision: before.pokerRevision, participantId: t.player, action: { type: 'fold' } });
     await entered.promise;
     if (status === 'complete') f.evaluations[0]!.result.resolve(distribution); else f.evaluations[0]!.result.reject(new Error('Controlled failure'));
     // HTTP remains available while a real mutation transaction owns this Table Session queue.
@@ -363,7 +363,7 @@ test.each(['complete', 'error'] as const)('historical evaluation %s waits behind
 });
 
 
-test('blocked derived persistence leaves human acceptance responsive and publishes the historical result only after save', async () => {
+test('blocked derived persistence leaves player acceptance responsive and publishes the historical result only after save', async () => {
   const f = await fixture(); const blocker = await administration.connect();
   try {
     const t = await f.decision(); const pending = await (await f.request(t)).json();
@@ -373,7 +373,7 @@ test('blocked derived persistence leaves human acceptance responsive and publish
     // This real database lock is fault control, while all behavior is asserted through HTTP.
     await expect.poll(async () => (await administration.query('SELECT count(*)::int AS count FROM pg_locks WHERE relation = $1::regclass AND NOT granted', [f.schema + '.analysis_evaluations'])).rows[0].count).toBe(1);
     expect((await (await f.result(t, pending.requestId)).json()).status).toBe('pending');
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     expect((await f.read(t)).view.state.status).toBe('completed-hand');
     expect((await (await f.result(t, pending.requestId)).json()).status).toBe('pending');
     await blocker.query('ROLLBACK');

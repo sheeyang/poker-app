@@ -37,7 +37,7 @@ const get = (path: string, cookie: string) => fetch(base + path, { headers: { co
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 const stakes = { seatCount: 4, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000 };
 
-/** An Online Table of Ann (its owner) with Bots, by default one named Rex. Other Guests join through its Join Link. */
+/** An Online Table of Ann (its owner) with Bots, by default one named Rex. Other Users join through its Join Link. */
 async function onlineTable(bots: string[] = ['Rex']) {
   const ann = await guest('Ann');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online', configuration: stakes, bots: bots.map(name => ({ name, playingStrategy: baselinePlayingStrategy })) })).json();
@@ -51,14 +51,14 @@ async function onlineTable(bots: string[] = ['Rex']) {
       const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
-    /** A request from a Guest, at the poker revision that Guest last saw. */
+    /** A request from a User, at the poker revision that User last saw. */
     async as(cookie: string, kind: string, fields: object = {}) {
       return post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
     },
     async seat(cookie: string, participantId: string, seat: number) {
       expect((await t.as(cookie, 'seat-participant', { participantId, seat })).status).toBe(200);
     },
-    /** A live connection of the Guest: Ann's by default. */
+    /** A live connection of the User: Ann's by default. */
     connect: (cookie = ann) => connectLive(base, cookie, id),
   };
   return t;
@@ -68,7 +68,7 @@ const participant = (table: ObservableTableSession, participantId: string) => ta
 /** Stacks, plus what is in the pot while a Hand is played; once it completes, the pot has been paid into the stacks. */
 const chipsAtTable = (table: ObservableTableSession) => table.view.state.participants.reduce((sum, p) => sum + p.stack + (table.view.state.status === 'active-hand' ? p.contribution ?? 0 : 0), 0);
 const updates = (connection: LiveConnection) => connection.messages.filter((message): message is ObservableTableUpdate => message.type === 'table-update');
-/** The acting human acts through HTTP; a Bot through the trusted controller commands. */
+/** The acting player acts through HTTP; a Bot through the trusted controller commands. */
 async function act(t: Table, cookieOf: (participantId: string) => string | undefined, action: ConcreteAction) {
   const current = await t.view();
   const actor = current.view.state.actorId!;
@@ -91,7 +91,7 @@ async function dealtHeadsUp(t: Table) {
   return live;
 }
 
-test('an Online Table announces a Next-Hand Countdown, visible to everyone, once two Eligible Participants including a connected human are seated, and deals when it expires', async () => {
+test('an Online Table announces a Next-Hand Countdown, visible to everyone, once two Eligible Participants including a connected player are seated, and deals when it expires', async () => {
   const t = await onlineTable();
   const ben = await t.join('Ben');
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
@@ -154,7 +154,7 @@ test('after each Hand the payout phase and its Settle pass before the next count
   expect(chipsAtTable(second)).toBe(2000);
 });
 
-test('when a countdown expires, humans still disconnected are sat out first, and without two Eligible Participants including a human the countdown is cancelled until a commit or a connection makes the table dealable again', async () => {
+test('when a countdown expires, players still disconnected are sat out first, and without two Eligible Participants including a player the countdown is cancelled until a commit or a connection makes the table dealable again', async () => {
   const t = await onlineTable();
   const ben = await t.join('Ben');
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
@@ -202,7 +202,7 @@ test('when a countdown expires, humans still disconnected are sat out first, and
   expect(participant(await t.view(), ben.participantId)).toEqual({ participantId: ben.participantId, seat: 2, stack: 1000, sittingOut: true });
 });
 
-test('connection status is public and transient: it counts any of a Guest’s connections, is published live to everyone, changes no revision, and is lost by a restart', async () => {
+test('connection status is public and transient: it counts any of a User’s connections, is published live to everyone, changes no revision, and is lost by a restart', async () => {
   const t = await onlineTable();
   const ben = await t.join('Ben');
   const benLive = await t.connect(ben.cookie);
@@ -226,11 +226,11 @@ test('connection status is public and transient: it counts any of a Guest’s co
   await expect.poll(async () => (await t.view()).connectedParticipantIds).toEqual([ben.participantId]);
 });
 
-test('a Guest looking at another table stays connected to their Current Table and dealt in: one connection follows both, and dropping the other changes nothing', async () => {
+test('a User looking at another table stays connected to their Current Table and dealt in: one connection follows both, and dropping the other changes nothing', async () => {
   const t = await onlineTable();
   const live = await t.connect();
   const practice = await (await post('/api/table-sessions', t.ann, { requestId: randomUUID(), configuration: stakes, bots: [{ name: 'Bot 1', playingStrategy: baselinePlayingStrategy }] })).json();
-  /** The same connection subscribes to, or drops, another table, as the app does when its Guest opens another page. */
+  /** The same connection subscribes to, or drops, another table, as the app does when its User opens another page. */
   async function control(type: 'subscribe-table' | 'unsubscribe-table') {
     const requestId = randomUUID();
     live.socket.send(JSON.stringify({ type, requestId, tableSessionId: practice.tableSessionId }));
@@ -250,7 +250,7 @@ test('a Guest looking at another table stays connected to their Current Table an
   expect((await t.view()).view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
 });
 
-test('every Online Table enforces its Action Time Limit: a missed deadline plays the Timeout Action, later missed decisions in the Hand time out too, the human is sat out after the Hand, and resuming is explicit', async () => {
+test('every Online Table enforces its Action Time Limit: a missed deadline plays the Timeout Action, later missed decisions in the Hand time out too, the player is sat out after the Hand, and resuming is explicit', async () => {
   const t = await onlineTable([]);
   const ben = await t.join('Ben');
   await t.connect(); await t.connect(ben.cookie);
@@ -296,7 +296,7 @@ test('every Online Table enforces its Action Time Limit: a missed deadline plays
   expect(participant(await t.view(), ben.participantId)).toMatchObject({ inHand: true, sittingOut: false });
 });
 
-test('a human who disconnects mid-Hand stays in it under a running deadline, reconnecting in time continues normally, and a Guest seated mid-Hand is dealt in from the next Hand', async () => {
+test('a player who disconnects mid-Hand stays in it under a running deadline, reconnecting in time continues normally, and a User seated mid-Hand is dealt in from the next Hand', async () => {
   const t = await onlineTable();
   const ben = await t.join('Ben'), cy = await t.join('Cy');
   await t.connect();
@@ -336,13 +336,13 @@ test('a human who disconnects mid-Hand stays in it under a running deadline, rec
   for (const id of [t.annId, ben.participantId, t.botIds[0]!, cy.participantId]) expect(participant(second, id)).toMatchObject({ inHand: true, sittingOut: false });
 });
 
-test('a countdown survives a restart, and one that expired during the outage runs its recheck once: everyone counts as disconnected, so the humans are sat out and nothing is dealt', async () => {
+test('a countdown survives a restart, and one that expired during the outage runs its recheck once: everyone counts as disconnected, so the players are sat out and nothing is dealt', async () => {
   const t = await onlineTable();
   const ben = await t.join('Ben');
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
   await t.seat(t.ann, t.annId, 1); await t.seat(ben.cookie, ben.participantId, 2); await t.seat(t.ann, t.botIds[0]!, 3);
   const countdown = await announcedCountdown(() => t.view());
-  // A restart before it expires keeps the countdown; a Guest who reconnects in time is dealt in.
+  // A restart before it expires keeps the countdown; a User who reconnects in time is dealt in.
   await annLive.close(); await benLive.close();
   await server.close(); clock.advance(1000); await startServer();
   expect((await t.view()).schedule.nextHandCountdown).toEqual(countdown);

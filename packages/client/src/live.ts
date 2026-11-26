@@ -8,7 +8,7 @@ export function retainNewestTable(previous: unknown, incoming: unknown): Observa
   const next = incoming as ObservableTableSession;
   if (current?.tableSessionId === next.tableSessionId && current.sessionRevision > next.sessionRevision) return current;
   if (current?.tableSessionId === next.tableSessionId && current.sessionRevision === next.sessionRevision) {
-    // The Guest's Trainer Configuration changes without a table revision, so a read at the same revision says it.
+    // The User's Trainer Configuration changes without a table revision, so a read at the same revision says it.
     const configuration = sameValue(current.trainerConfiguration, next.trainerConfiguration) ? {} : { trainerConfiguration: next.trainerConfiguration };
     const status = Object.hasOwn(next, 'runtimeStatus') ? { runtimeStatus: next.runtimeStatus } : {};
     return Object.keys(configuration).length || Object.keys(status).length ? { ...current, ...configuration, ...status } : current;
@@ -27,13 +27,13 @@ export interface UserChannelLifecycle { readonly generation: number; readonly re
 export interface LiveConsumers {
   readonly onReady?: (lifecycle: UserChannelLifecycle) => void;
   readonly onAnalysisUpdate?: (update: AnalysisUpdate, lifecycle: UserChannelLifecycle) => void;
-  /** A followed table no longer includes this Guest's Participant: they left it (or were removed). */
+  /** A followed table no longer includes this User's Participant: they left it (or were removed). */
   readonly onMembershipEnded?: (ended: TableMembershipEnded) => void;
-  /** The Guest's Trainer Configuration changed, in this tab or another. Their table views are read again already. */
+  /** The User's Trainer Configuration changed, in this tab or another. Their table views are read again already. */
   readonly onTrainerConfigurationChanged?: () => void;
-  /** The latest count of each of the Guest's pending requests: counts only, never results, and never kept. */
+  /** The latest count of each of the User's pending requests: counts only, never results, and never kept. */
   readonly onProgress?: (update: ProgressUpdate, lifecycle: UserChannelLifecycle) => void;
-  /** One of the Guest's Overall History requests settled or failed: it is read again over HTTP. */
+  /** One of the User's Overall History requests settled or failed: it is read again over HTTP. */
   readonly onOverallHistoryUpdate?: (update: OverallHistoryUpdate, lifecycle: UserChannelLifecycle) => void;
 }
 /** Per followed table, the latest word of the current connection. */
@@ -50,7 +50,7 @@ function record<T>(set: Setter<T>, generation: number, tableId: string, value: T
 
 /**
  * One app-lifetime socket; changing the open table only changes its subscriptions. It follows the open table, `id`,
- * and also `following`, the Guest's Current Table, from every page: the server counts a Guest connected to a table
+ * and also `following`, the User's Current Table, from every page: the server counts a User connected to a table
  * while any of their live connections is subscribed to it, so looking at another page never sits them out. Updates
  * to either table reach the query cache, and `onMembershipEnded` hears of either; what this returns is about the open
  * table, so opening the followed table finds its live state already there.
@@ -154,7 +154,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
           return;
         }
         if (message.type === 'trainer-configuration-changed') {
-          // It belongs to the Guest, so every table view presents it, and it advances no table revision: read them again.
+          // It belongs to the User, so every table view presents it, and it advances no table revision: read them again.
           void queryClient.invalidateQueries({ queryKey: ['trainer-configuration'] });
           void queryClient.invalidateQueries({ queryKey: ['table-session'] });
           callbacks.current.onTrainerConfigurationChanged?.();
@@ -234,7 +234,7 @@ export function useTableSynchronization(id: string | null, enabled: boolean, con
     /** At an Online Table, the Participants connected now, from this connection's latest message. */
     connectedParticipantIds: latest(presence),
     /**
-     * Asks again for the open table, whose subscription the server refused while this Guest was not at it: after
+     * Asks again for the open table, whose subscription the server refused while this User was not at it: after
      * joining through its Join Link, the same address becomes their table.
      */
     resubscribe: () => { if (enabled && selected.current && control('subscribe-table', selected.current)) asked.current.add(selected.current); },

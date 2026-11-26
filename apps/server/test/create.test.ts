@@ -107,7 +107,7 @@ test.each([
 test('a supplied observer or Participant identity cannot authorize reading another owner session', async () => {
   const strangerIdentity = await fetch(base + '/api/identity');
   const strangerCookie = strangerIdentity.headers.get('set-cookie')!.split(';')[0]!;
-  const unauthorized = await fetch(base + '/api/table-sessions/' + tableSessionId + '?participantId=human&ownerUserId=client-owner', { headers: { cookie: strangerCookie } });
+  const unauthorized = await fetch(base + '/api/table-sessions/' + tableSessionId + '?participantId=player&ownerUserId=client-owner', { headers: { cookie: strangerCookie } });
   expect(unauthorized.status).toBe(404);
   const anonymous = await fetch(base + '/api/table-sessions/' + tableSessionId);
   expect(anonymous.status).toBe(401);

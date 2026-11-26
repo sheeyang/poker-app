@@ -4,11 +4,11 @@ import { dealBeats, payoutBeats, showdownBeats, streetBeats } from '@poker/contr
 const ids = (count: number) => Array.from({ length: count }, (_, i) => `p${i}`);
 
 /**
- * How long the deal of `players` Participants lasts, two cards each with both blinds in and no refill: the shared deal
+ * How long the deal of `participants` Participants lasts, two cards each with both blinds in and no refill: the shared deal
  * beats' total, so a test never hardcodes the deal's length.
  */
-export function dealMs(players: number): number {
-  const dealt = ids(players);
+export function dealMs(participants: number): number {
+  const dealt = ids(participants);
   return dealBeats({ dealt: dealt.map(participantId => ({ participantId, cardCount: 2 })), blinds: dealt.slice(0, 2), refills: [] }).totalMs;
 }
 

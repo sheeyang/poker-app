@@ -37,7 +37,7 @@ async function command(t: Table, kind: string, fields: object = {}) {
   const response = await submit(t, kind, fields); expect(response.status).toBe(200);
   const result = await response.json(); t.revision = result.pokerRevision; return result;
 }
-/** The human acts through HTTP; Bots through the trusted controller commands. */
+/** The player acts through HTTP; Bots through the trusted controller commands. */
 async function accepted(t: Table, participantId: string, action: ConcreteAction) {
   const response = participantId === t.ids[0] ? await submit(t, 'act', { participantId, action })
     : Response.json(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: t.revision, participantId, action }));
@@ -45,134 +45,134 @@ async function accepted(t: Table, participantId: string, action: ConcreteAction)
   t.revision = (await response.json()).pokerRevision;
 }
 async function headsUp() {
-  const t = await table(2); const [human, bot] = t.ids as [string, string];
-  await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
-  return { t, human, bot };
+  const t = await table(2); const [player, bot] = t.ids as [string, string];
+  await command(t, 'seat-participant', { participantId: player, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
+  return { t, player, bot };
 }
-/** Deals and lets the human fold at once: the Hand is over and its payout phase starts now. */
-async function foldedHand(t: Table, human: string) {
+/** Deals and lets the player fold at once: the Hand is over and its payout phase starts now. */
+async function foldedHand(t: Table, player: string) {
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  await accepted(t, human, { type: 'fold' });
+  await accepted(t, player, { type: 'fold' });
   return clock.now();
 }
 const participant = (view: ObservableTableSession, id: string) => view.view.state.participants.find(p => p.participantId === id)!;
 
 test('a sit-out asked for during a Hand is recorded as pending, visible to the table, and applied when the Hand ends with the Settle after its payout', async () => {
-  const { t, human } = await headsUp();
+  const { t, player } = await headsUp();
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   const before = await read(t);
-  const asked = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
+  const asked = await command(t, 'set-sitting-out', { participantId: player, sittingOut: true });
   // Nothing at the poker table changes: only the application records the request, so just the session revision moves.
   expect(asked).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: before.pokerRevision, sessionRevision: before.sessionRevision + 1, afterHand: true });
   const waiting = await read(t);
-  expect(waiting.pendingChanges).toEqual([{ participantId: human, change: 'sit-out' }]);
+  expect(waiting.pendingChanges).toEqual([{ participantId: player, change: 'sit-out' }]);
   expect(waiting.view).toEqual(before.view);
-  await accepted(t, human, { type: 'fold' });
+  await accepted(t, player, { type: 'fold' });
   const ends = clock.now() + presentedFor('payout');
   clock.advanceTo(ends - 1);
-  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'sit-out' }]);
-  expect(participant(await read(t), human).sittingOut).toBe(false);
+  expect((await read(t)).pendingChanges).toEqual([{ participantId: player, change: 'sit-out' }]);
+  expect(participant(await read(t), player).sittingOut).toBe(false);
   clock.advanceTo(ends);
   await expect.poll(async () => (await read(t)).pendingChanges).toEqual([]);
   const settled = await read(t);
-  expect(participant(settled, human)).toMatchObject({ seat: 1, sittingOut: true });
+  expect(participant(settled, player)).toMatchObject({ seat: 1, sittingOut: true });
   expect(settled.pokerRevision).toBe(t.revision + 1);
 });
 
 test('a Stand Up asked for during a Hand cashes out after it, keeps every chip, and applies once however often it is asked or the server restarts', async () => {
-  const { t, human, bot } = await headsUp();
+  const { t, player, bot } = await headsUp();
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  const asked = await (await submit(t, 'stand-up-participant', { participantId: human }, 'stand-up-once')).json();
+  const asked = await (await submit(t, 'stand-up-participant', { participantId: player }, 'stand-up-once')).json();
   expect(asked).toMatchObject({ ok: true, afterHand: true });
   // The same request again, and a fresh request for the same change, record nothing further.
-  expect(await (await submit(t, 'stand-up-participant', { participantId: human }, 'stand-up-once')).json()).toEqual(asked);
-  expect(await (await submit(t, 'stand-up-participant', { participantId: human })).json()).toEqual(asked);
+  expect(await (await submit(t, 'stand-up-participant', { participantId: player }, 'stand-up-once')).json()).toEqual(asked);
+  expect(await (await submit(t, 'stand-up-participant', { participantId: player })).json()).toEqual(asked);
   expect((await read(t)).sessionRevision).toBe(asked.sessionRevision);
-  await accepted(t, human, { type: 'fold' });
+  await accepted(t, player, { type: 'fold' });
   const paid = clock.now();
   const finished = await read(t);
-  expect(finished.pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
+  expect(finished.pendingChanges).toEqual([{ participantId: player, change: 'stand-up' }]);
   const chipsAtTable = finished.view.state.participants.reduce((sum, p) => sum + p.stack, 0);
   expect(chipsAtTable).toBe(2000);
   // A restart in the middle of the payout phase keeps the request pending.
   clock.advanceTo(paid + 1000);
   await server.close(); await startServer();
-  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
+  expect((await read(t)).pendingChanges).toEqual([{ participantId: player, change: 'stand-up' }]);
   clock.advanceTo(paid + presentedFor('payout'));
   await expect.poll(async () => (await read(t)).pendingChanges).toEqual([]);
   const settled = await read(t);
-  expect(participant(settled, human)).toMatchObject({ seat: null, stack: 0, sittingOut: false });
+  expect(participant(settled, player)).toMatchObject({ seat: null, stack: 0, sittingOut: false });
   // The stack was cashed out, not lost or moved: what left the table plus what stayed is what was there.
-  const cashOut = participant(finished, human).stack;
+  const cashOut = participant(finished, player).stack;
   expect(participant(settled, bot).stack + cashOut).toBe(chipsAtTable);
   expect((await controllers.readPersistedSession(t.id))!.pokerRecord.commands.filter(command => command.type === 'stand-up-participant')).toHaveLength(1);
   // A late retry of the original request still answers with its original outcome.
-  expect(await (await submit(t, 'stand-up-participant', { participantId: human, expectedPokerRevision: asked.pokerRevision }, 'stand-up-once')).json()).toEqual(asked);
+  expect(await (await submit(t, 'stand-up-participant', { participantId: player, expectedPokerRevision: asked.pokerRevision }, 'stand-up-once')).json()).toEqual(asked);
 });
 
 test('a request whose Hand ended while the server was down is applied once, when the untimed Practice Table is next opened', async () => {
-  const { t, human } = await headsUp();
+  const { t, player } = await headsUp();
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  await command(t, 'stand-up-participant', { participantId: human });
-  await accepted(t, human, { type: 'fold' });
+  await command(t, 'stand-up-participant', { participantId: player });
+  await accepted(t, player, { type: 'fold' });
   await server.close();
   // The outage outlasts the payout phase; no timer of the closed server fires.
   clock.advance(60_000);
   await startServer();
-  // Nothing advances an untimed Practice Table without its human, so startup leaves it, and the request, waiting.
+  // Nothing advances an untimed Practice Table without its player, so startup leaves it, and the request, waiting.
   expect(controllers.loadedTables()).not.toContain(t.id);
   expect((await controllers.readPersistedSession(t.id))!.pendingChanges).toHaveLength(1);
   await read(t);
   await expect.poll(async () => (await controllers.readPersistedSession(t.id))!.pendingChanges).toEqual([]);
   const session = (await controllers.readPersistedSession(t.id))!;
-  expect(session.bindings.find(binding => binding.participantId === human)).toMatchObject({ membership: 'joined' });
+  expect(session.bindings.find(binding => binding.participantId === player)).toMatchObject({ membership: 'joined' });
   expect(session.pokerRecord.commands.slice(-1).map(command => command.type)).toEqual(['stand-up-participant']);
   await server.close(); await startServer();
   expect((await controllers.readPersistedSession(t.id))!.pokerRecord.commands).toHaveLength(session.pokerRecord.commands.length);
 });
 
 test('a stronger request replaces a weaker pending one, and a weaker one changes nothing', async () => {
-  const { t, human } = await headsUp();
+  const { t, player } = await headsUp();
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  const sitOut = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
-  const standUp = await command(t, 'stand-up-participant', { participantId: human });
-  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
-  const again = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
+  const sitOut = await command(t, 'set-sitting-out', { participantId: player, sittingOut: true });
+  const standUp = await command(t, 'stand-up-participant', { participantId: player });
+  expect((await read(t)).pendingChanges).toEqual([{ participantId: player, change: 'stand-up' }]);
+  const again = await command(t, 'set-sitting-out', { participantId: player, sittingOut: true });
   expect(standUp.sessionRevision).toBe(sitOut.sessionRevision + 1);
   expect(again.sessionRevision).toBe(standUp.sessionRevision);
-  expect((await read(t)).pendingChanges).toEqual([{ participantId: human, change: 'stand-up' }]);
+  expect((await read(t)).pendingChanges).toEqual([{ participantId: player, change: 'stand-up' }]);
 });
 
 test('top-ups and seat moves are not deferred: they wait for the Hand, which lasts until the Settle after its payout ends', async () => {
-  const { t, human } = await headsUp();
+  const { t, player } = await headsUp();
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   const refused = async (kind: string, fields: object) => { const response = await submit(t, kind, fields); return { status: response.status, code: (await response.json()).rejection?.code }; };
-  const attempts: [string, object][] = [['top-up-to', { participantId: human, targetStack: 1000 }], ['move-participant', { participantId: human, seat: 3 }], ['set-sitting-out', { participantId: human, sittingOut: false }]];
+  const attempts: [string, object][] = [['top-up-to', { participantId: player, targetStack: 1000 }], ['move-participant', { participantId: player, seat: 3 }], ['set-sitting-out', { participantId: player, sittingOut: false }]];
   for (const [kind, fields] of attempts) expect({ kind, ...await refused(kind, fields) }).toEqual({ kind, status: 400, code: 'active-hand' });
-  await accepted(t, human, { type: 'fold' });
+  await accepted(t, player, { type: 'fold' });
   const paid = clock.now();
   // The Hand is decided but its payout is still being shown: changing seats or chips now would reveal it early.
   for (const [kind, fields] of attempts) expect({ kind, ...await refused(kind, fields) }).toEqual({ kind, status: 400, code: 'active-hand' });
   clock.advanceTo(paid + presentedFor('payout') - 1);
   for (const [kind, fields] of attempts) expect({ kind, ...await refused(kind, fields) }).toEqual({ kind, status: 400, code: 'active-hand' });
   clock.advanceTo(paid + presentedFor('payout'));
-  await command(t, 'move-participant', { participantId: human, seat: 3 });
-  expect(participant(await read(t), human)).toMatchObject({ seat: 3 });
+  await command(t, 'move-participant', { participantId: player, seat: 3 });
+  expect(participant(await read(t), player)).toMatchObject({ seat: 3 });
 });
 
 test('between Hands the same requests apply at once, and Stand Up changes the Seat in one revision step', async () => {
-  const { t, human } = await headsUp();
-  await foldedHand(t, human);
+  const { t, player } = await headsUp();
+  await foldedHand(t, player);
   clock.advance(presentedFor('payout'));
   const revision = t.revision;
-  const sat = await command(t, 'set-sitting-out', { participantId: human, sittingOut: true });
+  const sat = await command(t, 'set-sitting-out', { participantId: player, sittingOut: true });
   expect(sat).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: revision + 1, sessionRevision: expect.any(Number) });
-  expect(participant(await read(t), human).sittingOut).toBe(true);
+  expect(participant(await read(t), player).sittingOut).toBe(true);
   expect((await read(t)).pendingChanges).toEqual([]);
-  const stood = await command(t, 'stand-up-participant', { participantId: human });
+  const stood = await command(t, 'stand-up-participant', { participantId: player });
   expect(stood).toMatchObject({ ok: true, pokerRevision: revision + 2 });
   expect(stood).not.toHaveProperty('afterHand');
-  expect(participant(await read(t), human)).toMatchObject({ seat: null });
+  expect(participant(await read(t), player)).toMatchObject({ seat: null });
   expect((await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).status).toBe(200);
 });
 
@@ -186,25 +186,25 @@ test('Deal received before the table has woken for the end of the payout phase s
   try {
     const cookie = (await fetch(origin + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(origin, cookie);
     const created = await (await fetch(origin + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) })).json();
-    const [human, bot] = created.bindings.map((b: { participantId: string }) => b.participantId) as [string, string];
+    const [player, bot] = created.bindings.map((b: { participantId: string }) => b.participantId) as [string, string];
     const post = async (kind: string, fields: object, revision: number) => (await fetch(origin + '/api/table-sessions/' + created.tableSessionId + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), expectedPokerRevision: revision, ...fields }) })).json();
     const view = async (): Promise<ObservableTableSession> => (await fetch(origin + '/api/table-sessions/' + created.tableSessionId, { headers: { cookie } })).json();
-    await post('seat-participant', { participantId: human, seat: 1 }, 0); await post('seat-participant', { participantId: bot, seat: 4 }, 1);
+    await post('seat-participant', { participantId: player, seat: 1 }, 0); await post('seat-participant', { participantId: bot, seat: 4 }, 1);
     await post('start-hand', {}, 2); silent.advance(presentedFor('deal'));
-    await post('set-sitting-out', { participantId: human, sittingOut: true }, 3);
-    await post('act', { participantId: human, action: { type: 'fold' } }, 3);
+    await post('set-sitting-out', { participantId: player, sittingOut: true }, 3);
+    await post('act', { participantId: player, action: { type: 'fold' } }, 3);
     silent.advance(presentedFor('payout'));
     // Nothing has woken the table, so the request is still pending.
-    expect((await view()).pendingChanges).toEqual([{ participantId: human, change: 'sit-out' }]);
+    expect((await view()).pendingChanges).toEqual([{ participantId: player, change: 'sit-out' }]);
     // The Deal names the revision it saw, which the applied requests then make stale: nothing is dealt on a table that has since changed.
     const stale = await post('start-hand', {}, 4);
     expect(stale).toMatchObject({ ok: false, rejection: { code: 'stale-poker-revision' } });
     const settled = await view();
     expect(settled).toMatchObject({ pendingChanges: [], pokerRevision: 5 });
-    expect(participant(settled, human).sittingOut).toBe(true);
+    expect(participant(settled, player).sittingOut).toBe(true);
     // Deal resumes them, as for any voluntary sit-out.
     expect(await post('start-hand', {}, 5)).toMatchObject({ ok: true });
-    expect(participant(await view(), human)).toMatchObject({ sittingOut: false, inHand: true });
+    expect(participant(await view(), player)).toMatchObject({ sittingOut: false, inHand: true });
   } finally { await quiet.close(); await administration.query('DROP SCHEMA "' + quietSchema + '" CASCADE'); }
 });
 
@@ -239,7 +239,7 @@ async function onlineHand() {
   return { ann, ben, id, annId, benId, view, join, preview, as, cookieOf };
 }
 
-test('at an Online Table a seated Guest who leaves during a Hand is stood up after it, frees a place, and rejoins through the Join Link as the same Participant with their history', async () => {
+test('at an Online Table a seated User who leaves during a Hand is stood up after it, frees a place, and rejoins through the Join Link as the same Participant with their history', async () => {
   const { ann, ben, id, annId, benId, view, join, preview, as, cookieOf } = await onlineHand();
   const watcher = await guest('Cy');
   const placesTaken = async () => (await preview(watcher)).placesTaken as number;
@@ -262,7 +262,7 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   expect(after.pendingChanges).toEqual([]);
   expect(participant(after, benId)).toMatchObject({ seat: null, stack: 0 });
   expect(participant(after, annId).stack + participant(decided, benId).stack).toBe(stacks.reduce((sum, stack) => sum + stack, 0));
-  // The link tells the returning Guest who they will be, then gives them back the same Participant.
+  // The link tells the returning User who they will be, then gives them back the same Participant.
   expect(await preview(ben)).toMatchObject({ alreadyJoined: false, returningAs: 'Ben' });
   const rejoined = await join(ben);
   expect(await rejoined.json()).toMatchObject({ ok: true, participantId: benId });
@@ -274,9 +274,9 @@ test('at an Online Table a seated Guest who leaves during a Hand is stood up aft
   expect(await placesTaken()).toBe(2);
 });
 
-test('nobody manages another human, and an owner who leaves passes the table on, which keeps running without them', async () => {
+test('nobody manages another player, and an owner who leaves passes the table on, which keeps running without them', async () => {
   const { ann, ben, id, annId, benId, view, join, preview, as } = await onlineHand();
-  // Both are seated in a Hand. Requests naming the other human are refused for the owner and everyone else.
+  // Both are seated in a Hand. Requests naming the other player are refused for the owner and everyone else.
   for (const [cookie, target] of [[ben, annId], [ann, benId]] as const) {
     for (const [kind, fields] of [['leave-table', {}], ['stand-up-participant', {}], ['set-sitting-out', { sittingOut: true }]] as const) {
       const refused = await as(cookie, kind, { participantId: target, ...fields });
@@ -292,7 +292,7 @@ test('nobody manages another human, and an owner who leaves passes the table on,
   expect((await as(ann, 'leave-table', { participantId: annId })).status).toBe(200);
   expect((await get('/api/table-sessions/' + id, ann)).status).toBe(404);
   expect(await (await get('/api/table-sessions', ann)).json()).toMatchObject({ tables: [{ tableSessionId: id, mode: 'online', left: true }] });
-  // The table keeps running, and ownership passed to Ben, the one human still at it.
+  // The table keeps running, and ownership passed to Ben, the one player still at it.
   const running = await view(ben);
   expect(running.ownerParticipantId).toBe(benId);
   expect((await as(ben, 'move-participant', { participantId: benId, seat: 3 })).status).toBe(200);
@@ -305,37 +305,37 @@ test('nobody manages another human, and an owner who leaves passes the table on,
   expect(participant(back, annId)).toMatchObject({ seat: null, stack: 0 });
 });
 
-test('at a Practice Table a missed Action Deadline plays the Timeout Action without sitting the human out, and a sit-out asked for meanwhile applies after the Hand, before Deal', async () => {
-  const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [human, bot] = t.ids as [string, string];
-  await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
+test('at a Practice Table a missed Action Deadline plays the Timeout Action without sitting the player out, and a sit-out asked for meanwhile applies after the Hand, before Deal', async () => {
+  const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [player, bot] = t.ids as [string, string];
+  await command(t, 'seat-participant', { participantId: player, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
-  expect(await command(t, 'set-sitting-out', { participantId: human, sittingOut: true })).toMatchObject({ afterHand: true });
+  expect(await command(t, 'set-sitting-out', { participantId: player, sittingOut: true })).toMatchObject({ afterHand: true });
   clock.advance(15_001);
-  // The human never acted: the server folded for them, as their own decision.
+  // The player never acted: the server folded for them, as their own decision.
   await expect.poll(async () => (await read(t)).view.state.status).toBe('completed-hand');
   const timedOut = await read(t);
-  expect(timedOut.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: human, action: { type: 'fold' } }]);
+  expect(timedOut.view.history[0]!.decisions.map(decision => decision.action)).toEqual([{ participantId: player, action: { type: 'fold' } }]);
   // The Timeout Action sat nobody out: only the request does, and not before the Hand has been paid out.
-  expect(participant(timedOut, human).sittingOut).toBe(false);
-  expect(timedOut.pendingChanges).toEqual([{ participantId: human, change: 'sit-out' }]);
+  expect(participant(timedOut, player).sittingOut).toBe(false);
+  expect(timedOut.pendingChanges).toEqual([{ participantId: player, change: 'sit-out' }]);
   clock.advance(presentedFor('payout'));
   await expect.poll(async () => (await read(t)).pendingChanges).toEqual([]);
-  expect(participant(await read(t), human).sittingOut).toBe(true);
+  expect(participant(await read(t), player).sittingOut).toBe(true);
   // Deal then resumes them, as for any voluntary sit-out.
   t.revision = (await read(t)).pokerRevision;
   await command(t, 'start-hand');
-  expect(participant(await read(t), human)).toMatchObject({ sittingOut: false, inHand: true });
+  expect(participant(await read(t), player)).toMatchObject({ sittingOut: false, inHand: true });
 });
 
-test('at a Practice Table a missed Action Deadline with nothing requested leaves the human playing and the table waiting for their Deal', async () => {
-  const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [human, bot] = t.ids as [string, string];
-  await command(t, 'seat-participant', { participantId: human, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
+test('at a Practice Table a missed Action Deadline with nothing requested leaves the player playing and the table waiting for their Deal', async () => {
+  const t = await table(2, {}, { actionTimeLimitSeconds: 15 }); const [player, bot] = t.ids as [string, string];
+  await command(t, 'seat-participant', { participantId: player, seat: 1 }); await command(t, 'seat-participant', { participantId: bot, seat: 4 });
   await command(t, 'start-hand'); clock.advance(presentedFor('deal'));
   clock.advance(15_001);
   await expect.poll(async () => (await read(t)).view.state.status).toBe('completed-hand');
   clock.advance(presentedFor('payout'));
   const after = await read(t);
   expect(after.pendingChanges).toEqual([]);
-  expect(participant(after, human)).toMatchObject({ seat: 1, sittingOut: false });
+  expect(participant(after, player)).toMatchObject({ seat: 1, sittingOut: false });
   expect(after.view.state.status).toBe('completed-hand');
 });

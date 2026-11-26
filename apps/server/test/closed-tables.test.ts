@@ -66,7 +66,7 @@ async function subscription(cookie: string, tableSessionId: string) {
   } finally { socket.terminate(); }
 }
 
-test('an Online Table with no committed change for 24 hours closes: nobody can open, join or follow it, and its Guests are free', async () => {
+test('an Online Table with no committed change for 24 hours closes: nobody can open, join or follow it, and its Users are free', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben'), cat = await guest('Cat');
   const id = await createOnline(ann);
   expect((await join(ben, id)).status).toBe(200);
@@ -147,17 +147,17 @@ test('a Practice Table never closes, however long it sits idle', async () => {
 test('closing clears load at startup: an Online Table left waiting on its Bot no longer loads after a restart', async () => {
   const ann = await guest('Ann');
   const created = await create(ann, { mode: 'online', bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] });
-  const id = created.tableSessionId as string, human = created.bindings[0].participantId as string, bot = created.bindings[1].participantId as string;
+  const id = created.tableSessionId as string, player = created.bindings[0].participantId as string, bot = created.bindings[1].participantId as string;
   const stored = async () => (await controllers.readPersistedSession(id))!;
   const command = async (kind: string, fields: object) => expect((await post('/api/table-sessions/' + id + '/' + kind, ann, { requestId: randomUUID(), expectedPokerRevision: (await stored()).pokerRevision, ...fields })).status).toBe(200);
   const live = await connectLive(base, ann, id);
-  await command('seat-participant', { participantId: human, seat: 1 });
+  await command('seat-participant', { participantId: player, seat: 1 });
   await command('seat-participant', { participantId: bot, seat: 2 });
   clock.advanceTo((await announcedCountdown(() => view(ann, id))).endsAt);
   await expect.poll(async () => (await view(ann, id)).view.state.handId).toBe('hand-1');
   clock.advance(presentedFor('deal', 'online'));
   // Ann calls from the button; the Bot, whose decisions this server does not make, is to act, and nothing else happens.
-  await command('act', { participantId: human, action: { type: 'call' } });
+  await command('act', { participantId: player, action: { type: 'call' } });
   await live.close();
   expect((await view(ann, id)).view.state.actorId).toBe(bot);
   await restart();

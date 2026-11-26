@@ -33,7 +33,7 @@ async function newTable(botCount = 1) {
     body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: botCount }, (_, index) => ({ name: 'Bot ' + (index + 1), playingStrategy: baselinePlayingStrategy })) }),
   });
   const created = await creation.json();
-  return { cookie, id: created.tableSessionId as string, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) as string[] };
+  return { cookie, id: created.tableSessionId as string, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) as string[] };
 }
 type Table = Awaited<ReturnType<typeof newTable>>;
 const submit = (table: Table, body: unknown, cookie = table.cookie) => fetch(base + '/api/table-sessions/' + table.id + '/seat-participant', {
@@ -43,49 +43,49 @@ const read = async (table: Table) => (await (await fetch(base + '/api/table-sess
 
 test('the owner seats a bound Participant durably with both revisions advancing once and restart restores the seat', async () => {
   const table = await newTable();
-  const response = await submit(table, { requestId: 'human-seat', expectedPokerRevision: 0, participantId: table.human, seat: 2 });
+  const response = await submit(table, { requestId: 'player-seat', expectedPokerRevision: 0, participantId: table.player, seat: 2 });
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ ok: true, tableSessionId: table.id, pokerRevision: 1, sessionRevision: 1 });
   const committed = await read(table);
-  expect(committed).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: table.human, seat: 2, stack: 1000, sittingOut: false }] } } });
+  expect(committed).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: table.player, seat: 2, stack: 1000, sittingOut: false }] } } });
   expect(JSON.stringify(committed)).not.toMatch(/"(?:seed|commands|ownerUserId|schemaVersion|engineVersion)"\s*:/);
   await server.close();
   server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
   expect(await read(table)).toEqual(committed);
-  expect(await (await submit(table, { requestId: 'human-seat', expectedPokerRevision: 0, participantId: table.human, seat: 2 })).json()).toEqual({ ok: true, tableSessionId: table.id, pokerRevision: 1, sessionRevision: 1 });
+  expect(await (await submit(table, { requestId: 'player-seat', expectedPokerRevision: 0, participantId: table.player, seat: 2 })).json()).toEqual({ ok: true, tableSessionId: table.id, pokerRevision: 1, sessionRevision: 1 });
 });
 
 test('a Participant seated during a Hand waits for the next Hand to be dealt in', async () => {
   const table = await newTable(2);
   const post = async (kind: string, body: object) => fetch(base + '/api/table-sessions/' + table.id + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie: table.cookie }, body: JSON.stringify({ requestId: randomUUID(), expectedPokerRevision: (await read(table)).pokerRevision, ...body }) });
-  await post('seat-participant', { participantId: table.human, seat: 1 }); await post('seat-participant', { participantId: table.bots[0], seat: 2 }); await post('start-hand', {});
+  await post('seat-participant', { participantId: table.player, seat: 1 }); await post('seat-participant', { participantId: table.bots[0], seat: 2 }); await post('start-hand', {});
   const response = await post('seat-participant', { participantId: table.bots[1], seat: 4 });
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ ok: true, pokerRevision: 4, sessionRevision: 4 });
   const during = await read(table);
-  expect(during.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', actorId: table.human });
+  expect(during.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', actorId: table.player });
   expect(during.view.state.participants.find((p: { participantId: string }) => p.participantId === table.bots[1])).toEqual({ participantId: table.bots[1], seat: 4, stack: 1000, sittingOut: false });
-  expect((await post('act', { participantId: table.human, action: { type: 'fold' } })).status).toBe(200);
+  expect((await post('act', { participantId: table.player, action: { type: 'fold' } })).status).toBe(200);
   expect((await post('start-hand', {})).status).toBe(200);
   const next = await read(table);
   expect(next.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-2' });
-  expect(next.view.state.participants.map((p: { participantId: string; inHand?: boolean }) => [p.participantId, p.inHand ?? false])).toEqual([[table.human, true], [table.bots[0], true], [table.bots[1], true]]);
+  expect(next.view.state.participants.map((p: { participantId: string; inHand?: boolean }) => [p.participantId, p.inHand ?? false])).toEqual([[table.player, true], [table.bots[0], true], [table.bots[1], true]]);
 });
 
 test('concurrent matching requests seat once and canonical key ordering does not change the fingerprint', async () => {
   const table = await newTable();
-  const request = { requestId: 'concurrent', expectedPokerRevision: 0, participantId: table.human, seat: 1 };
-  const responses = await Promise.all([submit(table, request), submit(table, { seat: 1, participantId: table.human, expectedPokerRevision: 0, requestId: 'concurrent' })]);
+  const request = { requestId: 'concurrent', expectedPokerRevision: 0, participantId: table.player, seat: 1 };
+  const responses = await Promise.all([submit(table, request), submit(table, { seat: 1, participantId: table.player, expectedPokerRevision: 0, requestId: 'concurrent' })]);
   expect(responses.map(r => r.status)).toEqual([200, 200]);
   const [first, duplicate] = await Promise.all(responses.map(r => r.json()));
   expect(duplicate).toEqual(first);
-  expect(await read(table)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: table.human, seat: 1, stack: 1000 }] } } });
+  expect(await read(table)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: table.player, seat: 1, stack: 1000 }] } } });
 });
 
 test('matching success and domain-rejection retries return the original small outcome before checking a later revision', async () => {
   const table = await newTable();
-  const accepted = { requestId: 'accepted', expectedPokerRevision: 0, participantId: table.human, seat: 2 };
+  const accepted = { requestId: 'accepted', expectedPokerRevision: 0, participantId: table.player, seat: 2 };
   const original = await (await submit(table, accepted)).json();
   const rejected = { requestId: 'occupied', expectedPokerRevision: 1, participantId: table.bot, seat: 2 };
   const domainRejection = await (await submit(table, rejected)).json();
@@ -102,7 +102,7 @@ test('matching success and domain-rejection retries return the original small ou
 
 test('a stale unprocessed expectation is remembered without invoking seating or advancing revisions', async () => {
   const table = await newTable();
-  await submit(table, { requestId: 'first', expectedPokerRevision: 0, participantId: table.human, seat: 1 });
+  await submit(table, { requestId: 'first', expectedPokerRevision: 0, participantId: table.player, seat: 1 });
   const stale = { requestId: 'stale', expectedPokerRevision: 0, participantId: table.bot, seat: 2 };
   const response = await submit(table, stale);
   expect(response.status).toBe(409);
@@ -116,13 +116,13 @@ test('a stale unprocessed expectation is remembered without invoking seating or 
 test('only the Table Owner can seat an assigned Participant and unassigned identities are rejected', async () => {
   const table = await newTable();
   const stranger = await newTable();
-  const request = { requestId: 'owner-only', expectedPokerRevision: 0, participantId: table.human, seat: 1 };
+  const request = { requestId: 'owner-only', expectedPokerRevision: 0, participantId: table.player, seat: 1 };
   expect((await submit(table, request, stranger.cookie)).status).toBe(404);
   const anonymous = await fetch(base + '/api/table-sessions/' + table.id + '/seat-participant', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request),
   });
   expect(anonymous.status).toBe(401);
-  const unassigned = { ...request, requestId: 'unassigned', participantId: stranger.human };
+  const unassigned = { ...request, requestId: 'unassigned', participantId: stranger.player };
   expect(await (await submit(table, unassigned)).json()).toMatchObject({ ok: false, rejection: { code: 'participant-not-bound' } });
   expect(await read(table)).toMatchObject({ pokerRevision: 0, sessionRevision: 0, view: { state: { participants: [] } } });
   expect((await submit(table, request)).status).toBe(200);
@@ -133,7 +133,7 @@ test.each([
   { ownerUserId: 'injected' }, { seed: 'injected' }, { type: 'start-hand' },
 ])('invalid application mutation contents are retained outside the poker record: %j', async invalid => {
   const table = await newTable();
-  const request = { requestId: randomUUID(), expectedPokerRevision: 0, participantId: table.human, seat: 1, ...invalid };
+  const request = { requestId: randomUUID(), expectedPokerRevision: 0, participantId: table.player, seat: 1, ...invalid };
   const rejection = await (await submit(table, request)).json();
   expect(rejection).toMatchObject({ ok: false, rejection: { code: 'invalid-mutation-request' } });
   expect(await (await submit(table, request)).json()).toEqual(rejection);

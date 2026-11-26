@@ -19,7 +19,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   let heldId: string | undefined;
   let terminal: ReturnType<typeof Promise.withResolvers<'COMMIT' | 'ROLLBACK'>> | undefined;
   const targets = new Set<Promise<void>>();
-  const humans = new Set<string>();
+  const players = new Set<string>();
   let commands: TableSessionControllerCommands;
   let server: Awaited<ReturnType<typeof createServer>>;
   let base = '';
@@ -43,7 +43,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, databaseUrl, schema, automaticBots: false, transactionFaults: faults, mutationTransactionFaults: faults, ...options,
       strategyFactory: options.strategyFactory && (descriptor => {
         const controlled = options.strategyFactory!(descriptor); const reference = baselineStrategy(descriptor);
-        return { ...controlled, policy: { ...controlled.policy, evaluate: (view, execution) => humans.has(view.state.actorId ?? '') ? reference.policy.evaluate(view, execution) : controlled.policy.evaluate(view, execution) } };
+        return { ...controlled, policy: { ...controlled.policy, evaluate: (view, execution) => players.has(view.state.actorId ?? '') ? reference.policy.evaluate(view, execution) : controlled.policy.evaluate(view, execution) } };
       }), onControllerCommandsReady: ready => { commands = ready; } } as ServerOptions);
     base = await server.listen({ host: '127.0.0.1', port: 0 });
   }
@@ -54,7 +54,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   }
   async function table() {
     const response = await post('/table-sessions', { requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] });
-    expect(response.status).toBe(201); const created = await response.json(); humans.add(created.bindings[0].participantId); return created;
+    expect(response.status).toBe(201); const created = await response.json(); players.add(created.bindings[0].participantId); return created;
   }
   const read = async (id: string) => (await fetch(base + '/api/table-sessions/' + id, { headers: { cookie } })).json();
   const list = async () => (await (await fetch(base + '/api/table-sessions', { headers: { cookie } })).json()).tables.map((table: { tableSessionId: string }) => table.tableSessionId);

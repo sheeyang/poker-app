@@ -57,7 +57,7 @@ test('a working creation remains unavailable until its real PostgreSQL transacti
   expect(await list(cookie)).toEqual([outcome.tableSessionId]);
 });
 
-test('confirmed creation rollback leaves no session or definitive rejection and a human retry may create it', async () => {
+test('confirmed creation rollback leaves no session or definitive rejection and a player retry may create it', async () => {
   const cookie = await newUser();
   beforeCommit = async () => { throw new Error('controlled failure before COMMIT'); };
   const failed = await submit(cookie, 'rollback-attempt');

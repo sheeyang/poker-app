@@ -34,13 +34,13 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), configuration: { maximumBuyIn: 2000 }, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const post = (t: Table, path: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + path, { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); }
-  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
+  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
   async function configure(t: Table, referenceStrategy: StrategyDescriptor) { expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { referenceStrategy, liveAnalysis: false } }) })).status).toBe(200); }
   const request = (t: Table, decisionId = 'hand-1/decision-1') => post(t, 'analysis', { decisionId });
   const result = async (t: Table, requestId: string, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie } });
@@ -67,11 +67,11 @@ test('an empty Hand summary freezes committed metadata and schedules no analysis
   } finally { await f.close(); }
 });
 
-test('a Hand summary evaluates its accepted human decisions and publishes readable complete means without a live subscription', async () => {
+test('a Hand summary evaluates its accepted player decisions and publishes readable complete means without a live subscription', async () => {
   const f = await fixture();
   try {
     const t = await f.decision(); const stranger = await f.table();
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     await f.configure(t, reference);
     const before = await f.read(t); const live = f.connect(t); const other = f.connect(stranger);
     await expect.poll(() => live.messages.some(frame => frame.type === 'user-channel-ready')).toBe(true);
@@ -99,7 +99,7 @@ test('concurrent overlapping summary requests share a global outstanding bound a
   try {
     const tables: Awaited<ReturnType<typeof f.decision>>[] = [];
     for (let count = 0; count < 3; count++) {
-      const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference); tables.push(t);
+      const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); await f.configure(t, reference); tables.push(t);
     }
     const summaries = await Promise.all([...tables, tables[0]!].map(t => f.post(t, 'hand-summaries', { handId: 'hand-1' }).then(response => response.json())));
     await expect.poll(() => f.evaluations.length).toBe(2);
@@ -119,9 +119,9 @@ test('failure outranks pending and explicit Retry preserves a frozen active-Hand
   const f = await fixture({ automaticBots: true });
   try {
     const t = await f.decision();
-    const humanTurn = () => expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'call' } }); await humanTurn();
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'check' } }); await humanTurn();
+    const playerTurn = () => expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.player);
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'call' } }); await playerTurn();
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'check' } }); await playerTurn();
     await f.configure(t, reference); const before = await f.read(t);
     const summary = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
     expect(summary).toMatchObject({ status: 'pending', decisionCount: 2, capturedPokerRevision: before.pokerRevision, referenceStrategy: reference });
@@ -132,7 +132,7 @@ test('failure outranks pending and explicit Retry preserves a frozen active-Hand
     const failed = await (await f.summary(t, summary.requestId)).json();
     expect(failed).toMatchObject({ error: { code: 'failed' } }); expect(failed).not.toHaveProperty('averages'); expect(JSON.stringify(failed)).not.toContain('Private');
     await f.configure(t, highestProbabilityPlayingStrategy);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'check' } }); await humanTurn();
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'check' } }); await playerTurn();
     expect(await (await f.summary(t, summary.requestId)).json()).toEqual(failed);
     expect(f.evaluations).toHaveLength(2);
     const [retried, duplicate] = await Promise.all([f.post(t, 'summaries/' + summary.requestId + '/retry', {}).then(response => response.json()), f.post(t, 'summaries/' + summary.requestId + '/retry', {}).then(response => response.json())]);
@@ -155,7 +155,7 @@ test('shared runner capacity is an explicit readable summary error and missing w
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 0 } });
   try {
     const blocker = await f.decision(); await f.configure(blocker, reference); await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(1);
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference);
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); await f.configure(t, reference);
     const response = await f.post(t, 'hand-summaries', { handId: 'hand-1' }); expect(response.status).toBe(503);
     const failed = await response.json(); expect(failed).toMatchObject({ status: 'error', error: { code: 'capacity' } }); expect(failed).not.toHaveProperty('averages');
     expect(await (await f.summary(t, failed.requestId)).json()).toEqual(failed); expect(f.evaluations).toHaveLength(1);
@@ -170,7 +170,7 @@ test('logical timeout and repeated Retry retain the global summary budget until 
   const f = await fixture({ jobRunnerOptions: { concurrency: 4, maximumQueued: 16, timeoutMs: 1000 } });
   try {
     const tables: Awaited<ReturnType<typeof f.decision>>[] = [];
-    for (let index = 0; index < 3; index++) { const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference); tables.push(t); }
+    for (let index = 0; index < 3; index++) { const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); await f.configure(t, reference); tables.push(t); }
     const summaries: HandScoreSummary[] = [];
     for (const t of tables) summaries.push(await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json());
     await expect.poll(() => f.evaluations.length).toBe(2);
@@ -197,7 +197,7 @@ test('logical timeout and repeated Retry retain the global summary budget until 
 test('restart loses exact transient summaries and an explicit new snapshot reuses persisted successful member scores', async () => {
   const f = await fixture();
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference);
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); await f.configure(t, reference);
     const original = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await (await f.summary(t, original.requestId)).json()).status).toBe('complete');
@@ -215,7 +215,7 @@ test('restart loses exact transient summaries and an explicit new snapshot reuse
 test('a new Hand summary reuses a member successfully retried through individual decision analysis', async () => {
   const f = await fixture();
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference);
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); await f.configure(t, reference);
     const first = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.reject(new Error('Controlled external failure'));
     await expect.poll(async () => (await (await f.summary(t, first.requestId)).json()).status).toBe('error');
@@ -233,7 +233,7 @@ test('a new Hand summary reuses a member successfully retried through individual
 test('a new summary follows an active individual Retry without releasing the older physical attempt budget', async () => {
   const f = await fixture({ jobRunnerOptions: { concurrency: 4, maximumQueued: 16, timeoutMs: 1000 } });
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } }); await f.configure(t, reference);
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } }); await f.configure(t, reference);
     const first = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();
     await expect.poll(() => f.evaluations.length).toBe(1); await expect.poll(() => f.evaluations[0]!.signal?.aborted, { timeout: 3000 }).toBe(true);
     await expect.poll(async () => (await (await f.summary(t, first.requestId)).json()).status).toBe('error');
@@ -242,7 +242,7 @@ test('a new summary follows an active individual Retry without releasing the old
     const fresh = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json(); expect(fresh.status).toBe('pending');
     f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await (await f.summary(t, fresh.requestId)).json()).status).toBe('complete');
-    for (let index = 0; index < 2; index++) { const other = await f.decision(); await f.command(other, 'act', { participantId: other.human, action: { type: 'fold' } }); await f.configure(other, reference); await f.post(other, 'hand-summaries', { handId: 'hand-1' }); }
+    for (let index = 0; index < 2; index++) { const other = await f.decision(); await f.command(other, 'act', { participantId: other.player, action: { type: 'fold' } }); await f.configure(other, reference); await f.post(other, 'hand-summaries', { handId: 'hand-1' }); }
     await expect.poll(() => f.evaluations.length).toBe(3);
     expect(f.evaluations).toHaveLength(3);
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
@@ -254,16 +254,16 @@ test('a new summary follows an active individual Retry without releasing the old
 test('new summary members use priority 2 while a later interactive request keeps priority 1', async () => {
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 8 } });
   try {
-    const target = await f.decision(); await f.command(target, 'act', { participantId: target.human, action: { type: 'fold' } });
+    const target = await f.decision(); await f.command(target, 'act', { participantId: target.player, action: { type: 'fold' } });
     const automatic = await (await f.request(target)).json(); await expect.poll(async () => (await (await f.result(target, automatic.requestId)).json()).status).toBe('complete'); await f.configure(target, reference);
     const blocker = await f.decision(); await f.configure(blocker, reference); await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(1);
     const summary = await (await f.post(target, 'hand-summaries', { handId: 'hand-1' })).json();
     const interactive = await f.decision(); await f.configure(interactive, reference); await f.request(interactive);
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(2);
-    expect(f.evaluations[1]!.view.state.actorId).toBe(interactive.human);
+    expect(f.evaluations[1]!.view.state.actorId).toBe(interactive.player);
     f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
-    await expect.poll(() => f.evaluations.length).toBe(3); expect(f.evaluations[2]!.view.state.actorId).toBe(target.human);
+    await expect.poll(() => f.evaluations.length).toBe(3); expect(f.evaluations[2]!.view.state.actorId).toBe(target.player);
     f.evaluations[2]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await (await f.summary(target, summary.requestId)).json()).status).toBe('complete');
   } finally { await f.close(); }
@@ -274,11 +274,11 @@ test('an already failed member beyond the admission batch immediately outranks t
   try {
     const t = await f.decision();
     for (const type of ['call', 'check', 'check'] as const) {
-      await f.command(t, 'act', { participantId: t.human, action: { type } });
-      await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+      await f.command(t, 'act', { participantId: t.player, action: { type } });
+      await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.player);
     }
     await f.configure(t, reference);
-    const decisions = (await f.read(t)).view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === t.human));
+    const decisions = (await f.read(t)).view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === t.player));
     expect(decisions).toHaveLength(3);
     const failed = await (await f.request(t, decisions[2]!.decisionId)).json();
     await expect.poll(() => f.evaluations.length).toBe(1); f.evaluations[0]!.result.reject(new Error('Controlled existing failure'));
@@ -298,11 +298,11 @@ test('a later matching member failure is observed while two missing members occu
   try {
     const t = await f.decision();
     for (const type of ['call', 'check', 'check'] as const) {
-      await f.command(t, 'act', { participantId: t.human, action: { type } });
-      await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.human);
+      await f.command(t, 'act', { participantId: t.player, action: { type } });
+      await expect.poll(async () => (await f.read(t)).view.state.actorId).toBe(t.player);
     }
     await f.configure(t, reference);
-    const decisions = (await f.read(t)).view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === t.human));
+    const decisions = (await f.read(t)).view.history.flatMap(hand => hand.decisions.filter(decision => decision.action.participantId === t.player));
     const existing = await (await f.request(t, decisions[2]!.decisionId)).json();
     await expect.poll(() => f.evaluations.length).toBe(1);
     const summary = await (await f.post(t, 'hand-summaries', { handId: 'hand-1' })).json();

@@ -9,9 +9,9 @@ export const requestIdConflict = () => reject('request-id-conflict', 'This reque
 export const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
 /** A request without an established local identity: the Trainer establishes one when it opens. */
 export const unauthenticated = () => reject('unauthenticated', 'Open the Trainer to establish your local identity.');
-export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove Guests, or change table options.');
+export const ownerRequired = () => reject('table-owner-required', 'Only the Table Owner can deal, manage Bots, remove players, or change table options.');
 export const unavailableOnline = (message: string) => reject('unavailable-at-online-tables', message);
-/** A Guest is at one Online Table at a time: creating, joining or returning to another waits until they leave it. */
+/** A User is at one Online Table at a time: creating, joining or returning to another waits until they leave it. */
 export const currentTableElsewhere = (currentTableId: string): ApplicationRejection => ({ ok: false, rejection: { code: 'current-table-elsewhere', currentTableId,
   message: 'You’re already at another Online Table, your Current Table. Leave it first, then try again.' } });
 /** A Closed Table: told to anyone who asks to join it or opens its Join Link. */

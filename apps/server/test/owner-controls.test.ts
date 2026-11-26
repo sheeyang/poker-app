@@ -36,7 +36,7 @@ const post = (path: string, cookie: string, body: unknown) => fetch(base + path,
 const stakes = { seatCount: 4, smallBlind: 10, bigBlind: 20, minimumBuyIn: 500, defaultBuyIn: 1000, maximumBuyIn: 1500 };
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code as string | undefined });
 
-/** A table of Ann (its owner), with Bots (by default one named Rex) that start unseated. Other Guests join an Online Table through its Join Link. */
+/** A table of Ann (its owner), with Bots (by default one named Rex) that start unseated. Other Users join an Online Table through its Join Link. */
 async function newTable(mode: 'practice' | 'online', bots: string[] = ['Rex'], configuration: object = stakes) {
   const ann = await guest('Ann');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode, configuration, bots: bots.map(name => ({ name, playingStrategy: baselinePlayingStrategy })) })).json();
@@ -50,11 +50,11 @@ async function newTable(mode: 'practice' | 'online', bots: string[] = ['Rex'], c
       const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
-    /** A poker request from a Guest, at the poker revision that Guest last saw. */
+    /** A poker request from a User, at the poker revision that User last saw. */
     async as(cookie: string, kind: string, fields: object = {}) {
       return post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
     },
-    /** A configuration request from a Guest, at the session revision that Guest last saw. */
+    /** A configuration request from a User, at the session revision that User last saw. */
     async configure(cookie: string, kind: string, fields: object = {}) {
       return post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedSessionRevision: (await view(cookie)).sessionRevision, ...fields });
     },
@@ -222,7 +222,7 @@ test('at a Practice Table the owner adds a Bot at any time, and one added during
   clock.advance(presentedFor('payout'));
   expect((await t.as(t.ann, 'start-hand')).status).toBe(200);
   const second = await t.view();
-  // Dealt in with the normal blinds of three players, and nothing extra for the seat she took.
+  // Dealt in with the normal blinds of three Participants, and nothing extra for the seat she took.
   const cleoId = botOf(second, 'Cleo').participantId;
   expect(second.view.state.participants.filter(p => p.inHand).map(p => p.participantId).sort()).toEqual([t.annId, t.botIds[0]!, cleoId].sort());
   expect(second.view.state.participants.reduce((sum, p) => sum + (p.contribution ?? 0), 0)).toBe(30);
@@ -258,10 +258,10 @@ test('a Bot is added with a unique name, a supported Playing Strategy and a buy-
   await t.seat(ben.cookie, ben.participantId, 3);
   const before = await t.view();
   const refuse = async (label: string, fields: object, status: number, code: string, cookie = t.ann) => expect({ label, ...await refusal(await t.as(cookie, 'add-bot', fields)) }).toEqual({ label, status, code });
-  await refuse('a Guest cannot add Bots', cleo, 403, 'table-owner-required', ben.cookie);
-  // Names are told apart ignoring case, among every Participant: humans, Bots, and those who have left.
+  await refuse('a player other than the owner cannot add Bots', cleo, 403, 'table-owner-required', ben.cookie);
+  // Names are told apart ignoring case, among every Participant: players, Bots, and those who have left.
   await refuse('the owner’s name', { ...cleo, name: 'ann' }, 409, 'name-taken');
-  await refuse('another Guest’s name', { ...cleo, name: 'BEN' }, 409, 'name-taken');
+  await refuse('another User’s name', { ...cleo, name: 'BEN' }, 409, 'name-taken');
   await refuse('a Bot’s name', { ...cleo, name: ' rex ' }, 409, 'name-taken');
   // A Bot's name follows the rules for every Participant's name: 1 to 20 letters, digits, spaces or basic punctuation.
   // An invisible character (a zero-width space, a direction isolate) cannot make a second "Ben" either.
@@ -347,7 +347,7 @@ test('a seated Bot is sat out or removed after the Hand, shown to everyone as pe
   expect(participant(await t.view(), sol)).toMatchObject({ inHand: true });
   expect(participant(await t.view(), cleoId)).toMatchObject({ seat: 3 });
 
-  // Stack changes and resuming wait for the Hand, as a human's do.
+  // Stack changes and resuming wait for the Hand, as a player's do.
   for (const [kind, fields] of [['top-up-to', { participantId: sol, targetStack: 1500 }], ['stand-up-participant', { participantId: sol }], ['move-participant', { participantId: sol, seat: 3 }], ['set-sitting-out', { participantId: sol, sittingOut: false }]] as const)
     expect({ kind, ...await refusal(await t.as(t.ann, kind, fields)) }).toEqual({ kind, status: 400, code: 'active-hand' });
   const sat = await t.as(t.ann, 'set-sitting-out', { participantId: sol, sittingOut: true });
@@ -386,7 +386,7 @@ test('a seated Bot is sat out or removed after the Hand, shown to everyone as pe
   expect(participant(await t.view(), sol).sittingOut).toBe(false);
 });
 
-test('the owner can never act for, move, sit out, stand up or change the chips of another human, nor see their hole cards or analysis', async () => {
+test('the owner can never act for, move, sit out, stand up or change the chips of another player, nor see their hole cards or analysis', async () => {
   const t = await newTable('online');
   const ben = await t.join('Ben');
   await t.connect(ben.cookie);
@@ -430,7 +430,7 @@ test('the owner can never act for, move, sit out, stand up or change the chips o
   expect(JSON.stringify(await t.view())).not.toContain(card);
 });
 
-test('the table view says who has left or been removed, humans and Bots alike', async () => {
+test('the table view says who has left or been removed, players and Bots alike', async () => {
   const t = await newTable('online');
   const ben = await t.join('Ben'), cy = await t.join('Cy');
   expect((await t.view()).departedParticipantIds).toBeUndefined();

@@ -1,5 +1,5 @@
 import type { MutationOutcome, PokerMutationRequest, Refill, StartHandRequest } from '@poker/contracts';
-import { findBinding, isBot, isHuman, type PersistedHumanBinding, type PersistedTableSession } from './aggregate.js';
+import { findBinding, isBot, isPlayer, type PersistedPlayerBinding, type PersistedTableSession } from './aggregate.js';
 import { ownerRequired, reject, unavailableOnline } from './rejections.js';
 
 /** The poker mutations a table accepts: each is one accepted transition of its CashGame (`mutations.ts` `accept`). */
@@ -9,24 +9,24 @@ const notYours = () => reject('not-your-participant', 'Only its own Human Contro
 
 /**
  * Who may ask for what, decided before request idempotency, so a remembered outcome is only ever replayed to
- * a requester who may make that request. Each human manages only their own Participant; Table Ownership manages
- * the table's Bots and options and removes Guests, and never names another human's Participant otherwise. Unknown
+ * a requester who may make that request. Each player manages only their own Participant; Table Ownership manages
+ * the table's Bots and options and removes players, and never names another player's Participant otherwise. Unknown
  * Participants and acting as a Bot stay definitive rejections, judged with the request.
  */
-export function humanMutationDenial(aggregate: PersistedTableSession, requester: PersistedHumanBinding, kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
+export function playerMutationDenial(aggregate: PersistedTableSession, requester: PersistedPlayerBinding, kind: PokerMutationKind, request: PokerMutationRequest): MutationOutcome | undefined {
   const owner = aggregate.ownerUserId === requester.userId;
   const target = findBinding(aggregate, (request as { participantId?: unknown }).participantId);
   if (kind === 'remove-participant') {
-    // The one request that names another human's Participant: the owner's Removal of a Guest.
+    // The one request that names another player's Participant: the owner's Removal of a player.
     if (!owner) return ownerRequired();
-    if (isBot(target)) return reject('participant-not-human', 'Only a human Participant can be removed. Bots are managed by the Table Owner.');
-    if (isHuman(target) && target.userId === aggregate.ownerUserId) return reject('cannot-remove-owner', 'The Table Owner cannot be removed from their own table.');
+    if (isBot(target)) return reject('participant-not-player', 'Only a player can be removed. Bots are managed by the Table Owner.');
+    if (isPlayer(target) && target.userId === aggregate.ownerUserId) return reject('cannot-remove-owner', 'The Table Owner cannot be removed from their own table.');
     return undefined;
   }
   if (kind === 'remove-bot') {
-    // The owner's Bots only: a human Participant, however named, is never theirs to remove.
+    // The owner's Bots only: a player, however named, is never theirs to remove.
     if (!owner) return ownerRequired();
-    if (isHuman(target)) return target.participantId === requester.participantId ? reject('participant-not-bot', 'Choose a Bot. To leave the table, use Leave table.') : notYours();
+    if (isPlayer(target)) return target.participantId === requester.participantId ? reject('participant-not-bot', 'Choose a Bot. To leave the table, use Leave table.') : notYours();
     return undefined;
   }
   // Automatic Dealing deals each Hand at an Online Table and moves the button.
@@ -37,12 +37,12 @@ export function humanMutationDenial(aggregate: PersistedTableSession, requester:
     // Rebuy & deal refills only the owner's own Participant and their Bots.
     const refills: unknown = kind === 'start-hand' ? (request as StartHandRequest).refills : undefined;
     const refilled = refillList(refills) ? refills.map(refill => findBinding(aggregate, refill.participantId)) : [];
-    return refilled.some(binding => isHuman(binding) && binding.participantId !== requester.participantId) ? notYours() : undefined;
+    return refilled.some(binding => isPlayer(binding) && binding.participantId !== requester.participantId) ? notYours() : undefined;
   }
-  if (isHuman(target) && target.participantId !== requester.participantId) return notYours();
-  // A Practice Table is never left: its human keeps it in their practice history.
+  if (isPlayer(target) && target.participantId !== requester.participantId) return notYours();
+  // A Practice Table is never left: its player keeps it in their practice history.
   if (kind === 'leave-table' && aggregate.mode !== 'online') return reject('unavailable-at-practice-tables', 'A Practice Table is never left. Stand Up or sit out instead.');
-  if (isBot(target) && kind === 'leave-table') return reject('participant-not-human', 'Only a human Participant can leave the table. Bots are managed by the Table Owner.');
+  if (isBot(target) && kind === 'leave-table') return reject('participant-not-player', 'Only a player can leave the table. Bots are managed by the Table Owner.');
   if (isBot(target) && kind !== 'act' && !owner) return ownerRequired();
 }
 

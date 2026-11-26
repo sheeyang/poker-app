@@ -14,12 +14,12 @@ let held = 0;
 let failed = false;
 let evaluations = 0;
 let mode: 'baseline' | 'passive' | 'numerical' = 'baseline';
-const humans = new Set<string>();
+const players = new Set<string>();
 async function start() {
   const server = await createServer({ journalConnectionTimeoutMs: 10_000, databaseUrl, schema, automaticBots: true, strategyFactory: descriptor => {
     const strategy = createStrategy(descriptor);
     return { ...strategy, policy: { checkCompatibility: view => strategy.policy.checkCompatibility(view), evaluate: async (view, execution) => {
-      const controlled = mode === 'baseline' || humans.has(view.state.actorId!);
+      const controlled = mode === 'baseline' || players.has(view.state.actorId!);
       if (!controlled) {
         const action = view.state.legalActions.find(action => action.type === 'call' || action.type === 'check') ?? view.state.legalActions[0]!;
         return { choices: [{ action: action.type === 'bet' ? { type: 'bet', betTo: action.minimum } : action.type === 'raise' ? { type: 'raise', raiseTo: action.minimum } : { type: action.type }, probability: 1 }] };
@@ -49,7 +49,7 @@ const control = http.createServer(async (request, response) => {
   const url = new URL(request.url!, 'http://localhost');
   const path = url.pathname;
   if (path === '/baseline') mode = 'baseline';
-  if (path === '/passive' || path === '/numerical') { mode = path.slice(1) as 'passive' | 'numerical'; const human = url.searchParams.get('human'); if (human) humans.add(human); }
+  if (path === '/passive' || path === '/numerical') { mode = path.slice(1) as 'passive' | 'numerical'; const player = url.searchParams.get('player'); if (player) players.add(player); }
   if (path === '/hold') { gate ??= Promise.withResolvers<void>(); failed = false; }
   if (path === '/fail') { failed = true; }
   if (path === '/release') { gate?.resolve(); gate = undefined; }

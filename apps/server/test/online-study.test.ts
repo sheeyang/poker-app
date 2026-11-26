@@ -19,7 +19,7 @@ let server: Awaited<ReturnType<typeof createServer>>;
 let base: string;
 /**
  * Every Reference Strategy evaluation the server started, with the view it was given. There are no Bots: each is a
- * human's analysis. While `holding`, evaluations wait until `release()` (or until the server cancels them).
+ * player's analysis. While `holding`, evaluations wait until `release()` (or until the server cancels them).
  */
 const evaluations: { decisionId: string; participantId: string; strategy: string; view: ObservableGameView }[] = [];
 const strategyName = (descriptor: StrategyDescriptor) => descriptor.policy.id + '/' + descriptor.selector.id;
@@ -54,7 +54,7 @@ async function guest(name: string) {
 }
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
-/** Sets the Guest's own Trainer Configuration, which applies at every table. */
+/** Sets the User's own Trainer Configuration, which applies at every table. */
 const study = (cookie: string, trainerConfiguration: object) => fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration }) });
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000 };
@@ -73,16 +73,16 @@ async function table(mode: 'practice' | 'online' = 'online') {
       const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
       return { cookie, participantId: joined.participantId as string };
     },
-    /** A poker mutation from a Guest, at the poker revision that Guest last saw. */
+    /** A poker mutation from a User, at the poker revision that User last saw. */
     async as(cookie: string, kind: string, fields: object = {}) {
       return post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
     },
-    /** The owner's table options change, at the session revision that Guest last saw. */
+    /** The owner's table options change, at the session revision that User last saw. */
     async options(options: object, cookie = ann, requestId: string = randomUUID()) {
       return post('/api/table-sessions/' + id + '/set-table-options', cookie, { requestId, expectedSessionRevision: (await view(cookie)).sessionRevision, options });
     },
     connect: (cookie = ann) => connectLive(base, cookie, id),
-    /** Analysis of a decision for the requesting Guest's own Participant; `live` asks for it as Live Analysis. */
+    /** Analysis of a decision for the requesting User's own Participant; `live` asks for it as Live Analysis. */
     analyze: (cookie: string, decisionId: string, live?: true) => post('/api/table-sessions/' + id + '/analysis', cookie, { decisionId, ...(live ? { live } : {}) }),
     result: async (cookie: string, requestId: string): Promise<DecisionAnalysis> => (await get('/api/table-sessions/' + id + '/analysis/' + requestId, cookie)).json(),
     summary: async (cookie: string, path: 'hand-summaries' | 'session-summaries', body: object): Promise<ScoreSummary> => (await post('/api/table-sessions/' + id + '/' + path, cookie, body)).json(),
@@ -109,7 +109,7 @@ async function dealt(t: Table, handId: string) {
   clock.advanceTo((await t.view()).schedule.actionWindow!.opensAt);
   return t.view();
 }
-/** The acting human folds; then the payout phase and its Settle pass, and the next countdown is announced. */
+/** The acting player folds; then the payout phase and its Settle pass, and the next countdown is announced. */
 async function foldHand(t: Table, cookieOf: (participantId: string) => string) {
   const actor = (await t.view()).view.state.actorId!;
   expect((await t.as(cookieOf(actor), 'act', { participantId: actor, action: { type: 'fold' } })).status).toBe(200);
@@ -169,7 +169,7 @@ test('Allow Live Analysis is an Online Table option, on by default and visible t
 
 test('Live Analysis of a decision whose Action Window opened while the table disallowed it is refused, while post-action analysis and scoring continue', async () => {
   const { t, ben, cookieOf } = await headsUp();
-  // Allowed: the acting human may evaluate their current decision before acting.
+  // Allowed: the acting player may evaluate their current decision before acting.
   let hand = await dealt(t, 'hand-1');
   expect(hand.schedule.actionWindow).not.toHaveProperty('liveAnalysisDisallowed');
   expect((await t.analyze(cookieOf(hand.view.state.actorId!), hand.view.state.decisionId!, true)).status).toBe(200);
@@ -177,7 +177,7 @@ test('Live Analysis of a decision whose Action Window opened while the table dis
 
   // Disallowed between Hands: from the next decision on, every window captures it, and everyone sees that.
   expect((await t.options({ allowLiveAnalysis: false })).status).toBe(200);
-  // Whatever each Guest's own setting: both have Live Analysis on.
+  // Whatever each User's own setting: both have Live Analysis on.
   for (const cookie of [t.ann, ben.cookie]) expect((await study(cookie, { referenceStrategy: defaultPlayingStrategy, liveAnalysis: true })).status).toBe(200);
   hand = await dealt(t, 'hand-2');
   const actor = hand.view.state.actorId!, decisionId = hand.view.state.decisionId!;
@@ -207,13 +207,13 @@ test('Live Analysis of a decision whose Action Window opened while the table dis
   expect((await t.analyze(cookieOf(hand.view.state.actorId!), hand.view.state.decisionId!, true)).status).toBe(200);
 });
 
-test('an Online Timeout Action is scored as the humanâ€™s own decision, in Decision Scores and in Hand and Session summaries', async () => {
+test('an Online Timeout Action is scored as the player’s own decision, in Decision Scores and in Hand and Session summaries', async () => {
   const { t, cookieOf } = await headsUp();
   const hand = await dealt(t, 'hand-1');
   const { participantId: actor, decisionId, deadlineAt } = hand.schedule.actionWindow!;
   clock.advanceTo(deadlineAt! + 1);
   await expect.poll(async () => (await t.view()).view.history[0]?.decisions.at(-1)?.action).toEqual({ participantId: actor, action: { type: 'fold' } });
-  // Post-action analysis starts by itself, as for an action the human chose, and only for that human.
+  // Post-action analysis starts by itself, as for an action the player chose, and only for that player.
   await expect.poll(() => evaluations.filter(evaluation => evaluation.decisionId === decisionId).map(evaluation => evaluation.participantId)).toEqual([actor]);
   const scored = await (await t.analyze(cookieOf(actor), decisionId)).json() as DecisionAnalysis;
   expect(scored).toMatchObject({ participantId: actor, decisionId, scoredDecision: { acceptedAction: { type: 'fold' } } });
@@ -225,13 +225,13 @@ test('an Online Timeout Action is scored as the humanâ€™s own decision, in 
     expect(summary).toMatchObject({ decisionIds: [decisionId], decisionCount: 1 });
     await expect.poll(async () => (await t.summaryResult(cookieOf(actor), summary.requestId)).status).toBe('complete');
   }
-  // Overall History agrees with the Session summary: the Timeout Action is listed as the Guest's own decision, and
+  // Overall History agrees with the Session summary: the Timeout Action is listed as the User's own decision, and
   // counted in an Overall History Score Summary (ADR-0041, story 65).
   await expect.poll(async () => (await (await get('/api/overall-history', cookieOf(actor))).json()).decisions.map((listed: { decisionId: string; action: { type: string } }) => [listed.decisionId, listed.action.type])).toEqual([[decisionId, 'fold']]);
   const history: OverallHistorySummary = await (await post('/api/overall-history/summaries', cookieOf(actor), {})).json();
   expect(history.summary).toMatchObject({ decisionCount: 1 });
   await expect.poll(async () => (await (await get('/api/overall-history/summaries/' + history.requestId, cookieOf(actor))).json()).summary.status).toBe('complete');
-  // The other Guest made no decision in that Hand, so it is not in their Overall History.
+  // The other User made no decision in that Hand, so it is not in their Overall History.
   const other = hand.view.state.participants.map(participant => participant.participantId).find(participantId => participantId !== actor)!;
   expect((await (await get('/api/overall-history', cookieOf(other))).json()).decisions).toEqual([]);
 });
@@ -252,7 +252,7 @@ test('held analysis never delays an action, an Action Deadline or the next deal'
   await expect.poll(() => evaluations.length).toBe(1);
   expect((await t.as(cookieOf(first), 'act', { participantId: first, action: { type: 'fold' } })).status).toBe(200);
   expect(await t.result(cookieOf(first), live.requestId)).toMatchObject({ status: 'pending' });
-  // The next human's Live Analysis is pending too, and their Action Deadline still plays the Timeout Action on time.
+  // The next player's Live Analysis is pending too, and their Action Deadline still plays the Timeout Action on time.
   const waiting = await t.view();
   const second = waiting.view.state.actorId!, deadlineAt = waiting.schedule.actionWindow!.deadlineAt!;
   const secondLive = await (await t.analyze(cookieOf(second), waiting.view.state.decisionId!, true)).json() as DecisionAnalysis;
@@ -268,17 +268,17 @@ test('held analysis never delays an action, an Action Deadline or the next deal'
   await expect.poll(async () => (await t.view()).view.state.handId).toBe('hand-2');
   for (const [cookie, requestId] of [[cookieOf(first), live.requestId], [cookieOf(second), secondLive.requestId]] as const)
     expect(await t.result(cookie, requestId)).toMatchObject({ status: 'pending' });
-  // Released, the analysis completes for each human's own decision.
+  // Released, the analysis completes for each player's own decision.
   release();
   for (const [cookie, requestId] of [[cookieOf(first), live.requestId], [cookieOf(second), secondLive.requestId]] as const)
     await expect.poll(async () => (await t.result(cookie, requestId)).status).toBe('complete');
 });
 
-test('two humans in one Hand study privately, from what each observed at the decision: later streets, the showdown and later Hands never reach the analysis', async () => {
+test('two players in one Hand study privately, from what each observed at the decision: later streets, the showdown and later Hands never reach the analysis', async () => {
   const { t, ben, cookieOf } = await headsUp();
   const annLive = await t.connect(), benLive = await t.connect(ben.cookie);
   expect((await study(ben.cookie, { referenceStrategy: baselinePlayingStrategy, liveAnalysis: true })).status).toBe(200);
-  // Both humans check Hand 1 down to a showdown, each recording the view they had at each of their decisions.
+  // Both players check Hand 1 down to a showdown, each recording the view they had at each of their decisions.
   await dealt(t, 'hand-1');
   const seen = new Map<string, { participantId: string; view: ObservableGameView }>();
   for (let current = await t.view(); current.view.state.status === 'active-hand'; current = await t.view()) {
@@ -290,7 +290,7 @@ test('two humans in one Hand study privately, from what each observed at the dec
     expect((await t.as(cookieOf(actor), 'act', { participantId: actor, action: { type: action } })).status).toBe(200);
   }
   expect([...seen.values()].map(entry => entry.view.state.street)).toEqual(['preflop', 'preflop', 'flop', 'flop', 'turn', 'turn', 'river', 'river']);
-  // The showdown has since revealed each human's cards to the other, and a later Hand has been dealt.
+  // The showdown has since revealed each player's cards to the other, and a later Hand has been dealt.
   const shown = (await t.view(ben.cookie)).view.history[0]!.result!.participants.find(participant => participant.participantId === t.annId)!;
   expect(shown.holeCards).toHaveLength(2);
   // The showdown may split the pot, and each award takes its own beat: the Hand ends when its last phase does.
@@ -299,13 +299,13 @@ test('two humans in one Hand study privately, from what each observed at the dec
   const later = await t.view();
   expect((await t.as(cookieOf(later.view.state.actorId!), 'act', { participantId: later.view.state.actorId!, action: { type: 'fold' } })).status).toBe(200);
 
-  // A new Reference Strategy analyzes each Hand 1 decision afresh, for its own human only.
+  // A new Reference Strategy analyzes each Hand 1 decision afresh, for its own player only.
   const reference = { [t.annId]: highestProbabilityPlayingStrategy, [ben.participantId]: simpleHeuristicPlayingStrategy };
   for (const [cookie, referenceStrategy] of [[t.ann, reference[t.annId]!], [ben.cookie, reference[ben.participantId]!]] as const) expect((await study(cookie, { referenceStrategy, liveAnalysis: true })).status).toBe(200);
   const requested: { cookie: string; requestId: string }[] = [];
   for (const [decisionId, { participantId }] of seen) {
     const cookie = cookieOf(participantId), other = participantId === t.annId ? ben.cookie : t.ann;
-    // Nobody captures another human's decision.
+    // Nobody captures another player's decision.
     expect(await refusal(await t.analyze(other, decisionId))).toEqual({ status: 400, code: 'decision-unavailable' });
     const analysis = await (await t.analyze(cookie, decisionId)).json() as DecisionAnalysis;
     expect(analysis).toMatchObject({ participantId, decisionId, referenceStrategy: reference[participantId] });
@@ -314,7 +314,7 @@ test('two humans in one Hand study privately, from what each observed at the dec
       expect((await (path.endsWith('retry') ? post('/api/table-sessions/' + t.id + path, other, {}) : get('/api/table-sessions/' + t.id + path, other))).status).toBe(404);
   }
   for (const { cookie, requestId } of requested) await expect.poll(async () => (await t.result(cookie, requestId)).status).toBe('complete');
-  // Each evaluation saw exactly what its human observed at that decision: no later street, no opponent's cards.
+  // Each evaluation saw exactly what its player observed at that decision: no later street, no opponent's cards.
   const fresh = evaluations.filter(evaluation => evaluation.strategy === strategyName(reference[evaluation.participantId]!));
   expect(fresh.map(evaluation => [evaluation.decisionId, evaluation.participantId])).toEqual([...seen].map(([decisionId, entry]) => [decisionId, entry.participantId]));
   for (const evaluation of fresh) {
@@ -324,7 +324,7 @@ test('two humans in one Hand study privately, from what each observed at the dec
     expect(evaluation.view.state.board).toHaveLength({ preflop: 0, flop: 3, turn: 4, river: 5 }[evaluation.view.state.street!]);
     expect(evaluation.view.history.every(entry => entry.handId === 'hand-1')).toBe(true);
   }
-  // Responses carry no cards, deck or seed of the game, and each human is told only of their own analysis.
+  // Responses carry no cards, deck or seed of the game, and each player is told only of their own analysis.
   for (const { cookie, requestId } of requested)
     expect(JSON.stringify(await t.result(cookie, requestId))).not.toMatch(/"(?:holeCards|board|deck|burns|seed|commands|view|history)"\s*:/);
   const notified = (connection: LiveConnection) => connection.messages.flatMap(message => message.type === 'analysis-update' ? [message.requestId] : []);

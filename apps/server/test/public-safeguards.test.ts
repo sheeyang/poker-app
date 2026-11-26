@@ -40,7 +40,7 @@ test('table creation is limited per IP, a refusal says when to try again, and re
   await withServer({ rateLimits: { creation: { limit: 2, windowMs: minute } } }, async ({ base, clock }) => {
     const ann = await guest(base, 'Ann'), ben = await guest(base, 'Ben');
     expect((await create(base, ann)).status).toBe(201);
-    // Another Guest on the same address shares the limit.
+    // Another User on the same address shares the limit.
     expect((await create(base, ben)).status).toBe(201);
     const refused = await create(base, ann);
     expect(refused.status).toBe(429);
@@ -92,7 +92,7 @@ test('Table Password attempts at joining are limited per IP, by default to 10 in
     const join = (cookie: string, fields: object) => call(base, 'POST', '/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID(), ...fields });
     const ben = await guest(base, 'Ben'), cy = await guest(base, 'Cy');
     for (let guess = 0; guess < 10; guess++) expect((await rejection(await join(ben, { tablePassword: 'guess ' + guess }))).code).toBe('wrong-table-password');
-    // Another Guest on the same address shares the limit, even with the right password.
+    // Another User on the same address shares the limit, even with the right password.
     const refused = await join(cy, { tablePassword: 'right one' });
     expect(await rejection(refused)).toEqual({ status: 429, code: 'rate-limited', message: expect.stringContaining('10 minutes') });
     expect(refused.headers.get('retry-after')).toBe('600');
@@ -103,7 +103,7 @@ test('Table Password attempts at joining are limited per IP, by default to 10 in
   });
 });
 
-test('a join refused for the Guest’s Current Table spends no Table Password attempt', async () => {
+test('a join refused for the User’s Current Table spends no Table Password attempt', async () => {
   await withServer({ rateLimits: { 'table-password': { limit: 1, windowMs: minute } } }, async ({ base }) => {
     const sam = await guest(base, 'Sam'), cy = await guest(base, 'Cy'), ben = await guest(base, 'Ben');
     const locked = (await (await create(base, sam, { mode: 'online', tablePassword: 'right one' })).json()).tableSessionId as string;
@@ -148,16 +148,16 @@ test('client addresses come from forwarding headers only when the connection is 
   });
 });
 
-/** Creates a table for `cookie` (Practice unless `body` says otherwise) and, for Practice, seats the human. */
+/** Creates a table for `cookie` (Practice unless `body` says otherwise) and, for Practice, seats the player. */
 async function seatedPracticeTable(base: string, cookie: string, requestId = randomUUID()) {
   const created = await (await create(base, cookie, { requestId })).json();
-  const id = created.tableSessionId as string, human = created.bindings[0].participantId as string;
-  const seated = await call(base, 'POST', '/api/table-sessions/' + id + '/seat-participant', cookie, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: human, seat: 1 });
+  const id = created.tableSessionId as string, player = created.bindings[0].participantId as string;
+  const seated = await call(base, 'POST', '/api/table-sessions/' + id + '/seat-participant', cookie, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: player, seat: 1 });
   expect(seated.status).toBe(200);
-  return { id, human, requestId };
+  return { id, player, requestId };
 }
 
-test('there is no per-Guest table cap: a Guest with a seated human at every table creates more than 10', async () => {
+test('there is no per-User table cap: a User with a seated player at every table creates more than 10', async () => {
   await withServer({ rateLimits: { creation: { limit: 100, windowMs: minute } } }, async harness => {
     const ann = await guest(harness.base, 'Ann');
     for (let count = 0; count < 12; count++) await seatedPracticeTable(harness.base, ann);

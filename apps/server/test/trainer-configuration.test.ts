@@ -35,7 +35,7 @@ async function table(cookie: string, body: object = {}) {
   const creation = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }], ...body }) });
   expect(creation.status).toBe(201);
   const result = await creation.json();
-  return { id: result.tableSessionId as string, cookie, human: result.bindings[0].participantId as string, bot: result.bindings[1].participantId as string };
+  return { id: result.tableSessionId as string, cookie, player: result.bindings[0].participantId as string, bot: result.bindings[1].participantId as string };
 }
 type Table = Awaited<ReturnType<typeof table>>;
 const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
@@ -44,13 +44,13 @@ async function command(t: Table, kind: string, body: object = {}) {
   const before = await read(t);
   expect((await post(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body })).status).toBe(200);
 }
-/** A table at the Guest's first decision of its first Hand. */
+/** A table at the User's first decision of its first Hand. */
 async function decision(cookie: string, body: object = {}) {
   const t = await table(cookie, body);
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
   await command(t, 'start-hand');
-  await expect.poll(async () => (await read(t)).view.state.actorId).toBe(t.human);
+  await expect.poll(async () => (await read(t)).view.state.actorId).toBe(t.player);
   return t;
 }
 const configuration = async (cookie: string) => fetch(base + '/api/trainer-configuration', { headers: { cookie } });
@@ -59,7 +59,7 @@ const chosen: TrainerConfiguration = { referenceStrategy: highestProbabilityPlay
 const change = (trainerConfiguration: TrainerConfiguration = chosen, requestId: string = randomUUID()) => ({ requestId, trainerConfiguration });
 const analyze = async (t: Table, decisionId?: string) => (await post(t, 'analysis', { decisionId: decisionId ?? (await read(t)).view.state.decisionId })).json();
 
-test('a Guest starts from the default Trainer Configuration, with Live Analysis on', async () => {
+test('a User starts from the default Trainer Configuration, with Live Analysis on', async () => {
   const cookie = await guest();
   const response = await configuration(cookie);
   expect(response.status).toBe(200);
@@ -74,7 +74,7 @@ test('a Reference Strategy set once is used by new analysis at two different tab
   const response = await configure(cookie, change());
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ ok: true, trainerConfiguration: chosen });
-  // The change is the Guest's, not the table's: it advances no revision.
+  // The change is the User's, not the table's: it advances no revision.
   expect(await read(first)).toMatchObject({ pokerRevision: before.pokerRevision, sessionRevision: before.sessionRevision, trainerConfiguration: chosen });
   const second = await decision(cookie);
   expect(await read(second)).toMatchObject({ trainerConfiguration: chosen });
@@ -97,12 +97,12 @@ test('repeating a change with the same request ID applies it once, and a request
   const conflict = await configure(cookie, change(later, 'first'));
   expect(conflict.status).toBe(409);
   expect(await conflict.json()).toMatchObject({ ok: false, rejection: { code: 'request-id-conflict' } });
-  // Another Guest's request IDs are their own.
+  // Another User's request IDs are their own.
   const other = await guest();
   expect(await (await configure(other, change(later, 'first'))).json()).toEqual({ ok: true, trainerConfiguration: later });
 });
 
-test('a change notifies every connection of the Guest, and theirs only, which then read the new configuration', async () => {
+test('a change notifies every connection of the User, and theirs only, which then read the new configuration', async () => {
   const cookie = await guest(), other = await guest();
   const listen = (owner: string) => {
     const socket = new WebSocket(base.replace('http:', 'ws:') + '/api/live', { headers: { cookie: owner } });
@@ -165,12 +165,12 @@ test('an unidentified caller can neither read nor change a Trainer Configuration
   expect((await configure(await guest(), { trainerConfiguration: chosen })).status).toBe(400);
 });
 
-test('a change survives a restart, and a table persisted with per-Participant configurations loads with each Guest on their own configuration', async () => {
+test('a change survives a restart, and a table persisted with per-Participant configurations loads with each User on their own configuration', async () => {
   const cookie = await guest(), untouched = await guest();
   const t = await table(cookie), u = await table(untouched);
   expect((await configure(cookie, change())).status).toBe(200);
   await server.close();
-  // An external persistence fixture simulates rows written before M6: each human Participant kept its own configuration.
+  // An external persistence fixture simulates rows written before M6: each player kept its own configuration.
   const legacy = JSON.stringify({ referenceStrategy: baselinePlayingStrategy, liveAnalysis: false });
   await administration.query('UPDATE "' + schema + '".table_sessions SET aggregate = jsonb_set(jsonb_set(aggregate, \'{schemaVersion}\', \'2\'), \'{bindings,0,trainerConfiguration}\', $2::jsonb) WHERE id = ANY($1)', [[t.id, u.id], legacy]);
   await start();

@@ -68,7 +68,7 @@ test('setting a name needs a known identity', async () => {
   expect((await setName('poker_local=unknown', 'Ada')).status).toBe(401);
 });
 
-test('the Practice human Participant keeps the creation-time name after the Guest edits theirs', async () => {
+test('the Practice player keeps the creation-time name after the Guest edits theirs', async () => {
   const cookie = await identity();
   await setName(cookie, 'First');
   const created = await (await create(cookie)).json();

@@ -9,7 +9,7 @@ import { creationRequests, localUsers } from './db/schema.js';
 import type { openDatabase } from './db/database.js';
 import { projectBindings } from './projection.js';
 import { currentTable, writeTableSession } from './membership.js';
-import { createGuestQueue, type GuestQueue } from './guest-queue.js';
+import { createUserQueue, type UserQueue } from './user-queue.js';
 import { currentTableElsewhere } from './rejections.js';
 import { emptySchedule } from './schedule.js';
 import { type AcceptanceTransactions, CommitOutcomeUnknown, type AcceptanceFaults } from './db/acceptance.js';
@@ -21,11 +21,11 @@ type Database = ReturnType<typeof openDatabase>['db'];
 /** Test tooling wraps the real transaction; these hooks are never HTTP endpoints. */
 export interface CreationTransactionFaults extends AcceptanceFaults { readonly beforeCommit?: () => Promise<void>; readonly afterCommit?: () => Promise<void> }
 /**
- * Creates tables, each in its owner's turn (`guests`), which joining shares: an Online Table becomes its owner's Current
+ * Creates tables, each in its owner's turn (`userQueue`), which joining shares: an Online Table becomes its owner's Current
  * Table, so creating one is refused while they are at another.
  */
-export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, guests: GuestQueue = createGuestQueue(), clock: ServerClock = systemClock) {
-  return (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => guests.run(ownerUserId, async (): Promise<CreationOutcome> => {
+export function createTableSessionCreator(db: Database, acceptance: AcceptanceTransactions, faults?: CreationTransactionFaults, supportsStrategy: (descriptor: unknown) => boolean = isSupportedStrategy, userQueue: UserQueue = createUserQueue(), clock: ServerClock = systemClock) {
+  return (ownerUserId: string, request: CreateTableSessionRequest): Promise<CreationOutcome> => userQueue.run(ownerUserId, async (): Promise<CreationOutcome> => {
     // The Table Password never reaches the fingerprint: retrying with another password is the same creation.
     const { requestId, tablePassword, ...contents } = request;
     const fingerprint = createHash('sha256').update('create-table-v1:' + canonical(contents)).digest('hex');
@@ -60,8 +60,8 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
       if (existing) return existing.fingerprint === fingerprint ? existing.outcome : {
         ok: false, rejection: { code: 'request-id-conflict', message: 'This requestId was already used for different creation contents.' },
       };
-      const guest = await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, ownerUserId));
-      const displayName = guest[0]?.displayName;
+      const owner = await tx.select({ displayName: localUsers.displayName }).from(localUsers).where(eq(localUsers.id, ownerUserId));
+      const displayName = owner[0]?.displayName;
       const mode = request.mode ?? 'practice';
       const created = !displayName ? { ok: false as const, rejection: { code: 'display-name-required', message: 'Choose a display name before creating a table.' } } : validateCreationRequest(request, supportsStrategy) ?? CashGame.create({ ...defaultConfiguration, ...request.configuration, seed: randomBytes(32).toString('hex') });
       // At an Online Table everyone is told apart by name, ignoring case, so the owner's name cannot be a Bot's.
@@ -83,7 +83,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined' },
           ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: participantName(b.name)!, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
         ];
-        // The Online owner joins unseated, without the Join Link, and observes from creation. A Practice human joins by sitting down.
+        // The Online owner joins unseated, without the Join Link, and observes from creation. A Practice player joins by sitting down.
         const joined = mode === 'online' ? created.game.joinTable(ownerParticipantId) : undefined;
         if (joined && !joined.ok) throw new Error('The Online owner could not join their own table.');
         const options: TableOptions = {
@@ -107,5 +107,5 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
 }
 /** Rolls a creation back: its owner is at another Online Table, their Current Table. */
 class CurrentTableElsewhere extends Error {
-  constructor(readonly currentTableId: string) { super('The Guest is at another Online Table.'); }
+  constructor(readonly currentTableId: string) { super('The User is at another Online Table.'); }
 }

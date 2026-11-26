@@ -16,27 +16,27 @@ import { createHistoryAnalysisScheduler, type HistoryAnalysisScheduler } from '.
 export interface FrozenEvaluationInput { readonly identity: EvaluationIdentity; readonly view: ObservableGameView; readonly acceptedAction?: ConcreteAction }
 export type AnalysisPurpose = Extract<JobPurpose, 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis' | 'history-analysis'>;
 /**
- * How analysis is scheduled: a purpose, or for `history-analysis` the purpose with the Guest who asked, whose
- * outstanding history jobs are bounded (`createHistoryAnalysisScheduler`). That Guest is the Participant's own, so a
+ * How analysis is scheduled: a purpose, or for `history-analysis` the purpose with the User who asked, whose
+ * outstanding history jobs are bounded (`createHistoryAnalysisScheduler`). That User is the Participant's own, so a
  * history entry also notifies them directly, whether or not the table is loaded or they are still joined at it.
  */
-export type AnalysisSchedule = Exclude<AnalysisPurpose, 'history-analysis'> | { readonly purpose: 'history-analysis'; readonly guestId: string };
+export type AnalysisSchedule = Exclude<AnalysisPurpose, 'history-analysis'> | { readonly purpose: 'history-analysis'; readonly userId: string };
 function canonicalAnalysisKey(input: FrozenEvaluationInput): string {
   return createHash('sha256').update(canonical({ ...input.identity, ...(input.acceptedAction ? { scoredDecision: { acceptedAction: input.acceptedAction, scoringMethodVersion } } : {}) })).digest('hex');
 }
 type Database = ReturnType<typeof openDatabase>['db'];
-interface Entry { readonly input: FrozenEvaluationInput; readonly schedule: AnalysisSchedule; state: DecisionAnalysis; guestId?: string }
+interface Entry { readonly input: FrozenEvaluationInput; readonly schedule: AnalysisSchedule; state: DecisionAnalysis; userId?: string }
 /**
  * Owns matching, execution and successful retention, independently of connections and poker. Notifications go to the
- * Participant: to `guestId` when a history request named their Guest, otherwise to whoever `publish` resolves.
+ * Participant: to `userId` when a history request named their User, otherwise to whoever `publish` resolves.
  */
-export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (participantId: string, update: AnalysisUpdate, guestId?: string) => void, acceptJobResult: AcceptTableJobResult, history: HistoryAnalysisScheduler = createHistoryAnalysisScheduler(runner)) {
+export function createAnalysis(db: Database, runner: JobRunner, strategyFactory: (descriptor: StrategyDescriptor) => Strategy = createStrategy, publish: (participantId: string, update: AnalysisUpdate, userId?: string) => void, acceptJobResult: AcceptTableJobResult, history: HistoryAnalysisScheduler = createHistoryAnalysisScheduler(runner)) {
   /** Submits one job of an entry under its schedule. */
   function submit<I, O>(schedule: AnalysisSchedule, input: I, execute: (input: I, options: { readonly signal: AbortSignal }) => O | Promise<O>): JobHandle<O> {
-    return typeof schedule === 'string' ? runner.submit(schedule, input, execute) : history.submit(schedule.guestId, input, execute);
+    return typeof schedule === 'string' ? runner.submit(schedule, input, execute) : history.submit(schedule.userId, input, execute);
   }
-  /** A request may reuse an entry another schedule made; one that names the Guest lets that entry notify them directly. */
-  function adopt(entry: Entry, schedule: AnalysisSchedule) { if (typeof schedule !== 'string') entry.guestId ??= schedule.guestId; return entry; }
+  /** A request may reuse an entry another schedule made; one that names the User lets that entry notify them directly. */
+  function adopt(entry: Entry, schedule: AnalysisSchedule) { if (typeof schedule !== 'string') entry.userId ??= schedule.userId; return entry; }
   const entries = new Map<string, Entry>();
   const byRequest = new Map<string, Entry>();
   const initializing = new Map<string, Promise<Entry>>();
@@ -53,7 +53,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     const state = entry.state;
     for (const resolve of terminalWaiters.get(state.requestId) ?? []) resolve(state);
     terminalWaiters.delete(state.requestId);
-    try { publish(entry.input.identity.participantId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }, entry.guestId); } catch { /* Delivery cannot change a readable result. */ }
+    try { publish(entry.input.identity.participantId, { type: 'analysis-update', resource: 'analysis', tableSessionId: state.tableSessionId, requestId: state.requestId, attemptId: state.attemptId, status: state.status }, entry.userId); } catch { /* Delivery cannot change a readable result. */ }
   }
   function accept(entry: Entry, attemptId: string, operation: () => void = () => {}): Promise<boolean> {
     return acceptJobResult(entry.input.identity.tableSessionId, entry.input.identity.participantId, () => {
@@ -173,7 +173,7 @@ export function createAnalysis(db: Database, runner: JobRunner, strategyFactory:
     await accept(entry, state.attemptId, () => { entry.state = terminal; notify(entry); });
   }
   const owns = (entry: Entry, tableSessionId: string, participantId: string) => entry.input.identity.participantId === participantId && entry.state.tableSessionId === tableSessionId;
-  /** `participantId` must be the requesting Guest's own joined Participant at `tableSessionId`. */
+  /** `participantId` must be the requesting User's own joined Participant at `tableSessionId`. */
   async function read(tableSessionId: string, requestId: string, participantId: string): Promise<DecisionAnalysis | undefined> {
     const memory = byRequest.get(requestId);
     if (memory) return owns(memory, tableSessionId, participantId) ? memory.state : undefined;

@@ -31,7 +31,7 @@ async function table(configuration?: { maximumBuyIn: number }) {
   const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), configuration, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await response.json();
-  return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+  return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
 }
 type Table = Awaited<ReturnType<typeof table>>;
 const submit = (t: Table, kind: string, body: unknown) => fetch(base + '/api/table-sessions/' + t.id + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie: t.cookie }, body: JSON.stringify(body) });
@@ -45,16 +45,16 @@ function connect(t: Table, cookie = t.cookie, suffix = '') {
     return messages.find((m): m is ObservableTableUpdate => m.type === 'table-update' && m.sessionRevision === revision)!;
   } };
 }
-test('a real connection receives the latest complete view for the owner’s bound human, independently of a client-supplied observer', async () => {
+test('a real connection receives the latest complete view for the owner’s bound player, independently of a client-supplied observer', async () => {
   const t = await table();
-  await submit(t, 'seat-participant', { requestId: 'human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+  await submit(t, 'seat-participant', { requestId: 'player', expectedPokerRevision: 0, participantId: t.player, seat: 1 });
   await submit(t, 'seat-participant', { requestId: 'bot', expectedPokerRevision: 1, participantId: t.bot, seat: 4 });
   await submit(t, 'start-hand', { requestId: 'start', expectedPokerRevision: 2 });
   const live = connect(t, t.cookie, '?participantId=' + t.bot);
   live.socket.on('error', () => {});
   try {
     const update = await live.next(3);
-    expect(update).toMatchObject({ tableSessionId: t.id, pokerRevision: 3, sessionRevision: 3, presentationEvents: [], view: { state: { status: 'active-hand', actorId: t.human, legalActions: expect.arrayContaining([{ type: 'fold' }]) } } });
+    expect(update).toMatchObject({ tableSessionId: t.id, pokerRevision: 3, sessionRevision: 3, presentationEvents: [], view: { state: { status: 'active-hand', actorId: t.player, legalActions: expect.arrayContaining([{ type: 'fold' }]) } } });
     expect(update.view.state.participants[0]?.holeCards).toHaveLength(2);
     expect(update.view.state.participants[1]).not.toHaveProperty('holeCards');
     expect(update.view).not.toHaveProperty('sessionRevision');
@@ -69,8 +69,8 @@ test('held or failed PostgreSQL COMMIT publishes no working state, and successfu
   let held: Promise<Response> | undefined;
   try {
     await live.next(0);
-    beforeCommit = async context => { if (context.tableSessionId === t.id && context.requestId === 'held-human') { entered.resolve(); await release.promise; } };
-    held = submit(t, 'seat-participant', { requestId: 'held-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+    beforeCommit = async context => { if (context.tableSessionId === t.id && context.requestId === 'held-player') { entered.resolve(); await release.promise; } };
+    held = submit(t, 'seat-participant', { requestId: 'held-player', expectedPokerRevision: 0, participantId: t.player, seat: 1 });
     await entered.promise;
     const reconnectWhileHeld = connect(t);
     try {
@@ -80,7 +80,7 @@ test('held or failed PostgreSQL COMMIT publishes no working state, and successfu
     } finally { reconnectWhileHeld.socket.terminate(); }
     release.resolve();
     expect((await held).status).toBe(200);
-    expect(await live.next(1)).toMatchObject({ pokerRevision: 1, presentationEvents: [{ type: 'participant-seated', participantId: t.human, seat: 1, buyIn: 1000 }], view: { state: { participants: [{ participantId: t.human, seat: 1, stack: 1000 }] } } });
+    expect(await live.next(1)).toMatchObject({ pokerRevision: 1, presentationEvents: [{ type: 'participant-seated', participantId: t.player, seat: 1, buyIn: 1000 }], view: { state: { participants: [{ participantId: t.player, seat: 1, stack: 1000 }] } } });
     beforeCommit = async () => { throw new Error('controlled rollback'); };
     expect((await submit(t, 'seat-participant', { requestId: 'failed-bot', expectedPokerRevision: 1, participantId: t.bot, seat: 4 })).status).toBe(503);
     expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1 });
@@ -91,7 +91,7 @@ test('held or failed PostgreSQL COMMIT publishes no working state, and successfu
     await submit(t, 'start-hand', { requestId: 'start', expectedPokerRevision: 2 });
     const dealt = await live.next(3);
     expect(dealt.presentationEvents.filter(e => e.type === 'hole-cards-dealt')).toEqual([
-      { type: 'hole-cards-dealt', participantId: t.human, cardCount: 2, cards: dealt.view.state.participants[0]?.holeCards },
+      { type: 'hole-cards-dealt', participantId: t.player, cardCount: 2, cards: dealt.view.state.participants[0]?.holeCards },
       { type: 'hole-cards-dealt', participantId: t.bot, cardCount: 2 },
     ]);
     expect(dealt.view.state.participants[1]).not.toHaveProperty('holeCards');
@@ -106,7 +106,7 @@ test('WebSocket upgrades require a known cookie and Table Ownership before expos
   const t = await table();
   const other = await table();
   for (const [cookie, expectedStatus] of [['', 401], ['poker_local=unrecognized', 401], [other.cookie, 404]] as const) {
-    const live = connect(t, cookie, '?participantId=' + t.human);
+    const live = connect(t, cookie, '?participantId=' + t.player);
     live.socket.on('error', () => {});
     const status = await new Promise<number>(resolve => live.socket.once('unexpected-response', (_request, response) => { response.resume(); resolve(response.statusCode!); }));
     expect(status).toBe(expectedStatus);
@@ -116,16 +116,16 @@ test('WebSocket upgrades require a known cookie and Table Ownership before expos
 });
 test('disconnect submits no poker command, and reconnect supplies the latest complete view across missed revisions with no replayed events', async () => {
   const t = await table();
-  await submit(t, 'seat-participant', { requestId: 'human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+  await submit(t, 'seat-participant', { requestId: 'player', expectedPokerRevision: 0, participantId: t.player, seat: 1 });
   await submit(t, 'seat-participant', { requestId: 'bot', expectedPokerRevision: 1, participantId: t.bot, seat: 4 });
   await submit(t, 'start-hand', { requestId: 'start', expectedPokerRevision: 2 });
   const live = connect(t);
   const decision = await live.next(3);
   live.socket.close();
   await new Promise<void>(resolve => live.socket.once('close', () => resolve()));
-  const humanWaiting = await read(t);
-  expect(humanWaiting).toMatchObject({ pokerRevision: 3, sessionRevision: 3, view: decision.view });
-  await submit(t, 'act', { requestId: 'fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } });
+  const playerWaiting = await read(t);
+  expect(playerWaiting).toMatchObject({ pokerRevision: 3, sessionRevision: 3, view: decision.view });
+  await submit(t, 'act', { requestId: 'fold', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } });
   await submit(t, 'start-hand', { requestId: 'next-hand', expectedPokerRevision: 4 });
   const reconnected = connect(t);
   try {
@@ -141,7 +141,7 @@ test('lost COMMIT confirmation publishes recovery feedback before proven committ
   try {
     const before = await live.next(0);
     afterCommit = async () => { throw new Error('controlled lost COMMIT confirmation'); };
-    expect((await submit(t, 'seat-participant', { requestId: 'unknown-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(503);
+    expect((await submit(t, 'seat-participant', { requestId: 'unknown-player', expectedPokerRevision: 0, participantId: t.player, seat: 1 })).status).toBe(503);
     afterCommit = async () => {};
     await expect.poll(() => live.messages.find(m => m.type === 'table-status')).toMatchObject({ type: 'table-status', tableSessionId: t.id, status: { phase: 'recovering' } });
     const recoveryIndex = live.messages.findIndex(m => m.type === 'table-status' && m.status.phase === 'recovering');
@@ -149,11 +149,11 @@ test('lost COMMIT confirmation publishes recovery feedback before proven committ
     expect(before).toMatchObject({ pokerRevision: 0, sessionRevision: 0, view: { state: { participants: [] } } });
     // Delay reconnect until PostgreSQL recovery has proved and promoted the commit.
     const promoted = await live.next(1);
-    expect(promoted).toMatchObject({ pokerRevision: 1, sessionRevision: 1, presentationEvents: [], view: { state: { participants: [{ participantId: t.human, seat: 1, stack: 1000 }] } } });
+    expect(promoted).toMatchObject({ pokerRevision: 1, sessionRevision: 1, presentationEvents: [], view: { state: { participants: [{ participantId: t.player, seat: 1, stack: 1000 }] } } });
     await expect.poll(() => live.messages.find(m => m.type === 'table-status' && m.status.phase === 'idle')).toBeDefined();
     const currentView = await read(t);
     expect(currentView).toMatchObject({ pokerRevision: 1, sessionRevision: 1, runtimeStatus: { phase: 'idle' }, view: promoted.view });
-    const retry = await submit(t, 'seat-participant', { requestId: 'unknown-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+    const retry = await submit(t, 'seat-participant', { requestId: 'unknown-player', expectedPokerRevision: 0, participantId: t.player, seat: 1 });
     expect(retry.status).toBe(200);
     expect(await retry.json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });
     expect(live.messages.filter(m => m.type === 'table-update').map(m => m.sessionRevision)).toEqual([0, 1]);
@@ -174,7 +174,7 @@ test('reading and subscribing while a COMMIT is still being confirmed neither pa
     await live.next(0);
     // COMMIT has run and its journal entry is still pending while the acceptance confirms it.
     afterCommit = async () => { confirming.resolve(); await release.promise; };
-    held = submit(t, 'seat-participant', { requestId: 'confirming', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+    held = submit(t, 'seat-participant', { requestId: 'confirming', expectedPokerRevision: 0, participantId: t.player, seat: 1 });
     await confirming.promise;
     expect(await read(t)).toMatchObject({ pokerRevision: 0, runtimeStatus: { phase: 'idle' } });
     const another = connect(t);
@@ -192,9 +192,9 @@ test('committed management commands automatically synchronize their complete vie
   try {
     await live.next(0);
     const steps = [
-      ['seat-participant', { participantId: t.human, seat: 1 }, { type: 'participant-seated', participantId: t.human, seat: 1, buyIn: 1000 }],
+      ['seat-participant', { participantId: t.player, seat: 1 }, { type: 'participant-seated', participantId: t.player, seat: 1, buyIn: 1000 }],
       ['seat-participant', { participantId: t.bot, seat: 4 }, { type: 'participant-seated', participantId: t.bot, seat: 4, buyIn: 1000 }],
-      ['top-up-to', { participantId: t.human, targetStack: 1500 }, { type: 'participant-topped-up', participantId: t.human, targetStack: 1500, amount: 500 }],
+      ['top-up-to', { participantId: t.player, targetStack: 1500 }, { type: 'participant-topped-up', participantId: t.player, targetStack: 1500, amount: 500 }],
       ['move-participant', { participantId: t.bot, seat: 2 }, { type: 'participant-moved', participantId: t.bot, fromSeat: 4, seat: 2 }],
       ['set-sitting-out', { participantId: t.bot, sittingOut: true }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: true }],
       ['set-sitting-out', { participantId: t.bot, sittingOut: false }, { type: 'sitting-out-changed', participantId: t.bot, sittingOut: false }],
@@ -209,20 +209,20 @@ test('committed management commands automatically synchronize their complete vie
       expect(update.view).toEqual((await read(t)).view);
     }
     expect((await live.next(8)).view.state.participants).toEqual([
-      { participantId: t.human, seat: 1, stack: 1500, sittingOut: false },
+      { participantId: t.player, seat: 1, stack: 1500, sittingOut: false },
       { participantId: t.bot, seat: null, stack: 0, sittingOut: false },
     ]);
   } finally { live.socket.terminate(); }
 });
-test('trusted controller Check and human Call share committed publication, burn events omit identities, and Showdown alone reveals live cards', async () => {
+test('trusted controller Check and player Call share committed publication, burn events omit identities, and Showdown alone reveals live cards', async () => {
   const t = await table();
-  await submit(t, 'seat-participant', { requestId: 'human', expectedPokerRevision: 0, participantId: t.human, seat: 1 });
+  await submit(t, 'seat-participant', { requestId: 'player', expectedPokerRevision: 0, participantId: t.player, seat: 1 });
   await submit(t, 'seat-participant', { requestId: 'bot', expectedPokerRevision: 1, participantId: t.bot, seat: 4 });
   await submit(t, 'start-hand', { requestId: 'start', expectedPokerRevision: 2 });
   const live = connect(t);
   try {
     await live.next(3);
-    expect((await submit(t, 'act', { requestId: 'call', expectedPokerRevision: 3, participantId: t.human, action: { type: 'call' } })).status).toBe(200);
+    expect((await submit(t, 'act', { requestId: 'call', expectedPokerRevision: 3, participantId: t.player, action: { type: 'call' } })).status).toBe(200);
     await live.next(4);
     for (let revision = 4; revision < 11; revision++) {
       const current = await live.next(revision);

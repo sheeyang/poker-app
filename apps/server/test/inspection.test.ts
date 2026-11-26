@@ -33,7 +33,7 @@ async function table(bots = 1) {
   const result = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), bots: Array.from({ length: bots }, (_, i) => ({ name: 'Bot ' + i, playingStrategy: baselinePlayingStrategy })) }) });
   const created = await result.json();
   for (const binding of created.bindings.slice(1)) botParticipants.add(binding.participantId);
-  return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bots: created.bindings.slice(1).map((b: { participantId: string }) => b.participantId) as string[] };
+  return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bots: created.bindings.slice(1).map((b: { participantId: string }) => b.participantId) as string[] };
 }
 type Table = Awaited<ReturnType<typeof table>>;
 const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
@@ -60,10 +60,10 @@ async function queueInspection(t: Table, handId = 'hand-1') {
 }
 async function completed() {
   const t = await table();
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bots[0], seat: 2 });
   await command(t, 'start-hand');
-  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
   const analysis = await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis', { method: 'POST', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ decisionId: 'hand-1/decision-1' }) })).json();
   await expect.poll(async () => (await (await fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + analysis.requestId, { headers: { cookie: t.cookie } })).json()).status, { timeout: 5000 }).toBe('complete');
   return t;
@@ -166,14 +166,14 @@ test('direct inspection rejects unauthenticated, non-owner, active, unknown and 
 
 test('showdown inspection reconstructs burn-before-board draws while earlier decision information stays unchanged', async () => {
   const t = await table();
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bots[0], seat: 2 });
   await command(t, 'start-hand');
   const decision = (await read(t)).view.state;
-  await command(t, 'act', { participantId: t.human, action: { type: 'call' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'call' } });
   while ((await read(t)).view.state.status === 'active-hand') {
     const current = await read(t);
-    if (current.view.state.actorId === t.human) await command(t, 'act', { participantId: t.human, action: { type: 'check' } });
+    if (current.view.state.actorId === t.player) await command(t, 'act', { participantId: t.player, action: { type: 'check' } });
     else expect((await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: current.pokerRevision, participantId: t.bots[0]!, action: { type: 'check' } })).ok).toBe(true);
   }
   const before = await read(t);
@@ -213,7 +213,7 @@ test.each(['invalid suffix', 'null record', 'missing record'])('inspection rejec
 
 /**
  * The Strategy of a server whose shared computation slot a test fills: Bots check or call at once, and their Policy
- * view is kept. Once `hold()` is called, a human's analysis waits for `release()`, holding the one slot that analysis
+ * view is kept. Once `hold()` is called, a player's analysis waits for `release()`, holding the one slot that analysis
  * and inspection share. Bot decisions have a slot of their own (ADR-0019), so they never wait behind it.
  */
 function sharedSlotStrategy() {
@@ -230,10 +230,10 @@ function sharedSlotStrategy() {
   };
   return { strategy, hold() { holding = true; }, evaluating: evaluating.promise, release: () => released.resolve(), botView: () => botView };
 }
-/** The next Hand starts, the Bot calls, and the human's analysis of their own current decision holds the shared slot. */
+/** The next Hand starts, the Bot calls, and the player's analysis of their own current decision holds the shared slot. */
 async function holdSharedSlot(t: Table, shared: ReturnType<typeof sharedSlotStrategy>) {
   await command(t, 'start-hand');
-  await expect.poll(async () => (await read(t)).view.state.actorId).toBe(t.human);
+  await expect.poll(async () => (await read(t)).view.state.actorId).toBe(t.player);
   shared.hold();
   const { decisionId } = (await read(t)).view.state;
   expect((await fetch(base + '/api/table-sessions/' + t.id + '/analysis', { method: 'POST', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ decisionId }) })).status).toBe(200);
@@ -257,7 +257,7 @@ test('queued inspection retains its captured active-Hand rejection after the liv
       expect(await (await inspect(t, 'hand-2')).json()).toMatchObject({ rejection: { code: 'inspection-capacity' } });
       expect(finished).toBe(false);
       expect(replay).not.toHaveBeenCalled();
-      await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+      await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
       const completedView = await read(t);
       expect(completedView.view.state.status).toBe('completed-hand');
       const committed = await controllers.readPersistedSession(t.id);
@@ -304,10 +304,10 @@ test('inspection shares the analysis capacity of the one JobRunner, waits outsid
     expect(shared.botView()).toBeDefined();
     expect(JSON.stringify(shared.botView())).not.toMatch(/"(?:inspection|deck|burns|seed|configurationSeed|commands|pokerRecord)"\s*:/);
     // Play goes on while the inspection waits.
-    await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     await command(t, 'start-hand');
     expect((await read(t)).view.state.legalActions).toContainEqual({ type: 'fold' });
-    await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const advanced = await read(t);
     const record = await controllers.readPersistedSession(t.id);
     shared.release();

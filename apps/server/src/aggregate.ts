@@ -2,15 +2,15 @@ import type { AfterHandRequest, StrategyDescriptor, TableMode, TableOptions, Tab
 import type { TableSessionRecord } from '@poker/engine';
 import { emptySchedule } from './schedule.js';
 /**
- * A human Participant's application membership. Only `joined` grants access to the table.
+ * A player's application membership. Only `joined` grants access to the table.
  * The membership index (`table_memberships`) mirrors it in the same transaction as each commit.
  */
 export type MembershipStatus = 'joined' | 'left';
-export interface PersistedHumanBinding {
+export interface PersistedPlayerBinding {
   readonly participantId: string;
   readonly name: string;
   readonly controller: { readonly kind: 'human' };
-  /** The Guest who is this Participant's Human Controller. It never changes. */
+  /** The User who is this Participant's Human Controller. It never changes. */
   readonly userId: string;
   readonly membership: MembershipStatus;
 }
@@ -25,7 +25,7 @@ export interface PersistedBotBinding {
    */
   readonly removed?: true;
 }
-export type PersistedBinding = PersistedHumanBinding | PersistedBotBinding;
+export type PersistedBinding = PersistedPlayerBinding | PersistedBotBinding;
 export interface BotActionProvenance {
   readonly commandIndex: number;
   readonly participantId: string;
@@ -41,7 +41,7 @@ export interface BotActionProvenance {
 export interface PersistedTableSession {
   readonly schemaVersion: 3;
   readonly tableSessionId: string;
-  /** Table Ownership: table options, Bots and inspection. Never control of another human. */
+  /** Table Ownership: table options, Bots and inspection. Never control of another player. */
   readonly ownerUserId: string;
   readonly mode: TableMode;
   readonly options: TableOptions;
@@ -62,7 +62,7 @@ export interface PersistedTableSession {
    */
   readonly schedule: TableSchedule;
   /**
-   * After-Hand requests: changes to a human Participant asked for during a Hand (`after-hand.ts`). At most one
+   * After-Hand requests: changes to a player asked for during a Hand (`after-hand.ts`). At most one
    * per Participant, in the order first asked. The server applies them all in one committed transition when
    * the Hand ends (the Settle after its payout), and clears them in the same transaction.
    */
@@ -85,20 +85,20 @@ export interface PersistedTableSession {
   readonly closed?: true;
 }
 /**
- * Written before M6: each human Participant kept its own Trainer configuration, which is discarded on reading. The
- * Trainer Configuration belongs to the Guest now (ADR-0041). Read-only.
+ * Written before M6: each player kept its own Trainer configuration, which is discarded on reading. The
+ * Trainer Configuration belongs to the User now (ADR-0041). Read-only.
  */
 export interface PersistedTableSessionV2 extends Omit<PersistedTableSession, 'schemaVersion' | 'bindings'> {
   readonly schemaVersion: 2;
-  readonly bindings: readonly ((PersistedHumanBinding & { readonly trainerConfiguration?: TrainerConfiguration }) | PersistedBotBinding)[];
+  readonly bindings: readonly ((PersistedPlayerBinding & { readonly trainerConfiguration?: TrainerConfiguration }) | PersistedBotBinding)[];
 }
-/** Written before M4: one owner-human and a table-level Trainer configuration. Read-only. */
+/** Written before M4: one player, its owner, and a table-level Trainer configuration. Read-only. */
 export interface PersistedTableSessionV1 {
   readonly schemaVersion: 1;
   readonly tableSessionId: string;
   readonly ownerUserId: string;
   readonly pokerRecord: TableSessionRecord;
-  readonly bindings: readonly (Omit<PersistedHumanBinding, 'membership'> | PersistedBotBinding)[];
+  readonly bindings: readonly (Omit<PersistedPlayerBinding, 'membership'> | PersistedBotBinding)[];
   readonly trainerConfiguration: TrainerConfiguration;
   readonly pokerRevision: number;
   readonly sessionRevision: number;
@@ -118,7 +118,7 @@ export const defaultPracticeOptions: TableOptions = { actionTimeLimitSeconds: nu
  * a part of its version's format is not guessed at.
  *
  * Every Trainer configuration a table kept, per Participant (version 2) or for the table (version 1), is discarded: the
- * Guest's own applies (ADR-0041). Version 1 loads as a Practice Table whose human is joined. It predates scheduled play,
+ * User's own applies (ADR-0041). Version 1 loads as a Practice Table whose player is joined. It predates scheduled play,
  * so it loads with an empty schedule: its current decision, if any, has no recorded Action Window, and the restoring
  * caller opens one (`mutations.ts` `restorable`).
  */
@@ -133,7 +133,7 @@ export function upgradeTableSession(stored: StoredTableSession): PersistedTableS
   return {
     ...rest, schemaVersion: 3, mode: legacyTableMode, options: defaultPracticeOptions, schedule: emptySchedule, pendingChanges: [],
     bindings: stored.bindings.map((binding): PersistedBinding => binding.controller.kind === 'human'
-      ? { ...withoutTrainerConfiguration(binding as PersistedHumanBinding), membership: 'joined' }
+      ? { ...withoutTrainerConfiguration(binding as PersistedPlayerBinding), membership: 'joined' }
       : binding as PersistedBotBinding),
   };
 }
@@ -143,18 +143,18 @@ function withoutTrainerConfiguration<T extends PersistedBinding>(binding: T & { 
   const { trainerConfiguration: _discarded, ...rest } = binding;
   return rest as unknown as T;
 }
-export const isHuman = (binding: PersistedBinding | undefined): binding is PersistedHumanBinding => binding?.controller.kind === 'human';
+export const isPlayer = (binding: PersistedBinding | undefined): binding is PersistedPlayerBinding => binding?.controller.kind === 'human';
 export const isBot = (binding: PersistedBinding | undefined): binding is PersistedBotBinding => binding?.controller.kind === 'bot';
-export const humanBindings = (aggregate: PersistedTableSession) => aggregate.bindings.filter(isHuman);
-/** The joined, unremoved human Participant whose Human Controller is this Guest. */
-export const memberBinding = (aggregate: PersistedTableSession, userId: string) => humanBindings(aggregate).find(binding => binding.userId === userId && binding.membership === 'joined');
+export const playerBindings = (aggregate: PersistedTableSession) => aggregate.bindings.filter(isPlayer);
+/** The joined, unremoved player whose Human Controller is this User. */
+export const memberBinding = (aggregate: PersistedTableSession, userId: string) => playerBindings(aggregate).find(binding => binding.userId === userId && binding.membership === 'joined');
 export const findBinding = (aggregate: PersistedTableSession, participantId: unknown) => aggregate.bindings.find(binding => binding.participantId === participantId);
 /**
- * The places of an Online Table's `onlineTableCapacity` that are taken: every joined human Participant and every Bot
+ * The places of an Online Table's `onlineTableCapacity` that are taken: every joined player and every Bot
  * the owner has not removed. None is held for anyone who left, a former Table Owner included (ADR-0034).
  */
 export function placesTaken(aggregate: PersistedTableSession): number {
-  const joined = humanBindings(aggregate).filter(binding => binding.membership === 'joined').length;
+  const joined = playerBindings(aggregate).filter(binding => binding.membership === 'joined').length;
   const bots = aggregate.bindings.filter(binding => isBot(binding) && !binding.removed).length;
   return joined + bots;
 }

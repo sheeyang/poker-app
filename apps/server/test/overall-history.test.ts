@@ -36,7 +36,7 @@ const get = (path: string, cookie: string) => fetch(base + path, { headers: { co
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 const loaded = (id: string) => controller.loadedTables().includes(id);
 
-/** Overall History for a Guest, filtered by `filter` and paged by `page`. */
+/** Overall History for a User, filtered by `filter` and paged by `page`. */
 async function overall(cookie: string, filter: HistoryFilter = {}, page: { limit?: number; offset?: number } = {}): Promise<OverallHistory> {
   const query = new URLSearchParams({ ...historyFilterParams(filter), ...(page.limit !== undefined ? { limit: String(page.limit) } : {}), ...(page.offset !== undefined ? { offset: String(page.offset) } : {}) });
   const response = await get('/api/overall-history?' + query, cookie);
@@ -47,13 +47,13 @@ async function overall(cookie: string, filter: HistoryFilter = {}, page: { limit
 const summary = (decision: OverallHistoryDecision) => [decision.handNumber, decision.street, decision.position, decision.action.type, decision.potBigBlinds] as const;
 
 // ---- Practice Tables played by script -------------------------------------------------------------------------------
-type Table = { id: string; owner: string; human: string; bots: string[] };
+type Table = { id: string; owner: string; player: string; bots: string[] };
 async function practice(owner: string, seatCount: number, blinds = { smallBlind: 10, bigBlind: 20 }): Promise<Table> {
   const response = await post('/api/table-sessions', owner, { requestId: randomUUID(), configuration: { seatCount, ...blinds }, bots: Array.from({ length: seatCount - 1 }, (_, index) => ({ name: 'Bot' + (index + 1), playingStrategy: baselinePlayingStrategy })) });
   expect(response.status).toBe(201);
   const created = await response.json();
-  const t: Table = { id: created.tableSessionId, owner, human: created.bindings[0].participantId, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) };
-  for (const [index, participantId] of [t.human, ...t.bots].entries()) await command(t, 'seat-participant', { participantId, seat: index + 1 });
+  const t: Table = { id: created.tableSessionId, owner, player: created.bindings[0].participantId, bots: created.bindings.slice(1).map((binding: { participantId: string }) => binding.participantId) };
+  for (const [index, participantId] of [t.player, ...t.bots].entries()) await command(t, 'seat-participant', { participantId, seat: index + 1 });
   return t;
 }
 const read = async (t: Table): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, t.owner)).json();
@@ -62,18 +62,18 @@ async function command(t: Table, kind: string, contents: object = {}) {
   expect(response.status).toBe(200);
 }
 const botAct = async (t: Table, participantId: string, action: ConcreteAction) => controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId, action });
-/** The next decision is `who`'s (a Bot's index, or `'human'`) and they take `action`. */
-async function turn(t: Table, who: 'human' | number, action: ConcreteAction) {
+/** The next decision is `who`'s (a Bot's index, or `'player'`) and they take `action`. */
+async function turn(t: Table, who: 'player' | number, action: ConcreteAction) {
   clock.settle();
-  const participantId = who === 'human' ? t.human : t.bots[who]!;
+  const participantId = who === 'player' ? t.player : t.bots[who]!;
   expect((await read(t)).view.state.actorId).toBe(participantId);
-  if (who === 'human') await command(t, 'act', { participantId, action });
+  if (who === 'player') await command(t, 'act', { participantId, action });
   else expect(await botAct(t, participantId, action)).toMatchObject({ ok: true });
 }
 const deal = async (t: Table) => { clock.settle(); await command(t, 'start-hand'); clock.settle(); };
 /**
  * Everyone checks, or calls what they must, until the Hand ends; with `foldAfterFlop` they fold once the flop is dealt, which
- * ends a Hand sooner (and a Guest decides at least once, preflop, whatever their seat).
+ * ends a Hand sooner (and a User decides at least once, preflop, whatever their seat).
  */
 async function checkDown(t: Table, foldAfterFlop = false) {
   for (;;) {
@@ -81,7 +81,7 @@ async function checkDown(t: Table, foldAfterFlop = false) {
     const view = await read(t), state = view.view.state, actor = state.actorId;
     if (state.status !== 'active-hand' || !actor) break;
     const folds = foldAfterFlop && state.street !== 'preflop';
-    if (actor === t.human) {
+    if (actor === t.player) {
       const action: ConcreteAction = { type: folds ? 'fold' : state.legalActions.some(legal => legal.type === 'check') ? 'check' : 'call' };
       expect((await post('/api/table-sessions/' + t.id + '/act', t.owner, { requestId: randomUUID(), expectedPokerRevision: view.pokerRevision, participantId: actor, action })).status).toBe(200);
     } else {
@@ -93,31 +93,31 @@ async function checkDown(t: Table, foldAfterFlop = false) {
   clock.settle();
 }
 /**
- * Three-handed, blinds 10/20, the Guest on the button (seat 1) with Bot1 the small blind and Bot2 the big blind. The Guest
- * raises to 60 and Bot1 folds; Bot2 re-raises to 180, which the Guest calls; on the flop Bot2 checks, the Guest bets 100
- * and Bot2 folds. The Guest decided three times: pot 30, 250 and 370 chips, which is 1.5, 12.5 and 18.5 big blinds.
+ * Three-handed, blinds 10/20, the User on the button (seat 1) with Bot1 the small blind and Bot2 the big blind. The User
+ * raises to 60 and Bot1 folds; Bot2 re-raises to 180, which the User calls; on the flop Bot2 checks, the User bets 100
+ * and Bot2 folds. The User decided three times: pot 30, 250 and 370 chips, which is 1.5, 12.5 and 18.5 big blinds.
  */
 async function threeBet(t: Table) {
   await deal(t);
-  await turn(t, 'human', { type: 'raise', raiseTo: 60 });
+  await turn(t, 'player', { type: 'raise', raiseTo: 60 });
   await turn(t, 0, { type: 'fold' });
   await turn(t, 1, { type: 'raise', raiseTo: 180 });
-  await turn(t, 'human', { type: 'call' });
+  await turn(t, 'player', { type: 'call' });
   await turn(t, 1, { type: 'check' });
-  await turn(t, 'human', { type: 'bet', betTo: 100 });
+  await turn(t, 'player', { type: 'bet', betTo: 100 });
   await turn(t, 1, { type: 'fold' });
   clock.settle();
 }
 const threeBetDecisions = [[1, 'preflop', 'BTN', 'raise', 1.5], [1, 'preflop', 'BTN', 'call', 12.5], [1, 'flop', 'BTN', 'bet', 18.5]] as const;
-/** The next Hand of that table: the Guest is in the big blind and everyone checks it down; the Guest decides four times at a pot of three big blinds. */
+/** The next Hand of that table: the User is in the big blind and everyone checks it down; the User decides four times at a pot of three big blinds. */
 const checkedDownDecisions = [[2, 'preflop', 'BB', 'check', 3], [2, 'flop', 'BB', 'check', 3], [2, 'turn', 'BB', 'check', 3], [2, 'river', 'BB', 'check', 3]] as const;
 
-test('a Guest with no tables has an empty Overall History, and a stranger to the service has none to read', async () => {
+test('a User with no tables has an empty Overall History, and a stranger to the service has none to read', async () => {
   expect(await overall(await guest('Zed'))).toEqual({ filter: {}, total: 0, offset: 0, decisions: [] });
   expect((await fetch(base + '/api/overall-history')).status).toBe(401);
 });
 
-test("Overall History lists the Guest's decisions in their own Hands, newest Hand first, each with the facts the filters use", async () => {
+test("Overall History lists the User's decisions in their own Hands, newest Hand first, each with the facts the filters use", async () => {
   const t = await practice(await guest('Ann'), 3);
   await threeBet(t);
   await deal(t);
@@ -131,12 +131,12 @@ test("Overall History lists the Guest's decisions in their own Hands, newest Han
   expect(decisions.every(decision => typeof decision.completedAt === 'number')).toBe(true);
 });
 
-// ---- an Online Table of three humans, played to a showdown, for tables the Guest has left or that have closed -------------
+// ---- an Online Table of three players, played to a showdown, for tables the User has left or that have closed -------------
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000 };
 const minute = 60_000;
 /**
  * Ann's Online Table, with Ben and Cy joined and seated, all connected, so the table deals by itself. `playHand` checks or
- * calls the next Hand down to its end; `decisions` records every decision each human was asked for, by Decision ID.
+ * calls the next Hand down to its end; `decisions` records every decision each player was asked for, by Decision ID.
  */
 async function online(ann: string) {
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online', configuration: stakes })).json();
@@ -173,7 +173,7 @@ async function online(ann: string) {
 const ids = (decisions: readonly OverallHistoryDecision[]) => decisions.map(decision => decision.decisionId).sort();
 const tableIds = (history: OverallHistory) => [...new Set(history.decisions.map(decision => decision.tableSessionId))].sort();
 
-test("it reaches every table the Guest can read, Practice, left and Closed, only in Hands they were dealt into, and never shows another Guest's decisions or loads a table", async () => {
+test("it reaches every table the User can read, Practice, left and Closed, only in Hands they were dealt into, and never shows another User's decisions or loads a table", async () => {
   const ann = await guest('Ann');
   const mine = await practice(ann, 3);
   await threeBet(mine);
@@ -241,7 +241,7 @@ test('each filter narrows the list to the decisions that meet it, and filters to
   // Table mode.
   expect(await rows({ mode: ['practice'] })).toEqual(all);
   expect(await rows({ mode: ['online'] })).toEqual([]);
-  // Pot in big blinds as faced before the decision: the Guest's own raise faced 30 chips, the three-bet 250.
+  // Pot in big blinds as faced before the decision: the User's own raise faced 30 chips, the three-bet 250.
   expect(await rows({ pot: { max: 1.5 } })).toEqual([threeBetDecisions[0]]);
   expect(await rows({ pot: { min: 12.5 } })).toEqual([threeBetDecisions[1], threeBetDecisions[2]]);
   expect(await rows({ pot: { min: 3, max: 12.4 } })).toEqual(checkedDownDecisions);
@@ -286,7 +286,7 @@ test.each([
   { seats: 3, positions: ['BTN', 'SB', 'BB'] },
   { seats: 6, positions: ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO'] },
   { seats: 9, positions: ['BTN', 'SB', 'BB', 'UTG', 'UTG+1', 'UTG+2', 'LJ', 'HJ', 'CO'] },
-])('at a $seats-Seat table the Guest, in seat 1, is every Position in turn as the button moves round', async ({ seats, positions }) => {
+])('at a $seats-Seat table the User, in seat 1, is every Position in turn as the button moves round', async ({ seats, positions }) => {
   const t = await practice(await guest('Ann'), seats);
   for (let hand = 1; hand <= seats; hand++) { await deal(t); await checkDown(t, true); }
   const { decisions } = await overall(t.owner);

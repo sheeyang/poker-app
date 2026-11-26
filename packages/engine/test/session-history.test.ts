@@ -58,7 +58,7 @@ test('Participants who joined at different times, or left, see the same public h
   expect(carol[1]!.decisions.map(d => d.state.legalActions.length > 0)).toEqual([true, false, false]);
   expect(carol[1]!.decisions[0]!.state.participants.find(p => p.participantId === 'carol')!.holeCards).toEqual(cashGame.getHand('hand-2')!.participants.find(p => p.participantId === 'carol')!.holeCards);
   expect(withoutOwnFacts(cashGame, carol, 'carol')).toEqual(early);
-  // The players' histories differ from the watchers' only by their own facts.
+  // The dealt-in Participants' histories differ from the watchers' only by their own facts.
   for (const id of ['alice', 'bob']) expect(withoutOwnFacts(cashGame, history(cashGame, id), id)).toEqual(early);
 });
 

@@ -46,43 +46,43 @@ async function act(t: Table, participantId: string, action: ConcreteAction) {
   }
 }
 
-test('sparse three-player seats preserve public position, antes, all street order, fixed membership, and restoration', async () => {
-  const t = await table(3, { ante: 5 }); const [human, bob, carol] = t.ids as [string, string, string];
-  for (const [participantId, seat] of [[human, 7], [bob, 9], [carol, 2]] as const) await command(t, 'seat-participant', { participantId, seat });
+test('sparse seats of three Participants preserve public position, antes, all street order, fixed membership, and restoration', async () => {
+  const t = await table(3, { ante: 5 }); const [player, bob, carol] = t.ids as [string, string, string];
+  for (const [participantId, seat] of [[player, 7], [bob, 9], [carol, 2]] as const) await command(t, 'seat-participant', { participantId, seat });
   await command(t, 'set-button', { seat: 7 }); await command(t, 'start-hand');
   const before = await read(t);
-  expect(before).toMatchObject({ pokerRevision: 5, view: { configuration: { seatCount: 9, ante: 5 }, state: { buttonSeat: 7, smallBlindParticipantId: bob, bigBlindParticipantId: carol, actorId: human, amountToCall: 20 } } });
+  expect(before).toMatchObject({ pokerRevision: 5, view: { configuration: { seatCount: 9, ante: 5 }, state: { buttonSeat: 7, smallBlindParticipantId: bob, bigBlindParticipantId: carol, actorId: player, amountToCall: 20 } } });
   expect(before.view.state.participants.map(p => [p.seat, p.stack, p.anteContribution, p.wager, p.contribution, p.cardCount])).toEqual([[7, 995, 5, 0, 5, 2], [9, 985, 5, 10, 15, 2], [2, 975, 5, 20, 25, 2]]);
   expect(before.view.state.participants[0]!.holeCards).toHaveLength(2);
   expect(before.view.state.participants[1]).not.toHaveProperty('holeCards'); expect(before.view.state.participants[2]).not.toHaveProperty('holeCards');
-  for (const [kind, fields] of [['move-participant', { participantId: human, seat: 8 }], ['stand-up-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: false }], ['top-up-to', { participantId: human, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
+  for (const [kind, fields] of [['move-participant', { participantId: player, seat: 8 }], ['stand-up-participant', { participantId: bob }], ['set-sitting-out', { participantId: carol, sittingOut: false }], ['top-up-to', { participantId: player, targetStack: 1000 }], ['set-button', { seat: 2 }], ['start-hand', {}]] as const) {
     const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: t.revision, ...fields });
     expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
     expect(await read(t)).toEqual(before);
   }
-  for (const actor of [human, bob, carol]) {
+  for (const actor of [player, bob, carol]) {
     expect((await read(t)).view.state.actorId).toBe(actor); await act(t, actor, { type: actor === carol ? 'check' : 'call' });
   }
   for (const [index, street] of ['flop', 'turn', 'river'].entries()) {
     const view = await read(t); expect(view.view.state).toMatchObject({ street, actorId: bob }); expect(view.view.state.board).toHaveLength(index + 3);
     expect(view.view.state.participants.map(p => [p.stack, p.wager, p.anteContribution, p.contribution])).toEqual([[975, 0, 5, 25], [975, 0, 5, 25], [975, 0, 5, 25]]);
-    for (const actor of [bob, carol, human]) { expect((await read(t)).view.state.actorId).toBe(actor); await act(t, actor, { type: 'check' }); }
+    for (const actor of [bob, carol, player]) { expect((await read(t)).view.state.actorId).toBe(actor); await act(t, actor, { type: 'check' }); }
   }
   const completed = await read(t);
-  expect(completed.view.state).toMatchObject({ status: 'completed-hand', actorId: null, pots: [{ amount: 75, eligibleParticipantIds: [human, bob, carol] }], returns: [] });
+  expect(completed.view.state).toMatchObject({ status: 'completed-hand', actorId: null, pots: [{ amount: 75, eligibleParticipantIds: [player, bob, carol] }], returns: [] });
   expect(completed.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(3000);
-  expect(completed.view.history[0]!.decisions[0]!.state).toMatchObject({ actorId: human, amountToCall: 20 });
+  expect(completed.view.history[0]!.decisions[0]!.state).toMatchObject({ actorId: player, amountToCall: 20 });
   expect(completed.view.history[0]!.decisions[0]!.state.participants[1]).not.toHaveProperty('holeCards');
   expect(completed.view.history[0]!.decisions[0]!.state.participants[1]!.anteContribution).toBe(5);
   expect(JSON.stringify(completed)).not.toMatch(/"(?:seed|deck|burns|drawnCardCount|commands)"\s*:/);
   await server.close(); await startServer(); expect(await read(t)).toEqual(completed);
-  await command(t, 'move-participant', { participantId: human, seat: 8 }); await command(t, 'stand-up-participant', { participantId: bob }); await command(t, 'start-hand');
+  await command(t, 'move-participant', { participantId: player, seat: 8 }); await command(t, 'stand-up-participant', { participantId: bob }); await command(t, 'start-hand');
   const next = await read(t);
-  expect(next.view.state).toMatchObject({ buttonSeat: 8, smallBlindParticipantId: human, bigBlindParticipantId: carol, actorId: human });
+  expect(next.view.state).toMatchObject({ buttonSeat: 8, smallBlindParticipantId: player, bigBlindParticipantId: carol, actorId: player });
   expect(next.view.history[0]!.result!.buttonSeat).toBe(7); expect(next.view.history[0]!.result!.participants.map(p => p.seat)).toEqual([7, 9, 2]);
 });
 
-test('nine-player server acceptance retains clockwise action and conservation through showdown', async () => {
+test('a full-ring server acceptance retains clockwise action and conservation through showdown', async () => {
   const t = await table(9); for (const [index, participantId] of t.ids.entries()) await command(t, 'seat-participant', { participantId, seat: index + 1 }); await command(t, 'start-hand');
   const start = await read(t);
   expect(start.view.state).toMatchObject({ actorId: t.ids[3], smallBlindParticipantId: t.ids[1], bigBlindParticipantId: t.ids[2] });
@@ -95,13 +95,13 @@ test('nine-player server acceptance retains clockwise action and conservation th
 });
 
 test('short forced bets expose only the real Call and commit-gate immediate reveal and runout', async () => {
-  const t = await table(3); const [human, bob, carol] = t.ids as [string, string, string];
-  for (const [participantId, seat, buyIn] of [[human, 1, 100], [bob, 2, 5], [carol, 3, 15]] as const) await command(t, 'seat-participant', { participantId, seat, buyIn }); await command(t, 'start-hand');
+  const t = await table(3); const [player, bob, carol] = t.ids as [string, string, string];
+  for (const [participantId, seat, buyIn] of [[player, 1, 100], [bob, 2, 5], [carol, 3, 15]] as const) await command(t, 'seat-participant', { participantId, seat, buyIn }); await command(t, 'start-hand');
   const before = await read(t);
-  expect(before.view.state).toMatchObject({ actorId: human, amountToCall: 15, legalActions: [{ type: 'fold' }, { type: 'call' }] });
-  for (const action of [{ type: 'check' }, { type: 'raise', raiseTo: 40 }] as const) { const response = await submit(t, 'act', { requestId: randomUUID(), expectedPokerRevision: t.revision, participantId: human, action }); expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } }); expect(await read(t)).toEqual(before); }
-  await act(t, human, { type: 'call' }); const done = await read(t);
-  expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null, pots: [{ amount: 15, eligibleParticipantIds: [human, bob, carol] }, { amount: 20, eligibleParticipantIds: [human, carol] }], returns: [] });
+  expect(before.view.state).toMatchObject({ actorId: player, amountToCall: 15, legalActions: [{ type: 'fold' }, { type: 'call' }] });
+  for (const action of [{ type: 'check' }, { type: 'raise', raiseTo: 40 }] as const) { const response = await submit(t, 'act', { requestId: randomUUID(), expectedPokerRevision: t.revision, participantId: player, action }); expect(response.status).toBe(400); expect(await response.json()).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } }); expect(await read(t)).toEqual(before); }
+  await act(t, player, { type: 'call' }); const done = await read(t);
+  expect(done.view.state).toMatchObject({ status: 'completed-hand', actorId: null, pots: [{ amount: 15, eligibleParticipantIds: [player, bob, carol] }, { amount: 20, eligibleParticipantIds: [player, carol] }], returns: [] });
   expect(done.view.state.participants[0]!.contribution).toBe(15); expect(done.view.state.participants.reduce((sum, p) => sum + p.stack, 0)).toBe(120);
 
   const immediate = await table(2); for (const [index, participantId] of immediate.ids.entries()) await command(immediate, 'seat-participant', { participantId, seat: index + 1, buyIn: index === 0 ? 5 : 100 });

@@ -12,8 +12,8 @@ export const emptySchedule: TableSchedule = Object.freeze({ phases: Object.freez
 
 /**
  * The current decision after a transition, or `null` when no one is to act. `actionTimeLimitMs` is set only
- * when this decision's Participant has an Action Deadline: a human, under the table's Action Time Limit.
- * `liveAnalysisDisallowed` is the table's Allow Live Analysis, captured for a human's decision as its window opens.
+ * when this decision's Participant has an Action Deadline: a player, under the table's Action Time Limit.
+ * `liveAnalysisDisallowed` is the table's Allow Live Analysis, captured for a player's decision as its window opens.
  */
 export type CurrentDecision = { readonly participantId: ParticipantId; readonly decisionId: DecisionId; readonly actionTimeLimitMs?: number; readonly liveAnalysisDisallowed?: true } | null;
 

@@ -42,7 +42,7 @@ async function online(owner: string, bots: string[] = []) {
   const id = created.tableSessionId as string;
   const view = async (cookie: string): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + id, cookie)).json();
   const joinWith = (cookie: string, tablePassword?: string) => post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID(), ...(tablePassword ? { tablePassword } : {}) });
-  /** Joins and returns the Guest's Participant. */
+  /** Joins and returns the User's Participant. */
   const join = async (cookie: string) => {
     const joined = await joinWith(cookie);
     expect(joined.status).toBe(200);
@@ -54,7 +54,7 @@ async function online(owner: string, bots: string[] = []) {
   return { id, ownerId: created.bindings[0].participantId as string, botIds, view, join, joinWith, as, leave };
 }
 
-test('when the owner leaves, the earliest-joined human still at the table becomes owner, a watcher included, and everyone sees it', async () => {
+test('when the owner leaves, the earliest-joined player still at the table becomes owner, a watcher included, and everyone sees it', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben'), cat = await guest('Cat');
   const table = await online(ann, ['Rex']);
   // Ben joined first and only watches; Cat joined after him and sits down.
@@ -70,7 +70,7 @@ test('when the owner leaves, the earliest-joined human still at the table become
   expect((await get('/api/table-sessions/' + table.id, ann)).status).toBe(404);
 });
 
-test('the new owner has every owner capability, and the former owner returns like any other Guest, through the Join Link and its Table Password', async () => {
+test('the new owner has every owner capability, and the former owner returns like any other User, through the Join Link and its Table Password', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben');
   const table = await online(ann, ['Rex']);
   const benId = await table.join(ben);
@@ -89,7 +89,7 @@ test('the new owner has every owner capability, and the former owner returns lik
   const back = await table.view(ann);
   expect(back).toMatchObject({ viewerParticipantId: table.ownerId, ownerParticipantId: benId });
   expect(await refusal(await table.as(ann, 'add-bot', { name: 'Zed', playingStrategy: baselinePlayingStrategy }))).toEqual({ status: 403, code: 'table-owner-required' });
-  // Ben can remove her now, as any Guest; she cannot remove him.
+  // Ben can remove her now, as any User; she cannot remove him.
   expect(await refusal(await table.as(ann, 'remove-participant', { participantId: benId }))).toEqual({ status: 403, code: 'table-owner-required' });
   expect((await table.as(ben, 'remove-participant', { participantId: table.ownerId })).status).toBe(200);
 });
@@ -105,8 +105,8 @@ test('no place is held for an owner who left: their place is free for anyone', a
 });
 
 /**
- * Seats each Guest given at the table, keeps them connected so Automatic Dealing deals to them, and deals the first
- * Hand. Returns a way to play it out: each human folds when it is their turn, and a Bot's Action Deadline runs out.
+ * Seats each User given at the table, keeps them connected so Automatic Dealing deals to them, and deals the first
+ * Hand. Returns a way to play it out: each player folds when it is their turn, and a Bot's Action Deadline runs out.
  */
 async function dealt(table: Awaited<ReturnType<typeof online>>, seated: (readonly [string, string])[], bots: string[] = []) {
   const live = [];
@@ -125,8 +125,8 @@ async function dealt(table: Awaited<ReturnType<typeof online>>, seated: (readonl
     for (let step = 0; step < 40; step++) {
       const state = (await table.view(watcher)).view.state;
       if (state.status !== 'active-hand') break;
-      const human = cookieOf.get(state.actorId!);
-      if (human) expect((await table.as(human, 'act', { participantId: state.actorId, action: { type: 'fold' } })).status).toBe(200);
+      const player = cookieOf.get(state.actorId!);
+      if (player) expect((await table.as(player, 'act', { participantId: state.actorId, action: { type: 'fold' } })).status).toBe(200);
       else { clock.advance(31_000); await expect.poll(async () => (await table.view(watcher)).view.state.actorId).not.toBe(state.actorId); }
     }
     clock.advance(presentedFor('payout', 'online'));
@@ -152,7 +152,7 @@ test('an owner who leaves during a Hand keeps ownership until it ends; then it p
   expect((await table.view(dee)).departedParticipantIds).toEqual(expect.arrayContaining([table.ownerId, benId]));
 });
 
-test('join order is when each Guest last joined: one who left and returned joined after everyone still there', async () => {
+test('join order is when each User last joined: one who left and returned joined after everyone still there', async () => {
   const ann = await guest('Ann'), ben = await guest('Ben'), cat = await guest('Cat');
   const table = await online(ann);
   const benId = await table.join(ben), catId = await table.join(cat);
@@ -162,7 +162,7 @@ test('join order is when each Guest last joined: one who left and returned joine
   expect((await table.view(ben)).ownerParticipantId).toBe(catId);
 });
 
-test('an owner who leaves with no other human at the table closes it in the same transition, at once or after the Hand', async () => {
+test('an owner who leaves with no other player at the table closes it in the same transition, at once or after the Hand', async () => {
   // At once: Ann watches her own table with a Bot, and leaves.
   const ann = await guest('Ann');
   const quiet = await online(ann, ['Rex']);

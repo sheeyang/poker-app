@@ -37,7 +37,7 @@ async function guest(name = 'You') {
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 
-type Table = { id: string; cookie: string; human: string; bot: string };
+type Table = { id: string; cookie: string; player: string; bot: string };
 /** A table of a new Guest against one Bot: a Practice Table unless `mode` says otherwise. */
 async function table(options: { actionTimeLimitSeconds?: ActionTimeLimitSeconds | null; mode?: 'online' } = {}): Promise<Table> {
   const cookie = await guest();
@@ -45,7 +45,7 @@ async function table(options: { actionTimeLimitSeconds?: ActionTimeLimitSeconds 
     ...(options.actionTimeLimitSeconds !== undefined ? { options: { actionTimeLimitSeconds: options.actionTimeLimitSeconds } } : {}), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] });
   expect(response.status).toBe(201);
   const created = await response.json();
-  return { id: created.tableSessionId, cookie, human: created.bindings[0].participantId, bot: created.bindings[1].participantId };
+  return { id: created.tableSessionId, cookie, player: created.bindings[0].participantId, bot: created.bindings[1].participantId };
 }
 const read = async (t: Table): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, t.cookie)).json();
 /** The stored table. */
@@ -55,10 +55,10 @@ async function command(t: Table, kind: string, fields: object = {}) {
   expect(response.status).toBe(200);
   return response.json();
 }
-/** A Hand in progress at a heads-up Practice Table, past its deal: the human, in seat 1, is to act. */
+/** A Hand in progress at a heads-up Practice Table, past its deal: the player, in seat 1, is to act. */
 async function practiceHand(actionTimeLimitSeconds: ActionTimeLimitSeconds | null) {
   const t = await table({ actionTimeLimitSeconds });
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
   await command(t, 'start-hand');
   clock.advance(presentedFor('deal'));
@@ -68,7 +68,7 @@ async function practiceHand(actionTimeLimitSeconds: ActionTimeLimitSeconds | nul
 async function onlineHand() {
   const t = await table({ mode: 'online' });
   const live = await connectLive(base, t.cookie, t.id);
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
   clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
@@ -80,11 +80,11 @@ async function onlineHand() {
 test('startup loads only the tables with scheduled work: timed Practice Hands in progress and Online Tables in play', async () => {
   const idle = await table();
   const seated = await table({ mode: 'online' });
-  await command(seated, 'seat-participant', { participantId: seated.human, seat: 1 });
+  await command(seated, 'seat-participant', { participantId: seated.player, seat: 1 });
   const untimed = await practiceHand(null);
   const timed = await practiceHand(60);
   const online = await onlineHand();
-  expect((await read(online)).view.state).toMatchObject({ status: 'active-hand', actorId: online.human });
+  expect((await read(online)).view.state).toMatchObject({ status: 'active-hand', actorId: online.player });
   await restart();
   expect(loaded()).toEqual([timed.id, online.id].sort());
   // Every other table loads the first time a request needs it.
@@ -92,20 +92,20 @@ test('startup loads only the tables with scheduled work: timed Practice Hands in
   expect(loaded()).toEqual([idle.id, seated.id, untimed.id, timed.id, online.id].sort());
 });
 
-test('pending After-Hand Requests are not scheduled work at an untimed Practice Table: nothing advances its Hand without its human', async () => {
+test('pending After-Hand Requests are not scheduled work at an untimed Practice Table: nothing advances its Hand without its player', async () => {
   const t = await practiceHand(null);
-  expect(await command(t, 'stand-up-participant', { participantId: t.human })).toMatchObject({ ok: true, afterHand: true });
+  expect(await command(t, 'stand-up-participant', { participantId: t.player })).toMatchObject({ ok: true, afterHand: true });
   await restart();
   expect(loaded()).not.toContain(t.id);
-  // The request waits in the record, and applies once the human finishes the Hand.
-  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  // The request waits in the record, and applies once the player finishes the Hand.
+  await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
   clock.advance(presentedFor('payout'));
   await expect.poll(async () => (await stored(t)).pendingChanges).toEqual([]);
 });
 
-test('a Bot decision is scheduled work: an untimed Practice Hand loads at startup while its Bot is to act, and not once its human is', async () => {
+test('a Bot decision is scheduled work: an untimed Practice Hand loads at startup while its Bot is to act, and not once its player is', async () => {
   const t = await practiceHand(null);
-  await command(t, 'act', { participantId: t.human, action: { type: 'call' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'call' } });
   await restart();
   expect(loaded()).toContain(t.id);
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await stored(t)).pokerRevision, participantId: t.bot, action: { type: 'check' } })).toMatchObject({ ok: true });
@@ -115,20 +115,20 @@ test('a Bot decision is scheduled work: an untimed Practice Hand loads at startu
   await restart();
   expect(loaded()).toContain(t.id);
   expect(await controllers.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await stored(t)).pokerRevision, participantId: t.bot, action: { type: 'check' } })).toMatchObject({ ok: true });
-  expect((await read(t)).view.state).toMatchObject({ street: 'flop', actorId: t.human });
+  expect((await read(t)).view.state).toMatchObject({ street: 'flop', actorId: t.player });
   await restart();
   expect(loaded()).not.toContain(t.id);
 });
 
-test('after a restart, a timed Practice Hand in progress plays out by its Action Deadline without its human, and is then no longer loaded at startup', async () => {
+test('after a restart, a timed Practice Hand in progress plays out by its Action Deadline without its player, and is then no longer loaded at startup', async () => {
   const t = await practiceHand(60);
   const waiting = await stored(t);
   await restart();
   expect(loaded()).toContain(t.id);
   clock.advanceTo(waiting.schedule.actionWindow!.deadlineAt! + 1);
-  // Preflop the human, on the button, faces the big blind: the Timeout Action folds and the Hand is over.
+  // Preflop the player, on the button, faces the big blind: the Timeout Action folds and the Hand is over.
   await expect.poll(async () => (await stored(t)).pokerRevision).toBe(waiting.pokerRevision + 1);
-  expect((await stored(t)).pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: t.human, action: { type: 'fold' } });
+  expect((await stored(t)).pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: t.player, action: { type: 'fold' } });
   await restart();
   expect(loaded()).not.toContain(t.id);
   expect((await read(t)).view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
@@ -140,12 +140,12 @@ test('after a restart, an Online Table in play continues: its Action Deadline pl
   await restart();
   expect(loaded()).toContain(t.id);
   clock.advanceTo(waiting.schedule.actionWindow!.deadlineAt! + 1);
-  await expect.poll(async () => (await stored(t)).pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: t.human, action: { type: 'fold' } });
+  await expect.poll(async () => (await stored(t)).pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: t.player, action: { type: 'fold' } });
   clock.advance(10_000);
   await expect.poll(async () => (await stored(t)).pendingChanges).toEqual([]);
   const settled = await read(t);
   expect(settled.view.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
-  expect(settled.view.state.participants.find(p => p.participantId === t.human)).toMatchObject({ sittingOut: true });
+  expect(settled.view.state.participants.find(p => p.participantId === t.player)).toMatchObject({ sittingOut: true });
   expect(settled.schedule.nextHandCountdown).toBeUndefined();
   await restart();
   expect(loaded()).not.toContain(t.id);
@@ -161,5 +161,5 @@ test('an Action Deadline that expired while the table was unloaded resolves exac
   expect((await read(t)).pokerRevision).toBe(waiting.pokerRevision + 1);
   for (let again = 0; again < 2; again++) { await restart(); clock.advance(minute); }
   expect((await read(t)).pokerRevision).toBe(waiting.pokerRevision + 1);
-  expect((await stored(t)).pokerRecord.commands.filter(command => command.type === 'act')).toEqual([{ type: 'act', participantId: t.human, action: { type: 'fold' } }]);
+  expect((await stored(t)).pokerRecord.commands.filter(command => command.type === 'act')).toEqual([{ type: 'act', participantId: t.player, action: { type: 'fold' } }]);
 });

@@ -82,8 +82,8 @@ test('a Participant who joins during a Hand observes the rest of it and its resu
   cashGame.act('alice', { type: 'call' });
   expect(cashGame.joinTable('late').ok).toBe(true);
   const joined = cashGame.forParticipant('late').getView();
-  const player = cashGame.forParticipant('bob').getView();
-  expect(joined.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', actorId: 'bob', decisionId: player.state.decisionId, street: 'preflop', pots: player.state.pots, legalActions: [] });
+  const bob = cashGame.forParticipant('bob').getView();
+  expect(joined.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', actorId: 'bob', decisionId: bob.state.decisionId, street: 'preflop', pots: bob.state.pots, legalActions: [] });
   expect(joined.state.participants.map(p => [p.participantId, p.stack, p.wager ?? null, p.holeCards ?? null])).toEqual([['alice', 980, 20, null], ['bob', 980, 20, null], ['late', 0, null, null]]);
   expect(joined.history).toMatchObject([{ handId: 'hand-1', description: 'Hand 1', decisions: [{ decisionId: earlier, action: { participantId: 'alice', action: { type: 'call' } } }] }]);
   const atEarlier = cashGame.forParticipant('late').getView({ at: { decisionId: earlier } });
@@ -91,7 +91,7 @@ test('a Participant who joins during a Hand observes the rest of it and its resu
   expect(atEarlier.state).toMatchObject({ actorId: 'alice', legalActions: [] });
   expect(atEarlier.state.participants.some(p => p.holeCards)).toBe(false);
   // Bob's decision is addressed as it stood when it opened, before Late joined.
-  expect(cashGame.forParticipant('late').getView({ at: { decisionId: player.state.decisionId! } }).state.participants.map(p => p.participantId)).toEqual(['alice', 'bob']);
+  expect(cashGame.forParticipant('late').getView({ at: { decisionId: bob.state.decisionId! } }).state.participants.map(p => p.participantId)).toEqual(['alice', 'bob']);
   playPassively(cashGame);
   const completed = cashGame.forParticipant('late').getView();
   expect(completed.state).toMatchObject({ status: 'completed-hand', handId: 'hand-1' });
@@ -100,7 +100,7 @@ test('a Participant who joins during a Hand observes the rest of it and its resu
   expect(completed.history[0]).toMatchObject({ handId: 'hand-1', description: 'Completed Hand 1', result: completed.state });
   expect(completed.history[0].decisions.map(d => d.decisionId)).toContain(earlier);
   expect(completed.history[0].decisions).toHaveLength(8);
-  expect(completed.history[0].decisions[1]).toEqual({ decisionId: player.state.decisionId, state: joined.state, action: { participantId: 'bob', action: { type: 'check' } } });
+  expect(completed.history[0].decisions[1]).toEqual({ decisionId: bob.state.decisionId, state: joined.state, action: { participantId: 'bob', action: { type: 'check' } } });
   expect(cashGame.forParticipant('alice').getView().history[0].decisions).toHaveLength(8);
 });
 

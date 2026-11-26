@@ -28,28 +28,28 @@ async function table() {
   const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
   const creation = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await creation.json();
-  return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+  return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
 }
 type Table = Awaited<ReturnType<typeof table>>;
 const submit = (t: Table, kind: string, body: unknown, cookie = t.cookie) => fetch(base + '/api/table-sessions/' + t.id + '/' + kind, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 const read = async (t: Table) => (await (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json());
 async function seated() {
   const t = await table();
-  expect((await submit(t, 'seat-participant', { requestId: 'seat-human', expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(200);
+  expect((await submit(t, 'seat-participant', { requestId: 'seat-player', expectedPokerRevision: 0, participantId: t.player, seat: 1 })).status).toBe(200);
   expect((await submit(t, 'seat-participant', { requestId: 'seat-bot', expectedPokerRevision: 1, participantId: t.bot, seat: 4 })).status).toBe(200);
   return t;
 }
 
-test('the owner starts a durable heads-up Hand, the bound human Folds, and restart preserves settlement and privacy', async () => {
+test('the owner starts a durable heads-up Hand, the bound player Folds, and restart preserves settlement and privacy', async () => {
   const t = await seated();
   const start = { requestId: 'start', expectedPokerRevision: 2 };
   expect(await (await submit(t, 'start-hand', start)).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 3, sessionRevision: 3 });
   const decision = await read(t);
-  expect(decision.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', decisionId: 'hand-1/decision-1', actorId: t.human, legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }] });
+  expect(decision.view.state).toMatchObject({ status: 'active-hand', handId: 'hand-1', decisionId: 'hand-1/decision-1', actorId: t.player, legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }] });
   expect(decision.view.state.participants[0].holeCards).toHaveLength(2);
   expect(decision.view.state.participants[1]).not.toHaveProperty('holeCards');
   expect(JSON.stringify(decision)).not.toMatch(/"(?:seed|deck|burns|commands|ownerUserId|userId|schemaVersion|engineVersion|cards)"\s*:/);
-  const fold = { requestId: 'fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } };
+  const fold = { requestId: 'fold', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } };
   expect(await (await submit(t, 'act', fold)).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 4, sessionRevision: 4 });
   const completed = await read(t);
   expect(completed.view.state).toMatchObject({ status: 'completed-hand', actorId: null, board: [], returns: [{ participantId: t.bot, amount: 10 }], payouts: [{ participantId: t.bot, amount: 20 }] });
@@ -64,7 +64,7 @@ test('the owner starts a durable heads-up Hand, the bound human Folds, and resta
   expect(await read(t)).toEqual(completed);
 });
 
-test('owner management does not authorize browser actions as a Bot, and wrong human turns and active setup are atomic rejections', async () => {
+test('owner management does not authorize browser actions as a Bot, and wrong player turns and active setup are atomic rejections', async () => {
   const t = await seated();
   const other = await table();
   const start = { requestId: 'owner-start', expectedPokerRevision: 2 };
@@ -75,14 +75,14 @@ test('owner management does not authorize browser actions as a Bot, and wrong hu
   expect((await submit(t, 'act', botAction)).status).toBe(403);
   expect(await (await submit(t, 'act', botAction)).json()).toMatchObject({ ok: false, rejection: { code: 'actor-not-authorized' } });
   expect(await (await submit(t, 'start-hand', { requestId: 'already-active', expectedPokerRevision: 3 })).json()).toMatchObject({ ok: false, rejection: { code: 'active-hand' } });
-  expect(await (await submit(t, 'seat-participant', { requestId: 'active-setup', expectedPokerRevision: 3, participantId: t.human, seat: 2 })).json()).toMatchObject({ ok: false, rejection: { code: 'participant-already-seated' } });
-  expect(await (await submit(t, 'act', { requestId: 'illegal-check', expectedPokerRevision: 3, participantId: t.human, action: { type: 'check' } })).json()).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
+  expect(await (await submit(t, 'seat-participant', { requestId: 'active-setup', expectedPokerRevision: 3, participantId: t.player, seat: 2 })).json()).toMatchObject({ ok: false, rejection: { code: 'participant-already-seated' } });
+  expect(await (await submit(t, 'act', { requestId: 'illegal-check', expectedPokerRevision: 3, participantId: t.player, action: { type: 'check' } })).json()).toMatchObject({ ok: false, rejection: { code: 'illegal-action' } });
   expect(await read(t)).toEqual(decision);
-  await submit(t, 'act', { requestId: 'fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } });
+  await submit(t, 'act', { requestId: 'fold', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } });
   await submit(t, 'start-hand', { requestId: 'next-hand', expectedPokerRevision: 4 });
   const secondDecision = await read(t);
   expect(secondDecision.view.state).toMatchObject({ handId: 'hand-2', actorId: t.bot, legalActions: [] });
-  expect(await (await submit(t, 'act', { requestId: 'wrong-human-turn', expectedPokerRevision: 5, participantId: t.human, action: { type: 'fold' } })).json()).toMatchObject({ ok: false, rejection: { code: 'wrong-actor' } });
+  expect(await (await submit(t, 'act', { requestId: 'wrong-player-turn', expectedPokerRevision: 5, participantId: t.player, action: { type: 'fold' } })).json()).toMatchObject({ ok: false, rejection: { code: 'wrong-actor' } });
   expect(await read(t)).toEqual(secondDecision);
 });
 
@@ -101,7 +101,7 @@ test('Start Hand and Fold withhold every consequence until COMMIT and use the sa
     const waiting = await read(t);
     expect(waiting).toMatchObject({ pokerRevision: 2, view: { state: { status: 'between-hands', actorId: null } } });
     expect(waiting.view.state.participants[0]).not.toHaveProperty('holeCards');
-    folding = submit(t, 'act', { requestId: 'queued-fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } });
+    folding = submit(t, 'act', { requestId: 'queued-fold', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } });
     expect(await read(t)).toEqual(waiting);
   } finally { release.resolve(); beforeCommit = async () => {}; }
   expect((await starting).status).toBe(200);
@@ -113,7 +113,7 @@ test('a confirmed rollback of dealing or Fold preserves the prior committed view
   const t = await seated();
   for (const [kind, request] of [
     ['start-hand', { requestId: 'rollback-start', expectedPokerRevision: 2 }],
-    ['act', { requestId: 'rollback-fold', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } }],
+    ['act', { requestId: 'rollback-fold', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } }],
   ] as const) {
     const before = await read(t);
     beforeCommit = async () => { throw new Error('controlled PostgreSQL rollback'); };
