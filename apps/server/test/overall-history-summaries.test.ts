@@ -292,7 +292,7 @@ test('a large summary never has more than 8 history-analysis jobs outstanding fo
   await completed(g, heavy, large.requestId);
   await completed(g, light, small.requestId);
   // Eight decisions scoring 1 and the fold scoring 0.
-  expect((await g.current(heavy, large.requestId)).summary).toMatchObject({ progress: { succeeded: 9, total: 9 }, averages: { decisionScore: expect.closeTo(8 / 9), actionRankScore: expect.closeTo(8 / 9) } });
+  expect((await g.current(heavy, large.requestId)).summary).toMatchObject({ progress: { succeeded: 9, total: 9 }, averages: { decisionScore: expect.closeTo(8 / 9, 12), actionRankScore: expect.closeTo(8 / 9, 12) } });
 });
 
 test('a summary names a supported Strategy, and an unsupported one is refused', async () => {
