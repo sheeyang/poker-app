@@ -16,7 +16,7 @@ function table(viewer: 'ann' | 'ben', pendingChanges: AfterHandRequest[] = []): 
 const binding = (t: ObservableTableSession, id: string) => t.bindings.find(b => b.participantId === id)!;
 
 describe('who can be removed', () => {
-  it('lets the Table Owner remove another human, and nobody else remove anyone', () => {
+  it('lets the Table Owner remove another player, and nobody else remove anyone', () => {
     expect(canRemove(table('ann'), binding(table('ann'), 'ben'))).toBe(true);
     expect(canRemove(table('ben'), binding(table('ben'), 'ann'))).toBe(false);
     expect(canRemove(table('ben'), binding(table('ben'), 'ben'))).toBe(false);
@@ -38,7 +38,7 @@ describe('a pending Removal', () => {
   it('is named for everyone at the table', () => {
     expect(afterHandRequestLabel('remove')).toBe('Being removed after this hand');
   });
-  it('leaves the removed Guest nothing to ask for: no change of their own outranks it', () => {
+  it('leaves the removed player nothing to ask for: no change of their own outranks it', () => {
     const asked = selfService(table('ben', [{ participantId: 'ben', change: 'remove' }]), true);
     expect(asked).toMatchObject({ pending: 'remove', sitOut: 'unavailable', standUp: 'unavailable', leaveTable: 'unavailable' });
   });

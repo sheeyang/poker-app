@@ -5,7 +5,7 @@ import { participantActions, seatActions, type ParticipantAction, type SeatActio
 import { AddBotDialog, ParticipantDialog, type ParticipantTask } from './participant-dialogs.js';
 import { TakeSeatDialog } from './take-seat.js';
 import { openSeats } from './owner-controls.js';
-import { playerName } from './table-model.js';
+import { participantName } from './table-model.js';
 import type { Command } from './session.js';
 
 type Menu = { kind: 'seat'; seat: number; anchor: HTMLElement } | { kind: 'participant'; participantId: string; anchor: HTMLElement };
@@ -52,7 +52,7 @@ export function useTableInteractions(table: ObservableTableSession | undefined, 
   let items: ContextMenuItem[] = [], title = '';
   if (table && menu) {
     if (menu.kind === 'seat') { title = `Seat ${menu.seat}`; items = seatActions(table, menu.seat, handOpen, choosing ?? undefined).map(action => ({ ...action, disabled: blocked || action.timing === 'unavailable', action: () => selectSeatAction(action.id, menu.seat) })); }
-    else { const binding = table.bindings.find(b => b.participantId === menu.participantId); title = binding ? playerName(table, binding) : 'Participant'; items = participantActions(table, menu.participantId, handOpen).map(action => ({ ...action, disabled: blocked || action.timing === 'unavailable', action: () => selectParticipantAction(action.id, menu.participantId) })); }
+    else { const binding = table.bindings.find(b => b.participantId === menu.participantId); title = binding ? participantName(table, binding) : 'Participant'; items = participantActions(table, menu.participantId, handOpen).map(action => ({ ...action, disabled: blocked || action.timing === 'unavailable', action: () => selectParticipantAction(action.id, menu.participantId) })); }
   }
   const overlays = table && <>
     {menu && <ContextMenu key={`${menu.kind}-${menu.kind === 'seat' ? menu.seat : menu.participantId}`} anchor={menu.anchor} title={title} items={items} close={closeMenu} />}

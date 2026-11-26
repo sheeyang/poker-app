@@ -175,7 +175,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
   const { hand } = replay ?? {};
   const current = replay?.steps[index];
   const analysis = useReplayComparison(replay, index, compared);
-  // Choosing Strategies changes the address only, at the step on show: never the Guest's Trainer Configuration.
+  // Choosing Strategies changes the address only, at the step on show: never the User's Trainer Configuration.
   const changeCompared = (strategies: readonly StrategyDescriptor[]) => { if (current) void navigate({ href: historyPath(mode, tableSessionId, handId, stepKey(current), strategies), replace: true }); };
   // What led to this step, and at the result who won.
   const happened = replay && current ? [actedLabel(replay, current), replayResult(replay, current)].filter(Boolean).join(' · ') : '';

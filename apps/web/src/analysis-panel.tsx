@@ -38,8 +38,8 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     observer.observe(tabs);
     return () => observer.disconnect();
   }, []);
-  // The Guest's Trainer Configuration, one choice for every table. A table can still disallow Live Analysis; the
-  // Guest's own setting is kept for when it is allowed again, and for every other table.
+  // The User's Trainer Configuration, one choice for every table. A table can still disallow Live Analysis; the
+  // User's own setting is kept for when it is allowed again, and for every other table.
   const configuration = table.trainerConfiguration;
   const allowed = liveAnalysisAllowed(table), liveOn = configuration.liveAnalysis && allowed, tableNote = tableLiveAnalysisNote(table);
   function configure(referenceStrategy: StrategyDescriptor, liveAnalysis: boolean) {
@@ -64,7 +64,7 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
   const handActions = table.view.history.find(hand => hand.handId === context.handId)?.decisions ?? [];
   const selectedActionIndex = selected ? handActions.findIndex(action => action.decisionId === selected.decisionId) : -1;
   const earlierActions = selected ? selectedActionIndex < 0 ? [] : handActions.slice(0, selectedActionIndex) : handActions;
-  const humanId = table.viewerParticipantId;
+  const viewerId = table.viewerParticipantId;
   const expandedDecisionId = analysis.expandedDecisionId ?? analysis.selectedDecisionId;
   const showFollow = !liveView && analysis.pinned && selected?.decisionId !== accepted.at(-1)?.decisionId;
   const reference = data?.referenceStrategy ?? configuration.referenceStrategy;
@@ -76,8 +76,8 @@ export function AnalysisPanel({ table, analysis, summary, sessionSummary, comman
     {loadingAnalysis && <AnalysisSkeleton actions={context.legalActions} scores={!!selected} sampled={reference.selector.id === 'seeded-sampling'} />}
     {analysisError && <div className="notice-error" role="alert"><strong>Analysis unavailable</strong><p>{analysisError.error.message}</p><button disabled={analysis.display?.retrying} onClick={() => void analysis.retry()}>{analysis.display?.retrying ? 'Retrying…' : 'Retry analysis'}</button></div>}
     {data?.status === 'complete' && <DecisionResult data={data} />}
-    {selected ? <div className="decision-context"><span>{`${street[0]!.toUpperCase()}${street.slice(1)} · Before your action`}</span>{humanId && <DecisionSituation state={context} humanId={humanId} bindings={table.bindings} earlierActions={earlierActions} seatCount={table.view.configuration.seatCount} />}</div> : !liveOn && <div className="decision-context"><span>Reference appears after you act</span></div>}
-    {humanId && selected && <EarlierActions actions={earlierActions} humanId={humanId} bindings={table.bindings} />}
+    {selected ? <div className="decision-context"><span>{`${street[0]!.toUpperCase()}${street.slice(1)} · Before your action`}</span>{viewerId && <DecisionSituation state={context} viewerId={viewerId} bindings={table.bindings} earlierActions={earlierActions} seatCount={table.view.configuration.seatCount} />}</div> : !liveOn && <div className="decision-context"><span>Reference appears after you act</span></div>}
+    {viewerId && selected && <EarlierActions actions={earlierActions} viewerId={viewerId} bindings={table.bindings} />}
     {data?.status === 'complete' && <AnalysisDetails data={data} />}
     {!data && !loadingAnalysis && !analysis.display?.loading && !analysis.display?.error && <div className="analysis-empty"><Icon name="cards" size={30} /><strong>{liveView ? 'Waiting for your turn.' : 'Play first. Explore after.'}</strong><p>{liveView ? 'The current decision will be evaluated when it’s your turn.' : 'Your accepted decision and reference distribution will appear here after you act.'}</p></div>}
   </>;
@@ -155,7 +155,7 @@ function HandMeans({ summary, currentReference }: { summary: HandSummary; curren
     <div className="summary-averages" aria-live="polite" aria-atomic="true"><div><span>Mean Decision Score</span><strong>{data ? (data.averages.decisionScore * 100).toFixed(1) : pending ? <ScoreSkeleton /> : '—'}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{data ? (data.averages.actionRankScore * 100).toFixed(1) : pending ? <ScoreSkeleton /> : '—'}<small>/100</small></strong></div></div>
     {summary.display?.error && <div className="notice-error" role="alert"><p>{summary.display.error}{retainedCount}</p><button onClick={summary.request}>Request summary again</button></div>}
     {candidate?.status === 'error' && <div className="notice-error" role="alert"><p>{candidate.error.message}{retainedCount}</p><button disabled={summary.display?.retrying} onClick={() => void summary.retry()}>{summary.display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
-    {candidate?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
+    {candidate?.status === 'empty' && <p className="muted">No accepted decisions in this summary.</p>}
     {differentReference && <p className="analysis-provenance">Reference Strategy: <strong>{strategyName(data.referenceStrategy)}</strong></p>}
   </>;
 }
@@ -168,7 +168,7 @@ export function SummaryResult({ summary, currentReference }: { summary: HandSumm
     {!display?.error && data?.status === 'pending' && <Progress summary={data} />}
     {display?.error && <div className="notice-error" role="alert"><p>{display.error}</p><button onClick={summary.request}>Request summary again</button></div>}
     {data?.status === 'error' && <div className="notice-error" role="alert"><p>{data.error.message}</p><button disabled={display?.retrying} onClick={() => void summary.retry()}>{display?.retrying ? 'Retrying…' : 'Retry summary'}</button></div>}
-    {data?.status === 'empty' && <p className="muted">No accepted human decisions in this summary.</p>}
+    {data?.status === 'empty' && <p className="muted">No accepted decisions in this summary.</p>}
     {data?.status === 'complete' && <div className="summary-averages"><div><span>Mean Decision Score</span><strong>{(data.averages.decisionScore * 100).toFixed(1)}<small>/100</small></strong></div><div><span>Mean Action Rank Score</span><strong>{(data.averages.actionRankScore * 100).toFixed(1)}<small>/100</small></strong></div></div>}
     {data && (currentReference ? differentReference && <p className="analysis-provenance">Reference Strategy: <strong>{strategyName(data.referenceStrategy)}</strong></p> : <p className="analysis-provenance">{data.decisionCount} {data.decisionCount === 1 ? 'decision' : 'decisions'} · Fixed reference: {policyName(data.referenceStrategy)} + {data.referenceStrategy.selector.id}<br />This summary retains its original decision set and reference.</p>)}
   </>;

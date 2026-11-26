@@ -13,7 +13,7 @@ type TableAttempt = { readonly tableId: string } & (
   | { readonly kind: 'act'; readonly body: ActRequest }
   | { readonly kind: 'seat'; readonly body: SeatParticipantRequest }
   | { readonly kind: 'manage'; readonly operation: ParticipantManagementKind; readonly body: ParticipantManagementRequest }
-  /** The Guest's Trainer Configuration, for every table, asked for from this one. */
+  /** The User's Trainer Configuration, for every table, asked for from this one. */
   | { readonly kind: 'trainer'; readonly body: SetTrainerConfigurationRequest }
   | { readonly kind: 'strategy'; readonly body: SetPlayingStrategyRequest }
   | { readonly kind: 'retry-bot'; readonly body: RetryBotRequest }
@@ -42,7 +42,7 @@ export const useSession = create<SessionState>()(persist(set => ({
   toggleAnalysis: () => set(state => ({ analysisOpen: !state.analysisOpen })),
 }), {
   name: 'poker-trainer-v1',
-  // Browser storage keeps only device preferences; what belongs to the Guest, such as when each table was last opened, is on the server (ADR-0037). A request, and anything a Guest typed into one, lives in memory for the life of the page.
+  // Browser storage keeps only device preferences; what belongs to the User, such as when each table was last opened, is on the server (ADR-0037). A request, and anything a User typed into one, lives in memory for the life of the page.
   // Version 4 dropped the card-animation switch: table motion has no preference (ADR-0038).
   version: 4,
   partialize: ({ analysisOpen }) => ({ analysisOpen }),
@@ -75,7 +75,7 @@ export function useCommand() {
   const pending = useSession(state => state.pending);
   const setPending = useSession(state => state.setPending);
   const router = useRouter();
-  // The table's own mode, for its address; a table not in the cache is an Online one, the only kind a Guest can leave.
+  // The table's own mode, for its address; a table not in the cache is an Online one, the only kind a User can leave.
   const modeOf = (id: string): TableMode => queryClient.getQueryData<ObservableTableSession>(['table-session', id])?.mode ?? 'online';
   const showing = (id: string) => router.state.location.pathname === tablePath(modeOf(id), id);
   const mutation = useMutation({
@@ -83,7 +83,7 @@ export function useCommand() {
     retry: false,
     onSuccess: async (acknowledgement, attempt) => {
       setPending(null);
-      // The Guest's own change: every table view presents it, this one included.
+      // The User's own change: every table view presents it, this one included.
       if (attempt.kind === 'trainer') {
         await Promise.all([queryClient.invalidateQueries({ queryKey: trainerConfigurationKey }), queryClient.invalidateQueries({ queryKey: ['table-session'] })]);
         return;
@@ -96,9 +96,9 @@ export function useCommand() {
         void router.navigate({ to: tablePath(attempt.body.mode ?? 'practice', result.tableSessionId) });
         await queryClient.invalidateQueries({ queryKey: ['table-sessions'] });
       }
-      // Leaving at once ends this Guest's place at the table; leaving after the Hand is announced when it happens.
+      // Leaving at once ends this User's place at the table; leaving after the Hand is announced when it happens.
       if (attempt.kind === 'manage' && attempt.operation === 'leave-table' && !('afterHand' in result)) {
-        // Back never returns to a table this Guest is no longer at.
+        // Back never returns to a table this User is no longer at.
         if (showing(result.tableSessionId)) void router.navigate({ to: listPath(modeOf(result.tableSessionId)), replace: true });
         // No longer their Current Table: the banner goes at once.
         queryClient.setQueryData<SavedTables>(['table-sessions'], list => withMembershipEnded(list, result.tableSessionId));

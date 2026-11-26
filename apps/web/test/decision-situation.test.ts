@@ -112,7 +112,7 @@ describe('decision situation', () => {
       [{ data: { status: 'pending' } }, 'Mean Decision Score', false],
       [{ data: { status: 'error', error: { message: 'Reference evaluation failed.' } } }, 'Retry summary', false],
       [{ error: 'Connection unavailable.' }, 'Request summary again', false],
-      [{ data: { status: 'empty' } }, 'No accepted human decisions in this summary.', true],
+      [{ data: { status: 'empty' } }, 'No accepted decisions in this summary.', true],
     ] as const) {
       const summary = { handId: 'hand-1', display: { ...display, ...('data' in display ? { data: { ...display.data, referenceStrategy: defaultTrainerConfiguration.referenceStrategy } } : {}) } } as Props['summary'];
       const analysis = { view: 'hand', acceptedDecisions: empty ? [] : [accepted], selectedDecisionId: 'd1', expandedDecisionId: '' } as unknown as Props['analysis'];
@@ -206,7 +206,7 @@ describe('decision situation', () => {
     const summaries = [...html.matchAll(/<summary(?=[^>]*aria-label="Review your)[^>]*>([\s\S]*?)<\/summary>/g)].map(match => match[1].replace(/<[^>]*>/g, ''));
     expect(summaries).toEqual(['CallDecision Score72.0/100Action Rank Score80.0/100', 'CallDecision Score35.0/100Action Rank Score50.0/100', 'CallDecision Score/100Action Rank Score/100']);
   });
-  it('lists only human decisions as expandable actions, with the street inside the selected detail', () => {
+  it('lists only the viewer’s decisions as expandable actions, with the street inside the selected detail', () => {
     const accepted = [
       { decisionId: 'd1', handId: 'hand-1', handNumber: 1, state: decision, action: { type: 'call' as const } },
       { decisionId: 'd2', handId: 'hand-1', handNumber: 1, state: { ...decision, street: 'river' as const }, action: { type: 'check' as const } },
@@ -240,7 +240,7 @@ describe('decision situation', () => {
     expect(html.replace(/<[^>]*>/g, '')).toContain('80.0/100');
     for (const removed of ['Your accepted action', 'Each seat shows', 'Total pot</dt>', 'Your stack</dt>', 'Return to latest decision', '>Latest decision<']) expect(html).not.toContain(removed);
     expect(html).toContain('aria-label="Analysis settings"');
-    // The settings edit the Guest's Trainer Configuration, and say that it is one choice for every table.
+    // The settings edit the User's Trainer Configuration, and say that it is one choice for every table.
     expect(html).toContain('>Trainer Configuration</h3>');
     expect(html.replace(/<[^>]*>/g, '')).toContain('Applies at every table, in review and in every summary.');
     expect(html).toContain('About these scores');
@@ -312,7 +312,7 @@ describe('decision situation', () => {
 
   it('distinguishes a free check, heads-up dealer/blind roles and an all-in opponent', () => {
     const state = { ...decision, amountToCall: 0, participants: decision.participants.map(p => p.participantId === 'bot' ? { ...p, stack: 0, allIn: true } : p) };
-    const html = renderToStaticMarkup(createElement(DecisionSituation, { state, humanId: 'you', bindings }));
+    const html = renderToStaticMarkup(createElement(DecisionSituation, { state, viewerId: 'you', bindings }));
     expect(html).toContain('No bet to call');
     expect(html).toContain('Dealer · Small blind');
     expect(html).toContain('seat 2, 0 chips');
@@ -320,8 +320,8 @@ describe('decision situation', () => {
     expect(html).toContain('0 behind');
   });
 
-  it('does not present another participant’s turn as the human’s decision situation', () => {
-    const html = renderToStaticMarkup(createElement(DecisionSituation, { state: { ...decision, actorId: 'bot', amountToCall: undefined }, humanId: 'you', bindings }));
+  it('does not present another participant’s turn as the viewer’s decision situation', () => {
+    const html = renderToStaticMarkup(createElement(DecisionSituation, { state: { ...decision, actorId: 'bot', amountToCall: undefined }, viewerId: 'you', bindings }));
     expect(html).toBe('');
   });
 });

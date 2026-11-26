@@ -14,12 +14,12 @@ import { joinProblem, joinRequest, type JoinProblemField } from './join-form.js'
 import { PasswordField } from './password-input.js';
 
 /**
- * The join form an Online Table's address shows a Guest who is not at the table: the table as its Join Link
- * describes it on the left, and on the right their name, then Join. A Guest who left returns as the same
+ * The join form an Online Table's address shows a User who is not at the table: the table as its Join Link
+ * describes it on the left, and on the right their name, then Join. A User who left returns as the same
  * Participant, under the name they had. Joining keeps the address: it becomes their table.
  *
  * Behind a Table Password the left pane shows only whose table it is, and the form asks for the password with the
- * name, as one step. A wrong password keeps everything typed, explains itself under the password, and lets the Guest
+ * name, as one step. A wrong password keeps everything typed, explains itself under the password, and lets the User
  * try again. The password lives only in this form's memory.
  */
 export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId: string; preview: JoinLinkPreview; joined: () => void }) {
@@ -33,12 +33,12 @@ export function JoinTable({ tableSessionId, preview, joined }: { tableSessionId:
   const locked = !!preview.passwordRequired;
   const returning = preview.passwordRequired ? undefined : preview.returningAs;
   const alreadyJoined = !preview.passwordRequired && preview.alreadyJoined;
-  // A Guest already at the table, or coming back to it, keeps the name they had there.
+  // A User already at the table, or coming back to it, keeps the name they had there.
   const named = !returning && !alreadyJoined;
   const nameField = useRef<HTMLInputElement>(null), passwordField = useRef<HTMLInputElement>(null);
   const join = useMutation({
     mutationFn: async () => {
-      // The name is the Guest's own; saving it first lets the join see it. Each attempt is a fresh request.
+      // The name is the User's own; saving it first lets the join see it. Each attempt is a fresh request.
       if (named && value.trim() !== stored) {
         const saved = await api.setDisplayName(value.trim());
         queryClient.setQueryData(['identity'], { ok: true, displayName: saved.displayName });

@@ -8,7 +8,7 @@ import { actionLabel, modeLabel, tableFormat, blindsLabel } from './table-model.
 
 /**
  * Overall History's model (ADR-0041), pure. The address holds the filters in the one encoding the server's query uses
- * (`historyFilterParams`): choices as comma-separated lists, ranges as numbers. A date is the Guest's own calendar day.
+ * (`historyFilterParams`): choices as comma-separated lists, ranges as numbers. A date is the User's own calendar day.
  */
 export type OverallHistorySearch = { street?: string; position?: string; action?: string; mode?: string; completedFrom?: number; completedTo?: number; potMin?: number; potMax?: number; decisionScoreMin?: number; decisionScoreMax?: number; actionRankScoreMin?: number; actionRankScoreMax?: number; breakdown?: HistoryBreakdown; compare?: string };
 
@@ -70,7 +70,7 @@ export function withoutScoreFilter(filter: HistoryFilter): HistoryFilter {
   return rest;
 }
 const dayPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
-/** The first millisecond of a calendar day (`YYYY-MM-DD`) in the Guest's own time zone; nothing for anything else. */
+/** The first millisecond of a calendar day (`YYYY-MM-DD`) in the User's own time zone; nothing for anything else. */
 export function dayStartMs(date: string): number | undefined {
   const [, year, month, day] = dayPattern.exec(date) ?? [];
   if (!year) return undefined;
@@ -84,7 +84,7 @@ export function dayEndMs(date: string): number | undefined {
   const [, year, month, day] = dayPattern.exec(date)!;
   return new Date(Number(year), Number(month) - 1, Number(day) + 1).getTime() - 1;
 }
-/** The calendar day (`YYYY-MM-DD`) a server time falls on in the Guest's time zone, for a date field; empty for none. */
+/** The calendar day (`YYYY-MM-DD`) a server time falls on in the User's time zone, for a date field; empty for none. */
 export function dateInputValue(at: number | undefined): string {
   if (at === undefined) return '';
   const date = new Date(at);

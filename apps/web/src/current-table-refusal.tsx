@@ -6,7 +6,7 @@ import { useShell } from './app-shell.js';
 import { currentTableRefusal } from './table-address.js';
 
 /**
- * Why creating, joining or returning to an Online Table was refused: the Guest is already at another one, their
+ * Why creating, joining or returning to an Online Table was refused: the User is already at another one, their
  * Current Table. It names that table when their saved tables list it, and links to it, where they can leave it.
  * Renders nothing for any other failure.
  */

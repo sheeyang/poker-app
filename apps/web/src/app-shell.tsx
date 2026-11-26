@@ -59,11 +59,11 @@ export function AppShell() {
   const [consumeLive] = useState(() => (next: TableConsumers | null) => { consumers.current = next; });
   const requestListeners = useRef(new Set<UserChannelListener>());
   const [followRequests] = useState(() => (listener: UserChannelListener) => { requestListeners.current.add(listener); return () => { requestListeners.current.delete(listener); }; });
-  // The saved tables say which Online Table is the Guest's Current Table; the shell follows it live from every page.
+  // The saved tables say which Online Table is the User's Current Table; the shell follows it live from every page.
   const saved = useQuery({ queryKey: ['table-sessions'], queryFn: api.listSessions, enabled: identity.isSuccess });
   const currentTable = currentTableId(saved.data?.tables) ?? null;
   const live = useTableSynchronization(tableSessionId, identity.isSuccess, {
-    // Left after the Hand, removed, or the table closed: the server says so when it happens, and a Guest looking at that table returns to its list.
+    // Left after the Hand, removed, or the table closed: the server says so when it happens, and a User looking at that table returns to its list.
     onMembershipEnded: ended => {
       const mode = queryClient.getQueryData<ObservableTableSession>(['table-session', ended.tableSessionId])?.mode ?? 'online';
       if (router.state.location.pathname === tablePath(mode, ended.tableSessionId)) void router.navigate({ href: listPath(mode), replace: true });

@@ -35,7 +35,7 @@ type TableRead = { readonly mode: TableMode } | 'not-found';
 /**
  * What a table address shows its visitor. Pure: the server alone decides who may see a table, and answers
  * "not found" to anyone who is not one of its Participants, so a Practice Table is never revealed to anyone
- * but its human, whatever mode the address names.
+ * but its player, whatever mode the address names.
  *
  * - `table`: the visitor is a Participant and the address names the table's own mode.
  * - `corrected`: the visitor is a Participant, but the address names the other mode; replace it with `to`.
@@ -72,7 +72,7 @@ export function tableAddress(routeMode: TableMode, tableSessionId: string, read:
 export const joinPreviewWanted = (routeMode: TableMode, read: TableRead) => routeMode === 'online' && read === 'not-found';
 
 /**
- * Where a refusal to create, join or return to an Online Table sends a Guest who is already at another one: their
+ * Where a refusal to create, join or return to an Online Table sends a User who is already at another one: their
  * Current Table, and its format and stakes when their saved tables list it. Undefined for any other failure.
  */
 export function currentTableRefusal(error: unknown, saved: readonly SavedTable[] | undefined): { readonly tableSessionId: string; readonly table?: string } | undefined {
@@ -97,7 +97,7 @@ export function tableSearch(search: Record<string, unknown>): { analysis?: Analy
 /**
  * The Strategies a Counterfactual Comparison holds beside the Reference Strategy, as the address's `compare`: supported
  * Strategies' tokens (`strategyToken`), comma-separated in the order chosen. Anything unsupported or repeated is dropped,
- * and no more than the maximum are kept. Undefined when none are left. Selecting Strategies never touches the Guest's
+ * and no more than the maximum are kept. Undefined when none are left. Selecting Strategies never touches the User's
  * Trainer Configuration: the address is the only place they live.
  */
 export function compareParam(strategies: readonly StrategyDescriptor[]): string | undefined {

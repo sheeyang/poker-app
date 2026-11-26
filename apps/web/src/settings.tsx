@@ -5,7 +5,7 @@ import { tablePasswordProblem } from './online-setup.js';
 import { PasswordField } from './password-input.js';
 import { Dialog } from './dialog.js';
 import { CommandFeedback } from './controls.js';
-import { chips, modeLabel, playerName } from './table-model.js';
+import { chips, modeLabel, participantName } from './table-model.js';
 import type { Command } from './session.js';
 
 /**
@@ -57,7 +57,7 @@ function SettingsForm({ table, command, handOpen, busy }: { table: ObservableTab
     {rules.shown && <section className="settings-section"><h3>Rules</h3>
       <div className="rules-form">
         <label>Time to act<select value={timeLimit} disabled={rulesLocked} onChange={event => setTimeLimit(Number(event.target.value))}>{actionTimeLimits.map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}</select></label>
-        <label className="live-toggle"><span><strong>Seat changes</strong><small>Players can move seats between hands</small></span><input type="checkbox" role="switch" checked={seatChanges} disabled={rulesLocked} onChange={event => setSeatChanges(event.target.checked)} /></label>
+        <label className="live-toggle"><span><strong>Seat changes</strong><small>Participants can move seats between hands</small></span><input type="checkbox" role="switch" checked={seatChanges} disabled={rulesLocked} onChange={event => setSeatChanges(event.target.checked)} /></label>
         <label className="live-toggle"><span><strong>Live Analysis</strong><small>Show the reference before you act</small></span><input type="checkbox" role="switch" checked={liveAnalysis} disabled={rulesLocked} onChange={event => setLiveAnalysis(event.target.checked)} /></label>
       </div>
       <p className="muted">{rules.editable ? 'Everyone at the table sees the change, and it applies from the next hand.' : 'Rules change between hands, once the payout has been shown.'}</p>
@@ -71,7 +71,7 @@ function SettingsForm({ table, command, handOpen, busy }: { table: ObservableTab
       <p className="muted">{password.set ? 'Newcomers need it to join, and so does anyone who leaves and comes back.' : 'Without one, anyone with the link can join.'} Changing it never affects anyone already at the table, even during a hand.</p>
     </section>}
     {buttonShown && <section className="settings-section"><h3>Next dealer button</h3>
-      <label>Seat<select value={buttonSeat} disabled={buttonLocked} onChange={event => setButtonSeat(Number(event.target.value))}>{table.view.state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).map(p => <option key={p.seat} value={p.seat!}>{p.seat} · {playerName(table, table.bindings.find(b => b.participantId === p.participantId)!)}</option>)}</select></label>
+      <label>Seat<select value={buttonSeat} disabled={buttonLocked} onChange={event => setButtonSeat(Number(event.target.value))}>{table.view.state.participants.filter(p => p.seat !== null && !p.sittingOut && p.stack > 0).map(p => <option key={p.seat} value={p.seat!}>{p.seat} · {participantName(table, table.bindings.find(b => b.participantId === p.participantId)!)}</option>)}</select></label>
     </section>}
     {!nothingToEdit && <button type="submit" className="primary full-width settings-apply" disabled={!canApply}>{busy ? 'Applying…' : 'Apply'}</button>}
   </form>;

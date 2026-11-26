@@ -20,10 +20,10 @@ function createLiveHub() {
 type LiveHub = ReturnType<typeof createLiveHub>;
 
 /**
- * The analyses of the reader's own decision at the Replay Step on show: under their Guest's current Reference Strategy,
+ * The analyses of the reader's own decision at the Replay Step on show: under their User's current Reference Strategy,
  * and under each Strategy compared beside it (Counterfactual Comparison). The Reference Strategy always comes first. They are
  * asked for from Table History so the server schedules them as `history-analysis`. A matching cached result comes back
- * at once; otherwise it is read again when the Guest's live connection says it changed. The compared Strategies come
+ * at once; otherwise it is read again when the User's live connection says it changed. The compared Strategies come
  * from the address and are never saved to the Trainer Configuration. Nothing is asked at anyone else's decision.
  */
 export function useReplayComparison(replay: TableHandReplay | undefined, index: number, compared: readonly StrategyDescriptor[]) {
@@ -37,9 +37,9 @@ export function useReplayComparison(replay: TableHandReplay | undefined, index: 
   return {
     /** The decision on show is the reader's own: analysis belongs here. */
     offered: !!replay?.steps[index]?.viewerDecisionId,
-    /** The Guest's current Reference Strategy, once read. */
+    /** The User's current Reference Strategy, once read. */
     reference,
-    /** One target per Strategy, the Reference Strategy first; none until the Guest's configuration is read. */
+    /** One target per Strategy, the Reference Strategy first; none until the User's configuration is read. */
     targets,
     hub,
     /** The Trainer Configuration could not be read, so nothing could be asked. */
@@ -50,7 +50,7 @@ export function useReplayComparison(replay: TableHandReplay | undefined, index: 
 
 /**
  * One Strategy's analysis of the decision on show. Its own pending, failed and Retry states: another Strategy failing or
- * still running never touches it. The Reference Strategy's is asked for without a Strategy, so it is always the Guest's
+ * still running never touches it. The Reference Strategy's is asked for without a Strategy, so it is always the User's
  * current one; every other is asked for by name.
  */
 export function useStrategyAnalysis(replay: TableHandReplay, target: ComparisonTarget, reference: boolean, hub: LiveHub) {

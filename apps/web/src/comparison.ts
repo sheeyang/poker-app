@@ -3,7 +3,7 @@ import { replayAnalysisTarget, type ReplayAnalysisTarget } from './replay.js';
 
 /**
  * Counterfactual Comparison of one decision (ADR-0041), as pure model. The Strategies live in the address, never in the
- * Guest's Trainer Configuration. Each Strategy is its own analysis request and its own result, on the same frozen inputs
+ * User's Trainer Configuration. Each Strategy is its own analysis request and its own result, on the same frozen inputs
  * and seeds the server gives them, so the comparison is only the list of Strategies and one target for each.
  */
 

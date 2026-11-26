@@ -6,7 +6,7 @@ import { followedTableSummary } from './table-history.js';
 import { useFollowedCount } from './use-followed-request.js';
 
 /**
- * A summary resource whose count follows the Guest's `progress` messages while it is Analyzing. The resource reads it
+ * A summary resource whose count follows the User's `progress` messages while it is Analyzing. The resource reads it
  * again on its notices and reconnects, as before; nothing reads it on a timer.
  */
 function useSummaryProgress<R extends { display?: { data?: ScoreSummary } }>(resource: R): R {
@@ -17,8 +17,8 @@ function useSummaryProgress<R extends { display?: { data?: ScoreSummary } }>(res
 export function useHandSummary(table: ObservableTableSession | undefined) {
   const handId = table?.view.state.handId;
   const scope = hashKey([table?.tableSessionId, handId]);
-  const human = table?.viewerParticipantId;
-  const decisionIds = table?.view.history.find(hand => hand.handId === handId)?.decisions.filter(decision => decision.action.participantId === human).map(decision => decision.decisionId) ?? [];
+  const viewer = table?.viewerParticipantId;
+  const decisionIds = table?.view.history.find(hand => hand.handId === handId)?.decisions.filter(decision => decision.action.participantId === viewer).map(decision => decision.decisionId) ?? [];
   // Settings alone retain the recorded snapshot. The next accepted action captures the then-current reference.
   const key = hashKey([scope, decisionIds]);
   const target = useMemo(() => table && handId && decisionIds.length ? createAnalysisTarget<ScoreSummary>({

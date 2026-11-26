@@ -5,8 +5,8 @@ import { strategyName } from './strategy-select.js';
 import { useTrainerConfiguration } from './trainer-configuration.js';
 
 /**
- * Side-by-side Score Summaries (ADR-0041): the Guest's Reference Strategy and up to 3 others, each its own column. The
- * Reference Strategy is the Guest's Trainer Configuration, read outside any table; the others live in the address.
+ * Side-by-side Score Summaries (ADR-0041): the User's Reference Strategy and up to 3 others, each its own column. The
+ * Reference Strategy is the User's Trainer Configuration, read outside any table; the others live in the address.
  */
 export function useSummaryStrategies(compared: readonly StrategyDescriptor[]) {
   const { identity } = useShell();
