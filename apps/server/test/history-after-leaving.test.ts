@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import WebSocket from 'ws';
-import { highestProbabilityPlayingStrategy, baselinePlayingStrategy, defaultPlayingStrategy, strategyToken, supportedStrategies, type DecisionAnalysis, type TableHandReplay, type ObservableTableSession, type ScoreSummary, type ServerLiveMessage, type StrategyDescriptor, type TableHistory } from '@poker/contracts';
+import { highestProbabilityPlayingStrategy, baselinePlayingStrategy, defaultPlayingStrategy, strategyToken, supportedStrategies, type ConcreteAction, type DecisionAnalysis, type LegalAction, type TableHandReplay, type ObservableTableSession, type ScoreSummary, type ServerLiveMessage, type StrategyDescriptor, type TableHistory } from '@poker/contracts';
 import { createStrategy } from '@poker/strategies';
 import { createServer } from '../src/server.js';
 import type { TableSessionControllerCommands } from '../src/mutations.js';
@@ -54,19 +54,20 @@ const post = (path: string, cookie: string, body: unknown) => fetch(base + path,
 const stakes = { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 1000, defaultBuyIn: 1000, maximumBuyIn: 1000 };
 
 /**
- * Ann's Online Table, with Ben and Cy joined through its Join Link. All three are connected and seated, so the table
- * deals by itself. Every decision each human makes is recorded, by Decision ID.
+ * Ann's Online Table, with Ben and Cy joined through its Join Link, or with only those `joiners` named. All of them are
+ * connected and seated, so the table deals by itself. Every decision each human makes is recorded, by Decision ID.
  */
-async function threeHanded() {
+async function threeHanded(joiners = ['Ben', 'Cy']) {
   const ann = await guest('Ann');
   const created = await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online', configuration: stakes })).json();
   const id = created.tableSessionId as string;
   const players = [{ cookie: ann, participantId: created.bindings[0].participantId as string }];
-  for (const name of ['Ben', 'Cy']) {
+  for (const name of joiners) {
     const cookie = await guest(name);
     const joined = await (await post('/api/table-sessions/' + id + '/join-table', cookie, { requestId: randomUUID() })).json();
     players.push({ cookie, participantId: joined.participantId as string });
   }
+  // Without Cy to join, `cy` is undefined: only the heads-up test omits him, and it never reads him.
   const [a, b, c] = players as [typeof players[number], typeof players[number], typeof players[number]];
   const view = async (cookie = ann): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + id, cookie)).json();
   const as = async (cookie: string, kind: string, fields: object = {}) => post('/api/table-sessions/' + id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await view(cookie)).pokerRevision, ...fields });
@@ -75,8 +76,13 @@ async function threeHanded() {
   for (const [seat, player] of players.entries()) expect((await as(player.cookie, 'seat-participant', { participantId: player.participantId, seat: seat + 1 })).status).toBe(200);
   const cookieOf = (participantId: string) => players.find(player => player.participantId === participantId)!.cookie;
   const decisions = new Map<string, string[]>();
-  /** Deals the next Hand, then every actor checks or calls it down to a showdown, and the Hand ends. */
-  async function playHand(handId: string) {
+  /**
+   * Deals the next Hand, then every actor checks or calls it down to a showdown, and the Hand ends. The `raiser`, when
+   * named, bets or raises the minimum once, the first time they act after an opponent has acted on the same street: the
+   * opponent then has one more decision to make than checking down gives them.
+   */
+  async function playHand(handId: string, raiser?: string) {
+    let raised = false, previous: { street?: string; actor: string } | undefined;
     await expect.poll(async () => (await view()).schedule.nextHandCountdown).toBeDefined();
     clock.advanceTo((await announcedCountdown(() => view())).endsAt);
     await expect.poll(async () => (await view()).view.state.handId).toBe(handId);
@@ -85,8 +91,14 @@ async function threeHanded() {
       if (clock.now() < window.opensAt) clock.advanceTo(window.opensAt);
       const actor = window.participantId, own = await view(cookieOf(actor));
       decisions.set(actor, [...decisions.get(actor) ?? [], window.decisionId]);
-      const action = own.view.state.legalActions.some(legal => legal.type === 'check') ? 'check' : 'call';
-      expect((await as(cookieOf(actor), 'act', { participantId: actor, action: { type: action } })).status).toBe(200);
+      const { legalActions, street } = own.view.state;
+      const answering = previous !== undefined && previous.street === street && previous.actor !== actor;
+      const aggressive: LegalAction | undefined = actor === raiser && !raised && answering ? legalActions.find(legal => legal.type === 'bet' || legal.type === 'raise') : undefined;
+      raised ||= !!aggressive;
+      const action: ConcreteAction = aggressive?.type === 'bet' ? { type: 'bet', betTo: aggressive.minimum } : aggressive?.type === 'raise' ? { type: 'raise', raiseTo: aggressive.minimum } : { type: legalActions.some(legal => legal.type === 'check') ? 'check' : 'call' };
+      previous = { street, actor };
+      // The revision just read is the one to act on: no second read.
+      expect((await post('/api/table-sessions/' + id + '/act', cookieOf(actor), { requestId: randomUUID(), expectedPokerRevision: own.pokerRevision, participantId: actor, action })).status).toBe(200);
     }
     clock.advanceTo(handEndsAt(await view()));
   }
@@ -319,27 +331,30 @@ test('at a table not in memory, and once it is a Closed Table, former Participan
 });
 
 test('a former Participant\'s study is history-analysis under the cap of 8 even when asked for as in-table study, a summary included', async () => {
-  const t = await threeHanded();
-  for (const hand of ['hand-1', 'hand-2', 'hand-3']) await t.playHand(hand);
+  // Heads-up, with Ben alone joining Ann, and Ann raising once a Hand: Ben has five decisions in each of two Hands.
+  const t = await threeHanded(['Ben']);
+  for (const hand of ['hand-1', 'hand-2']) await t.playHand(hand, t.ann.participantId);
   expect((await t.as(t.ben.cookie, 'leave-table', { participantId: t.ben.participantId })).status).toBe(200);
   const decisions = t.decisions.get(t.ben.participantId)!;
-  expect(decisions.length).toBeGreaterThan(8);
+  // The smallest set past the cap: nine of the former Participant's own decisions.
+  const asking = decisions.slice(0, 9);
+  expect(asking.length).toBeGreaterThan(8);
   // Every post-action analysis has finished: nothing is held yet.
-  await expect.poll(async () => (await Promise.all(decisions.map(async decisionId => ((await (await post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId, history: true })).json()) as DecisionAnalysis).status))).every(status => status === 'complete')).toBe(true);
+  const earlier = await Promise.all(decisions.map(async decisionId => ((await (await post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId, history: true })).json()) as DecisionAnalysis).requestId));
+  await expect.poll(async () => (await Promise.all(earlier.map(async requestId => ((await (await get('/api/table-sessions/' + t.id + '/analysis/' + requestId, t.ben.cookie)).json()) as DecisionAnalysis).status))).every(status => status === 'complete')).toBe(true);
   await study(t.ben.cookie, baselinePlayingStrategy);
   hold();
   try {
     // Asked plainly, with neither `history` nor a Strategy, as the in-table analysis panel asks.
-    const asked = await Promise.all(decisions.map(decisionId => post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId })));
-    expect(asked.map(response => response.status)).toEqual(decisions.map(() => 200));
+    const asked = await Promise.all(asking.map(decisionId => post('/api/table-sessions/' + t.id + '/analysis', t.ben.cookie, { decisionId })));
+    expect(asked.map(response => response.status)).toEqual(asking.map(() => 200));
     await expect.poll(() => held.length).toBe(8);
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(held.length).toBe(8);
     release();
-    for (const response of asked) {
-      const { requestId } = await response.json() as DecisionAnalysis;
-      await expect.poll(async () => ((await (await get('/api/table-sessions/' + t.id + '/analysis/' + requestId, t.ben.cookie)).json()) as DecisionAnalysis).status).toBe('complete');
-    }
+    // One read of every request's state, until all nine are complete.
+    const requestIds = await Promise.all(asked.map(async response => ((await response.json()) as DecisionAnalysis).requestId));
+    await expect.poll(async () => (await Promise.all(requestIds.map(async requestId => ((await (await get('/api/table-sessions/' + t.id + '/analysis/' + requestId, t.ben.cookie)).json()) as DecisionAnalysis).status))).every(status => status === 'complete')).toBe(true);
     // A plain session summary under yet another Reference Strategy: the same bound.
     await study(t.ben.cookie, highestProbabilityPlayingStrategy);
     hold();
