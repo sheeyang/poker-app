@@ -88,7 +88,7 @@ function LedgerRow({ mode, row, now, retry }: { mode: TableMode; row: SavedRow; 
     ? <Link className="ledger-open" aria-label={label} to="/practice/$tableSessionId" params={{ tableSessionId: row.tableSessionId }}>{name}</Link>
     : <Link className="ledger-open" aria-label={label} to="/online/$tableSessionId" params={{ tableSessionId: row.tableSessionId }}>{name}</Link>;
   return <tr className={`ledger-row is-${kind === 'current' ? 'seated' : kind}`}>
-    <th scope="row"><span className="ledger-name"><SeatGlyph seats={seatCount} you={kind === 'current' && live?.stack !== undefined} dim={kind === 'away'} />{opener}</span></th>
+    <th scope="row"><span className="ledger-name"><SeatGlyph seats={seatCount} viewer={kind === 'current' && live?.stack !== undefined} dim={kind === 'away'} />{opener}</span></th>
     <td className="numeric">{blinds}{row.ante ? <span className="ledger-ante"> · ante {row.ante}</span> : null}</td>
     <td>{status}</td>
     <td className="ledger-opened numeric">{openedLabel(row.openedAt, now)}</td>

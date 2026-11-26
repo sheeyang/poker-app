@@ -110,7 +110,7 @@ tied hands above all three live short hands. Run with `--hex` for creation entro
   real schema-isolated Fastify on 3008 and Playground on 5178. Ordinary controls
   created and seated 100/300/300, submitted Raise-to 100, and completed at
   revisions 7/7 with pots 300/400, board `Td Qh 5c Ad 4s`, stacks 0/700/0.
-  It then disconnected/reconnected without accepted play, rebought the human
+  It then disconnected/reconnected without accepted play, rebought the player
   to 100, confirmed no automatic new Hand, explicitly started Hand 2 excluding
   the unreplenished zero stack, and played 100/300 to pot 200 plus return 200.
 - The corrected browser tracer used actual five-Participant setup and Check

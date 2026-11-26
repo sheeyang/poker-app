@@ -32,7 +32,7 @@ import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './gues
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
-import { analysisNotFound, notFound, outcomeStatus, overallSummaryNotFound, reject, scoredRequestNotFound, tableSummaryNotFound, unauthenticated } from './rejections.js';
+import { analysisNotFound, invalidRequestId, notFound, outcomeStatus, overallSummaryNotFound, reject, scoredRequestNotFound, tableSummaryNotFound, unauthenticated } from './rejections.js';
 
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string;
   /** How long the acceptance journal waits to open a connection. Defaults to 2 seconds; test fixtures on a loaded machine raise it. Journal statements stay bounded at 2 seconds regardless. */
@@ -136,7 +136,7 @@ export async function createServer(options: ServerOptions) {
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
-  // reaching only its Human Controller, after making the HTTP state readable.
+  // reaching only the player's User, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
   /** Sends `message` to every live connection of the User's, and nobody else's. */
   function deliverToUser(userId: string, message: ServerLiveMessage) { for (const deliver of userChannels.get(userId) ?? []) deliver(message); }
@@ -258,7 +258,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     const requestId = (request.body as { requestId?: unknown } | null)?.requestId;
-    if (!isSuppliedRequestId(requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(requestId)) return reply.code(400).send(invalidRequestId());
     try {
       const outcome = await trainerConfigurations.set(userId, request.body);
       return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'request-id-conflict' ? 409 : 400).send(outcome);
@@ -268,7 +268,7 @@ export async function createServer(options: ServerOptions) {
     const limited = refuseIfLimited('creation', request, reply); if (limited) return limited;
     const ownerUserId = await ensureIdentity(request, reply);
     if (!isSuppliedRequestId(request.body?.requestId))
-      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+      return reply.code(400).send(invalidRequestId());
     try {
       const result = await create(ownerUserId, request.body);
       // Bot names repeated within the creation request make the request itself wrong, not a conflict with a table.
@@ -310,7 +310,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!isSuppliedRequestId(request.body?.requestId))
-      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+      return reply.code(400).send(invalidRequestId());
     try {
       // Each check of a Table Password is an attempt at it, right or wrong; a join refused before any check spends none.
       let retryAfterSeconds: number | undefined;
@@ -464,7 +464,7 @@ export async function createServer(options: ServerOptions) {
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!isSuppliedRequestId(request.body?.requestId))
-      return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+      return reply.code(400).send(invalidRequestId());
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);
@@ -479,7 +479,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send(invalidRequestId());
     try {
       const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);
@@ -494,7 +494,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send(notFound());
-    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send(invalidRequestId());
     try {
       const outcome = await mutations.setTablePassword(request.params.id, userId, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);

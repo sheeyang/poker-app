@@ -8,7 +8,7 @@ import { AnalysisPanel } from '../src/analysis-panel.js';
 function table({ mode = 'online', allowLiveAnalysis = true, liveAnalysis = true, actionWindow = null }: { mode?: TableMode; allowLiveAnalysis?: boolean; liveAnalysis?: boolean; actionWindow?: ActionWindow | null } = {}): ObservableTableSession {
   return {
     tableSessionId: 'table', mode, options: { actionTimeLimitSeconds: 30, allowLiveAnalysis }, viewerParticipantId: 'you', ownerParticipantId: 'owner', pokerRevision: 3, sessionRevision: 5,
-    bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'owner', name: 'Ann', controller: { kind: 'human' } }],
+    bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'player' } }, { participantId: 'owner', name: 'Ann', controller: { kind: 'player' } }],
     trainerConfiguration: { ...defaultTrainerConfiguration, liveAnalysis }, inspection: { adminMode: false, completedHands: [] },
     schedule: { phases: [], actionWindow }, serverTime: 0, pendingChanges: [],
     view: { configuration: defaultConfiguration, state: { status: 'active-hand', handId: 'hand-2', street: 'preflop', buttonSeat: 1, actorId: actionWindow?.participantId ?? null, decisionId: actionWindow?.decisionId ?? null, legalActions: actionWindow?.participantId === 'you' ? [{ type: 'fold' }, { type: 'call' }] : [], board: [], pots: [], participants: [] }, history: [] },

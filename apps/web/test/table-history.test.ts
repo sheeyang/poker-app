@@ -46,7 +46,7 @@ describe('the Table History row of the Hand being replayed', () => {
   });
 });
 
-describe('why a reader of Table History cannot play there', () => {
+describe('why a viewer of Table History cannot play there', () => {
   const list = { tableSessionId: 't', viewerParticipantId: 'you', mode: 'online' as const, seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 }, hands: [] };
   it('says nothing to a Participant still at the table', () => {
     expect(historyStanding(list)).toBeUndefined();

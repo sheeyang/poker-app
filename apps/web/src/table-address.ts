@@ -114,7 +114,7 @@ export function comparedStrategies(compare: unknown): StrategyDescriptor[] {
 /**
  * The search a Table History route accepts: `hand=hand-N`, the Hand to replay, and with it `step`, the Replay Step to open
  * it at: `decision-N` (before that decision), `flop`, `turn`, `river` (after that street's reveal) or `result`; and
- * `compare`, the Strategies compared beside the Reference Strategy (`compareParam`), at the reader's decisions and in the
+ * `compare`, the Strategies compared beside the Reference Strategy (`compareParam`), at the viewer's decisions and in the
  * table's Score Summary. Only the step needs its Hand.
  */
 export function historySearch(search: Record<string, unknown>): { hand?: string; step?: string; compare?: string } {

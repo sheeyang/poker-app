@@ -2,7 +2,7 @@
 
 ## What to build
 
-The Table Owner chooses an empty seat and buy-in for the human or a configured Bot in the Playground, submits a request, and sees the committed seat and stack. Establish the reusable per-session acceptance path here so subsequent poker operations inherit atomic rules execution, durable outcomes, revisions, and commit-before-publication behavior rather than implementing separate mutation mechanisms.
+The Table Owner chooses an empty seat and buy-in for the player or a configured Bot in the Playground, submits a request, and sees the committed seat and stack. Establish the reusable per-session acceptance path here so subsequent poker operations inherit atomic rules execution, durable outcomes, revisions, and commit-before-publication behavior rather than implementing separate mutation mechanisms.
 
 M1 scope; apply accepted ADRs 0011, 0012, 0015–0018, 0020, 0025. This is a vertical slice of the playable foundation, not an invitation to implement later Trainer, product UX, replay tooling, Solver, or simulation milestones.
 

@@ -17,9 +17,9 @@ basics, has not been established.
 
 ## Product Purpose
 
-Let a human play no-limit Hold'em Cash Game Hands and study how their concrete
+Let a player play no-limit Hold'em Cash Game Hands and study how their concrete
 decisions align with a chosen Reference Strategy. Hands are played against Bots
-at a Practice Table or against other humans at an Online Table. The Trainer
+at a Practice Table or against other players at an Online Table. The Trainer
 supplies numerical evidence for the player's interpretation without prescribing
 an action or labeling a decision good or bad.
 
@@ -31,7 +31,7 @@ player's study settings and results stay private from everyone else at the table
 
 ## Positioning
 
-Bot Playing Strategies and the human-selected Reference Strategy are independent.
+Bot Playing Strategies and the player-selected Reference Strategy are independent.
 Players can study a Reference Strategy's complete Policy distribution, concrete
 sizings and selected action alongside their own accepted decision. A sampled
 Reference action is distinct from the distribution and need not have its highest

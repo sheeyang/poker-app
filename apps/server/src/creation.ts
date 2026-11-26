@@ -80,7 +80,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
         const tableSessionId = randomUUID();
         const ownerParticipantId = randomUUID();
         const bindings: PersistedTableSession['bindings'] = [
-          { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'human' }, userId: ownerUserId, membership: 'joined' },
+          { participantId: ownerParticipantId, name: displayName!, controller: { kind: 'player' }, userId: ownerUserId, membership: 'joined' },
           ...(request.bots ?? []).map(b => ({ participantId: randomUUID(), name: participantName(b.name)!, controller: { kind: 'bot' as const, playingStrategy: b.playingStrategy }, assignmentId: randomUUID() })),
         ];
         // The Online owner joins unseated, without the Join Link, and observes from creation. A Practice player joins by sitting down.
@@ -91,7 +91,7 @@ export function createTableSessionCreator(db: Database, acceptance: AcceptanceTr
           allowLiveAnalysis: request.options?.allowLiveAnalysis ?? true,
         };
         const aggregate: PersistedTableSession = {
-          schemaVersion: 3, tableSessionId, ownerUserId, mode, options,
+          schemaVersion: 4, tableSessionId, ownerUserId, mode, options,
           pokerRecord: created.game.toRecord(), bindings,
           pokerRevision: joined ? 1 : 0, sessionRevision: 0, adminMode: true, botProvenance: [], schedule: emptySchedule, pendingChanges: [],
           ...(tablePasswordHash ? { tablePasswordHash } : {}),

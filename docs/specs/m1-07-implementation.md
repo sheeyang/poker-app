@@ -29,7 +29,7 @@ actor's stack/wager. The server maps it explicitly for current and historical
 states, and the Playground uses this fact instead of inferring a nominal
 price. The Playground renders all configured seats, actual ante contributions,
 street wagers, total contributions, button/blind markers, hidden card counts,
-and the existing legal human controls. No private deck or burn data enters
+and the existing legal player controls. No private deck or burn data enters
 those DTOs.
 
 Validation completed on 8 October 2026:
@@ -67,7 +67,7 @@ Validation completed on 8 October 2026:
 - Named Chrome session `poker-m1-07` used actual Playground controls and the
   existing schema-isolated trusted acceptance fixture on 3007/5177. A
   nine-seat capacity with You at 7 / Bot 1 at 9 / Bot 2 at 2, button 7 and ante 5 showed
-  correct blind markers, contributions and Call 20. Human Call and three
+  correct blind markers, contributions and Call 20. Player Call and three
   Checks completed at revisions 17/17, board `Qd 9h Td Th Kc`, stacks
   `1050,975,975`, pot 75. Opponent cards stayed hidden until showdown; prior
   decisions stayed private; reconnect changed no accepted play. No browser

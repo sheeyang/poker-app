@@ -42,17 +42,17 @@ Validation on 7–8 October 2026:
   identical future events/dealing after restoration.
 - Real HTTP/WebSocket/PostgreSQL fixtures restart against the same committed
   schema, compare exact safe views and bindings/revisions, reopen both completed
-  and unchanged human decisions, continue top-ups/new explicit Hands/Call/Check,
+  and unchanged player decisions, continue top-ups/new explicit Hands/Call/Check,
   and reject an externally corrupted suffix without serving a prefix.
 - The named Chrome session `poker-m1-10` used isolated server/Vite ports
-  3010/5180 and a separate PostgreSQL schema. The human created a configured
+  3010/5180 and a separate PostgreSQL schema. The player created a configured
   table, seated two Participants, and started Hand 1. After restarting the
   actual server process, the exact confirmed decision was unchanged at revisions
   3/3, with `8c 8h` and two hidden opponent cards. Fold settled stacks at
   990/1010 and revisions 4/4. A second restart reproduced the complete view
   exactly, with no automatic next Hand. The user explicitly reopened, topped
   up to 1200, moved from seat 1 to seat 3, selected the button, and started Hand 2
-  at revisions 8/8. Its human cards were `4c 3c`; the prior history retained
+  at revisions 8/8. Its player cards were `4c 3c`; the prior history retained
   seat 1. The 1280px capture was inspected, and the console contained only Vite
   connection and React DevTools notices. Assigned processes stopped and the
   isolated browser schema was removed.

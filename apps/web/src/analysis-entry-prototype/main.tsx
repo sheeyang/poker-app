@@ -11,10 +11,10 @@ const names: Record<Key, string> = { A: 'Edge tab', B: 'Tool rail', C: 'Live doc
 const keys = Object.keys(names) as Key[];
 
 const decisions = [
-  { street: 'Preflop', you: 'Raise 60', grade: 'good', note: 'Standard open from the button.' },
-  { street: 'Flop', you: 'Bet 90', grade: 'good', note: 'Value bet; villain calls too wide.' },
-  { street: 'Turn', you: 'Check', grade: 'miss', note: 'A bet of 40% pot earns more here.' },
-  { street: 'River', you: 'Call 210', grade: 'ok', note: 'Close; priced at 28% equity needed.' },
+  { street: 'Preflop', viewerAction: 'Raise 60', grade: 'good', note: 'Standard open from the button.' },
+  { street: 'Flop', viewerAction: 'Bet 90', grade: 'good', note: 'Value bet; villain calls too wide.' },
+  { street: 'Turn', viewerAction: 'Check', grade: 'miss', note: 'A bet of 40% pot earns more here.' },
+  { street: 'River', viewerAction: 'Call 210', grade: 'ok', note: 'Close; priced at 28% equity needed.' },
 ] as const;
 
 function Seat({ n, name, stack, viewer }: { n: number; name: string; stack: string; viewer?: boolean }) {
@@ -34,7 +34,7 @@ function Panel({ close, focus }: { close: () => void; focus?: number }) {
   return <aside className="pe-panel" aria-label="Analysis">
     <div className="pe-panel-head"><h2>Analysis</h2><button className="icon-button" aria-label="Close analysis" onClick={close}><Icon name="close" /></button></div>
     <div className="pe-tabs" role="tablist">{['Live', 'Hand', 'Session'].map(t => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}</div>
-    <ol className="pe-decisions">{decisions.map((d, i) => <li key={d.street} className={focus === i ? 'is-focus' : ''}><span className="pe-street">{d.street}</span><strong>{d.you}</strong><span className={`pe-grade pe-${d.grade}`}>{d.grade === 'good' ? 'Best' : d.grade === 'ok' ? 'Close' : 'Missed value'}</span><p>{d.note}</p></li>)}</ol>
+    <ol className="pe-decisions">{decisions.map((d, i) => <li key={d.street} className={focus === i ? 'is-focus' : ''}><span className="pe-street">{d.street}</span><strong>{d.viewerAction}</strong><span className={`pe-grade pe-${d.grade}`}>{d.grade === 'good' ? 'Best' : d.grade === 'ok' ? 'Close' : 'Missed value'}</span><p>{d.note}</p></li>)}</ol>
   </aside>;
 }
 
@@ -84,7 +84,7 @@ function VariantD() {
     {open && <Panel close={() => setFocus(null)} focus={focus} />}
     <nav className="pe-timeline" aria-label="This hand's decisions">
       <button className="pe-tl-head" aria-label="Analysis" onClick={() => setFocus(open ? null : decisions.length - 1)}><Icon name="chart" size={18} /></button>
-      {decisions.map((d, i) => <button key={d.street} className={`pe-dot pe-${d.grade}${focus === i ? ' is-on' : ''}`} aria-label={`${d.street}: ${d.you}`} onClick={() => setFocus(i)}><i /><span className="pe-tip">{d.street} · {d.you}</span></button>)}
+      {decisions.map((d, i) => <button key={d.street} className={`pe-dot pe-${d.grade}${focus === i ? ' is-on' : ''}`} aria-label={`${d.street}: ${d.viewerAction}`} onClick={() => setFocus(i)}><i /><span className="pe-tip">{d.street} · {d.viewerAction}</span></button>)}
       <span className="pe-dot pe-now" aria-label="Your turn now"><i /></span>
     </nav>
   </main></div>;

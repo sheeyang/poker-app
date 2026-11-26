@@ -21,7 +21,7 @@ export function CurrentTableBanner({ tableSessionId, command }: { tableSessionId
   const [leaving, setLeaving] = useState(false);
   const banner = table && presentation && currentTableBanner(table, pathname, presentation.serverNow);
   if (!table || !banner) return null;
-  return <aside className={`live-strip${banner.yourTurn ? ' is-turn' : ''}${banner.pending ? ' is-leaving' : ''}`} aria-label="Your Current Table">
+  return <aside className={`live-strip${banner.viewerToAct ? ' is-turn' : ''}${banner.pending ? ' is-leaving' : ''}`} aria-label="Your Current Table">
     <span className="live-strip-dot" aria-hidden="true" />
     <p className="live-strip-facts">
       <strong aria-live="polite">{banner.heading}</strong>

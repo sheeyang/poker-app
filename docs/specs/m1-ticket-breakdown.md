@@ -21,12 +21,12 @@ Common acceptance for every delivered command: one semantic CashGame state owner
 
 2. **Seat Participants through durable atomic mutations**
    - **Blocked by:** Ticket 1.
-   - **What it delivers:** Place the human and Bots in seats with valid buy-ins, with one serialized, revisioned mutation path and durable success/rejection retries.
+   - **What it delivers:** Place the player and Bots in seats with valid buy-ins, with one serialized, revisioned mutation path and durable success/rejection retries.
    - [Full issue draft](../../.scratch/m1-tickets/issues/02-seat-participants-atomically.md)
 
 3. **Deal a heads-up Hand and settle a fold**
    - **Blocked by:** Ticket 2.
-   - **What it delivers:** Start a two-Participant Hand, show only legally visible cards, and finish the Hand when the human folds.
+   - **What it delivers:** Start a two-Participant Hand, show only legally visible cards, and finish the Hand when the player folds.
    - [Full issue draft](../../.scratch/m1-tickets/issues/03-deal-heads-up-and-fold.md)
 
 4. **Manage seats, button, top-ups, and rebuys between Hands**
@@ -71,7 +71,7 @@ Common acceptance for every delivered command: one semantic CashGame state owner
 
 12. **Play baseline Bots through the server JobRunner**
    - **Blocked by:** Ticket 9, Ticket 10, Ticket 11.
-   - **What it delivers:** Play complete human-versus-Bot Hands using validated UniformChoicePolicy distributions, independent seeded selectors, and durable Bot provenance.
+   - **What it delivers:** Play complete player-versus-Bot Hands using validated UniformChoicePolicy distributions, independent seeded selectors, and durable Bot provenance.
    - [Full issue draft](../../.scratch/m1-tickets/issues/12-baseline-bots-through-jobrunner.md)
 
 13. **Recover Bot failures and change Playing Strategies safely**
@@ -112,7 +112,7 @@ Common acceptance for every delivered command: one semantic CashGame state owner
 - Authorized completion-gated Research/Admin Mode inspection: ticket 14.
 - Unknown commit, creation ambiguity, confirmed noncommit without auto-retry, Bot pause and recovery feedback: ticket 15.
 
-M1 completes only when all 15 slices pass their acceptance criteria and the combined browser flow exercises creation, seating, explicit starts, legal sized human-versus-Bot play, settlement, between-Hand management/top-up/rebuy, completed-Hand inspection, reconnect, restart and commit recovery. Type/build/dependency checks and rule/visibility/conservation/replay/durability suites must pass. Each slice adds its own tests; there is no separate end-only testing ticket.
+M1 completes only when all 15 slices pass their acceptance criteria and the combined browser flow exercises creation, seating, explicit starts, legal sized player-versus-Bot play, settlement, between-Hand management/top-up/rebuy, completed-Hand inspection, reconnect, restart and commit recovery. Type/build/dependency checks and rule/visibility/conservation/replay/durability suites must pass. Each slice adds its own tests; there is no separate end-only testing ticket.
 
 ## Approval check
 

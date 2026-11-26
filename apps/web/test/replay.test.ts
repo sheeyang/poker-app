@@ -80,7 +80,7 @@ describe('the replay controls', () => {
 });
 
 describe('a Replay Step on the felt', () => {
-  it('is the table as the step shows it, viewed by the reader, with the decisions taken before it', () => {
+  it('is the table as the step shows it, viewed by the viewer, with the decisions taken before it', () => {
     const felt = stepFelt(replay, 5);
     expect(felt.state).toBe(steps[5]!.state);
     expect(felt).toMatchObject({ tableSessionId: 'table-1', mode: 'online', viewerParticipantId: 'you', seatCount: defaultConfiguration.seatCount, phases: [], actionWindow: null });
@@ -100,7 +100,7 @@ describe('a Replay Step’s label', () => {
 });
 
 describe('what a Replay Step’s transition did', () => {
-  it('names the decision taken just before it, in the past tense, the reader as "You"', () => {
+  it('names the decision taken just before it, in the past tense, the viewer as "You"', () => {
     expect(steps.map(step => actedLabel(replay, step))).toEqual([undefined, 'You called', 'Rex checked', undefined, 'Rex checked', 'You checked', undefined, 'Rex bet 40', 'You folded']);
     expect(actedLabel(replay, { ...steps[1]!, transition: acted('rex', { type: 'raise', raiseTo: 1200 }) })).toBe('Rex raised to 1,200');
     expect(actedLabel(watched, steps[1]!)).toBe('Alex called');
@@ -114,7 +114,7 @@ describe('analysis at a Replay Step', () => {
     ok: true, tableSessionId: 'table-1', participantId: 'you', handId: 'hand-3', decisionId: 'hand-3/decision-' + n, referenceStrategy, inputFingerprint: 'f', evaluationSeed: 's', selectionSeed: 's', engineVersion: 'v1', randomVersion: 'v1', evaluationVersion: 'v1',
     scoredDecision: { acceptedAction: action, scoringMethodVersion: 'v1' }, requestId: 'r', attemptId: 'a', status: 'pending',
   });
-  it('is offered only at the reader’s own decisions, with the action they took there', () => {
+  it('is offered only at the viewer’s own decisions, with the action they took there', () => {
     expect(steps.map((_, index) => replayAnalysisTarget(replay, index, reference)?.decisionId)).toEqual(['hand-3/decision-1', undefined, undefined, undefined, 'hand-3/decision-4', undefined, undefined, 'hand-3/decision-6', undefined]);
     expect([0, 4, 7].map(index => replayAnalysisTarget(replay, index, reference)?.action)).toEqual([{ type: 'call' }, { type: 'check' }, { type: 'fold' }]);
   });

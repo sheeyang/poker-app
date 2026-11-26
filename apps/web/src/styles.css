@@ -287,7 +287,7 @@ meter::-webkit-meter-optimum-value { background: var(--probability-color); borde
 meter::-moz-meter-bar { background: var(--probability-color); }
 .probability-tree ul { padding: 6px 0 0 13px; margin: 8px 0 0 2px; border-left: 1px solid #53634e; }
 .probability-tree ul li { font-size: .77rem; padding: 6px 0; display: flex; justify-content: space-between; gap: 10px; color: #bdcbb6; }
-.you-marker { color: #e6cca0; background: #3b4931; padding: 2px 5px; border-radius: 3px; font-size: .59rem; margin-left: 8px; vertical-align: 1px; }
+.viewer-marker { color: #e6cca0; background: #3b4931; padding: 2px 5px; border-radius: 3px; font-size: .59rem; margin-left: 8px; vertical-align: 1px; }
 .reference-selected { margin: 20px 0; padding: 12px 0; border-block: 1px solid var(--line); display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
 .reference-selected > span { font-size: .74rem; color: #acc3ca; }
 .reference-selected > strong { font-size: .93rem; color: #b9d9e4; }
@@ -556,7 +556,7 @@ meter::-moz-meter-bar { background: var(--probability-color); }
   .review-row-scores strong { font-size: 1rem; }
   .review-row-scores small { font-size: .8rem; }
   .distribution-heading > span { font-size: .86rem; }
-  .you-marker { font-size: .8rem; }
+  .viewer-marker { font-size: .8rem; }
   .analysis-meta, .analysis-mode-line { font-size: .86rem; }
 }
 .review-decision > summary:hover { background: var(--raised); }
@@ -1067,7 +1067,7 @@ fieldset.composer-field { display: block; }
 .ledger-history svg { margin-right: 6px; vertical-align: -3px; }
 .seat-glyph-felt { fill: var(--felt); stroke: #51826a; stroke-width: 1; }
 .seat-glyph-seat { fill: #7d9686; }
-.seat-glyph-you { fill: var(--gold); }
+.seat-glyph-viewer { fill: var(--gold); }
 .seat-glyph.is-dim { opacity: .5; }
 .ledger-empty { display: flex; align-items: center; gap: 18px; padding: 26px 4px; border-block: 1px solid var(--line); }
 .ledger-empty .seat-glyph { width: 56px; height: 35px; }
@@ -1398,7 +1398,7 @@ a.text-button:hover { text-decoration: underline; text-underline-offset: 4px; }
 .replay-skeleton .loading-oval { margin: 32px auto 28px; width: 82%; max-width: 760px; height: clamp(220px, 38vh, 380px); }
 .replay-skeleton .replay-dock { min-height: 104px; align-content: center; }
 .replay-missing { padding: 28px 0 12px; color: var(--muted); }
-/* The reader's own decision, under the dock: the action they took once, then each Strategy's scores and distribution, in the analysis panel's own language. The Reference Strategy is first; compared Strategies follow in the order chosen. */
+/* The viewer's own decision, under the dock: the action they took once, then each Strategy's scores and distribution, in the analysis panel's own language. The Reference Strategy is first; compared Strategies follow in the order chosen. */
 .replay-analysis { max-width: 980px; margin: 16px auto 0; padding: 18px 24px 22px; border: 1px solid var(--line); border-radius: 12px; background: #1a2721; }
 .replay-analysis-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 24px; padding-bottom: 12px; }
 .replay-analysis-head h3 { font-size: 1rem; font-weight: 600; }

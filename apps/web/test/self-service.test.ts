@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { defaultConfiguration, defaultTrainerConfiguration, type ObservableTableSession, type AfterHandRequest } from '@poker/contracts';
 import { afterHandRequestOf, afterHandRequestLabel, selfService } from '../src/self-service.js';
 
-function table(you: { seat: number | null; sittingOut?: boolean }, pendingChanges: AfterHandRequest[] = [], allowSeatChanges = true): ObservableTableSession {
+function table(viewer: { seat: number | null; sittingOut?: boolean }, pendingChanges: AfterHandRequest[] = [], allowSeatChanges = true): ObservableTableSession {
   return {
     tableSessionId: 't', mode: 'online', options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'ann',
     pokerRevision: 1, sessionRevision: 1, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     schedule: { phases: [], actionWindow: null }, serverTime: 0, pendingChanges,
-    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'human' } }, { participantId: 'you', name: 'You', controller: { kind: 'human' } }],
+    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'player' } }, { participantId: 'you', name: 'You', controller: { kind: 'player' } }],
     view: { configuration: { ...defaultConfiguration, allowSeatChanges }, history: [], state: { status: 'between-hands', buttonSeat: 1, board: [], pots: [], actorId: null, legalActions: [],
-      participants: [{ participantId: 'ann', seat: 1, stack: 1000, sittingOut: false }, { participantId: 'you', seat: you.seat, stack: you.seat === null ? 0 : 1000, sittingOut: you.sittingOut ?? false }] } },
+      participants: [{ participantId: 'ann', seat: 1, stack: 1000, sittingOut: false }, { participantId: 'you', seat: viewer.seat, stack: viewer.seat === null ? 0 : 1000, sittingOut: viewer.sittingOut ?? false }] } },
   };
 }
 

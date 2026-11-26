@@ -23,7 +23,7 @@ type Decision = readonly [participantId: string, type: string];
 /** The felt of a three-handed Practice Table: you in seat 1, Bots in seats 2 and 3; the button is seat 3. */
 function table({ state = {}, phases = [], serverTime = 10_000, decisions = [] }: { state?: Partial<ObservableCashGameState>; phases?: PresentationPhase[]; serverTime?: number; decisions?: readonly Decision[] } = {}): FeltView {
   return liveFelt({ tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime, schedule: { phases, actionWindow: null }, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
-    bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, ...['ada', 'cy'].map(id => ({ participantId: id, name: id, controller: { kind: 'bot' as const, playingStrategy: baselinePlayingStrategy } }))],
+    bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'player' } }, ...['ada', 'cy'].map(id => ({ participantId: id, name: id, controller: { kind: 'bot' as const, playingStrategy: baselinePlayingStrategy } }))],
     view: { configuration: { ...defaultConfiguration, seatCount: 3 },
       history: [{ handId: state.handId ?? 'hand-1', decisions: decisions.map(([participantId, type], i) => ({ decisionId: `d${i}`, action: { participantId, action: { type } } })) }] as never,
       state: {

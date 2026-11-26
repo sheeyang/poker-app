@@ -65,7 +65,7 @@ interface Subscriber { readonly userId: string; readonly publish: (update: Table
  * A player request carries the server time it was received, which decides Action Window and Action Deadline
  * timing. `server` is the scheduler itself: it submits Timeout Actions for whoever holds the expired decision.
  */
-type MutationAuthority = { kind: 'human'; userId: string; receivedAt: number } | { kind: 'bot'; identity?: BotIdentity } | { kind: 'server' };
+type MutationAuthority = { kind: 'user'; userId: string; receivedAt: number } | { kind: 'bot'; identity?: BotIdentity } | { kind: 'server' };
 interface AcceptedPlayerIntent { readonly participantId: string; readonly decisionId: string; readonly fingerprint: string }
 /** Test-only hooks wrap real PostgreSQL transactions and receive no mutable state. */
 export interface MutationTransactionFaults extends AcceptanceFaults {
@@ -829,13 +829,15 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
         let session = tables.get(id);
         // After-Hand requests whose Hand has ended are applied before anything else is judged, Deal included.
         if (session && afterHandDue(session)) { await commitAfterHandRequests(id); session = tables.get(id); }
-        const requester = session && authority.kind === 'human' ? memberBinding(session.aggregate, authority.userId) : undefined;
-        if (!session || (authority.kind === 'human' && !requester)) return notFound();
+        const requester = session && authority.kind === 'user' ? memberBinding(session.aggregate, authority.userId) : undefined;
+        if (!session || (authority.kind === 'user' && !requester)) return notFound();
         if (stopped) return reject('server-closing', 'The server is closing.');
         const denial = requester && playerMutationDenial(session.aggregate, requester, kind, request);
         if (denial) return denial;
         const { requestId, ...contents } = request;
-        const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: authority.kind, kind, contents })).digest('hex');
+        // The fingerprint's `source` names who asked: a player (through their User), a Bot or the server. A fingerprint stored
+        // with the old source `'human'` no longer matches: a pre-release record may break (ADR-0014).
+        const fingerprint = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: authority.kind === 'user' ? 'player' : authority.kind, kind, contents })).digest('hex');
         const existing = await resolveRequest(id, requestId, fingerprint); if (existing) return existing;
         session = tables.get(id)!;
         if (authority.kind === 'bot' && authority.identity && !current(id, authority.identity)) return reject('obsolete-bot-work', 'The Bot decision changed.');
@@ -849,7 +851,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
           const { outcome, committed: next } = await commitTableRequest(id, requestId, fingerprint, session.aggregate, (): TableDecision<MutationOutcome> => {
             let result = malformedPokerRequest(kind, request);
             // A late act is told so even after its Timeout Action has moved the table on.
-            if (!result && kind === 'act' && authority.kind === 'human' && missedActionDeadline(session.aggregate, request as ActRequest, authority.receivedAt))
+            if (!result && kind === 'act' && authority.kind === 'user' && missedActionDeadline(session.aggregate, request as ActRequest, authority.receivedAt))
               result = reject('action-deadline-passed', 'Your action reached the server after your Action Deadline, so the Timeout Action was played for you: Check, or Fold when Check was not legal.');
             if (!result && request.expectedPokerRevision !== session.aggregate.pokerRevision) result = reject('stale-poker-revision', 'The table changed. Refresh its committed view before submitting a new attempt.');
             const binding = findBinding(session.aggregate, 'participantId' in request ? request.participantId : undefined);
@@ -857,20 +859,20 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
             if (!result && isBot(binding) && binding.removed) result = reject('bot-removed', 'The Table Owner removed this Bot from the table.');
             if (!result && kind === 'remove-participant' && !(isPlayer(binding) && binding.membership === 'joined')) result = reject('participant-not-joined', 'This Participant has already left the table or been removed.');
             // The scheduler's own Timeout Action may act for whoever holds the expired decision.
-            if (!result && kind === 'act' && authority.kind !== 'server' && (authority.kind === 'human'
+            if (!result && kind === 'act' && authority.kind !== 'server' && (authority.kind === 'user'
               ? !isPlayer(binding) || binding.userId !== authority.userId
-              : !isBot(binding))) result = reject('actor-not-authorized', authority.kind === 'human'
+              : !isBot(binding))) result = reject('actor-not-authorized', authority.kind === 'user'
                 ? 'This local identity can act only through its bound player.'
                 : 'Trusted controller commands can act only through a bound Bot.');
             // Timing is judged by when a player's request arrived, and by now for the server's own work.
-            const arrivedAt = authority.kind === 'human' ? authority.receivedAt : clock.now();
+            const arrivedAt = authority.kind === 'user' ? authority.receivedAt : clock.now();
             // No one acts during a Presentation Phase, and the next Hand is not dealt before the last one has ended.
             if (!result && kind === 'act' && beforeActionWindow(session.aggregate.schedule, (request as ActRequest).participantId, arrivedAt))
               result = reject('action-window-not-open', 'This decision’s Action Window opens when the current Presentation Phase ends. Act once it opens.');
             if (!result && kind === 'start-hand' && beforeHandEnd(session.aggregate.schedule, arrivedAt))
               result = reject('hand-not-ended', 'The last Hand has not ended yet. Deal once it has.');
             // Judged when the request is processed, not when it arrived: the Hand ends for management when the Settle after its payout does.
-            const during = !result && authority.kind === 'human' ? duringHand(tableState(session), session.aggregate, kind, binding, request, clock.now()) : undefined;
+            const during = !result && authority.kind === 'user' ? duringHand(tableState(session), session.aggregate, kind, binding, request, clock.now()) : undefined;
             if (during && 'rejection' in during) result = during.rejection;
             else if (during) {
               const current = session.aggregate;
@@ -1150,7 +1152,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
                 const next: PersistedTableSession = { ...aggregate, sessionRevision: aggregate.sessionRevision + 1,
                   ...(joined.ok ? { pokerRecord: working.toRecord(), pokerRevision: aggregate.pokerRevision + 1 } : {}),
                   bindings: binding ? aggregate.bindings.map(candidate => candidate.participantId === participantId ? { ...binding, membership: 'joined' as const } : candidate)
-                    : [...aggregate.bindings, { participantId, name: displayName!, controller: { kind: 'human' }, userId, membership: 'joined' }] };
+                    : [...aggregate.bindings, { participantId, name: displayName!, controller: { kind: 'player' }, userId, membership: 'joined' }] };
                 proposed = { aggregate: next, game: working };
                 result = acknowledged(participantId, next);
               }
@@ -1405,7 +1407,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     publishStatus,
     /** A User's mutation, timed by when it arrived. Only a User joined at the table can make the request load it. */
     submit: async (id: string, userId: string, kind: PokerMutationKind, request: PokerMutationRequest): Promise<MutationOutcome> => {
-      const authority: MutationAuthority = { kind: 'human', userId, receivedAt: clock.now() };
+      const authority: MutationAuthority = { kind: 'user', userId, receivedAt: clock.now() };
       return await asMember(id, userId, () => submit(id, authority, kind, request)) ?? notFound();
     },
     submitControllerAction: async (id: string, request: ActRequest): Promise<MutationOutcome> => await holding(id, () => submit(id, { kind: 'bot' }, 'act', request)) ?? notFound(),

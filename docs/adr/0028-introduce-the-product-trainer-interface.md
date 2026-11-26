@@ -70,11 +70,11 @@ play → review → continue**. Classic materials and table-led composition rema
   still requires an explicit deal gesture.
 - Completed-Hand review is visible outside the collapsed panel, next to continuation.
   Decisions carry Hand/street/action and the safe cards at that decision. Manual
-  selection applies within the current Hand until another human action is
+  selection applies within the current Hand until another player action is
   accepted. A new Hand clears the previous review; the sidebar follows the current
   Hand and latest accepted decision. Latest decision restores following on request.
 - Saved tables show observable stakes, Table Format, completed-Hand count, progress and
-  the human stack. Session IDs are secondary details, not navigation labels.
+  the player stack. Session IDs are secondary details, not navigation labels.
 - The mobile table is composed around seeing cards and actions together. Review
   focuses analysis, and closing review returns focus to the play controls without
   scrolling the page.

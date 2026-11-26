@@ -71,10 +71,10 @@ export function ActionTray({ table, actionOpen, countdown, dealOpen, nextHand, c
  */
 function OnlineBetweenHands({ table, nextHand, busy, handEnded, command, openSettings, review, online }: { table: ObservableTableSession; nextHand?: NextHandStatus; busy: boolean; handEnded: boolean; command: Command; openSettings: () => void; review?: (decisionId?: string) => void; online?: OnlineTrayActions }) {
   const state = table.view.state;
-  const you = state.participants.find(p => p.participantId === table.viewerParticipantId);
+  const viewer = state.participants.find(p => p.participantId === table.viewerParticipantId);
   const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === table.viewerParticipantId) ?? [];
-  const seated = you?.seat != null;
-  const sittingOut = seated && you.sittingOut;
+  const seated = viewer?.seat != null;
+  const sittingOut = seated && viewer.sittingOut;
   const pending = afterHandRequestOf(table, table.viewerParticipantId);
   // While the table cannot deal, the tray names what it is waiting for and offers the way forward.
   const reason = nextHand?.kind === 'waiting' ? nextHand.reason : undefined;
@@ -88,7 +88,7 @@ function OnlineBetweenHands({ table, nextHand, busy, handEnded, command, openSet
       {needsParticipants && online?.addBot && <button className="quiet-button" disabled={busy} onClick={online.addBot}>Add a Bot</button>}
       {needsParticipants && online?.openJoinLink && <button className="primary" onClick={online.openJoinLink}><Icon name="link" size={18} />Share join link</button>}
       {/* A stack shows its winnings once the payout is presented, so an empty stack waits for it before offering a rebuy. */}
-      {seated && !pending && (you.stack === 0
+      {seated && !pending && (viewer.stack === 0
         ? handEnded && <button className="primary" disabled={busy} onClick={online?.rebuy ?? openSettings}>Rebuy <Icon name="arrow" /></button>
         : sittingOut && <button className="primary" disabled={busy} onClick={resume}>Return to play <Icon name="arrow" /></button>)}
     </div>

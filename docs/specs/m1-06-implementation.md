@@ -58,7 +58,7 @@ Validation completed across 7–8 October 2026 before integration:
   Bet endpoint cases also passed at the real HTTP seam. M1-11 was integrated
   from `implement/m1` at `6e34b81` before completion.
 - Named Chrome session `poker-m1-06` exercised the actual Playground on
-  isolated ports 3006/5176 against a unique PostgreSQL schema. The human
+  isolated ports 3006/5176 against a unique PostgreSQL schema. The player
   entered Raise-to 53, then Bet-to 37, checked to showdown, and reconnected.
   Final revisions were 12/12, board `3h 4c 4h 5d 9d`, stacks 910/1090, and
   the settled pot was 180. Bot cards stayed hidden before showdown. The native

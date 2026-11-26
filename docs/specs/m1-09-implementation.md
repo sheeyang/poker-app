@@ -60,7 +60,7 @@ identity; all identities and UUIDs retain normal entropy. There is no
 state injection, database assertion side channel, public seed field, or
 browser Bot impersonation route.
 
-The serialized human descriptions agree with closed, exact minimum, and
+The serialized player descriptions agree with closed, exact minimum, and
 singleton short-all-in acceptance. Real server tests preserve cards,
 stacks, history, and both revisions on closed/below-minimum and stale
 attempts; exact request retries retain their original outcome. A held
@@ -73,7 +73,7 @@ The Chrome session `poker-m1-09` used schema-isolated Fastify on 3009 and
 the Playground proxy on 5179. Actual creation, seating, Call, Bet-to,
 Raise-to, and Check controls completed the three boundary Hands:
 
-| Last short price | Human Call | Human minimum Raise-to | Final revisions | Final stacks A/B/C/D/E |
+| Last short price | Player Call | Player minimum Raise-to | Final revisions | Final stacks A/B/C/D/E |
 | --- | --- | --- | --- | --- |
 | 199 | 99 | Closed | 22/22 | 1278/350/781/0/980 |
 | 200 | 100 | 300 | 23/23 | 1480/350/580/0/980 |
@@ -81,7 +81,7 @@ Raise-to, and Check controls completed the three boundary Hands:
 
 The independently recorded hex seed ending `00ba` yields board
 `Qh Qc Ad 9c 6c`; A/B have queens and nines above the short hands.
-The open paths also use C's full Raise-to 400/401 and the human's
+The open paths also use C's full Raise-to 400/401 and the player's
 Call of 100, then ordinary turn/river Checks. Native integer bounds,
 atomic HTTP rejection from the same browser identity, stale revision,
 rejected retry, history privacy, conservation, and reconnect all passed.
@@ -119,6 +119,6 @@ Playground Vite with `POKER_API_TARGET=http://127.0.0.1:3009` on 5179.
 Fetch and evaluate `scripts/smoke-reopening-browser.js` as a function in
 the named Chrome session. Its default run completes all three cases;
 `{ pausePrice: 199 }` or `{ pausePrice: 200 }` stops at the corresponding
-committed human decision for screenshots. The fixture is test-only and
+committed player decision for screenshots. The fixture is test-only and
 excluded from production. Type `stop` in its terminal to close it and
 drop only its schema; stop the assigned Vite process and Chrome bridge.

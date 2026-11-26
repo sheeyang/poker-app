@@ -72,7 +72,7 @@ test('the Practice player keeps the creation-time name after the Guest edits the
   const cookie = await identity();
   await setName(cookie, 'First');
   const created = await (await create(cookie)).json();
-  expect(created.bindings).toEqual([{ participantId: expect.any(String), name: 'First', controller: { kind: 'human' } }]);
+  expect(created.bindings).toEqual([{ participantId: expect.any(String), name: 'First', controller: { kind: 'player' } }]);
   await setName(cookie, 'Second');
   const read = await (await fetch(base + '/api/table-sessions/' + created.tableSessionId, { headers: { cookie } })).json();
   expect(read.bindings[0].name).toBe('First');

@@ -12,10 +12,10 @@ ADR-0028, without introducing a historical replay workspace.
   up to 1000px, it fills the workspace below the app header; the covered table is
   hidden from interaction. Closing returns focus to play without moving the page.
 - Short phone screens place the three action buttons together and keep sizing
-  controls below them. Human cards sit beside the human seat to keep the board
+  controls below them. Player cards sit beside the player seat to keep the board
   clear within the available table height. Hand activity scrolls inside its open
   disclosure; practice setup and saved-table browsing retain normal page scrolling.
-- Only accepted human decisions appear as review rows. Each collapsed row names
+- Only accepted player decisions appear as review rows. Each collapsed row names
   the action. Preflop, Flop, Turn and River labels and their community cards belong
   inside the expanded detail, not in separate list headings.
 - The Your decisions heading and all rows share one bordered, rounded box, matching
@@ -35,8 +35,8 @@ ADR-0028, without introducing a historical replay workspace.
   their alignment.
 - The stable Hand N analysis heading has separate Live and This hand tabs. The
   chosen view stays in place as play advances. Tabs support arrow keys, Home/End
-  and normal keyboard activation. Live shows only the current human decision;
-  This hand contains the shared human decision box. Review hand/Review decisions
+  and normal keyboard activation. Live shows only the current player decision;
+  This hand contains the shared player decision box. Review hand/Review decisions
   opens This hand. Closing and reopening the sidebar retains the view unless a
   review entry point explicitly selects This hand. A different table initializes
   to Live when Live Analysis is enabled, otherwise This hand. Selecting Live never
@@ -48,7 +48,7 @@ ADR-0028, without introducing a historical replay workspace.
   redundant Reviewing this hand line; Live keeps its current status messages.
 - One decision is expanded at a time. The selected row can collapse, and opening
   it again restores its matching situation and analysis. Manual selection applies
-  within the current Hand until another human action is
+  within the current Hand until another player action is
   accepted. A new Hand clears the previous review immediately and the sidebar
   follows the current Hand and newest accepted decision. Latest decision restores
   following when reviewing
@@ -56,7 +56,7 @@ ADR-0028, without introducing a historical replay workspace.
   Live tab restores the current live reference without discarding the Hand review
   selection. New accepted actions still follow the latest review within This hand.
 - The detail shows a static participant-safe poker table before the selected
-  action: original seats, stacks, dealer, human cards and community cards. It
+  action: original seats, stacks, dealer, player cards and community cards. It
   shows the pot and stacks on the mini table, with amount to call and seat/blind
   context beneath it. These facts are not repeated in extra score/action blocks.
 - The live Current decision shows reference actions directly, without a duplicate
@@ -89,8 +89,8 @@ ADR-0028, without introducing a historical replay workspace.
   rows place each full label left and its value right; Mean Decision Score uses
   22.4px and Mean Action Rank Score 17.5px at the 14px root. Expanded individual
   scores retain their two-column pair and 35px / 19.6px values.
-- After each accepted human decision, request a new server-computed current-Hand
-  summary. Each immutable snapshot freezes its whole accepted human decision set
+- After each accepted player decision, request a new server-computed current-Hand
+  summary. Each immutable snapshot freezes its whole accepted player decision set
   and one complete Reference Strategy for every member. Publish both means only
   after every required analysis succeeds. Never calculate scores or averages in
   the browser. Keep the last complete snapshot, including its recorded decision
@@ -102,7 +102,7 @@ ADR-0028, without introducing a historical replay workspace.
 - Once confirmed means are available, routine updates have no caption about decision count, status sentence,
   spinner, pulse or processing indicator. Real errors and Retry remain visible;
   failure text identifies the older snapshot's decision count when one is shown.
-  Settings changes alone retain the recorded summary; the next accepted human
+  Settings changes alone retain the recorded summary; the next accepted player
   decision captures a new snapshot against the then-current reference. A differing
   recorded reference adds the existing full Policy and Action Selector caption.
 - Both mean values and both expanded individual scores appear immediately when

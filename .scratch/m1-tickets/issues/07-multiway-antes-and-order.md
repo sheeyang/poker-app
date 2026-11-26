@@ -2,7 +2,7 @@
 
 ## What to build
 
-The Table Owner configures a supported table of three or more Seats and the human plays the same Fold/Check/Call/Bet/Raise path against multiple seated Participants. CashGame handles participant eligibility, antes, blind positions, clockwise dealing, and action order, with the Playground rendering its complete safe view.
+The Table Owner configures a supported table of three or more Seats and the player plays the same Fold/Check/Call/Bet/Raise path against multiple seated Participants. CashGame handles participant eligibility, antes, blind positions, clockwise dealing, and action order, with the Playground rendering its complete safe view.
 
 M1 scope; apply accepted ADRs 0012, 0017, 0025. This is a vertical slice of the playable foundation, not an invitation to implement later Trainer, product UX, replay tooling, Solver, or simulation milestones.
 
@@ -14,7 +14,7 @@ M1 scope; apply accepted ADRs 0012, 0017, 0025. This is a vertical slice of the 
 - [ ] Apply conventional equal per-Participant antes before blinds as min(ante, remainingStack). Ante chips enter contribution/pot accounting but never reduce the amount needed to call the preflop blind; a short contribution preserves the Participant as all-in in the Hand.
 - [ ] Forced blind contributions are capped by the remaining stack without redefining configured blind sizes. Determine Hand seats/button/blinds before collecting antes or blinds.
 - [ ] Betting traversal and matching requirements apply to every live actor rather than assuming exactly two Participants; reuse the existing legality, street progression, and accepted-command path.
-- [ ] The Playground displays all configured seats, public contributions, antes, button/blinds, actor and legal human controls from participant-safe DTOs; no opponent private cards or burn identities leak.
+- [ ] The Playground displays all configured seats, public contributions, antes, button/blinds, actor and legal player controls from participant-safe DTOs; no opponent private cards or burn identities leak.
 - [ ] Seeded engine and real server/database fixtures verify two/three/nine-Participant boundaries, sparse seating, sitting out, ante-vs-wager accounting, short forced bets, correct clockwise positions, move/leave button continuity where the management branch is available, conservation, and rejection atomically.
 
 ## Blocked by

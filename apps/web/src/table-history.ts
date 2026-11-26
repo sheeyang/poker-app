@@ -62,7 +62,7 @@ export function handRows(hands: readonly TableHistoryHand[], viewerParticipantId
 }
 
 /**
- * Why the reader of a Table History cannot play at its table, if they cannot: they are a former Participant, or it is a
+ * Why the viewer of a Table History cannot play at its table, if they cannot: they are a former Participant, or it is a
  * Closed Table, which nobody can join or play at again (ADR-0041). Either way they still read every Hand.
  */
 export function historyStanding(history: TableHistory): { readonly kind: 'left' | 'closed'; readonly title: string; readonly detail: string } | undefined {

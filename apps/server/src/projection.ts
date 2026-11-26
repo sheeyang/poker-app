@@ -28,7 +28,7 @@ function projectStrategy(strategy: StrategyDescriptor): StrategyDescriptor {
 export function projectBindings(bindings: readonly ParticipantBinding[]): ParticipantBinding[] {
   return bindings.map(b => ({
     participantId: b.participantId, name: b.name,
-    controller: b.controller.kind === 'human' ? { kind: 'human' } : { kind: 'bot', playingStrategy: projectStrategy(b.controller.playingStrategy) },
+    controller: b.controller.kind === 'player' ? { kind: 'player' } : { kind: 'bot', playingStrategy: projectStrategy(b.controller.playingStrategy) },
   }));
 }
 /** The Observable Game Configuration, field by field (ADR-0017). */

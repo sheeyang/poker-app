@@ -9,7 +9,7 @@ const payout = (startsAt: number): PresentationPhase => ({ kind: 'payout', handI
 const settle = (startsAt: number, durationMs: number, name: PresentationPhase['street'] = 'river'): PresentationPhase => ({ kind: 'settle', handId: 'hand-1', street: name, startsAt, endsAt: startsAt + durationMs, durationMs });
 function table(state: Partial<ObservableCashGameState>, schedule: TableSchedule): ObservableTableSession {
   return { tableSessionId: 't', mode: 'practice', viewerParticipantId: 'you', pokerRevision: 5, sessionRevision: 5, serverTime: 0, schedule, pendingChanges: [], trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
-    bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'bot', name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
+    bindings: [{ participantId: 'you', name: 'You', controller: { kind: 'player' } }, { participantId: 'bot', name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { configuration: { ...defaultConfiguration, seatCount: 2 }, history: [], state: {
       status: 'active-hand', buttonSeat: 1, handId: 'hand-1', street: 'preflop', board: [], pots: [], actorId: 'you', decisionId: 'hand-1/decision-1', legalActions: [{ type: 'fold' }, { type: 'call' }],
       participants: [

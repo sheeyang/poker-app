@@ -32,10 +32,10 @@ Validation on 7 October 2026:
   Hand, one advancement of both revisions per successful command, and restart
   restoration of management commands and history.
 - Isolated Chrome session poker-m1-04 exercised actual Playground forms: create
-  a flexible-buy-in table, seat human/Bot, Start Hand, Fold, move human from Seat
+  a flexible-buy-in table, seat player/Bot, Start Hand, Fold, move player from Seat
   1 to Seat 3 while retaining 990 chips, topUpTo 1200 with a 210-chip preview and
   confirmation, sit out/return with corresponding Start Hand readiness, set the
-  eligible Seat 3 button, leave/cash out 1200, and reseat the same human in Seat
+  eligible Seat 3 button, leave/cash out 1200, and reseat the same player in Seat
   4 with 1000 chips. A second table demonstrated disabled movement controls and
   policy feedback after seating. Active-Hand management controls were disabled.
 - Desktop 1440-pixel and actual mobile 390-pixel captures were visually inspected.

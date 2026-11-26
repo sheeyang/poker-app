@@ -67,7 +67,7 @@ export function replayControls(replay: TableHandReplay, index: number): ReplayCo
 }
 
 /**
- * The step at `index` as the felt draws it (`PokerTable`): the step's own state, seen by the reader, everyone seated in
+ * The step at `index` as the felt draws it (`PokerTable`): the step's own state, seen by the viewer, everyone seated in
  * the Hand by name and as a Bot or not, and the decisions taken before the step so each seat shows its last action. It
  * has no schedule, no Action Window and nobody disconnected: a replay plays no live timing.
  */
@@ -112,7 +112,7 @@ export function actedLabel(replay: TableHandReplay, step: ReplayStep): string | 
 /** A street's name as the controls show it. */
 export const streetName = (street: Street) => streetNames[street];
 
-/** The analysis a Replay Step offers: the reader's own decision there, the action they took, under one Reference Strategy. */
+/** The analysis a Replay Step offers: the viewer's own decision there, the action they took, under one Reference Strategy. */
 export interface ReplayAnalysisTarget {
   readonly decisionId: string;
   readonly action: ConcreteAction;
@@ -123,7 +123,7 @@ export interface ReplayAnalysisTarget {
 }
 
 /**
- * The analysis to show at the step at `index` under `referenceStrategy`: only at one of the reader's own decisions,
+ * The analysis to show at the step at `index` under `referenceStrategy`: only at one of the viewer's own decisions,
  * which the server marks, and never at anyone else's or in a Hand they only watched. The action they took there is the
  * one the next step's transition records.
  */

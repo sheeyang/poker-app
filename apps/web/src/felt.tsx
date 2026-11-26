@@ -10,13 +10,13 @@ function around(index: number, count: number) {
 }
 
 /** A table's format at a glance: a small oval with one dot per seat. The viewer's seat, when there is one, is brass. */
-export function SeatGlyph({ seats, you = false, dim = false }: { seats: number; you?: boolean; dim?: boolean }) {
+export function SeatGlyph({ seats, viewer = false, dim = false }: { seats: number; viewer?: boolean; dim?: boolean }) {
   const w = 40, h = 25, rx = 16.5, ry = 9.5;
   return <svg className={`seat-glyph${dim ? ' is-dim' : ''}`} width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
     <ellipse className="seat-glyph-felt" cx={w / 2} cy={h / 2} rx={rx - 4} ry={ry - 3.2} />
     {Array.from({ length: seats }, (_, i) => {
       const p = around(i, seats);
-      return <circle key={i} className={you && i === 0 ? 'seat-glyph-you' : 'seat-glyph-seat'} cx={w / 2 + p.x * rx} cy={h / 2 + p.y * ry} r={you && i === 0 ? 2.9 : 2.1} />;
+      return <circle key={i} className={viewer && i === 0 ? 'seat-glyph-viewer' : 'seat-glyph-seat'} cx={w / 2 + p.x * rx} cy={h / 2 + p.y * ry} r={viewer && i === 0 ? 2.9 : 2.1} />;
     })}
   </svg>;
 }

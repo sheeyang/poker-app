@@ -4,7 +4,7 @@ CashGame will be a stateful mutable domain object whose successful public method
 
 ## High-level commands
 
-The public command surface comprises `seatParticipant`, `leaveParticipant`, `moveParticipant`, `setSittingOut`, `topUpTo`, `setButton`, `startHand`, and `act(participantId, action)`. All methods operate on the same CashGame instance. Humans, Bots, and replay submit the same ConcreteAction; `act` validates the current actor and legal action against current authoritative state without accepting a revision or attempting to identify the previous state from which an asynchronous caller computed it. Orchestration detects stale work before submission.
+The public command surface comprises `seatParticipant`, `leaveParticipant`, `moveParticipant`, `setSittingOut`, `topUpTo`, `setButton`, `startHand`, and `act(participantId, action)`. All methods operate on the same CashGame instance. Players, Bots, and replay submit the same ConcreteAction; `act` validates the current actor and legal action against current authoritative state without accepting a revision or attempting to identify the previous state from which an asynchronous caller computed it. Orchestration detects stale work before submission.
 
 Participant legal-action projections and `act` validation use the same internal legality calculation, including betting amounts and reopening restrictions, rather than separate implementations of Hold'em legality. Projection runs against the requested snapshot; an action submission is checked against the current authoritative state. Legal sizing descriptions use inclusive integer bounds or a single permitted short-all-in amount as recorded in ADR-0025, not an enumeration of every chip amount.
 

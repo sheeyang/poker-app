@@ -112,7 +112,7 @@ export interface TrainerConfiguration {
   readonly liveAnalysis: boolean;
 }
 export type ControllerDescriptor =
-  | { readonly kind: 'human' }
+  | { readonly kind: 'player' }
   | { readonly kind: 'bot'; readonly playingStrategy: StrategyDescriptor };
 export interface ParticipantBinding {
   readonly participantId: ParticipantId;

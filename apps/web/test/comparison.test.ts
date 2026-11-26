@@ -61,7 +61,7 @@ describe('who a comparison is made of', () => {
 });
 
 describe('analysis of one decision under several Strategies', () => {
-  it('is one target for each Strategy at the reader’s own decision, Reference Strategy first, all for the same decision and action', () => {
+  it('is one target for each Strategy at the viewer’s own decision, Reference Strategy first, all for the same decision and action', () => {
     const targets = comparisonTargets(replay, 2, reference, [uniform!, highest!]);
     expect(targets.map(target => target.strategy)).toEqual([reference, uniform, highest]);
     expect(targets.map(target => target.decisionId)).toEqual(Array(3).fill('hand-3/decision-3'));

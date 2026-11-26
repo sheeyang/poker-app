@@ -140,7 +140,7 @@ SELECT (binding->>'userId')::uuid, sessions.id, binding->>'participantId', 'join
 FROM table_sessions AS sessions, jsonb_array_elements(sessions.aggregate->'bindings') AS binding
 WHERE sessions.aggregate->>'schemaVersion' = '1' AND binding->'controller'->>'kind' = 'human' AND binding ? 'userId'
 ON CONFLICT DO NOTHING;
--- Analysis Results and scores belong to the Participant, authorized through its Human Controller.
+-- Analysis Results and scores belong to the Participant, authorized through the player's User.
 CREATE TABLE IF NOT EXISTS analysis_evaluations (
   fingerprint text PRIMARY KEY,
   request_id uuid NOT NULL UNIQUE,

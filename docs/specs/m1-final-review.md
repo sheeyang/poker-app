@@ -10,15 +10,15 @@ at `b8e14a1` and merged as `22f0a409025aa9892481e2e13d57c74bc60f7e70`.
 
 ## Standards
 
-- **P2 documented-standard breach: Bot actor discovery depended on the human
+- **P2 documented-standard breach: Bot actor discovery depended on the player
   observer.** `apps/server/src/mutations.ts:74` read
   `session.game.forParticipant(session.aggregate.bindings[0]!.participantId).getView().state.actorId`.
-  An unseated human's restricted view omitted a valid Bot-only Hand, preventing
+  An unseated player's restricted view omitted a valid Bot-only Hand, preventing
   its required controller work and startup resumption. This conflicted with
   ADR-0018's restoration of controllers and required Bot work, and ADR-0019's
   orchestration through the JobRunner. **Resolved:** discover the self-acting Bot
   through its own participant-safe view. Real HTTP/PostgreSQL regressions cover
-  unseated humans, departure between Hands, sitting out, and startup.
+  unseated players, departure between Hands, sitting out, and startup.
 - **P3 judgement call: possible Duplicated Code in fingerprint encoding.**
   Creation and mutation services independently implemented recursive `canonical`
   encoding with `value.map(canonical).join(',')` and `Object.keys(value).sort()`.
@@ -32,16 +32,16 @@ and the ParticipantCashGame facade were retained under the repository's ADRs.
 
 ## Spec
 
-- **P1: Bot-only Hands stalled when the human was unseated.** The specification
+- **P1: Bot-only Hands stalled when the player was unseated.** The specification
   requires “starting requires at least two eligible Participants” and “then resume
-  required Bot work for the current decision.” The human-observer actor lookup
+  required Bot work for the current decision.” The player-observer actor lookup
   violated these requirements after valid Hand start, Retry, and restart.
   **Resolved:** Bot actor discovery and the real regressions described above.
-  A seated sitting-out human remains an observer and did not independently
+  A seated sitting-out player remains an observer and did not independently
   reproduce the original failure.
 - **P2: Hand presentation events bypassed absence visibility.** The specification
   requires “absence and rejoining cannot invent missed information.” An absent
-  human's normal view/history omitted a Bot-only all-in Hand, while its projected
+  player's normal view/history omitted a Bot-only all-in Hand, while its projected
   events exposed that Hand's board and revealed holdings, even without Admin
   Mode. **Resolved:** authoritative Hand events retain their originating HandId;
   participant projection checks that Hand's frozen observer membership. Copied

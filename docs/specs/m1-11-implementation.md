@@ -21,7 +21,7 @@ completion and WebSocket cache writes. It compares `sessionRevision`, ignores
 older/duplicate views and their events, and accepts a newer complete view across
 gaps. Transient status bypasses the gameplay revision guard. Table switching
 closes the prior subscription and clears its presentation diagnostics. Closing a
-connection invokes no mutation; HTTP human controls remain available. Unexpected
+connection invokes no mutation; HTTP player controls remain available. Unexpected
 closure refreshes the committed view and reconnects with bounded backoff.
 
 ## Approved seam evidence
@@ -39,7 +39,7 @@ progression through `implement/m1` commit `4b8a0f8`:
   disconnect submitting no command, reconnect across missed revisions, and
   recovery feedback at unchanged gameplay revisions. All seven live tests pass.
 - Integrated management tests receive every committed top-up, move, sitting-out,
-  button, and leave event with its current full view. Integrated human Call and
+  button, and leave event with its current full view. Integrated player Call and
   trusted controller Check use the same postcommit publication point. Community
   deals expose only public cards; all three burn events physically contain only
   type/street, and Bot hole cards appear only at Showdown.
@@ -51,7 +51,7 @@ progression through `implement/m1` commit `4b8a0f8`:
 - The relay dropped committed revision 2 while holding its acknowledgement. The
   browser accepted the complete revision-3 Hand with own cards, hidden Bot cards,
   and six received presentation events despite the gap. Disconnect/reconnect at
-  that human decision changed no server revision and retained usable Fold.
+  that player decision changed no server revision and retained usable Fold.
 - A real HTTP read captured revision 3 and was released after the revision-4
   WebSocket Fold update, while the mutation acknowledgement was held. The visible
   table remained completed at 4/4 with stacks 990/1010. Replaying captured frames

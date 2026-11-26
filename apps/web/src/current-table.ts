@@ -30,7 +30,7 @@ export interface CurrentTableBanner {
   /** "2,140 chips", or "Watching" without a Seat. */
   readonly stack: string;
   /** The viewer's Action Window is open now. */
-  readonly yourTurn: boolean;
+  readonly viewerToAct: boolean;
   /** The viewer's pending Leave Table or Removal, in words: "Leaving after this hand". */
   readonly pending: string | undefined;
   /** A Hand is in progress until the Settle after its payout ends: Leave Table then waits for it. */
@@ -52,18 +52,18 @@ export function currentTableBanner(table: ObservableTableSession | undefined, pa
   const handOpen = handInProgress(table, serverNow);
   const handIndex = view.history.findIndex(hand => hand.handId === view.state.handId);
   // The stack as the table shows it now: a Hand still paying out has not paid the viewer yet.
-  const me = presentTable(table, serverNow).view.state.participants.find(participant => participant.participantId === viewer);
+  const viewerState = presentTable(table, serverNow).view.state.participants.find(participant => participant.participantId === viewer);
   const pending = afterHandRequestOf(table, viewer);
   const { configuration } = view;
-  const yourTurn = actionWindowOpen(table, viewer, serverNow);
+  const viewerToAct = actionWindowOpen(table, viewer, serverNow);
   const name = viewer === table.ownerParticipantId || !owner ? 'your table' : `${owner.name}’s table`;
   return {
     href: tablePath('online', table.tableSessionId),
-    heading: yourTurn ? `Your turn at ${name}` : name[0]!.toUpperCase() + name.slice(1),
+    heading: viewerToAct ? `Your turn at ${name}` : name[0]!.toUpperCase() + name.slice(1),
     format: formatAndStakes(configuration.seatCount, configuration.smallBlind, configuration.bigBlind),
     hand: handOpen ? `Hand ${handIndex >= 0 ? handIndex + 1 : view.history.length + 1} in progress` : 'Between hands',
-    stack: me?.seat != null ? `${chips(me.stack)} chips` : 'Watching',
-    yourTurn,
+    stack: viewerState?.seat != null ? `${chips(viewerState.stack)} chips` : 'Watching',
+    viewerToAct,
     pending: pending === 'leave-table' || pending === 'remove' ? afterHandRequestLabel(pending) : undefined,
     handOpen,
     leave: selfService(table, handOpen).leaveTable,
