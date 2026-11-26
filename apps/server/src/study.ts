@@ -1,4 +1,4 @@
-import type { ScoreSummaryScope, StrategyDescriptor } from '@poker/contracts';
+import type { ScoreSummaryScope, StrategyDescriptor, TableSessionId } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
 import { ownDecisionIds } from '@poker/research';
 import type { FrozenEvaluationInput } from './analysis.js';
@@ -10,13 +10,13 @@ import type { TrainerConfigurations } from './trainer-configuration.js';
 /** What the study reads of the table registry and the mutations: who may read a table, and how it is held. */
 export interface StudySources {
   /** The Participant a user has at a table where they have ever been one, joined or not; loads nothing. */
-  participant(id: string, userId: string): Promise<{ readonly participantId: string } | undefined>;
+  participant(id: TableSessionId, userId: string): Promise<{ readonly participantId: string } | undefined>;
   /** The table's committed record: the loaded table's copy, otherwise its stored record restored read-only. */
-  committed(id: string): Promise<CapturableTable | undefined>;
-  /** Whether the user is joined at the table now. */
-  access(id: string, userId: string): Promise<unknown>;
+  committed(id: TableSessionId): Promise<CapturableTable | undefined>;
+  /** Whether the user is joined at the table now; loads nothing. */
+  isJoined(id: TableSessionId, userId: string): Promise<boolean>;
   /** Runs `operation` holding a handle on the table for a request from a user joined at it; `undefined` for anyone else. */
-  asMember<T>(id: string, userId: string, operation: () => Promise<T>): Promise<T | undefined>;
+  asMember<T>(id: TableSessionId, userId: string, operation: () => Promise<T>): Promise<T | undefined>;
   stopped(): boolean;
   trainerConfigurations: Pick<TrainerConfigurations, 'studyStrategy'>;
 }
@@ -34,7 +34,7 @@ export function scoreSummaryOf(session: CapturableTable, participantId: string, 
  * The reads study of a player's own decisions needs, joined or not (ADR-0041): how a user may read a table's history,
  * and how a decision of theirs is frozen from it. None of it loads a table.
  */
-export function createStudy({ participant, committed, access, asMember, stopped, trainerConfigurations }: StudySources) {
+export function createStudy({ participant, committed, isJoined, asMember, stopped, trainerConfigurations }: StudySources) {
   /**
    * A table a user may read the history of, with their Participant there: a loaded table's committed copy, otherwise
    * its stored record restored read-only. Anyone who has ever been a Participant there may read, after a Leave Table
@@ -70,7 +70,7 @@ export function createStudy({ participant, committed, access, asMember, stopped,
    */
   async function studying<T>(id: string, userId: string, strategy: StrategyDescriptor | undefined, joined: (referenceStrategy: StrategyDescriptor) => Promise<T | undefined>, former: (table: ReadableTable, referenceStrategy: StrategyDescriptor) => T): Promise<T | undefined> {
     const chosen = () => trainerConfigurations.studyStrategy(userId, strategy);
-    if (await access(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
+    if (await isJoined(id, userId)) return asMember(id, userId, async () => joined(await chosen()));
     const table = await readableTable(id, userId);
     if (!table) return undefined;
     const referenceStrategy = await chosen();

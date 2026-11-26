@@ -777,7 +777,7 @@ export function createTableSessionMutations(db: Database, acceptance: Acceptance
     if (!stopped) queueMicrotask(() => queueSchedule(id));
   }
     const { readableTable, captureHistoryEvaluation, studying } = createStudy({
-      participant, access, asMember, trainerConfigurations, stopped: () => stopped,
+      participant, isJoined: async (id, userId) => !!await access(id, userId), asMember, trainerConfigurations, stopped: () => stopped,
       committed: async id => tables.get(id) ?? await readCommitted(id),
     });
     async function read(id: string, userId: string) {
