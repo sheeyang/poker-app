@@ -76,9 +76,9 @@ export function OverallHistorySummaryPanel({ filter, breakdown, compared, total,
     description={reference => <>Mean scores of the decisions shown here, against your Reference Strategy{reference}, or side by side with others.</>}
     controls={<fieldset className="history-summary-breakdown">
       <legend>Break down by</legend>
-      <div className="og-chips">
-        <button type="button" className="og-chip" aria-pressed={!breakdown} onClick={() => onBreakdown(undefined)}>None</button>
-        {historyBreakdowns.map(each => <button key={each} type="button" className="og-chip" aria-pressed={breakdown === each} onClick={() => onBreakdown(each)}>{breakdownNames[each]}</button>)}
+      <div className="overall-history-chips">
+        <button type="button" className="overall-history-chip" aria-pressed={!breakdown} onClick={() => onBreakdown(undefined)}>None</button>
+        {historyBreakdowns.map(each => <button key={each} type="button" className="overall-history-chip" aria-pressed={breakdown === each} onClick={() => onBreakdown(each)}>{breakdownNames[each]}</button>)}
       </div>
     </fieldset>}
     ask={<>

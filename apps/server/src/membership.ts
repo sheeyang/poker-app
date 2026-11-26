@@ -50,6 +50,10 @@ export async function writeTableSession(tx: Database, previous: PersistedTableSe
 export const tableSessionIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** A request ID as the server issues it: a lowercase UUID, as a Table Session ID is. */
 export const requestIdPattern = tableSessionIdPattern;
+/** A request ID a client supplies in a body or live message: a string of 1 to 128 characters. */
+export function isSuppliedRequestId(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 128;
+}
 /**
  * The stored aggregate of the Online Table a Join Link names, read without loading the table; undefined for an ID that
  * names no table, or names a Practice Table, which has no Join Link.

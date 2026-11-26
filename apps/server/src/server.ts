@@ -25,7 +25,7 @@ import { createTableSessionMutations, TableSessionRestorationError, type Mutatio
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
 import { createGuestQueue } from './guest-queue.js';
 import { validateDisplayName } from './validation.js';
-import { recordOpened, requestIdPattern, tableSessionIdPattern } from './membership.js';
+import { isSuppliedRequestId, recordOpened, requestIdPattern, tableSessionIdPattern } from './membership.js';
 import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './guests.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
@@ -170,7 +170,7 @@ export async function createServer(options: ServerOptions) {
     socket.on('message', data => {
       let message: ClientLiveMessage;
       try { message = JSON.parse(data.toString()); } catch { socket.close(1008, 'Invalid live message.'); return; }
-      if (!message || !['subscribe-table', 'unsubscribe-table'].includes(message.type) || typeof message.requestId !== 'string' || message.requestId.length < 1 || message.requestId.length > 128 || typeof message.tableSessionId !== 'string') {
+      if (!message || !['subscribe-table', 'unsubscribe-table'].includes(message.type) || !isSuppliedRequestId(message.requestId) || typeof message.tableSessionId !== 'string') {
         socket.close(1008, 'Invalid live message.'); return;
       }
       // Serialize subscription commands so removal cannot overtake authorization/loading.
@@ -256,7 +256,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     const requestId = (request.body as { requestId?: unknown } | null)?.requestId;
-    if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await trainerConfigurations.set(userId, request.body);
       return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'request-id-conflict' ? 409 : 400).send(outcome);
@@ -265,7 +265,7 @@ export async function createServer(options: ServerOptions) {
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
     const limited = refuseIfLimited('creation', request, reply); if (limited) return limited;
     const ownerUserId = await ensureIdentity(request, reply);
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+    if (!isSuppliedRequestId(request.body?.requestId))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const result = await create(ownerUserId, request.body);
@@ -307,7 +307,7 @@ export async function createServer(options: ServerOptions) {
     const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+    if (!isSuppliedRequestId(request.body?.requestId))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       // Each check of a Table Password is an attempt at it, right or wrong; a join refused before any check spends none.
@@ -420,22 +420,26 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { requestId: string }; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
     return scoredHistory.read(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never>; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Retry uses the captured request. Supply an empty request.' } });
     return scoredHistory.retry(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
   });
   app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
     return overallSummaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never> }>('/api/overall-history/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     return overallSummaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
   });
@@ -457,7 +461,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+    if (!isSuppliedRequestId(request.body?.requestId))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
@@ -473,7 +477,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);
@@ -488,7 +492,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send(notFound());
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.setTablePassword(request.params.id, userId, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);
@@ -502,6 +506,7 @@ export async function createServer(options: ServerOptions) {
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
@@ -513,6 +518,7 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && summaries.read(request.params.id, request.params.requestId, participantId);
