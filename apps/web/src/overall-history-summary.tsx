@@ -11,9 +11,9 @@ const failed = (summary: OverallHistorySummary | undefined) => !!summary && [sum
 
 /**
  * An Overall History Score Summary over `filter`, broken down by `breakdown`, once `asked`. A new filter or breakdown
- * asks again (matching analyses are reused). While it is Analyzing its count follows the Guest's `progress` messages,
+ * asks again (matching analyses are reused). While it is Analyzing its count follows the User's `progress` messages,
  * and each completion or failure notice reads it again; Retry asks again only for the failed analyses. `strategy` names
- * the Strategy to summarize under; without one it is the Guest's current Reference Strategy. Each Strategy is its own
+ * the Strategy to summarize under; without one it is the User's current Reference Strategy. Each Strategy is its own
  * request, with its own progress and Error.
  */
 function useOverallHistorySummary(filter: HistoryFilter, breakdown: HistoryBreakdown | undefined, asked: boolean, strategy: StrategyDescriptor | undefined) {
@@ -65,7 +65,7 @@ function SummaryColumn({ filter, breakdown, asked, strategy, reference, onRemove
 }
 
 /**
- * The Score Summary over the decisions the filters show (ADR-0041): explicitly asked for, under the Guest's Reference
+ * The Score Summary over the decisions the filters show (ADR-0041): explicitly asked for, under the User's Reference
  * Strategy and, side by side, up to 3 more the address names, each column with its progress, Error and Retry, and no score
  * for an empty set. A breakdown, one dimension at a time and held in the address, gives one ordinary summary per bucket.
  * Score ranges narrow every summary, each under its own column's Strategy, once all of the set's analyses have succeeded;
@@ -76,9 +76,9 @@ export function OverallHistorySummaryPanel({ filter, breakdown, compared, total,
     description={reference => <>Mean scores of the decisions shown here, against your Reference Strategy{reference}, or side by side with others.</>}
     controls={<fieldset className="history-summary-breakdown">
       <legend>Break down by</legend>
-      <div className="og-chips">
-        <button type="button" className="og-chip" aria-pressed={!breakdown} onClick={() => onBreakdown(undefined)}>None</button>
-        {historyBreakdowns.map(each => <button key={each} type="button" className="og-chip" aria-pressed={breakdown === each} onClick={() => onBreakdown(each)}>{breakdownNames[each]}</button>)}
+      <div className="overall-history-chips">
+        <button type="button" className="overall-history-chip" aria-pressed={!breakdown} onClick={() => onBreakdown(undefined)}>None</button>
+        {historyBreakdowns.map(each => <button key={each} type="button" className="overall-history-chip" aria-pressed={breakdown === each} onClick={() => onBreakdown(each)}>{breakdownNames[each]}</button>)}
       </div>
     </fieldset>}
     ask={<>

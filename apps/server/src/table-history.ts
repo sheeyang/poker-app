@@ -1,7 +1,7 @@
 import type { ObservableHandReplay, TableHandReplay, TableHistory } from '@poker/contracts';
 import { tableHandReplay, tableHistoryHands } from '@poker/research';
-import { findBinding, isHuman } from './aggregate.js';
-import { completedHands, historyReader, tableFormat, type ReadableTable } from './readable-table.js';
+import { findBinding, isPlayer } from './aggregate.js';
+import { completedHands, historyViewer, seatsAndStakes, type ReadableTable } from './readable-table.js';
 
 /**
  * The Table History list for one Participant: every completed Hand of the Table Session, oldest first (ADR-0040).
@@ -13,12 +13,12 @@ import { completedHands, historyReader, tableFormat, type ReadableTable } from '
 export function tableHistory(table: ReadableTable): TableHistory {
   const { aggregate, participantId } = table;
   const binding = findBinding(aggregate, participantId);
-  const left = aggregate.closed || isHuman(binding) && binding.membership !== 'joined';
+  const left = aggregate.closed || isPlayer(binding) && binding.membership !== 'joined';
   return {
     tableSessionId: aggregate.tableSessionId, viewerParticipantId: participantId,
-    mode: aggregate.mode, ...tableFormat(aggregate),
+    mode: aggregate.mode, ...seatsAndStakes(aggregate),
     ...(left ? { left: true as const } : {}), ...(aggregate.closed ? { closed: true as const } : {}),
-    hands: tableHistoryHands(completedHands(table), historyReader(table)),
+    hands: tableHistoryHands(completedHands(table), historyViewer(table)),
   };
 }
 
@@ -29,24 +29,24 @@ export function tableHistory(table: ReadableTable): TableHistory {
 export function handReplay(table: ReadableTable, handId: string): TableHandReplay | undefined {
   let replay: ObservableHandReplay;
   try { replay = table.game.forParticipant(table.participantId).getReplay(handId); } catch (error) { if (error instanceof RangeError) return undefined; throw error; }
-  const reader = historyReader(table);
-  const hand = tableHistoryHands(completedHands(table), reader).find(row => row.handId === handId);
-  return hand && tableHandReplay(replay, hand, reader);
+  const viewer = historyViewer(table);
+  const hand = tableHistoryHands(completedHands(table), viewer).find(row => row.handId === handId);
+  return hand && tableHandReplay(replay, hand, viewer);
 }
 
 /**
- * The reads of Table History: the list and one Hand's Replay Steps, each for a Guest who may read the table (ADR-0041).
+ * The reads of Table History: the list and one Hand's Replay Steps, each for a User who may read the table (ADR-0041).
  * `readableTable` is the one rule for that, so no read loads a table.
  */
 export function createTableHistoryReads(readableTable: (id: string, userId: string) => Promise<ReadableTable | undefined>) {
   return {
-    /** The Table History list for a Guest who may read this table's history; `undefined` for anyone else. */
+    /** The Table History list for a User who may read this table's history; `undefined` for anyone else. */
     async readHistory(id: string, userId: string): Promise<TableHistory | undefined> {
       const table = await readableTable(id, userId);
       return table && tableHistory(table);
     },
     /**
-     * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a Guest who may not read the
+     * One completed Hand's Replay Steps, under the same rule as the list: `undefined` for a User who may not read the
      * table, `'hand-not-found'` when the Hand is not a completed Hand of it.
      */
     async readReplay(id: string, userId: string, handId: string): Promise<TableHandReplay | 'hand-not-found' | undefined> {

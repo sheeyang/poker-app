@@ -1,7 +1,8 @@
 import { createSharedAnalyses } from './shared-analyses.js';
 import { createTableSummaries } from './table-summaries.js';
 import { createOverallHistorySummaries } from './overall-history-summaries.js';
-import { createOverallHistory, createScoredHistory } from './scored-history.js';
+import { createOverallHistory } from './overall-history.js';
+import { createScoreFilteredHistory } from './score-filtered-history.js';
 import { createProgressChannel } from './progress.js';
 import { createTableHistoryReads } from './table-history.js';
 import { participations } from './membership.js';
@@ -23,14 +24,15 @@ import { localUsers, tableSessions } from './db/schema.js';
 import { upgradeTableSession } from './aggregate.js';
 import { createTableSessionMutations, TableSessionRestorationError, type MutationTransactionFaults, type TableSessionControllerCommands } from './mutations.js';
 import { createTableSessionCreator, CommitOutcomeUnknown, type CreationTransactionFaults } from './creation.js';
-import { createGuestQueue } from './guest-queue.js';
+import { createUserQueue } from './user-queue.js';
 import { validateDisplayName } from './validation.js';
-import { recordOpened, requestIdPattern, tableSessionIdPattern } from './membership.js';
+import { recordOpened, tableSessionIdPattern } from './membership.js';
+import { isSuppliedRequestId, requestIdPattern } from './request-id.js';
 import { guestCookieSeconds, guestSeenIntervalMs, startGuestSweep } from './guests.js';
 import { AcceptanceTransactions } from './db/acceptance.js';
 import { systemClock, type ServerClock } from './clock.js';
 import { createRateLimiter, waitText, type RateLimitKind, type RateLimits } from './rate-limit.js';
-import { notFound, outcomeStatus, reject, unauthenticated } from './rejections.js';
+import { analysisNotFound, notFound, outcomeStatus, overallSummaryNotFound, reject, scoredRequestNotFound, tableSummaryNotFound, unauthenticated } from './rejections.js';
 
 export interface ServerOptions { readonly databaseUrl: string; readonly schema?: string;
   /** How long the acceptance journal waits to open a connection. Defaults to 2 seconds; test fixtures on a loaded machine raise it. Journal statements stay bounded at 2 seconds regardless. */
@@ -111,42 +113,42 @@ export async function createServer(options: ServerOptions) {
     'strategy' in body && !supportsStrategy((body as { strategy?: unknown }).strategy)
       ? reply.code(400).send({ ok: false, rejection: { code: 'unsupported-strategy', message: 'Choose a supported complete Strategy.' } }) : undefined;
   const acceptance = new AcceptanceTransactions(pool, options.databaseUrl, options.schema, options.journalConnectionTimeoutMs);
-  // Creating and joining share each Guest's turn, so a Guest is never let in at two Online Tables at once.
-  const guests = createGuestQueue();
-  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, supportsStrategy, guests, options.clock);
+  // Creating and joining share each User's turn, so a User is never let in at two Online Tables at once.
+  const userQueue = createUserQueue();
+  const create = createTableSessionCreator(db, acceptance, options.transactionFaults, supportsStrategy, userQueue, options.clock);
   const jobRunner = new JobRunner(options.jobRunnerOptions);
-  // A change reaches every connection of its Guest, which reads it again over HTTP.
+  // A change reaches every connection of its User, which reads it again over HTTP.
   const trainerConfigurations = createTrainerConfigurations(db, userId => { for (const deliver of userChannels.get(userId) ?? []) deliver({ type: 'trainer-configuration-changed' }); }, supportsStrategy);
-  const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onHumanActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis'), trainerConfigurations }, options.clock, guests);
+  const mutations = createTableSessionMutations(db, acceptance, options.mutationTransactionFaults, { runner: jobRunner, automaticBots: options.automaticBots, adminMode: options.adminMode, strategyFactory: options.strategyFactory, supportsStrategy: options.supportsStrategy, onPlayerActionAccepted: input => analysis.getOrStart(input, 'automatic-analysis'), trainerConfigurations }, options.clock, userQueue);
   options.onControllerCommandsReady?.({ submitAction: mutations.submitControllerAction, readPersistedSession: mutations.readPersistedSession, loadedTables: mutations.loadedTables });
-  // Every analysis a Table History or Overall History request schedules shares one per-Guest bound.
+  // Every analysis a Table History or Overall History request schedules shares one per-User bound.
   const historyAnalysis = createHistoryAnalysisScheduler(jobRunner);
   const analysis = createAnalysis(db, jobRunner, options.strategyFactory, publishUserUpdate, mutations.acceptJobResult, historyAnalysis);
   const sharedAnalyses = createSharedAnalyses(analysis, jobRunner, historyAnalysis);
-  // Score Summary requests are the Guest's own: their notices and pending counts reach that Guest's connections only.
-  const guestDelivery = { publish: deliverToGuest, progress: createProgressChannel(clock, deliverToGuest) };
-  const summaries = createTableSummaries(analysis, sharedAnalyses, publishUserUpdate, mutations.acceptJobResult, guestDelivery.progress);
-  const overallSummaries = createOverallHistorySummaries(sharedAnalyses, mutations.acceptJobResult, guestDelivery);
-  const scoredHistory = createScoredHistory(sharedAnalyses, guestDelivery);
+  // Score Summary requests are the User's own: their notices and pending counts reach that User's connections only.
+  const userDelivery = { publish: deliverToUser, progress: createProgressChannel(clock, deliverToUser) };
+  const summaries = createTableSummaries(analysis, sharedAnalyses, publishUserUpdate, mutations.acceptJobResult, userDelivery.progress);
+  const overallSummaries = createOverallHistorySummaries(sharedAnalyses, mutations.acceptJobResult, userDelivery);
+  const scoredHistory = createScoreFilteredHistory(sharedAnalyses, userDelivery);
   const tableHistory = createTableHistoryReads(mutations.readableTable);
   const overallHistory = createOverallHistory({ participations: userId => participations(db, userId), readableTable: mutations.readableTable, trainerConfigurations });
-  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); sharedAnalyses.stop(); guestDelivery.progress.stop(); analysis.stop(); });
+  app.addHook('preClose', async () => { closing = true; acceptance.stop(); mutations.stop(); sharedAnalyses.stop(); userDelivery.progress.stop(); analysis.stop(); });
   app.addHook('onClose', async () => { await mutations.close(); await analysis.close(); await pool.end(); await acceptance.close(); });
   const socketOwners = new WeakMap<FastifyRequest, string>();
   // The user channel is independent of open table subscriptions. Analysis publishes here for a Participant,
   // reaching only its Human Controller, after making the HTTP state readable.
   const userChannels = new Map<string, Set<(message: ServerLiveMessage) => void>>();
-  /** Sends `message` to every live connection of the Guest's, and nobody else's. */
-  function deliverToGuest(guestId: string, message: ServerLiveMessage) { for (const deliver of userChannels.get(guestId) ?? []) deliver(message); }
-  function publishUserUpdate(participantId: string, message: AnalysisUpdate, guestId?: string) {
+  /** Sends `message` to every live connection of the User's, and nobody else's. */
+  function deliverToUser(userId: string, message: ServerLiveMessage) { for (const deliver of userChannels.get(userId) ?? []) deliver(message); }
+  function publishUserUpdate(participantId: string, message: AnalysisUpdate, userId?: string) {
     const deliverTo = (userId: string | undefined) => { for (const deliver of userId ? userChannels.get(userId) ?? [] : []) deliver(message); };
-    // A history request names its Guest. Otherwise a former Participant studies too, so their Guest may have to be
+    // A history request names its User. Otherwise a former Participant studies too, so their User may have to be
     // found in the membership index.
-    if (guestId) return deliverTo(guestId);
-    void mutations.guestOf(message.tableSessionId, participantId).then(deliverTo, () => { /* Delivery cannot change a readable result. */ });
+    if (userId) return deliverTo(userId);
+    void mutations.userOf(message.tableSessionId, participantId).then(deliverTo, () => { /* Delivery cannot change a readable result. */ });
   }
   /**
-   * The requesting Guest's own Participant, joined or former (ADR-0041): the only one whose study results they may read
+   * The requesting User's own Participant, joined or former (ADR-0041): the only one whose study results they may read
    * or retry.
    */
   async function participantAt(tableSessionId: string, userId: string) {
@@ -170,7 +172,7 @@ export async function createServer(options: ServerOptions) {
     socket.on('message', data => {
       let message: ClientLiveMessage;
       try { message = JSON.parse(data.toString()); } catch { socket.close(1008, 'Invalid live message.'); return; }
-      if (!message || !['subscribe-table', 'unsubscribe-table'].includes(message.type) || typeof message.requestId !== 'string' || message.requestId.length < 1 || message.requestId.length > 128 || typeof message.tableSessionId !== 'string') {
+      if (!message || !['subscribe-table', 'unsubscribe-table'].includes(message.type) || !isSuppliedRequestId(message.requestId) || typeof message.tableSessionId !== 'string') {
         socket.close(1008, 'Invalid live message.'); return;
       }
       // Serialize subscription commands so removal cannot overtake authorization/loading.
@@ -243,7 +245,7 @@ export async function createServer(options: ServerOptions) {
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The display name could not be saved. Try again.' } }); }
     return { ok: true, displayName: checked.displayName };
   });
-  // The Guest's Trainer Configuration, for every table (ADR-0041). Changing it is the Guest's own request, not a table's.
+  // The User's Trainer Configuration, for every table (ADR-0041). Changing it is the User's own request, not a table's.
   app.get('/api/trainer-configuration', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
@@ -256,7 +258,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     const requestId = (request.body as { requestId?: unknown } | null)?.requestId;
-    if (typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await trainerConfigurations.set(userId, request.body);
       return reply.code(outcome.ok ? 200 : outcome.rejection.code === 'request-id-conflict' ? 409 : 400).send(outcome);
@@ -265,7 +267,7 @@ export async function createServer(options: ServerOptions) {
   app.post<{ Body: CreateTableSessionRequest }>('/api/table-sessions', async (request, reply) => {
     const limited = refuseIfLimited('creation', request, reply); if (limited) return limited;
     const ownerUserId = await ensureIdentity(request, reply);
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+    if (!isSuppliedRequestId(request.body?.requestId))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const result = await create(ownerUserId, request.body);
@@ -282,7 +284,7 @@ export async function createServer(options: ServerOptions) {
     try { return { tables: await mutations.savedTables(userId) }; }
     catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Your saved tables could not be read. Try again.' } }); }
   });
-  // The Trainer says a Guest opened a table: the time is the server's, kept with their membership, and orders their saved lists (ADR-0037).
+  // The Trainer says a User opened a table: the time is the server's, kept with their membership, and orders their saved lists (ADR-0037).
   app.post<{ Params: { id: string } }>('/api/table-sessions/:id/opened', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
@@ -307,7 +309,7 @@ export async function createServer(options: ServerOptions) {
     const limited = refuseIfLimited('joining', request, reply); if (limited) return limited;
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+    if (!isSuppliedRequestId(request.body?.requestId))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       // Each check of a Table Password is an attempt at it, right or wrong; a join refused before any check spends none.
@@ -340,7 +342,7 @@ export async function createServer(options: ServerOptions) {
       return restorationFailure(error, reply) ?? reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The committed Table Session is unavailable. Refresh to try reading it again.' } });
     }
   });
-  /** Table History: the list of the table's completed Hands, for a Guest who may read them (ADR-0040). */
+  /** Table History: the list of the table's completed Hands, for a User who may read them (ADR-0040). */
   app.get<{ Params: { id: string } }>('/api/table-sessions/:id/history', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
@@ -354,7 +356,7 @@ export async function createServer(options: ServerOptions) {
     }
   });
   /**
-   * Overall History: the Guest's own decisions across every table they may read, filtered by the declared non-score set
+   * Overall History: the User's own decisions across every table they may read, filtered by the declared non-score set
    * (`decodeHistoryFilter`: the same encoding as the browser's address) and paged by `limit` (1–200, default 50) and `offset`.
    */
   const count = (value: unknown, fallback: number, minimum: number, maximum: number) => { const number = typeof value === 'string' && /^[0-9]{1,9}$/.test(value) ? Number(value) : fallback; return Math.min(maximum, Math.max(minimum, number)); };
@@ -376,7 +378,7 @@ export async function createServer(options: ServerOptions) {
   /**
    * A Score Summary over Overall History's filtered decisions (ADR-0041), optionally broken down by one dimension. The
    * body is `{ filter?, breakdown?, strategy? }`, `filter` in the list's flat encoding. Score ranges narrow it once every
-   * analysis of the set the other filters admit has succeeded; until then it is Analyzing or Error, never a partial mean. Every analysis it needs runs as the Guest's
+   * analysis of the set the other filters admit has succeeded; until then it is Analyzing or Error, never a partial mean. Every analysis it needs runs as the User's
    * `history-analysis`; the answer comes at once and `GET` reports its progress. Transient, like every summary.
    */
   app.post<{ Body: OverallHistorySummaryRequest }>('/api/overall-history/summaries', async (request, reply) => {
@@ -385,7 +387,7 @@ export async function createServer(options: ServerOptions) {
     const body: unknown = request.body ?? {};
     if (!plain(body) || Object.keys(body).some(key => key !== 'filter' && key !== 'breakdown' && key !== 'strategy') || body.filter !== undefined && (!plain(body.filter) || Object.values(body.filter).some(value => typeof value !== 'string' && typeof value !== 'number' || String(value).length > 512)) || body.breakdown !== undefined && !isHistoryBreakdown(body.breakdown))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply an optional filter, in the Overall History address encoding, an optional breakdown: street, position, action or mode, and an optional Strategy.' } });
-    // A named Strategy summarizes the same set under it instead of the Guest's Reference Strategy, and never changes their Trainer Configuration.
+    // A named Strategy summarizes the same set under it instead of the User's Reference Strategy, and never changes their Trainer Configuration.
     const unsupported = unsupportedStrategy(body, reply);
     if (unsupported) return unsupported;
     try {
@@ -397,7 +399,7 @@ export async function createServer(options: ServerOptions) {
   });
   /**
    * Overall History with score ranges (ADR-0041): the body is `{ filter }`, in the list's flat encoding, holding at least
-   * one score range, and optionally `strategy`. A score range is decided by analysis under the Guest's Reference Strategy
+   * one score range, and optionally `strategy`. A score range is decided by analysis under the User's Reference Strategy
    * (or the supported Strategy named, which never changes the Trainer Configuration), so the answer is Analyzing
    * (with progress) or Error until every analysis of the non-score set has succeeded, and only then the decisions the
    * ranges admit, paged by `limit` and `offset` on the `GET`. Transient, like a summary.
@@ -420,26 +422,30 @@ export async function createServer(options: ServerOptions) {
   app.get<{ Params: { requestId: string }; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    return scoredHistory.read(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(scoredRequestNotFound());
+    return scoredHistory.read(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send(scoredRequestNotFound());
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never>; Querystring: Record<string, unknown> }>('/api/overall-history/scored/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(scoredRequestNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-scored-request', message: 'Retry uses the captured request. Supply an empty request.' } });
-    return scoredHistory.retry(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient request is unavailable. Ask for the filtered list again.' } });
+    return scoredHistory.retry(request.params.requestId, userId, pageOf(request.query)) ?? reply.code(404).send(scoredRequestNotFound());
   });
   app.get<{ Params: { requestId: string } }>('/api/overall-history/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
-    return overallSummaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(overallSummaryNotFound());
+    return overallSummaries.readHistory(request.params.requestId, userId) ?? reply.code(404).send(overallSummaryNotFound());
   });
   app.post<{ Params: { requestId: string }; Body: Record<string, never> }>('/api/overall-history/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(overallSummaryNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
-    return overallSummaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new summary explicitly.' } });
+    return overallSummaries.retryHistory(request.params.requestId, userId) ?? reply.code(404).send(overallSummaryNotFound());
   });
-  /** One completed Hand of Table History, replayed: its Replay Steps as the reader may see them (ADR-0041). */
+  /** One completed Hand of Table History, replayed: its Replay Steps as the viewer may see them (ADR-0041). */
   app.get<{ Params: { id: string; handId: string } }>('/api/table-sessions/:id/history/:handId', async (request, reply) => {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
@@ -457,7 +463,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128)
+    if (!isSuppliedRequestId(request.body?.requestId))
       return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.submit(request.params.id, userId, kind, request.body);
@@ -473,7 +479,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.configure(request.params.id, userId, kind, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);
@@ -488,7 +494,7 @@ export async function createServer(options: ServerOptions) {
     const userId = await authenticatedUser(request);
     if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send(notFound());
-    if (typeof request.body?.requestId !== 'string' || request.body.requestId.length < 1 || request.body.requestId.length > 128) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
+    if (!isSuppliedRequestId(request.body?.requestId)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-request-id', message: 'Supply a requestId from 1 to 128 characters.' } });
     try {
       const outcome = await mutations.setTablePassword(request.params.id, userId, request.body);
       return reply.code(outcomeStatus(outcome)).send(outcome);
@@ -501,29 +507,31 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/summaries/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(tableSummaryNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Retry uses the captured summary. Supply an empty request.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && await summaries.retry(request.params.id, request.params.requestId, participantId);
-      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+      if (!state) return reply.code(404).send(tableSummaryNotFound());
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be retried. Read its state before trying again.' } }); }
   });
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/summaries/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!requestIdPattern.test(request.params.requestId)) return reply.code(404).send(tableSummaryNotFound());
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && summaries.read(request.params.id, request.params.requestId, participantId);
-      return state || reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This transient summary request is unavailable. Request a new snapshot explicitly.' } });
+      return state || reply.code(404).send(tableSummaryNotFound());
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary could not be read. Try reading it again.' } }); }
   });
-  // `history: true` asks from Table History: run as the reader's `history-analysis`, under their per-Guest bound, as is
+  // `history: true` asks from Table History: run as the viewer's `history-analysis`, under their per-User bound, as is
   // any summary naming a Strategy to compare and any summary a former Participant asks for (ADR-0041).
   app.post<{ Params: { id: string }; Body: { strategy?: StrategyDescriptor; history?: true } }>('/api/table-sessions/:id/session-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (request.body !== undefined && (!plain(request.body) || request.body.history !== undefined && request.body.history !== true || Object.keys(request.body).some(key => key !== 'strategy' && key !== 'history'))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Session summaries capture the committed decisions. Supply an empty request, or a Strategy to summarize them under and whether Table History asks.' } });
     const unsupported = unsupportedStrategy(request.body ?? {}, reply);
@@ -537,7 +545,7 @@ export async function createServer(options: ServerOptions) {
   });
   app.post<{ Params: { id: string }; Body: { handId: string; strategy?: StrategyDescriptor } }>('/api/table-sessions/:id/hand-summaries', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!request.body || typeof request.body.handId !== 'string' || request.body.handId.length < 1 || request.body.handId.length > 128 || Object.keys(request.body).some(key => key !== 'handId' && key !== 'strategy')) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-summary-request', message: 'Supply the Hand ID, and optionally a Strategy.' } });
     const unsupported = unsupportedStrategy(request.body ?? {}, reply);
@@ -550,15 +558,15 @@ export async function createServer(options: ServerOptions) {
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'The summary snapshot could not be captured.' } }); }
   });
-  // `history: true` asks from Table History: the reader's own accepted decision, read like the history itself and
-  // scheduled as `history-analysis`, behind all play and live study, under the reader's per-Guest bound.
-  // `strategy` names a supported Strategy to analyze it under instead of the Guest's Reference Strategy (Counterfactual
-  // Comparison): the same frozen inputs and seeds, its own result. It never changes the Guest's Trainer Configuration, and
+  // `history: true` asks from Table History: the viewer's own accepted decision, read like the history itself and
+  // scheduled as `history-analysis`, behind all play and live study, under the viewer's per-User bound.
+  // `strategy` names a supported Strategy to analyze it under instead of the User's Reference Strategy (Counterfactual
+  // Comparison): the same frozen inputs and seeds, its own result. It never changes the User's Trainer Configuration, and
   // it applies only to an accepted decision, so it cannot be combined with `live`. The server decides the schedule, not
   // the flag: a named Strategy, and any study by a former Participant, is always `history-analysis` (ADR-0041).
   app.post<{ Params: { id: string }; Body: GetOrStartAnalysisRequest }>('/api/table-sessions/:id/analysis', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
     if (!tableSessionIdPattern.test(request.params.id)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
     if (!request.body || typeof request.body.decisionId !== 'string' || request.body.decisionId.length < 1 || request.body.decisionId.length > 128 || request.body.live !== undefined && request.body.live !== true || request.body.history !== undefined && request.body.history !== true || request.body.live && request.body.history || request.body.live && 'strategy' in request.body || Object.keys(request.body).some(key => !['decisionId', 'live', 'history', 'strategy'].includes(key))) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Supply a Decision ID and either an optional Live Analysis request or an optional history request, with an optional Strategy for an accepted decision.' } });
     const unsupported = unsupportedStrategy(request.body ?? {}, reply);
@@ -568,37 +576,37 @@ export async function createServer(options: ServerOptions) {
         const input = await mutations.captureHistoryEvaluation(request.params.id, userId, request.body.decisionId, request.body.strategy);
         if (input === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
         if (input === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose one of your own accepted decisions.' } });
-        const state = await analysis.getOrStart(input, { purpose: 'history-analysis', guestId: userId });
+        const state = await analysis.getOrStart(input, { purpose: 'history-analysis', userId });
         return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
       }
-      const studied = await mutations.captureEvaluation(request.params.id, userId, request.body.decisionId);
+      const studied = await mutations.captureStudyEvaluation(request.params.id, userId, request.body.decisionId);
       if (studied === undefined) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This Table Session is unavailable.' } });
-      if (studied === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted human decision.' } });
+      if (studied === null) return reply.code(400).send({ ok: false, rejection: { code: 'decision-unavailable', message: 'Choose a current or accepted player decision.' } });
       if ('ok' in studied) return reply.code(outcomeStatus(studied)).send(studied);
-      const state = await analysis.getOrStart(studied.input, studied.former ? { purpose: 'history-analysis', guestId: userId } : request.body.live ? 'live-analysis' : 'interactive-analysis');
+      const state = await analysis.getOrStart(studied.input, studied.former ? { purpose: 'history-analysis', userId } : request.body.live ? 'live-analysis' : 'interactive-analysis');
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });
   app.post<{ Params: { id: string; requestId: string }; Body: Record<string, never> }>('/api/table-sessions/:id/analysis/:requestId/retry', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send(analysisNotFound());
     if (!emptyBody(request.body)) return reply.code(400).send({ ok: false, rejection: { code: 'invalid-analysis-request', message: 'Retry uses the original analysis inputs. Supply an empty request.' } });
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && await analysis.retry(request.params.id, request.params.requestId, participantId);
-      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+      if (!state) return reply.code(404).send(analysisNotFound());
       return reply.code(state.status === 'error' && state.error.code === 'capacity' ? 503 : 200).send(state);
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be retried. Try reading it again.' } }); }
   });
   app.get<{ Params: { id: string; requestId: string } }>('/api/table-sessions/:id/analysis/:requestId', async (request, reply) => {
     const userId = await authenticatedUser(request);
-    if (!userId) return reply.code(401).send({ ok: false, rejection: { code: 'unauthenticated', message: 'Establish your local identity first.' } });
-    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+    if (!userId) return reply.code(401).send(unauthenticated());
+    if (!tableSessionIdPattern.test(request.params.id) || !requestIdPattern.test(request.params.requestId)) return reply.code(404).send(analysisNotFound());
     try {
       const participantId = await participantAt(request.params.id, userId);
       const state = participantId && await analysis.read(request.params.id, request.params.requestId, participantId);
-      if (!state) return reply.code(404).send({ ok: false, rejection: { code: 'not-found', message: 'This analysis is unavailable.' } });
+      if (!state) return reply.code(404).send(analysisNotFound());
       return state;
     } catch { return reply.code(503).send({ ok: false, rejection: { code: 'persistence-unavailable', message: 'Analysis could not be loaded. Try reading it again.' } }); }
   });

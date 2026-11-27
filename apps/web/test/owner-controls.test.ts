@@ -27,7 +27,7 @@ describe('who has departed', () => {
   it('treats a view that lists nobody as everyone present', () => {
     expect(presentBindings(table('ann'))).toHaveLength(4);
   });
-  it('does not offer Removal of a human who has left or was removed', () => {
+  it('does not offer Removal of a player who has left or was removed', () => {
     expect(canRemove(table('ann'), table('ann').bindings[1]!)).toBe(true);
     const left = table('ann', { departedParticipantIds: ['ben'] });
     expect(canRemove(left, left.bindings[1]!)).toBe(false);

@@ -34,7 +34,7 @@ async function table(cookie: string, mode: 'practice' | 'online' = 'practice') {
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), mode, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   expect(response.status).toBe(201);
   const created = await response.json();
-  return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+  return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
 }
 type Table = Awaited<ReturnType<typeof table>>;
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
@@ -44,19 +44,19 @@ async function command(t: Table, kind: string, contents: object = {}, cookie = t
   const response = await post('/api/table-sessions/' + t.id + '/' + kind, cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, ...contents });
   expect(response.status).toBe(200);
 }
-/** The human, in the button seat, folds the first Hand as soon as its Action Window opens; then its payout phase passes. */
+/** The player, in the button seat, folds the first Hand as soon as its Action Window opens; then its payout phase passes. */
 async function completedHand(t: Table) {
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 2 });
   const { mode } = await read(t);
   if (mode === 'online') {
-    // An Online Table deals by itself once its connected human and the Bot are seated and the countdown runs out.
+    // An Online Table deals by itself once its connected player and the Bot are seated and the countdown runs out.
     await connectLive(base, t.cookie, t.id);
     clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
     await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
   } else await command(t, 'start-hand');
   clock.advance(presentedFor('deal', mode));
-  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
   clock.advance(presentedFor('payout', mode));
 }
 const join = (t: Table, cookie: string) => post('/api/table-sessions/' + t.id + '/join-table', cookie, { requestId: randomUUID() });
@@ -96,7 +96,7 @@ async function legacyLive(tableSessionId: string, cookie: string) {
   } finally { socket.terminate(); }
 }
 
-test('a Guest who has not joined a table is refused every route and live subscription exactly as if it did not exist', async () => {
+test('a User who has not joined a table is refused every route and live subscription exactly as if it did not exist', async () => {
   const owner = await table(await guest());
   const stranger = await guest('Stranger');
   await table(stranger);
@@ -111,7 +111,7 @@ test('a Guest who has not joined a table is refused every route and live subscri
     expect(summary).toMatchObject({ ok: true, decisionCount: 1 });
     const before = await read(owner);
     const missing = randomUUID();
-    const pokerBody = { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, participantId: owner.human };
+    const pokerBody = { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, participantId: owner.player };
     const routes: [method: 'GET' | 'POST', suffix: string, body?: unknown][] = [
       ['GET', ''],
       ['POST', '/seat-participant', { ...pokerBody, participantId: owner.bot, seat: 3 }],
@@ -151,7 +151,7 @@ test('a Guest who has not joined a table is refused every route and live subscri
 });
 
 const refusal = async (response: Response) => ({ status: response.status, code: (await response.json()).rejection?.code });
-test('each human acts, manages and studies only through their own Participant, and only the owner manages the table', async () => {
+test('each player acts, manages and studies only through their own Participant, and only the owner manages the table', async () => {
   const owner = await table(await guest('Ann'), 'online');
   await completedHand(owner);
   const ownerAnalysis = await settledAnalysis(owner);
@@ -171,7 +171,7 @@ test('each human acts, manages and studies only through their own Participant, a
   // Joining after the Hand, Ben reads it in the table's history, with nobody's hole cards.
   expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [{ handId: 'hand-1', result: { status: 'completed-hand' } }] } });
   expect(JSON.stringify(seen.view.history)).not.toContain('holeCards');
-  expect(seen.view.state.participants).toEqual(expect.arrayContaining([{ participantId: owner.human, seat: 1, stack: 990, sittingOut: false }, { participantId: owner.bot, seat: 2, stack: 1010, sittingOut: false }]));
+  expect(seen.view.state.participants).toEqual(expect.arrayContaining([{ participantId: owner.player, seat: 1, stack: 990, sittingOut: false }, { participantId: owner.bot, seat: 2, stack: 1010, sittingOut: false }]));
   expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
   for (const cookie of [leftCookie, removedCookie]) {
     expect((await get('/api/table-sessions/' + owner.id, cookie)).status).toBe(404);
@@ -181,7 +181,7 @@ test('each human acts, manages and studies only through their own Participant, a
   expect(await (await get('/api/table-sessions', otherCookie)).json()).toMatchObject({ tables: [{ tableSessionId: owner.id, mode: 'online' }] });
   expect((await (await get('/api/table-sessions', owner.cookie)).json()).tables).toContainEqual(expect.objectContaining({ tableSessionId: owner.id, mode: 'online' }));
 
-  // The Trainer Configuration belongs to each Guest: the same table presents each viewer their own.
+  // The Trainer Configuration belongs to each User: the same table presents each viewer their own.
   const ownerStudy = { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true };
   const otherStudy = { referenceStrategy: baselinePlayingStrategy, liveAnalysis: false };
   const configure = (cookie: string, trainerConfiguration: object) => fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'study', trainerConfiguration }) });
@@ -192,10 +192,10 @@ test('each human acts, manages and studies only through their own Participant, a
   expect(await read(owner)).toMatchObject({ pokerRevision: unchanged.pokerRevision, sessionRevision: unchanged.sessionRevision, trainerConfiguration: ownerStudy });
   expect(await read(ben)).toMatchObject({ trainerConfiguration: otherStudy });
 
-  // Nobody acts for or manages another human, the owner included; only the owner deals and manages Bots.
+  // Nobody acts for or manages another player, the owner included; only the owner deals and manages Bots.
   const revision = (await read(owner)).pokerRevision, sessionRevision = (await read(owner)).sessionRevision;
   const poker = (t: Table, kind: string, contents: object) => post('/api/table-sessions/' + t.id + '/' + kind, t.cookie, { requestId: randomUUID(), expectedPokerRevision: revision, ...contents });
-  for (const [t, target] of [[ben, owner.human], [owner, other]] as const) {
+  for (const [t, target] of [[ben, owner.player], [owner, other]] as const) {
     for (const [kind, contents] of [['seat-participant', { seat: 4 }], ['act', { action: { type: 'check' } }], ['stand-up-participant', {}], ['move-participant', { seat: 5 }], ['set-sitting-out', { sittingOut: true }], ['top-up-to', { targetStack: 1000 }]] as const)
       expect({ kind, ...await refusal(await poker(t, kind, { participantId: target, ...contents })) }).toEqual({ kind, status: 403, code: 'not-your-participant' });
   }
@@ -226,7 +226,7 @@ test('each human acts, manages and studies only through their own Participant, a
   } finally { ownerChannel.socket.terminate(); otherChannel.socket.terminate(); }
   expect((await get('/api/table-sessions/' + owner.id + '/analysis/' + ownerAnalysis, otherCookie)).status).toBe(404);
   expect((await post('/api/table-sessions/' + owner.id + '/analysis/' + ownerAnalysis + '/retry', otherCookie, {})).status).toBe(404);
-  expect(await (await get('/api/table-sessions/' + owner.id + '/analysis/' + ownerAnalysis, owner.cookie)).json()).toMatchObject({ status: 'complete', participantId: owner.human });
+  expect(await (await get('/api/table-sessions/' + owner.id + '/analysis/' + ownerAnalysis, owner.cookie)).json()).toMatchObject({ status: 'complete', participantId: owner.player });
   expect(await refusal(await post('/api/table-sessions/' + owner.id + '/analysis', otherCookie, { decisionId: 'hand-1/decision-1' }))).toEqual({ status: 400, code: 'decision-unavailable' });
   expect((await get('/api/table-sessions/' + owner.id + '/summaries/' + ownerSummary.requestId, otherCookie)).status).toBe(404);
   expect((await post('/api/table-sessions/' + owner.id + '/summaries/' + ownerSummary.requestId + '/retry', otherCookie, {})).status).toBe(404);

@@ -8,9 +8,9 @@ import { chips } from './table-model.js';
 export function handResult(table: ObservableTableSession): { readonly headline: string; readonly detail: string } | undefined {
   const state = table.view.state;
   if (state.status !== 'completed-hand' || !state.handId) return undefined;
-  const humanId = table.viewerParticipantId;
-  const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === humanId) ?? [];
-  const payout = state.payouts?.filter(p => p.participantId === humanId).reduce((n, p) => n + p.amount, 0) ?? 0;
+  const viewerId = table.viewerParticipantId;
+  const decisions = table.view.history.find(h => h.handId === state.handId)?.decisions.filter(d => d.action.participantId === viewerId) ?? [];
+  const payout = state.payouts?.filter(p => p.participantId === viewerId).reduce((n, p) => n + p.amount, 0) ?? 0;
   return {
     headline: payout ? `You received ${chips(payout)} chips.` : 'Hand complete.',
     detail: decisions.length ? `${decisions.length} ${decisions.length === 1 ? 'decision' : 'decisions'} to review.` : 'You had no decisions in this hand, so there’s no score to review.',

@@ -12,7 +12,7 @@ describe('the saved rows of one mode', () => {
     expect(rows).toEqual([{ kind: 'practice', tableSessionId: 'p', seatCount: 6, name: '6-max Hold’em', blinds: '10 / 20', action: 'Continue', status: 'Practice', history: '/practice/p/history' }]);
   });
 
-  it('shows an Online Table the Guest is not at as "Not at this table", returning them to its address, with its Table History still open to them', () => {
+  it('shows an Online Table the User is not at as "Not at this table", returning them to its address, with its Table History still open to them', () => {
     const [row] = savedRows([online('o', true)], 'online');
     expect(row).toMatchObject({ kind: 'away', action: 'Return to table', status: 'Not at this table', tableSessionId: 'o', history: '/online/o/history' });
     expect(row).not.toHaveProperty('live');
@@ -68,7 +68,7 @@ describe('live details from the loaded Current Table', () => {
   const payout = { kind: 'payout', handId: 'hand-1', street: 'river', startsAt: 0, endsAt: 2000, durationMs: 2000 };
   const table = (status: string, stack?: number) => ({ viewerParticipantId: 'me', schedule: { phases: status === 'completed-hand' ? [payout] : [], actionWindow: null },
     view: { state: { status, handId: 'hand-1', participants: [{ participantId: 'me', seat: stack === undefined ? null : 1, stack: stack ?? 0 }, { participantId: 'bot', seat: 2, stack: 9 }] } } }) as unknown as ObservableTableSession;
-  it('says whether a Hand is in progress, and the stack of the Guest seated', () => {
+  it('says whether a Hand is in progress, and the stack of the player seated', () => {
     expect(liveDetails('t', table('active-hand', 2140), 0)).toEqual({ tableSessionId: 't', handInProgress: true, stack: 2140 });
     expect(liveDetails('t', table('between-hands', 500), 0)).toEqual({ tableSessionId: 't', handInProgress: false, stack: 500 });
   });
@@ -76,7 +76,7 @@ describe('live details from the loaded Current Table', () => {
     expect(liveDetails('t', table('completed-hand', 500), 1999)?.handInProgress).toBe(true);
     expect(liveDetails('t', table('completed-hand', 500), 2000)?.handInProgress).toBe(false);
   });
-  it('has no stack for a Guest who is watching', () => {
+  it('has no stack for a player who is watching', () => {
     expect(liveDetails('t', table('between-hands'), 0)).toEqual({ tableSessionId: 't', handInProgress: false });
   });
   it('has none when the table is not loaded', () => expect(liveDetails('t', undefined, 0)).toBeUndefined());

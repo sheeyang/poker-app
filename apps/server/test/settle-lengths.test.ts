@@ -36,7 +36,7 @@ test('a Settle set to 0 schedules no stillness: the next phase or Action Window 
   expect(dealt.phases.map(phase => phase.kind)).toEqual(['deal']);
   expect(dealt.actionWindow).toMatchObject({ participantId: 'ann', opensAt: now + lengthOf('deal') });
 
-  // The human goes all in and is called: a showdown, every street and the payout, back to back.
+  // The player goes all in and is called: a showdown, every street and the payout, back to back.
   const opens = dealt.actionWindow!.opensAt;
   const raised = step(game, dealt, (game.act('ann', { type: 'raise', raiseTo: 1000 })), opens, { settleLengths: none });
   const done = step(game, raised, (game.act('rex', { type: 'call' })), opens, { settleLengths: none });

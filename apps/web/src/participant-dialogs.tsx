@@ -9,7 +9,7 @@ import { nextBotName, openSeats } from './owner-controls.js';
 import { participantActions, stackBounds } from './participant-actions.js';
 import { StrategySelect } from './strategy-select.js';
 import type { Command } from './session.js';
-import { chips, playerName } from './table-model.js';
+import { chips, participantName } from './table-model.js';
 
 export type ParticipantTask = 'stack' | 'strategy' | 'remove-bot' | 'remove-participant' | 'leave';
 interface Props { table: ObservableTableSession; command: Command; handOpen: boolean; close: () => void }
@@ -22,7 +22,7 @@ export function ParticipantDialog({ table, command, handOpen, close, participant
   const [strategy, setStrategy] = useState<StrategyDescriptor>(binding?.controller.kind === 'bot' ? binding.controller.playingStrategy : defaultPlayingStrategy);
   const submit = useCommandDialog(command, close), hint = useId();
   const own = participantId === table.viewerParticipantId;
-  const name = binding ? playerName(table, binding) : 'Participant';
+  const name = binding ? participantName(table, binding) : 'Participant';
   const rebuy = participant?.stack === 0;
   const busy = command.busy || table.runtimeStatus?.phase === 'recovering';
   const action = participantActions(table, participantId, handOpen).find(action => action.id === task);

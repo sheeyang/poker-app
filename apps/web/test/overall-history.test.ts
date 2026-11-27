@@ -47,7 +47,7 @@ test('a range edge sets and clears on its own, and a range left with no edge is 
   expect(clearedFilter()).toEqual({});
 });
 
-test('a date is the Guest\'s own calendar day: it runs from midnight to the last millisecond, and reads back as the same date', () => {
+test('a date is the User\'s own calendar day: it runs from midnight to the last millisecond, and reads back as the same date', () => {
   const start = dayStartMs('2026-11-22'), end = dayEndMs('2026-11-22');
   expect(new Date(start).getHours()).toBe(0);
   expect(new Date(start).getDate()).toBe(22);

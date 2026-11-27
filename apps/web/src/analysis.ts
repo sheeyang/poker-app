@@ -10,8 +10,8 @@ export type AnalysisAddress = { tab: 'live' | 'hand' | 'session' | undefined; ch
 export function useDecisionAnalysis(table: ObservableTableSession | undefined, address?: AnalysisAddress) {
   const [selection, setSelection] = useState<{ tableId: string; decisionId: string; handId?: string; newestAccepted?: string; collapsed?: boolean }>();
   const [viewSelection, setViewSelection] = useState<{ tableId: string; view: 'live' | 'hand' }>();
-  const human = table?.viewerParticipantId;
-  const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.handId !== table.view.state.handId ? [] : hand.decisions.filter(decision => decision.action.participantId === human).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
+  const viewer = table?.viewerParticipantId;
+  const acceptedDecisions = table?.view.history.flatMap((hand, handIndex) => hand.handId !== table.view.state.handId ? [] : hand.decisions.filter(decision => decision.action.participantId === viewer).map(decision => ({ decisionId: decision.decisionId, action: decision.action.action, handId: hand.handId, handNumber: handIndex + 1, state: decision.state }))) ?? [];
   const newestAccepted = acceptedDecisions.at(-1)?.decisionId;
   const currentDecisionId = table?.view.state.legalActions.length ? table.view.state.decisionId : undefined;
   // Live Analysis runs only while the viewer has it on and the table allows it for their decision.

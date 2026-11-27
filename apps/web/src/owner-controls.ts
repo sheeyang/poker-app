@@ -3,10 +3,10 @@ import { betweenHandsOnly, outranksPending, type Availability } from './self-ser
 
 /**
  * The Table Owner's controls, as pure functions of the committed table: the Trainer shows what the server will
- * do, and the server alone decides. None of these gives the owner a way to touch another human.
+ * do, and the server alone decides. None of these gives the owner a way to touch another player.
  */
 
-/** Whether a Participant has left the table: a human who left or was removed, or a Bot the owner removed. */
+/** Whether a Participant has left the table: a player who left or was removed, or a Bot the owner removed. */
 export const hasDeparted = (table: ObservableTableSession, participantId: string) => !!table.departedParticipantIds?.includes(participantId);
 
 /** The Participants still at the table, in binding order: the ones the Trainer lists, seats and manages. */
@@ -66,7 +66,7 @@ export interface BotControls {
 }
 
 /**
- * What the owner can ask of one Bot right now. Like a human's own, a Bot's sit-out is asked for during a Hand and
+ * What the owner can ask of one Bot right now. Like a player's own, a Bot's sit-out is asked for during a Hand and
  * applies after it, and so is its Removal; stacks, Seats and resuming wait for the Hand to end.
  */
 export function botControls(table: ObservableTableSession, participantId: string, handOpen: boolean): BotControls {

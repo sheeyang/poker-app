@@ -46,7 +46,7 @@ Common acceptance for every delivered command: one semantic CashGame state owner
 
 7. **Play multiway Hands with antes and correct position**
    - **Blocked by:** Ticket 6.
-   - **What it delivers:** Play with three through nine Participants, equal per-player antes, correct blind/deal/action order, and eligible button rotation.
+   - **What it delivers:** Play with three through nine Participants, equal per-Participant antes, correct blind/deal/action order, and eligible button rotation.
    - [Full issue draft](../../.scratch/m1-tickets/issues/07-multiway-antes-and-order.md)
 
 8. **Run out all-ins and settle main, side, and split pots**

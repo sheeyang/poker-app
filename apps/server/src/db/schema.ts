@@ -9,11 +9,11 @@ export const localUsers = pgTable('local_users', {
   displayName: text('display_name'),
   /** When the Guest last made a request, by the server's clock; written at most once a day. */
   lastSeenAt: bigint('last_seen_at', { mode: 'number' }).notNull(),
-  /** The Guest's Trainer Configuration (ADR-0041); null until they first change it, which means the default. */
+  /** The User's Trainer Configuration (ADR-0041); null until they first change it, which means the default. */
   trainerConfiguration: jsonb('trainer_configuration').$type<TrainerConfiguration>(),
 });
-/** Each Guest-scoped change already applied, so that repeating its request ID applies it once. */
-export const guestRequests = pgTable('guest_requests', {
+/** Each User-scoped change already applied, so that repeating its request ID applies it once. */
+export const userRequests = pgTable('user_requests', {
   userId: uuid('user_id').notNull().references(() => localUsers.id, { onDelete: 'cascade' }),
   requestId: text('request_id').notNull(),
   fingerprint: text('fingerprint').notNull(),
@@ -31,13 +31,13 @@ export const tableSessions = pgTable('table_sessions', {
   /** A Closed Table, mirroring the aggregate's `closed`: never loaded, listed as closed. */
   closed: boolean('closed').notNull().default(false),
 });
-/** The membership index: one row per human Participant, mirroring its aggregate binding. */
+/** The membership index: one row per player, mirroring its aggregate binding. */
 export const tableMemberships = pgTable('table_memberships', {
   userId: uuid('user_id').notNull().references(() => localUsers.id),
   tableSessionId: uuid('table_session_id').notNull().references(() => tableSessions.id),
   participantId: text('participant_id').notNull(),
   status: text('status').$type<MembershipStatus>().notNull(),
-  /** When the Guest last opened the table, by the server's clock; null until they have. */
+  /** When the User last opened the table, by the server's clock; null until they have. */
   openedAt: bigint('opened_at', { mode: 'number' }),
 }, table => [primaryKey({ columns: [table.userId, table.tableSessionId] }), unique().on(table.tableSessionId, table.participantId)]);
 

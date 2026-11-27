@@ -49,10 +49,10 @@ test('the shared socket authenticates its cookie and readies the user channel wi
 async function table(cookie: string) {
   const response = await fetch(base + '/api/table-sessions', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }) });
   const created = await response.json();
-  return { id: created.tableSessionId as string, human: created.bindings[0].participantId as string };
+  return { id: created.tableSessionId as string, player: created.bindings[0].participantId as string };
 }
 async function seat(cookie: string, target: Awaited<ReturnType<typeof table>>) {
-  return fetch(base + '/api/table-sessions/' + target.id + '/seat-participant', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), expectedPokerRevision: 0, participantId: target.human, seat: 1 }) });
+  return fetch(base + '/api/table-sessions/' + target.id + '/seat-participant', { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ requestId: randomUUID(), expectedPokerRevision: 0, participantId: target.player, seat: 1 }) });
 }
 
 test('one socket authorizes multiple subscriptions, isolates removal and restores the latest complete safe view', async () => {
@@ -84,7 +84,7 @@ test('one socket authorizes multiple subscriptions, isolates removal and restore
     expect(live.messages.filter(message => message.type === 'table-update' && message.tableSessionId === first.id)).toHaveLength(1);
     expect(live.messages.some(message => 'tableSessionId' in message && message.tableSessionId === inaccessible.id && message.type !== 'table-subscription-result')).toBe(false);
     expect(await command('subscribe-table', first.id)).toMatchObject({ status: 'subscribed' });
-    await expect.poll(() => live.messages.find(message => message.type === 'table-update' && message.tableSessionId === first.id && message.sessionRevision === 1)).toMatchObject({ pokerRevision: 1, presentationEvents: [], view: { state: { participants: [{ participantId: first.human, seat: 1, stack: 1000 }] } } });
+    await expect.poll(() => live.messages.find(message => message.type === 'table-update' && message.tableSessionId === first.id && message.sessionRevision === 1)).toMatchObject({ pokerRevision: 1, presentationEvents: [], view: { state: { participants: [{ participantId: first.player, seat: 1, stack: 1000 }] } } });
     expect(live.socket.readyState).toBe(WebSocket.OPEN);
   } finally { live.socket.close(); await new Promise<void>(resolve => live.socket.once('close', () => resolve())); }
   const reconnected = connect(cookie);

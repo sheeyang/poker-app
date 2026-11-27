@@ -73,7 +73,7 @@ tied hands above all three live short hands. Run with `--hex` for creation entro
   nines with an ace kicker. The live short hands have only queens. Genuine
   main 5 and side 3 split independently, giving Alice 5 and Bob 3 overall.
 - The all-zero 32-byte seed can be reproduced with `random-v1.py` and 64 zero
-  digits. Three-player board is `Td Qh 5c Ad 4s`, burns `3d Js Qs`; Bob in
+  digits. Three-Participant board is `Td Qh 5c Ad 4s`, burns `3d Js Qs`; Bob in
   Seat 2 holds `4d 8s` and pairs the four. With caps 100/300/300 he wins both
   pots and stacks finish 0/700/0. Heads-up board is `Kc 3d Td 5c Ad`; the deep
   button's nine kicker beats the short big blind's eight, settling 200 plus

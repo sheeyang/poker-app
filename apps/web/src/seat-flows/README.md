@@ -58,7 +58,7 @@ their actions, or **You · Watching** in the tray for your watching actions.
 | You, watching | Choose a seat when several seats are open; Leave table |
 | You, seated | Top up or Rebuy; Sit out or Return to play; Move seat; Stand up; Leave table |
 | Bot, viewed by the owner | Top up or Rebuy; Sit out or Return to play; Move seat; Playing Strategy; Remove Bot |
-| Bot, viewed by a guest | Read-only stack summary |
+| Bot, viewed by another player | Read-only stack summary |
 
 Move seat highlights and focuses open seats on the table. For a Bot, select a
 destination + and confirm **Move [Bot name] here**. Top-up and strategy forms
@@ -70,8 +70,8 @@ and opens the same menu pattern:
 
 | Viewer | Menu actions |
 | --- | --- |
-| Watching guest | Take this seat |
-| Seated guest | Move here |
+| Watching player | Take this seat |
+| Seated player | Move here |
 | Watching owner | Take this seat; Add a Bot here |
 | Seated owner | Move here; Add a Bot here |
 

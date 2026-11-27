@@ -35,7 +35,7 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
   const currentPresentation = usePresentation(currentCopy.data, currentCopy.data?.viewerParticipantId);
   const tables = sessions.data && savedRows(sessions.data.tables, mode, currentId && currentPresentation ? liveDetails(currentId, currentCopy.data, currentPresentation.serverNow) : undefined);
   const { displayName } = useDisplayName(), [awaitingName, setAwaitingName] = useState<CreateTableSessionRequest | null>(null);
-  // Until the Guest decides, the form is open exactly when there is nothing to pick up instead.
+  // Until the User decides, the form is open exactly when there is nothing to pick up instead.
   const [composing, setComposing] = useState<boolean>();
   const open = composing ?? tables?.length === 0;
   const launch = (request: CreateTableSessionRequest) => displayName ? command.launch(request) : setAwaitingName(request);
@@ -65,7 +65,7 @@ export function TablesScreen({ mode }: { mode: TableMode }) {
 
 /**
  * One saved table. The whole row opens it: a real link to its address, so it can open in a new browser tab. An
- * Online Table the Guest is not at opens at its address too, which is its Join Link: its join form returns them. Each
+ * Online Table the User is not at opens at its address too, which is its Join Link: its join form returns them. Each
  * row also links to the table's Table History, which stays open after leaving. A Closed Table's whole row opens its
  * Table History, the only thing left to open there.
  */
@@ -132,24 +132,24 @@ function feltCentre(smallBlind: number, bigBlind: number, stack: number) {
 }
 
 function PracticeComposer({ id, command, ready, launch }: { id: string; command: Command; ready: boolean; launch: (request: CreateTableSessionRequest) => void }) {
-  const [players, setPlayers] = useState(6), [depth, setDepth] = useState(100);
+  const [seatCount, setSeatCount] = useState(6), [depth, setDepth] = useState(100);
   const [smallBlind, setSmallBlind] = useState(10), [bigBlind, setBigBlind] = useState(20), [ante, setAnte] = useState(0);
   const [minimumBB, setMinimumBB] = useState(20), [maximumBB, setMaximumBB] = useState(200);
   const [strategy, setStrategy] = useState(defaultPlayingStrategy), [seatChanges, setSeatChanges] = useState(true);
   // Practice is untimed unless the player asks for an Action Time Limit.
   const [timeLimit, setTimeLimit] = useState<ActionTimeLimitSeconds | null>(null);
   const valid = [smallBlind, bigBlind, ante, depth, minimumBB, maximumBB].every(Number.isSafeInteger) && smallBlind > 0 && bigBlind >= smallBlind && ante >= 0 && depth >= minimumBB && minimumBB > 0 && depth <= maximumBB && Number.isSafeInteger(bigBlind * maximumBB);
-  const bots = players - 1, others = `You and ${bots} ${bots === 1 ? 'Bot' : 'Bots'}`;
-  const seats = Array.from({ length: players }, (_, i): SeatMark => i === 0 ? 'you' : 'taken');
-  return <Composer id={id} label="New practice table" seats={seats} felt={`${tableFormat(players)} table: ${others.toLowerCase()}`} summary={feltCentre(smallBlind, bigBlind, bigBlind * depth)}>
-    <form onSubmit={e => { e.preventDefault(); if (!valid) return; launch({ requestId: crypto.randomUUID(), configuration: { ...defaultConfiguration, seatCount: players, smallBlind, bigBlind, ante, minimumBuyIn: bigBlind * minimumBB, defaultBuyIn: bigBlind * depth, maximumBuyIn: bigBlind * maximumBB, allowSeatChanges: seatChanges }, bots: Array.from({ length: bots }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: strategy })), ...(timeLimit ? { options: { actionTimeLimitSeconds: timeLimit } } : {}) }); }}>
+  const bots = seatCount - 1, others = `You and ${bots} ${bots === 1 ? 'Bot' : 'Bots'}`;
+  const seats = Array.from({ length: seatCount }, (_, i): SeatMark => i === 0 ? 'you' : 'taken');
+  return <Composer id={id} label="New practice table" seats={seats} felt={`${tableFormat(seatCount)} table: ${others.replace('You', 'you')}`} summary={feltCentre(smallBlind, bigBlind, bigBlind * depth)}>
+    <form onSubmit={e => { e.preventDefault(); if (!valid) return; launch({ requestId: crypto.randomUUID(), configuration: { ...defaultConfiguration, seatCount, smallBlind, bigBlind, ante, minimumBuyIn: bigBlind * minimumBB, defaultBuyIn: bigBlind * depth, maximumBuyIn: bigBlind * maximumBB, allowSeatChanges: seatChanges }, bots: Array.from({ length: bots }, (_, i) => ({ name: `Bot ${i + 1}`, playingStrategy: strategy })), ...(timeLimit ? { options: { actionTimeLimitSeconds: timeLimit } } : {}) }); }}>
       <fieldset disabled={command.busy || !ready}>
-        <p className="composer-summary"><strong>{tableFormat(players)} Hold’em</strong><span>{others}{timeLimit ? ` · ${timeLimit}s to act` : ''}</span></p>
-        <Segmented legend="Size" name="practice-size" options={sizes} value={players} onChange={setPlayers} />
+        <p className="composer-summary"><strong>{tableFormat(seatCount)} Hold’em</strong><span>{others}{timeLimit ? ` · ${timeLimit}s to act` : ''}</span></p>
+        <Segmented legend="Table Format" name="practice-size" options={sizes} value={seatCount} onChange={setSeatCount} />
         <Segmented legend="Starting stack" name="practice-stack" options={[50, 100, 200].map(n => ({ value: n, label: `${n} BB` }))} value={depth} onChange={setDepth} />
         <BlindsField smallBlind={smallBlind} bigBlind={bigBlind} onChange={(small, big) => { setSmallBlind(small); setBigBlind(big); }} />
-        <details className="composer-more"><summary>Customize table & bots<Icon name="chevron" size={15} /></summary><div className="details-content">
-          <div className="form-pair"><label>Players<select value={players} onChange={e => setPlayers(Number(e.target.value))}>{Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 2}>{i + 2} players</option>)}</select></label><label>Starting stack · BB<input required type="number" min={minimumBB} max={maximumBB} step="1" value={depth} onChange={e => setDepth(Number(e.target.value))} /></label></div>
+        <details className="composer-more"><summary>Customize table & Bots<Icon name="chevron" size={15} /></summary><div className="details-content">
+          <div className="form-pair"><label>Seats<select value={seatCount} onChange={e => setSeatCount(Number(e.target.value))}>{Array.from({ length: 8 }, (_, i) => <option key={i} value={i + 2}>{i + 2} seats</option>)}</select></label><label>Starting stack · BB<input required type="number" min={minimumBB} max={maximumBB} step="1" value={depth} onChange={e => setDepth(Number(e.target.value))} /></label></div>
           <div className="form-pair"><label>Small blind<input required type="number" min="1" step="1" value={smallBlind} onChange={e => setSmallBlind(Number(e.target.value))} /></label><label>Big blind<input required type="number" min={smallBlind} step="1" value={bigBlind} onChange={e => setBigBlind(Number(e.target.value))} /></label></div>
           <div className="form-pair"><label>Minimum buy-in · BB<input required type="number" min="1" max={depth} step="1" value={minimumBB} onChange={e => setMinimumBB(Number(e.target.value))} /></label><label>Maximum buy-in · BB<input required type="number" min={depth} step="1" value={maximumBB} onChange={e => setMaximumBB(Number(e.target.value))} /></label></div>
           <label>Ante<input required type="number" min="0" step="1" value={ante} onChange={e => setAnte(Number(e.target.value))} /></label>
@@ -164,7 +164,7 @@ function PracticeComposer({ id, command, ready, launch }: { id: string; command:
   </Composer>;
 }
 
-/** Online creation: the table size and stakes up front, as at a Practice Table, and everything else under progressive disclosure. */
+/** Online creation: the Table Format and stakes up front, as at a Practice Table, and everything else under progressive disclosure. */
 function OnlineComposer({ id, command, ready, displayName, launch }: { id: string; command: Command; ready: boolean; displayName?: string; launch: (request: CreateTableSessionRequest) => void }) {
   const [setup, setSetup] = useState(defaultOnlineSetup);
   const problem = onlineSetupProblem(setup);
@@ -178,7 +178,7 @@ function OnlineComposer({ id, command, ready, displayName, launch }: { id: strin
     <form onSubmit={e => { e.preventDefault(); const request = onlineCreationRequest(setup, crypto.randomUUID()); if (request) launch(request); }}>
       <fieldset disabled={command.busy || !ready}>
         <p className="composer-summary"><strong>{tableFormat(setup.seatCount)} Hold’em</strong><span>{setup.seatCount} seats{botCount} · {setup.actionTimeLimitSeconds}s to act</span></p>
-        <Segmented legend="Size" name="online-size" options={sizes} value={setup.seatCount} onChange={resize} />
+        <Segmented legend="Table Format" name="online-size" options={sizes} value={setup.seatCount} onChange={resize} />
         {/* Not an error while it is still being typed: the hint says what it takes, and Create waits for it. */}
         <PasswordField className="composer-field" id={`${id}-password`} label={<>Table password <span className="field-optional">optional</span></>} name="tablePassword" value={setup.tablePassword} placeholder="None: anyone with the address joins" autoComplete="new-password" aria-describedby={setup.tablePassword ? `${id}-password-hint` : undefined} onChange={e => setSetup({ ...setup, tablePassword: e.target.value })}
           note={setup.tablePassword && <small id={`${id}-password-hint`} className={passwordProblem ? 'field-hint is-short' : 'field-hint'}>{passwordProblem ? '4 to 64 characters. Capitals count.' : 'Capitals count. Tell it to the people you invite.'}</small>} />
@@ -191,7 +191,7 @@ function OnlineComposer({ id, command, ready, displayName, launch }: { id: strin
           <label>Time to act<select value={setup.actionTimeLimitSeconds} onChange={e => setSetup({ ...setup, actionTimeLimitSeconds: Number(e.target.value) as ActionTimeLimitSeconds })}>{actionTimeLimits.map(seconds => <option key={seconds} value={seconds}>{seconds} seconds</option>)}</select></label>
           <label className="check-label"><input type="checkbox" checked={setup.allowLiveAnalysis} onChange={e => setSetup({ ...setup, allowLiveAnalysis: e.target.checked })} />Allow Live Analysis at this table</label>
           <label className="check-label"><input type="checkbox" checked={setup.allowSeatChanges} onChange={e => setSetup({ ...setup, allowSeatChanges: e.target.checked })} />Allow seat changes between hands</label>
-          <div className="form-pair"><label>Bots<select value={setup.bots} onChange={number('bots')}>{Array.from({ length: setup.seatCount }, (_, i) => <option key={i} value={i}>{i === 0 ? 'No bots' : i === 1 ? '1 bot' : `${i} bots`}</option>)}</select></label>{setup.bots > 0 && <label>Bot Playing Strategy<StrategySelect value={setup.botStrategy} onChange={botStrategy => setSetup({ ...setup, botStrategy })} /></label>}</div>
+          <div className="form-pair"><label>Bots<select value={setup.bots} onChange={number('bots')}>{Array.from({ length: setup.seatCount }, (_, i) => <option key={i} value={i}>{i === 0 ? 'No Bots' : i === 1 ? '1 Bot' : `${i} Bots`}</option>)}</select></label>{setup.bots > 0 && <label>Bot Playing Strategy<StrategySelect value={setup.botStrategy} onChange={botStrategy => setSetup({ ...setup, botStrategy })} /></label>}</div>
         </div></details>
         {problem && problem !== passwordProblem && <p className="notice-error" role="alert">{problem}</p>}
         <CurrentTableRefusal error={command.error} />

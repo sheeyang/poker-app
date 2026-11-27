@@ -104,7 +104,7 @@ export interface StrategyDescriptor {
   readonly selector: { readonly id: string; readonly version: string; readonly configuration: Readonly<Record<string, unknown>> };
 }
 /**
- * A Guest's study preferences, chosen once and used at every table, in review and in every summary (ADR-0041).
+ * A User's study preferences, chosen once and used at every table, in review and in every summary (ADR-0041).
  * Independent of every Bot's Playing Strategy. An Online Table's Allow Live Analysis can still refuse Live Analysis.
  */
 export interface TrainerConfiguration {
@@ -138,7 +138,7 @@ export const tablePasswordLength = { minimum: 4, maximum: 64 } as const;
 /** Online defaults when creation names no option. */
 export const defaultOnlineActionTimeLimitSeconds: ActionTimeLimitSeconds = 30;
 /**
- * An Online Table holds at most this many Participants: its joined humans, the Bots its owner has not removed, and the
+ * An Online Table holds at most this many Participants: its joined players, the Bots its owner has not removed, and the
  * Table Owner's own place, which is held after they leave so that they can always return.
  */
 export const onlineTableCapacity = 20;
@@ -161,7 +161,7 @@ export interface ApplicationRejection {
   readonly ok: false;
   readonly rejection: {
     readonly code: string; readonly message: string; readonly field?: string;
-    /** With `current-table-elsewhere`: the Guest's Current Table, which they must leave first. */
+    /** With `current-table-elsewhere`: the User's Current Table, which they must leave first. */
     readonly currentTableId?: TableSessionId;
   };
 }
@@ -191,8 +191,8 @@ export interface SetButtonRequest extends PokerMutationMetadata { readonly seat:
 /** Leave Table: stand up if seated, then cease to be at the table. Self-service only. */
 export interface LeaveTableRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
 /**
- * Removal: the Table Owner ends a human Participant's membership. During a Hand it waits for the Hand (an
- * After-Hand Request); when it applies the Guest stands up and can no longer join through any Join Link.
+ * Removal: the Table Owner ends a player's membership. During a Hand it waits for the Hand (an
+ * After-Hand Request); when it applies the player stands up and can no longer join through any Join Link.
  */
 export interface RemoveParticipantRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
 /**
@@ -208,7 +208,7 @@ export interface AddBotRequest extends PokerMutationMetadata {
 }
 /**
  * The Table Owner removes a Bot: it stands up, cashing out, and leaves the table. A Bot in a Hand goes after it
- * (an After-Hand Request, shown to everyone like a human's). Its name stays taken and its past Hands stay in the history.
+ * (an After-Hand Request, shown to everyone like a player's). Its name stays taken and its past Hands stay in the history.
  */
 export interface RemoveBotRequest extends PokerMutationMetadata { readonly participantId: ParticipantId }
 export type ParticipantManagementRequest = StandUpParticipantRequest | MoveParticipantRequest | SetSittingOutRequest | TopUpToRequest | SetButtonRequest | LeaveTableRequest | RemoveParticipantRequest | RemoveBotRequest;
@@ -229,16 +229,16 @@ export interface MutationAcknowledgement {
 }
 export type MutationOutcome = MutationAcknowledgement | ApplicationRejection;
 /**
- * Joining carries a request ID but no expected revision: the joiner has not seen the table. A Guest who is not at a
+ * Joining carries a request ID but no expected revision: the joiner has not seen the table. A User who is not at a
  * table with a Table Password gives it too; it is never remembered with the request.
  */
 export interface JoinTableRequest { readonly requestId: string; readonly tablePassword?: string }
-/** The Guest's Participant at the table: the same one every time they join. */
+/** The User's Participant at the table: the same one every time they join. */
 export interface JoinAcknowledgement extends MutationAcknowledgement { readonly participantId: ParticipantId }
 export type JoinOutcome = JoinAcknowledgement | ApplicationRejection;
 /**
- * What an Online Table's Join Link, its own address, shows a Guest before they join. A table with a Table Password
- * shows a Guest who is not at it only its owner's name (`ProtectedJoinLinkPreview`).
+ * What an Online Table's Join Link, its own address, shows a User before they join. A table with a Table Password
+ * shows a User who is not at it only its owner's name (`ProtectedJoinLinkPreview`).
  */
 export type JoinLinkPreview = OpenJoinLinkPreview | ProtectedJoinLinkPreview;
 export interface ProtectedJoinLinkPreview {
@@ -254,9 +254,9 @@ export interface OpenJoinLinkPreview {
   readonly options: TableOptions;
   /** How many of the table's `onlineTableCapacity` places are taken (see there). Joining is refused once all are. */
   readonly placesTaken: number;
-  /** The requesting Guest has already joined, so joining returns their own Participant. */
+  /** The requesting User has already joined, so joining returns their own Participant. */
   readonly alreadyJoined: boolean;
-  /** The requesting Guest left this table earlier: joining returns them to their Participant under this original name. */
+  /** The requesting User left this table earlier: joining returns them to their Participant under this original name. */
   readonly returningAs?: string;
 }
 /** Explicitly authorized completed-Hand Research output; never an Observable Game View. */
@@ -285,9 +285,9 @@ export interface InspectionCapabilities {
 /** Fixed when a Table Session is created. */
 export type TableMode = 'practice' | 'online';
 /**
- * One entry of the saved-tables list: every table the Guest has a membership at, including those they left. It is built
- * from stored rows (mode, format, blinds, membership) and never loads a table, so it says nothing of play: how a Hand
- * stands and the Guest's stack come only from the Current Table's live copy. The size and stakes are absent only while
+ * One entry of the saved-tables list: every table the User has a membership at, including those they left. It is built
+ * from stored rows (mode, seat count, blinds, membership) and never loads a table, so it says nothing of play: how a Hand
+ * stands and the User's stack come only from the Current Table's live copy. The size and stakes are absent only while
  * the stored table cannot be read.
  */
 export interface SavedTable {
@@ -296,7 +296,7 @@ export interface SavedTable {
   readonly left?: true;
   /** A Closed Table: nobody can open, join or act at it. Its memberships have ended, so it is `left` too. */
   readonly closed?: true;
-  /** When the Guest last opened this table, by the server's clock in epoch milliseconds; absent until they have. */
+  /** When the User last opened this table, by the server's clock in epoch milliseconds; absent until they have. */
   readonly openedAt?: number;
   readonly seatCount?: number;
   readonly stakes?: Stakes;
@@ -336,13 +336,13 @@ export interface ActionWindow {
   readonly decisionId: DecisionId;
   readonly opensAt: ServerTime;
   /**
-   * The Action Deadline of a human's window under an Action Time Limit: `opensAt` plus the limit. An action the
+   * The Action Deadline of a player's window under an Action Time Limit: `opensAt` plus the limit. An action the
    * server receives later than this is rejected (`action-deadline-passed`), and the server plays the Timeout
    * Action (Check, or Fold when Check is not legal) as that Participant's decision. Bots never have one.
    */
   readonly deadlineAt?: ServerTime;
   /**
-   * Present on a human's window when the table disallowed Live Analysis as the window opened: each window captures
+   * Present on a player's window when the table disallowed Live Analysis as the window opened: each window captures
    * Allow Live Analysis then, so a change between Hands applies from the next decision. Live Analysis of this
    * decision is refused (`live-analysis-disallowed`); post-action analysis and scoring are not affected.
    */
@@ -350,7 +350,7 @@ export interface ActionWindow {
 }
 /**
  * What an After-Hand Request changes: a change to a Participant that waits for the Hand in progress to end. A weaker
- * request is superseded by a stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a Guest asks for
+ * request is superseded by a stronger one (`sit-out` < `stand-up` < `leave-table` < `remove`): nothing a User asks for
  * undoes the owner's Removal. The server queues sit-outs of its own (an Online Timeout Action, a failed Bot).
  */
 export type AfterHandRequestKind = 'sit-out' | 'stand-up' | 'leave-table' | 'remove';
@@ -361,23 +361,23 @@ export interface EligibilityFacts {
   readonly seat: number | null;
   readonly stack: ChipAmount;
   readonly sittingOut: boolean;
-  readonly human: boolean;
-  /** For a human: at least one live connection of their Guest is subscribed to the table. */
+  readonly player: boolean;
+  /** For a player: at least one live connection of their User is subscribed to the table. */
   readonly connected: boolean;
 }
-/** An Eligible Participant: seated with chips, not Sitting Out, and either a Bot or a connected human. */
-export const isEligibleParticipant = (participant: EligibilityFacts): boolean => participant.seat !== null && participant.stack > 0 && !participant.sittingOut && (!participant.human || participant.connected);
-/** Automatic Dealing deals only while at least two Eligible Participants remain, at least one of them human: Bots never play on alone. */
+/** An Eligible Participant: seated with chips, not Sitting Out, and either a Bot or a connected player. */
+export const isEligibleParticipant = (participant: EligibilityFacts): boolean => participant.seat !== null && participant.stack > 0 && !participant.sittingOut && (!participant.player || participant.connected);
+/** Automatic Dealing deals only while at least two Eligible Participants remain, at least one of them a player: Bots never play on alone. */
 export function canDealNextHand(participants: readonly EligibilityFacts[]): boolean {
   const ready = participants.filter(isEligibleParticipant);
-  return ready.length >= 2 && ready.some(participant => participant.human);
+  return ready.length >= 2 && ready.some(participant => participant.player);
 }
 /** An After-Hand Request, public to everyone at the table. The view and the Persisted Table Session list them as `pendingChanges`. */
 export interface AfterHandRequest { readonly participantId: ParticipantId; readonly change: AfterHandRequestKind }
 /**
  * The announced server time at which an Online Table deals its next Hand (Automatic Dealing). When it expires
  * the server rechecks eligibility: it deals if at least two Eligible Participants remain, at least one of them
- * a connected human, and otherwise cancels the countdown until the condition holds again.
+ * a connected player, and otherwise cancels the countdown until the condition holds again.
  */
 export interface NextHandCountdown {
   readonly startsAt: ServerTime;
@@ -402,22 +402,22 @@ export interface TableSchedule {
 export function handEndsAt(phases: readonly PresentationPhase[]): ServerTime | undefined {
   return phases.some(phase => phase.kind === 'payout') ? Math.max(...phases.map(phase => phase.endsAt)) : undefined;
 }
-/** Who becomes the Table Owner when the owner leaves, or that the table closes with no other human at it. */
+/** Who becomes the Table Owner when the owner leaves, or that the table closes with no other player at it. */
 export type OwnerSuccession = { readonly successorParticipantId: ParticipantId } | { readonly closes: true };
 export interface ObservableTableSession {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
   readonly options: ObservableTableOptions;
-  /** The Participant this view was projected for: the viewing Guest's own. */
+  /** The Participant this view was projected for: the viewing User's own. */
   readonly viewerParticipantId: ParticipantId;
-  /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another human. */
+  /** The Table Owner's Participant: who manages table options and Bots. Never a right to control another player. */
   readonly ownerParticipantId: ParticipantId;
   readonly pokerRevision: Revision;
   readonly sessionRevision: Revision;
   readonly bindings: readonly ParticipantBinding[];
   /**
-   * The viewing Guest's current Trainer Configuration, presented beside the table's Allow Live Analysis. It belongs to
-   * the Guest, not the table: changing it advances no revision (see `TrainerConfigurationChanged`).
+   * The viewing User's current Trainer Configuration, presented beside the table's Allow Live Analysis. It belongs to
+   * the User, not the table: changing it advances no revision (see `TrainerConfigurationChanged`).
    */
   readonly trainerConfiguration: TrainerConfiguration;
   readonly view: ObservableGameView;
@@ -428,20 +428,20 @@ export interface ObservableTableSession {
   /** Changes asked for during the Hand in progress, applied together when it ends, with the Settle after its payout. Public. */
   readonly pendingChanges: readonly AfterHandRequest[];
   /**
-   * At an Online Table, the human Participants connected to it when the view was produced: their Guest has at least
+   * At an Online Table, the players connected to it when the view was produced: their User has at least
    * one live connection subscribed to it. Public and transient: it is never persisted and changes no revision, and
-   * each change is also published live (`table-presence`). A Practice Table, with its single human, has none.
+   * each change is also published live (`table-presence`). A Practice Table, with its single player, has none.
    */
   readonly connectedParticipantIds?: readonly ParticipantId[];
   /**
-   * The Participants who are no longer at the table: humans who left it or were removed, and Bots the owner removed.
+   * The Participants who are no longer at the table: players who left it or were removed, and Bots the owner removed.
    * Public, and absent while nobody has departed. They keep their names in the history, and the owner is not offered
    * Removal of them.
    */
   readonly departedParticipantIds?: readonly ParticipantId[];
   /**
    * Only in the Table Owner's own view of an Online Table: what their Leave Table would do to ownership if they asked
-   * for it now. Ownership passes to the earliest-joined human still at the table (ADR-0034), or, with nobody to take it,
+   * for it now. Ownership passes to the earliest-joined player still at the table (ADR-0034), or, with nobody to take it,
    * the table closes. The server works out the join order, so the client only shows it.
    */
   readonly ownerSuccession?: OwnerSuccession;
@@ -470,13 +470,13 @@ export interface AnalysisUpdate {
   readonly status: 'complete' | 'error';
 }
 /**
- * A Guest-scoped request the user channel reports on, named by its HTTP resource: an Overall History Score Summary
+ * A User-scoped request the user channel reports on, named by its HTTP resource: an Overall History Score Summary
  * request (`/api/overall-history/summaries`) or a score-filtered Overall History list (`/api/overall-history/scored`).
  */
 export type OverallHistoryResource = 'overall-history-summary' | 'overall-history-scored';
 /**
- * One of the Guest's Overall History requests reached a terminal state: one of its summaries completed (or its score
- * ranges left it empty), the score-filtered list was decided, or it failed. Sent on the Guest's user channel only, once
+ * One of the User's Overall History requests reached a terminal state: one of its summaries completed (or its score
+ * ranges left it empty), the score-filtered list was decided, or it failed. Sent on the User's user channel only, once
  * that state is readable; like every notice it carries no result, and the client reads the request again over HTTP.
  */
 export interface OverallHistoryUpdate {
@@ -496,7 +496,7 @@ export type ProgressResource = OverallHistoryResource | 'summary';
 /** How far one pending request has got: how many of the analyses it needs have succeeded, out of all of them. */
 export interface RequestProgress { readonly resource: ProgressResource; readonly requestId: string; readonly succeeded: number; readonly total: number }
 /**
- * The latest count of every pending request of the Guest's, sent on their user channel at most once a second while
+ * The latest count of every pending request of the User's, sent on their user channel at most once a second while
  * counts change (ADR-0026: results still refresh over HTTP after notices, and nothing polls). It carries counts only,
  * never results, and is never stored: after a reconnect the client reads each request over HTTP. A request leaves it
  * once its completion or failure notice is sent.
@@ -504,7 +504,7 @@ export interface RequestProgress { readonly resource: ProgressResource; readonly
 export interface ProgressUpdate { readonly type: 'progress'; readonly progress: readonly RequestProgress[] }
 export interface UserChannelReady { readonly type: 'user-channel-ready' }
 /**
- * The Guest's Trainer Configuration changed, sent on their user channel to every one of their connections once the
+ * The User's Trainer Configuration changed, sent on their user channel to every one of their connections once the
  * change is readable. It carries nothing: each tab reads the configuration and its analysis state again over HTTP.
  */
 export interface TrainerConfigurationChanged { readonly type: 'trainer-configuration-changed' }
@@ -517,7 +517,7 @@ export type TableSubscriptionResult = {
   readonly tableSessionId: TableSessionId;
 } & ({ readonly status: 'subscribed' | 'unsubscribed' } | { readonly status: 'rejected'; readonly code: 'not-found' | 'unavailable' });
 /**
- * The last message a Guest's subscription receives after their Participant leaves the table or is removed, or the
+ * The last message a User's subscription receives after their Participant leaves the table or is removed, or the
  * table closes.
  * Their client returns to its saved tables.
  */
@@ -554,14 +554,14 @@ export interface ControllerMutationMetadata { readonly requestId: string; readon
 export interface SetPlayingStrategyRequest extends ControllerMutationMetadata { readonly playingStrategy: StrategyDescriptor }
 export interface RetryBotRequest extends ControllerMutationMetadata {}
 /**
- * Sets the requesting Guest's Trainer Configuration, for every table. A Guest-scoped request, not a table mutation: it
+ * Sets the requesting User's Trainer Configuration, for every table. A User-scoped request, not a table mutation: it
  * carries no revision, and repeating it with the same request ID applies it once.
  */
 export interface SetTrainerConfigurationRequest {
   readonly requestId: string;
   readonly trainerConfiguration: TrainerConfiguration;
 }
-/** The Guest's Trainer Configuration, as read or as a change left it. */
+/** The User's Trainer Configuration, as read or as a change left it. */
 export interface TrainerConfigurationAcknowledgement { readonly ok: true; readonly trainerConfiguration: TrainerConfiguration }
 export type TrainerConfigurationOutcome = TrainerConfigurationAcknowledgement | ApplicationRejection;
 /**
@@ -649,14 +649,14 @@ export type DecisionAnalysis = AnalysisRequestIdentity & (
 );
 /**
  * `POST /table-sessions/:id/analysis`. `live` asks for Live Analysis, `history` asks from Table History. `strategy`
- * (optional, supported Strategies only) names the Strategy to analyze an accepted decision under instead of the Guest's
+ * (optional, supported Strategies only) names the Strategy to analyze an accepted decision under instead of the User's
  * Reference Strategy, for a Counterfactual Comparison: each Strategy is its own request and its own result, on the same
- * frozen inputs and seeds. Absent, the Guest's Reference Strategy applies. It cannot be combined with `live`.
+ * frozen inputs and seeds. Absent, the User's Reference Strategy applies. It cannot be combined with `live`.
  */
 export interface GetOrStartAnalysisRequest { readonly decisionId: string; readonly live?: true; readonly history?: true; readonly strategy?: StrategyDescriptor }
 
 /**
- * One immutable, explicitly requested set of accepted human decisions. `progress` is how many of the analyses it needs
+ * One immutable, explicitly requested set of accepted player decisions. `progress` is how many of the analyses it needs
  * have succeeded, out of all of them: while it is Analyzing the same count travels on the user channel (`progress`
  * messages of the `summary` resource), and every HTTP response reports the latest one.
  */

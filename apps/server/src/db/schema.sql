@@ -16,15 +16,23 @@ DO $$ BEGIN
     ALTER TABLE local_users ALTER COLUMN last_seen_at SET DEFAULT 0;
   END IF;
 END $$;
--- The Guest's Trainer Configuration (ADR-0041), null until they first change it: the default. Configurations kept per
--- Participant before it are discarded, so every existing Guest starts from the default. Check first, as for display_name.
+-- The User's Trainer Configuration (ADR-0041), null until they first change it: the default. Configurations kept per
+-- Participant before it are discarded, so every existing User starts from the default. Check first, as for display_name.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'local_users' AND column_name = 'trainer_configuration') THEN
     ALTER TABLE local_users ADD COLUMN trainer_configuration jsonb;
   END IF;
 END $$;
--- Guest-scoped changes already applied, by request ID. They go with their Guest when an idle Guest is purged.
-CREATE TABLE IF NOT EXISTS guest_requests (
+-- User-scoped changes already applied, by request ID. They go with their User when an idle Guest is purged.
+-- The table was named guest_requests before; it keeps its rows under the new name. Guarded by the catalog alone, so
+-- that later startups take no lock.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_class AS r JOIN pg_namespace AS n ON n.oid = r.relnamespace WHERE n.nspname = current_schema() AND r.relname = 'guest_requests' AND r.relkind = 'r')
+    AND NOT EXISTS (SELECT 1 FROM pg_class AS r JOIN pg_namespace AS n ON n.oid = r.relnamespace WHERE n.nspname = current_schema() AND r.relname = 'user_requests') THEN
+    ALTER TABLE guest_requests RENAME TO user_requests;
+  END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS user_requests (
   user_id uuid NOT NULL REFERENCES local_users(id) ON DELETE CASCADE,
   request_id text NOT NULL,
   fingerprint text NOT NULL,
@@ -99,8 +107,8 @@ CREATE TABLE IF NOT EXISTS acceptance_attempts (
   table_session_id uuid,
   PRIMARY KEY(scope_kind, scope_id, request_id)
 );
--- Mirrors each human binding of a table's aggregate, written in the same transaction as every commit.
--- The primary key serves a Guest's lookups; the unique key serves a Participant's.
+-- Mirrors each player binding of a table's aggregate, written in the same transaction as every commit.
+-- The primary key serves a User's lookups; the unique key serves a Participant's.
 CREATE TABLE IF NOT EXISTS table_memberships (
   user_id uuid NOT NULL REFERENCES local_users(id),
   table_session_id uuid NOT NULL REFERENCES table_sessions(id),
@@ -119,14 +127,14 @@ DO $$ BEGIN
       ADD CONSTRAINT table_memberships_status CHECK (status IN ('joined', 'left'));
   END IF;
 END $$;
--- When the Guest last opened the table, by the server's clock (epoch ms); null until they have. The membership mirror
+-- When the User last opened the table, by the server's clock (epoch ms); null until they have. The membership mirror
 -- never writes it. Check first, as for display_name.
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'table_memberships' AND column_name = 'opened_at') THEN
     ALTER TABLE table_memberships ADD COLUMN opened_at bigint;
   END IF;
 END $$;
--- Version-1 aggregates predate the index. They are Practice Tables whose one human is joined.
+-- Version-1 aggregates predate the index. They are Practice Tables whose one player is joined.
 INSERT INTO table_memberships (user_id, table_session_id, participant_id, status)
 SELECT (binding->>'userId')::uuid, sessions.id, binding->>'participantId', 'joined'
 FROM table_sessions AS sessions, jsonb_array_elements(sessions.aggregate->'bindings') AS binding

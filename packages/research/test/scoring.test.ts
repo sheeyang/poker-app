@@ -5,7 +5,7 @@ import type { ConcreteAction } from '@poker/contracts';
 
 const view: ObservableGameView = {
   configuration: { seatCount: 2, smallBlind: 10, bigBlind: 20, ante: 0, minimumBuyIn: 100, defaultBuyIn: 1000, maximumBuyIn: 1000, allowSeatChanges: true },
-  state: { status: 'active-hand', buttonSeat: 1, participants: [{ participantId: 'human', seat: 1, stack: 990, sittingOut: false, wager: 10 }], board: [], pots: [], actorId: 'human', legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }] },
+  state: { status: 'active-hand', buttonSeat: 1, participants: [{ participantId: 'player', seat: 1, stack: 990, sittingOut: false, wager: 10 }], board: [], pots: [], actorId: 'player', legalActions: [{ type: 'fold' }, { type: 'call' }, { type: 'raise', minimum: 40, maximum: 1000 }] },
   history: [],
 };
 test('an accepted unsized action uses its Choice probability and its rank among every legal action type', () => {

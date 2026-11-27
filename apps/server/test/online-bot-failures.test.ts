@@ -21,7 +21,7 @@ const plans: ('fail' | ConcreteAction)[] = [];
 /** Every evaluation the Bot was asked for: its input view and seed. */
 const evaluations: { view: ObservableGameView; seed: string }[] = [];
 const fixture: StrategyDescriptor = { policy: { id: 'fixture', version: 'v1', configuration: {} }, selector: { id: 'highest-probability', version: 'v1', configuration: {} } };
-/** While `holdingAnalysis`, every other Strategy's evaluation (a human's analysis here) waits until `releaseAnalyses()`. */
+/** While `holdingAnalysis`, every other Strategy's evaluation (a player's analysis here) waits until `releaseAnalyses()`. */
 let holdingAnalysis = false;
 const heldAnalyses: (() => void)[] = [];
 function releaseAnalyses() { holdingAnalysis = false; for (const resume of heldAnalyses.splice(0)) resume(); }

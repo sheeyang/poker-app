@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { deriveSeed, type CashGame } from '@poker/engine';
 import type { ObservableGameView, StrategyDescriptor } from '@poker/contracts';
 import { immutableData } from '@poker/strategies';
-import { findBinding, isHuman, type PersistedTableSession } from './aggregate.js';
+import { findBinding, isPlayer, type PersistedTableSession } from './aggregate.js';
 import { canonical } from './canonical.js';
 import type { FrozenEvaluationInput } from './analysis.js';
 
@@ -10,12 +10,12 @@ import type { FrozenEvaluationInput } from './analysis.js';
 export interface CapturableTable { readonly aggregate: PersistedTableSession; readonly game: CashGame }
 
 /**
- * The frozen inputs of a human Participant's decision, under the Reference Strategy its Guest has as it is asked.
+ * The frozen inputs of a player's decision, under the Reference Strategy its User has as it is asked.
  * `current` is the Participant's current view, when the caller already has it for many decisions.
  */
 export function captureEvaluation(session: CapturableTable, participantId: string, decisionId: string, referenceStrategy: StrategyDescriptor, current = session.game.forParticipant(participantId).getView()): FrozenEvaluationInput | null {
   const binding = findBinding(session.aggregate, participantId);
-  if (!isHuman(binding)) return null;
+  if (!isPlayer(binding)) return null;
   const participant = session.game.forParticipant(participantId);
   const accepted = current.history.flatMap(hand => hand.decisions).find(decision => decision.decisionId === decisionId && decision.action.participantId === participantId);
   let view: ObservableGameView;

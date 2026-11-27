@@ -19,10 +19,10 @@ export interface CompletedHand {
 }
 
 /** A table as one Participant reads its history: its public facts, and the Participant every read is built for. */
-export interface HistoryReader {
+export interface HistoryViewer {
   readonly tableSessionId: TableSessionId;
   readonly mode: TableMode;
-  /** The reading Participant. */
+  /** The viewer's Participant. */
   readonly participantId: ParticipantId;
   readonly seatCount: number;
   readonly stakes: Stakes;
@@ -34,17 +34,17 @@ export interface HistoryReader {
 
 /**
  * The Table History list's rows: one per completed Hand, in the order given (oldest first). Each shows who was dealt in,
- * in seat order, with only the hole cards the reader's history holds (their own, and a showdown's reveals in its own
+ * in seat order, with only the hole cards the viewer's history holds (their own, and a showdown's reveals in its own
  * Hand's result), the final board and the payouts.
  */
-export function tableHistoryHands(hands: readonly CompletedHand[], reader: HistoryReader): TableHistoryHand[] {
+export function tableHistoryHands(hands: readonly CompletedHand[], viewer: HistoryViewer): TableHistoryHand[] {
   return hands.map(({ entry, handNumber, completedAt }): TableHistoryHand => {
     const { result } = entry;
     const dealt = result.participants.filter(participant => participant.inHand).sort((a, b) => a.handSeat! - b.handSeat!);
     return {
       handId: entry.handId, handNumber, ...(completedAt !== undefined ? { completedAt } : {}),
-      dealtIn: dealt.map(participant => ({ participantId: participant.participantId, name: reader.names.get(participant.participantId) ?? '', ...(participant.holeCards ? { holeCards: [...participant.holeCards] } : {}) })),
-      viewerDealtIn: dealt.some(participant => participant.participantId === reader.participantId),
+      dealtIn: dealt.map(participant => ({ participantId: participant.participantId, name: viewer.names.get(participant.participantId) ?? '', ...(participant.holeCards ? { holeCards: [...participant.holeCards] } : {}) })),
+      viewerDealtIn: dealt.some(participant => participant.participantId === viewer.participantId),
       board: [...result.board],
       showdown: dealt.filter(participant => !participant.folded).length > 1,
       payouts: (result.payouts ?? []).map(payout => ({ participantId: payout.participantId, amount: payout.amount })),
@@ -53,18 +53,18 @@ export function tableHistoryHands(hands: readonly CompletedHand[], reader: Histo
 }
 
 /**
- * One completed Hand replayed for the reader: the engine's Replay Steps as they may see them, with the Hand's number,
+ * One completed Hand replayed for the viewer: the engine's Replay Steps as they may see them, with the Hand's number,
  * completion time and who was dealt in, and everyone seated at any step, by name and whether they are a Bot, in seat
- * order at their first step (departed Guests and removed Bots included), so the Trainer can draw it without the live
+ * order at their first step (departed Users and removed Bots included), so the Trainer can draw it without the live
  * table. Only a seated Participant acts, so every step's actor is among them.
  *
  * How the Hand ended (its final board, who won what, and the hole cards a showdown revealed) is carried by the result step
  * alone: the replay's `hand` holds nothing of it, so no step before the result can show a viewer what the Hand came to.
  */
-export function tableHandReplay(replay: ObservableHandReplay, hand: TableHistoryHand, reader: HistoryReader): TableHandReplay {
+export function tableHandReplay(replay: ObservableHandReplay, hand: TableHistoryHand, viewer: HistoryViewer): TableHandReplay {
   const seats = new Map<ParticipantId, number>();
   for (const step of replay.steps) for (const p of step.state.participants) if (p.seat !== null && !seats.has(p.participantId)) seats.set(p.participantId, p.seat);
-  const participants = [...seats].sort((a, b) => a[1] - b[1]).map(([id]) => ({ participantId: id, name: reader.names.get(id) ?? '', bot: reader.bots.has(id) }));
+  const participants = [...seats].sort((a, b) => a[1] - b[1]).map(([id]) => ({ participantId: id, name: viewer.names.get(id) ?? '', bot: viewer.bots.has(id) }));
   const result: TableHistoryResult = {
     board: [...hand.board], showdown: hand.showdown, payouts: hand.payouts.map(payout => ({ ...payout })),
     holeCards: hand.dealtIn.flatMap(dealt => dealt.holeCards ? [{ participantId: dealt.participantId, cards: [...dealt.holeCards] }] : []),
@@ -74,26 +74,26 @@ export function tableHandReplay(replay: ObservableHandReplay, hand: TableHistory
     dealtIn: hand.dealtIn.map(({ participantId, name }) => ({ participantId, name })), viewerDealtIn: hand.viewerDealtIn,
   };
   const steps = replay.steps.map((step): TableReplayStep => step.kind === 'result' ? { ...step, result } : step);
-  return { ...replay, steps, tableSessionId: reader.tableSessionId, mode: reader.mode, viewerParticipantId: reader.participantId, hand: head, participants };
+  return { ...replay, steps, tableSessionId: viewer.tableSessionId, mode: viewer.mode, viewerParticipantId: viewer.participantId, hand: head, participants };
 }
 
 /**
- * Every decision the reader made in the completed Hands given, as Overall History lists it: their own, from the Hands
+ * Every decision the viewer made in the completed Hands given, as Overall History lists it: their own, from the Hands
  * they were dealt into. A decision of anyone else's is never in it, and a Hand without a decision of theirs adds nothing.
  * In decision order, Hand by Hand. The facts (street, Position, pot in big blinds) come from the decision's recorded state.
  */
-export function ownDecisions(hands: readonly CompletedHand[], reader: HistoryReader): OverallHistoryDecision[] {
-  const { participantId, seatCount, stakes } = reader;
+export function ownDecisions(hands: readonly CompletedHand[], viewer: HistoryViewer): OverallHistoryDecision[] {
+  const { participantId, seatCount, stakes } = viewer;
   const decisions: OverallHistoryDecision[] = [];
   for (const { entry, handNumber, completedAt } of hands) {
     for (const decision of entry.decisions) {
       if (decision.action.participantId !== participantId) continue;
-      const me = decision.state.participants.find(participant => participant.participantId === participantId);
+      const seen = decision.state.participants.find(participant => participant.participantId === participantId);
       decisions.push({
-        tableSessionId: reader.tableSessionId, mode: reader.mode, seatCount, stakes,
+        tableSessionId: viewer.tableSessionId, mode: viewer.mode, seatCount, stakes,
         handId: entry.handId, handNumber, ...(completedAt !== undefined ? { completedAt } : {}),
         decisionId: decision.decisionId, action: decision.action.action,
-        holeCards: [...me?.holeCards ?? []], board: [...decision.state.board],
+        holeCards: [...seen?.holeCards ?? []], board: [...decision.state.board],
         ...decisionSituation(decision, stakes.bigBlind),
       });
     }
@@ -102,7 +102,7 @@ export function ownDecisions(hands: readonly CompletedHand[], reader: HistoryRea
 }
 
 /**
- * The reader's own decisions a table-scoped Score Summary covers: in one Hand, or in every completed Hand of the Table
+ * The viewer's own decisions a table-scoped Score Summary covers: in one Hand, or in every completed Hand of the Table
  * Session, in decision order.
  */
 export function ownDecisionIds(history: ObservableSessionHistory, participantId: ParticipantId, scope: ScoreSummaryScope): DecisionId[] {

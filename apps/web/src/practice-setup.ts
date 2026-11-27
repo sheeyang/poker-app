@@ -25,7 +25,7 @@ export function usePracticeSetup(table: ObservableTableSession | undefined, comm
         }
         useSession.getState().setSetup(null);
       } catch (error) {
-        if (useSession.getState().setup?.tableId === tableId) useSession.getState().setSetup({ ...setup, paused: error instanceof Error ? error.message : 'Setup paused. Your seated players are saved.' });
+        if (useSession.getState().setup?.tableId === tableId) useSession.getState().setSetup({ ...setup, paused: error instanceof Error ? error.message : 'Setup paused. Your seated participants are saved.' });
       } finally { running.current = false; }
     })();
   }, [setup, table?.tableSessionId, table?.pokerRevision, command.busy]);

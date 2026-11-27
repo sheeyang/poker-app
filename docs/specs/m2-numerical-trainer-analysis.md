@@ -27,20 +27,20 @@ Open one shared WebSocket per browser tab after identity is established. Authori
 5. As a Table Owner, I want Live Analysis off by default, so that pre-action numerical results appear only when I enable them.
 6. As a Table Owner, I want the Reference Strategy and Live Analysis setting shared across my tabs for a Table Session, so that its configuration is consistent.
 7. As a Table Owner, I want those settings restored after server restart, so that resuming a Table Session retains my choices.
-8. As a human Participant, I want optional Live Analysis of my current decision, so that I can inspect its numerical Reference Strategy output before acting.
-9. As a human Participant, I want each Concrete Choice's probability and exact Bet-to or Raise-to amount, so that I can inspect the Policy without losing sizing information.
-10. As a human Participant, I want aggregated Action Probabilities as well as individual Concrete Choices, so that I can distinguish action-type probability from a particular sizing's probability.
-11. As a human Participant, I want the Reference Strategy's selected concrete action shown separately from its Policy distribution, so that a sampled action cannot be mistaken for the entire distribution.
-12. As a human Participant, I want numerical outputs without advice or good/bad labels, so that I decide what to do with the results.
-13. As a human Participant, I want legal actions to remain available while analysis is pending or failed, so that computation cannot hold up my decision.
-14. As a human Participant, I want every accepted decision to trigger analysis even with Live Analysis off, so that later numerical review does not depend on seeing pre-action results.
-15. As a human Participant, I want analysis to begin without a feedback acknowledgement or Continue gate, so that poker progression remains independent of analysis presentation.
+8. As a player, I want optional Live Analysis of my current decision, so that I can inspect its numerical Reference Strategy output before acting.
+9. As a player, I want each Concrete Choice's probability and exact Bet-to or Raise-to amount, so that I can inspect the Policy without losing sizing information.
+10. As a player, I want aggregated Action Probabilities as well as individual Concrete Choices, so that I can distinguish action-type probability from a particular sizing's probability.
+11. As a player, I want the Reference Strategy's selected concrete action shown separately from its Policy distribution, so that a sampled action cannot be mistaken for the entire distribution.
+12. As a player, I want numerical outputs without advice or good/bad labels, so that I decide what to do with the results.
+13. As a player, I want legal actions to remain available while analysis is pending or failed, so that computation cannot hold up my decision.
+14. As a player, I want every accepted decision to trigger analysis even with Live Analysis off, so that later numerical review does not depend on seeing pre-action results.
+15. As a player, I want analysis to begin without a feedback acknowledgement or Continue gate, so that poker progression remains independent of analysis presentation.
 16. As a Table Owner, I want rejected actions and duplicate action submissions to avoid duplicate analysis work, so that retries preserve the accepted decision's identity.
-17. As a human Participant, I want Decision Score calculated from my accepted concrete action and the Reference Policy, so that the score measures their numerical alignment.
-18. As a human Participant, I want sized decisions compared using additional chips committed from the original decision situation, so that earlier street commitment does not distort Sizing Similarity.
-19. As a human Participant, I want a legal sizing absent from the Policy distribution to remain analyzable, so that human actions are not restricted to the Policy's sampled sizes.
-20. As a human Participant, I want Action Rank Score to include every legal action type and handle ties, so that omitted Policy actions and equal probabilities have defined numerical behavior.
-21. As a human Participant, I want no decision scores before I have an accepted action, so that a Reference Strategy Evaluation is not confused with analysis of a decision I have made.
+17. As a player, I want Decision Score calculated from my accepted concrete action and the Reference Policy, so that the score measures their numerical alignment.
+18. As a player, I want sized decisions compared using additional chips committed from the original decision situation, so that earlier street commitment does not distort Sizing Similarity.
+19. As a player, I want a legal sizing absent from the Policy distribution to remain analyzable, so that human actions are not restricted to the Policy's sampled sizes.
+20. As a player, I want Action Rank Score to include every legal action type and handle ties, so that omitted Policy actions and equal probabilities have defined numerical behavior.
+21. As a player, I want no decision scores before I have an accepted action, so that a Reference Strategy Evaluation is not confused with analysis of a decision I have made.
 22. As a Table Owner, I want a matching Live Analysis evaluation reused after acting, so that scoring does not unnecessarily rerun the same Strategy.
 23. As a Table Owner, I want repeated matching analysis requests to share one queued or running job, so that multiple tabs and consumers do not duplicate computation.
 24. As a Table Owner, I want a successful matching result returned from cache, so that I can inspect it without another evaluation.
@@ -52,7 +52,7 @@ Open one shared WebSocket per browser tab after identity is established. Authori
 30. As a Table Owner, I want successful cached analysis available after server restart, so that previously completed numerical work can be reused.
 31. As a Table Owner, I want a request after restart to schedule missing analysis when necessary, so that transient job state need not be durably recovered.
 32. As a Table Owner, I want to analyze an authorized historical decision using the same HTTP operations, so that analysis does not require a live table subscription.
-33. As a human Participant, I want historical analysis to use only information observable at the original decision, so that later reveals cannot alter its inputs.
+33. As a player, I want historical analysis to use only information observable at the original decision, so that later reveals cannot alter its inputs.
 34. As a Table Owner, I want a Hand summary containing both score averages, so that I can inspect numerical alignment across that Hand's accepted human decisions.
 35. As a Table Owner, I want a Table Session summary containing both score averages, so that I can inspect alignment across its included decisions.
 36. As a Table Owner, I want every decision in a summary evaluated against one selected Reference Strategy, so that the average does not mix different references.
@@ -72,7 +72,7 @@ Open one shared WebSocket per browser tab after identity is established. Authori
 50. As a Table Owner, I want reconnect to restore live subscriptions and refresh relevant table and analysis state, so that missed messages do not leave stale results.
 51. As a Table Owner, I want obsolete requests, attempts, connections, and HTTP responses prevented from replacing current state, so that delayed delivery cannot undo a newer result.
 52. As a Table Owner, I want a notification received during an HTTP request to cause another reconciliation when needed, so that an earlier pending response cannot hide completion.
-53. As a human Participant, I want Bot decisions and analysis to share bounded computation resources with defined priorities, so that their scheduling is predictable.
+53. As a player, I want Bot decisions and analysis to share bounded computation resources with defined priorities, so that their scheduling is predictable.
 54. As a Table Owner, I want queue admission failure reported explicitly without rejecting an already accepted human action, so that resource limits remain visible and separate from poker acceptance.
 55. As a Table Owner, I want a matching interactive request to reuse existing work at its submitted priority, so that requesting the same analysis does not create or reorder jobs.
 56. As an engineer using the Playground UI, I want controls for Reference Strategy, Live Analysis, Retry, and summary requests with numerical results and status, so that I can validate M2 before M3 product design.

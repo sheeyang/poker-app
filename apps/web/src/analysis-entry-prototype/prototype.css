@@ -20,7 +20,7 @@ body { background: var(--ground); }
 .pe-card.pe-empty { background: rgb(0 0 0 / .18); border: 1px dashed #4a8a73; }
 .pe-pot { font-weight: 600; color: var(--gold); }
 .pe-seat { position: absolute; display: grid; justify-items: center; gap: 2px; padding: 8px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: .85rem; }
-.pe-seat.is-hero { border-color: var(--gold); }
+.pe-seat.is-viewer { border-color: var(--gold); }
 .pe-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--raised); border: 1px solid var(--control-line); }
 .pe-seat-1 { left: 50%; bottom: 17%; transform: translateX(-50%); }
 .pe-seat-2 { left: 4%; top: 36%; } .pe-seat-3 { left: 50%; top: 2%; transform: translateX(-50%); } .pe-seat-4 { right: 4%; top: 36%; }

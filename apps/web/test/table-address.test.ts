@@ -40,7 +40,7 @@ describe('what a table address shows its visitor', () => {
     expect(joinPreviewWanted('online', { mode: 'online' })).toBe(false);
     expect(joinPreviewWanted('online', { mode: 'practice' })).toBe(false);
   });
-  it('shows the join form at an Online Table’s address, to a newcomer and to a Guest who left alike', () => {
+  it('shows the join form at an Online Table’s address, to a newcomer and to a User who left alike', () => {
     expect(tableAddress('online', id, 'not-found', preview)).toEqual({ show: 'join-form', preview });
     const returning = { ...preview, returningAs: 'Ben' };
     expect(tableAddress('online', id, 'not-found', returning)).toEqual({ show: 'join-form', preview: returning });
@@ -74,7 +74,7 @@ describe('browser-tab titles', () => {
     expect(pageTitle({ page: 'table', seatCount: 6, smallBlind: 10, bigBlind: 20 })).toBe('6-max Hold’em · 10 / 20 · Poker Trainer');
     expect(pageTitle({ page: 'table', seatCount: 2, smallBlind: 1000, bigBlind: 2000 })).toBe('Heads-up Hold’em · 1,000 / 2,000 · Poker Trainer');
     expect(pageTitle({ page: 'table', seatCount: 9, smallBlind: 5, bigBlind: 10 })).toBe('Full ring Hold’em · 5 / 10 · Poker Trainer');
-    expect(pageTitle({ page: 'table', seatCount: 4, smallBlind: 5, bigBlind: 10 })).toBe('4-player Hold’em · 5 / 10 · Poker Trainer');
+    expect(pageTitle({ page: 'table', seatCount: 4, smallBlind: 5, bigBlind: 10 })).toBe('4-max Hold’em · 5 / 10 · Poker Trainer');
   });
   it('name a Join Link by whose table it opens, since its visitor can’t see the table yet', () => {
     expect(pageTitle({ page: 'join', ownerName: 'Sam' })).toBe('Join Sam’s table · Poker Trainer');
@@ -87,7 +87,7 @@ describe('browser-tab titles', () => {
   });
 });
 
-describe('the refusal of a Guest who is already at another Online Table', () => {
+describe('the refusal of a User who is already at another Online Table', () => {
   const refusal = new RequestFailure('current-table-elsewhere', 'Leave it first.', true, { currentTableId: id });
   it('links to their Current Table, described from their saved tables when it is listed there', () => {
     const listed: SavedTable = { tableSessionId: id, mode: 'online', seatCount: 6, stakes: { smallBlind: 10, bigBlind: 20, ante: 0 } };

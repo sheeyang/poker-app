@@ -19,7 +19,7 @@ afterAll(async () => { await Promise.all(fixtures.map(fixture => fixture.close()
 /** One Reference Strategy Evaluation the fake Strategy was asked for. */
 interface Evaluation { readonly decisionId: string; readonly descriptor: StrategyDescriptor; readonly view: ObservableGameView; readonly result: ReturnType<typeof Promise.withResolvers<PolicyResult>>; answered: boolean }
 /**
- * The fake Strategy puts all its probability on the passive action, checking or calling. A Guest who checks or calls
+ * The fake Strategy puts all its probability on the passive action, checking or calling. A User who checks or calls
  * therefore scores 1 on both scores, and one who folds scores 0 on both: fold has none of the probability, and ranks
  * last of the two distinct probabilities.
  */
@@ -53,11 +53,11 @@ async function fixture(concurrency = 2) {
     await nameGuest(base, cookie, name);
     return cookie;
   }
-  /** A heads-up Practice Table of the Guest's, the Guest on the button (BTN/SB) and the Bot in the big blind. */
+  /** A heads-up Practice Table of the User's, the User on the button (BTN/SB) and the Bot in the big blind. */
   async function practice(cookie: string) {
     const created = await (await post('/table-sessions', cookie, { requestId: randomUUID(), bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] })).json();
-    const t = { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
-    await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+    const t = { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
     await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
     return t;
   }
@@ -67,25 +67,25 @@ async function fixture(concurrency = 2) {
     const response = await post('/table-sessions/' + t.id + '/' + kind, t.cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, ...contents });
     expect(response.status).toBe(200);
   }
-  const humanAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.human, action });
+  const playerAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.player, action });
   const botAct = async (t: Table, action: ConcreteAction) => expect(await controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId: t.bot, action })).toMatchObject({ ok: true });
   /**
-   * A Hand checked down to showdown. On the button the Guest calls preflop and checks the flop, turn and river: four
+   * A Hand checked down to showdown. On the button the User calls preflop and checks the flop, turn and river: four
    * decisions, each scoring 1.
    */
   async function checkDown(t: Table) {
     await command(t, 'start-hand');
     for (let state = (await read(t)).view.state; state.status === 'active-hand'; state = (await read(t)).view.state) {
-      if (state.actorId === t.human) { await humanAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
-      const bot = state.participants.find(participant => participant.participantId === t.bot)!, human = state.participants.find(participant => participant.participantId === t.human)!;
-      await botAct(t, { type: (bot.wager ?? 0) < (human.wager ?? 0) ? 'call' : 'check' });
+      if (state.actorId === t.player) { await playerAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
+      const bot = state.participants.find(participant => participant.participantId === t.bot)!, player = state.participants.find(participant => participant.participantId === t.player)!;
+      await botAct(t, { type: (bot.wager ?? 0) < (player.wager ?? 0) ? 'call' : 'check' });
     }
   }
-  /** A Hand the Guest, on the button, folds preflop: one decision, scoring 0. */
+  /** A Hand the User, on the button, folds preflop: one decision, scoring 0. */
   async function foldPreflop(t: Table) {
     await command(t, 'start-hand');
-    expect((await read(t)).view.state.actorId).toBe(t.human);
-    await humanAct(t, { type: 'fold' });
+    expect((await read(t)).view.state.actorId).toBe(t.player);
+    await playerAct(t, { type: 'fold' });
   }
   const configure = async (cookie: string, referenceStrategy: StrategyDescriptor) => expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy } }) })).status).toBe(200);
   /** Asks for the decisions a filter with score ranges admits. */
@@ -114,7 +114,7 @@ let f: Fixture;
 beforeAll(async () => { f = await fixture(); fixtures.push(f); });
 
 /**
- * A Guest who played two Practice Tables: at the first a Hand checked down (preflop call, then checks on the flop, turn
+ * A User who played two Practice Tables: at the first a Hand checked down (preflop call, then checks on the flop, turn
  * and river, all scoring 1), at the second a preflop fold (scoring 0). Their Reference Strategy is then one no
  * post-action analysis ran under, so every decision needs a new analysis.
  */
@@ -200,7 +200,7 @@ test('a failed analysis makes it an Error until a Retry succeeds, and only the f
   expect(f.under(highestProbabilityPlayingStrategy).length).toBe(evaluated + 1);
 });
 
-test('the list route does not answer a score range from recorded facts, and another Guest cannot read the request', async () => {
+test('the list route does not answer a score range from recorded facts, and another User cannot read the request', async () => {
   const { cookie } = await twoTables();
   const asked = await f.ask(cookie, { decisionScore: { min: 0.5 } });
   const plain = await f.get('/overall-history?decisionScoreMin=0.5', cookie);

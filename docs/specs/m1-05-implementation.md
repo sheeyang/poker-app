@@ -58,7 +58,7 @@ Validation on 7 October 2026 before integration:
 Literal engine vectors use the independent Python script documented in
 [random-v1](../random-v1.md). Its optional master-seed argument reproduces
 `board-tie-4656`: the first twelve draws are
-`Ts Jc 8h 6h 7s Jh Ks Ah Ad Tc 3c Qd`. Both players play the board's ace-high
+`Ts Jc 8h 6h 7s Jh Ks Ah Ad Tc 3c Qd`. Both Participants play the board's ace-high
 straight and receive 20 chips each. No production RNG or ranking function
 computes test expectations.
 

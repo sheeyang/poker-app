@@ -7,7 +7,7 @@ The initial public game is No-Limit Texas Hold'em CashGame, with standard docume
 ## Configuration and defaults
 
 - Seat capacity defaults to `6` and is configurable as an integer from `2` through `9`, inclusive. CashGame configuration validation enforces this initial supported range independently of how many participants are currently seated.
-- Default small blind is `10`, big blind is `20`, and equal per-player ante is `0`.
+- Default small blind is `10`, big blind is `20`, and equal per-Participant ante is `0`.
 - Minimum, default, and maximum buy-in are each `1000` initially.
 - The initial button defaults to seat `1`; if that seat is unavailable for the first Hand, resolve to the next eligible seat clockwise.
 - Seat capacity, blinds, ante, buy-in limits, participant stacks through allowed buy-ins/top-ups, button position, and `allowSeatChanges` are configurable. Blinds and all chip amounts use representable integer chip units.
@@ -33,7 +33,7 @@ Do not let a seated participant remove chips while remaining in the cash game or
 
 ## Antes, blinds, and betting order
 
-Only conventional equal per-player antes are supported initially: ante zero disables them, otherwise each Hand participant contributes `min(ante, remainingStack)` before blinds. A short contribution consumes the stack and makes that participant all-in. Ante chips enter the contribution ledger and pot but never the participant's preflop street wager, so they do not reduce the amount needed to call a blind.
+Only conventional equal per-Participant antes are supported initially: ante zero disables them, otherwise each Hand participant contributes `min(ante, remainingStack)` before blinds. A short contribution consumes the stack and makes that participant all-in. Ante chips enter the contribution ledger and pot but never the participant's preflop street wager, so they do not reduce the amount needed to call a blind.
 
 For three or more participants, the small blind is the next participating seat clockwise from the button and the big blind is the next one after that. Heads-up, the button posts the small blind and the other participant posts the big blind. Blind contributions are limited by the remaining stack; a short blind does not change the configured blind sizes. Do not initially support big-blind antes, button antes, straddles, missed-blind posts, or other alternative forced-bet structures.
 

@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import type { ConcreteAction, DecisionFacts, ObservableCashGameState, ObservableHandReplay, ObservableHistoryEntry, ObservableParticipant, OverallHistoryDecision, ReplayStep } from '@poker/contracts';
 import {
   admittedByScores, filteredDecisions, historyBreakdownValue, inListOrder, matchesHistoryFilter, matchesScoreFilter, newestFirst, ownDecisionIds, ownDecisions,
-  scoreAdmission, summarySets, tableHandReplay, tableHistoryHands, type CompletedHand, type HistoryReader,
+  scoreAdmission, summarySets, tableHandReplay, tableHistoryHands, type CompletedHand, type HistoryViewer,
 } from '../src/index.js';
 
 /*
@@ -10,7 +10,7 @@ import {
  * `opp` at seat 2, a Bot `bot` at seat 3; blinds 5/10. Only `me`'s own hole cards appear, except where a showdown
  * revealed `opp`'s in its own Hand's result.
  */
-const player = (participantId: string, seat: number, extra: Partial<ObservableParticipant> = {}): ObservableParticipant =>
+const participant = (participantId: string, seat: number, extra: Partial<ObservableParticipant> = {}): ObservableParticipant =>
   ({ participantId, seat, stack: 1_000, sittingOut: false, inHand: true, handSeat: seat, folded: false, contribution: 0, ...extra });
 const state = (extra: Partial<ObservableCashGameState>): ObservableCashGameState =>
   ({ status: 'active-hand', buttonSeat: 1, participants: [], board: [], pots: [], actorId: null, legalActions: [], ...extra });
@@ -24,14 +24,14 @@ const hand1: CompletedHand = {
   entry: {
     handId: 'hand-1', description: 'Hand 1',
     decisions: [
-      decision('hand-1/decision-1', 'me', { type: 'raise', raiseTo: 30 }, state({ handId: 'hand-1', street: 'preflop', participants: [player('me', 1, { holeCards: mine }), player('opp', 2, { contribution: 5, wager: 5 }), player('bot', 3, { contribution: 10, wager: 10 })] })),
-      decision('hand-1/decision-2', 'opp', { type: 'fold' }, state({ handId: 'hand-1', street: 'preflop', participants: [player('me', 1, { holeCards: mine, contribution: 30, wager: 30 }), player('opp', 2, { contribution: 5, wager: 5 }), player('bot', 3, { contribution: 10, wager: 10 })] })),
-      decision('hand-1/decision-3', 'bot', { type: 'call' }, state({ handId: 'hand-1', street: 'preflop', participants: [player('me', 1, { holeCards: mine, contribution: 30, wager: 30 }), player('opp', 2, { contribution: 5, folded: true }), player('bot', 3, { contribution: 10, wager: 10 })] })),
-      decision('hand-1/decision-4', 'bot', { type: 'check' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [player('me', 1, { holeCards: mine, contribution: 30 }), player('opp', 2, { contribution: 5, folded: true }), player('bot', 3, { contribution: 30 })] })),
-      decision('hand-1/decision-5', 'me', { type: 'bet', betTo: 40 }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [player('me', 1, { holeCards: mine, contribution: 30 }), player('opp', 2, { contribution: 5, folded: true }), player('bot', 3, { contribution: 30 })] })),
-      decision('hand-1/decision-6', 'bot', { type: 'fold' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [player('me', 1, { holeCards: mine, contribution: 70, wager: 40 }), player('opp', 2, { contribution: 5, folded: true }), player('bot', 3, { contribution: 30 })] })),
+      decision('hand-1/decision-1', 'me', { type: 'raise', raiseTo: 30 }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('me', 1, { holeCards: mine }), participant('opp', 2, { contribution: 5, wager: 5 }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
+      decision('hand-1/decision-2', 'opp', { type: 'fold' }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('me', 1, { holeCards: mine, contribution: 30, wager: 30 }), participant('opp', 2, { contribution: 5, wager: 5 }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
+      decision('hand-1/decision-3', 'bot', { type: 'call' }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('me', 1, { holeCards: mine, contribution: 30, wager: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
+      decision('hand-1/decision-4', 'bot', { type: 'check' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('me', 1, { holeCards: mine, contribution: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
+      decision('hand-1/decision-5', 'me', { type: 'bet', betTo: 40 }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('me', 1, { holeCards: mine, contribution: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
+      decision('hand-1/decision-6', 'bot', { type: 'fold' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('me', 1, { holeCards: mine, contribution: 70, wager: 40 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
     ],
-    result: state({ status: 'completed-hand', handId: 'hand-1', board: ['2c', '7h', 'Jd'], participants: [player('bot', 3, { folded: true, contribution: 30 }), player('me', 1, { holeCards: mine, contribution: 70 }), player('opp', 2, { folded: true, contribution: 5 })], payouts: [{ participantId: 'me', amount: 105 }] }),
+    result: state({ status: 'completed-hand', handId: 'hand-1', board: ['2c', '7h', 'Jd'], participants: [participant('bot', 3, { folded: true, contribution: 30 }), participant('me', 1, { holeCards: mine, contribution: 70 }), participant('opp', 2, { folded: true, contribution: 5 })], payouts: [{ participantId: 'me', amount: 105 }] }),
   },
 };
 /** Hand 2, completed before completion times were recorded: the button moves to `opp`; `me` in the big blind checks to a showdown that reveals `opp`'s cards. */
@@ -40,20 +40,20 @@ const hand2: CompletedHand = {
   entry: {
     handId: 'hand-2', description: 'Hand 2',
     decisions: [
-      decision('hand-2/decision-1', 'opp', { type: 'call' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [player('me', 1, { holeCards: mine, contribution: 10, wager: 10 }), player('opp', 2), player('bot', 3, { contribution: 5, wager: 5 })] })),
-      decision('hand-2/decision-2', 'bot', { type: 'fold' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [player('me', 1, { holeCards: mine, contribution: 10, wager: 10 }), player('opp', 2, { contribution: 10, wager: 10 }), player('bot', 3, { contribution: 5, wager: 5 })] })),
-      decision('hand-2/decision-3', 'me', { type: 'check' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [player('me', 1, { holeCards: mine, contribution: 10, wager: 10 }), player('opp', 2, { contribution: 10, wager: 10 }), player('bot', 3, { contribution: 5, folded: true })] })),
+      decision('hand-2/decision-1', 'opp', { type: 'call' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('me', 1, { holeCards: mine, contribution: 10, wager: 10 }), participant('opp', 2), participant('bot', 3, { contribution: 5, wager: 5 })] })),
+      decision('hand-2/decision-2', 'bot', { type: 'fold' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('me', 1, { holeCards: mine, contribution: 10, wager: 10 }), participant('opp', 2, { contribution: 10, wager: 10 }), participant('bot', 3, { contribution: 5, wager: 5 })] })),
+      decision('hand-2/decision-3', 'me', { type: 'check' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('me', 1, { holeCards: mine, contribution: 10, wager: 10 }), participant('opp', 2, { contribution: 10, wager: 10 }), participant('bot', 3, { contribution: 5, folded: true })] })),
     ],
-    result: state({ status: 'completed-hand', handId: 'hand-2', buttonSeat: 2, board: ['2c', '7h', 'Jd', 'Qs', '3h'], participants: [player('me', 1, { holeCards: mine, contribution: 10 }), player('opp', 2, { holeCards: ['9c', '9d'], contribution: 10 }), player('bot', 3, { folded: true, contribution: 5 })], payouts: [{ participantId: 'opp', amount: 25 }] }),
+    result: state({ status: 'completed-hand', handId: 'hand-2', buttonSeat: 2, board: ['2c', '7h', 'Jd', 'Qs', '3h'], participants: [participant('me', 1, { holeCards: mine, contribution: 10 }), participant('opp', 2, { holeCards: ['9c', '9d'], contribution: 10 }), participant('bot', 3, { folded: true, contribution: 5 })], payouts: [{ participantId: 'opp', amount: 25 }] }),
   },
 };
-const reader: HistoryReader = {
+const viewer: HistoryViewer = {
   tableSessionId: 'table-a', mode: 'practice', participantId: 'me', seatCount: 3, stakes: { smallBlind: 5, bigBlind: 10, ante: 0 },
   names: new Map([['me', 'Mia'], ['opp', 'Olu'], ['bot', 'Bot 1']]), bots: new Set(['bot']),
 };
 
-test('a Table History row shows everyone dealt in, in seat order and by name, with only the hole cards the reader saw, the board and the payouts', () => {
-  const [first, second] = tableHistoryHands([hand1, hand2], reader);
+test('a Table History row shows everyone dealt in, in seat order and by name, with only the hole cards the viewer saw, the board and the payouts', () => {
+  const [first, second] = tableHistoryHands([hand1, hand2], viewer);
   expect(first).toEqual({
     handId: 'hand-1', handNumber: 1, completedAt: 1_000,
     dealtIn: [{ participantId: 'me', name: 'Mia', holeCards: ['As', 'Kd'] }, { participantId: 'opp', name: 'Olu' }, { participantId: 'bot', name: 'Bot 1' }],
@@ -68,11 +68,11 @@ test('a Table History row shows everyone dealt in, in seat order and by name, wi
   expect(second).not.toHaveProperty('completedAt');
 });
 
-test('a reader who was not dealt in sees the row as not theirs, a Participant not dealt in is not listed, and a missing name shows none', () => {
+test('a viewer who was not dealt in sees the row as not theirs, a Participant not dealt in is not listed, and a missing name shows none', () => {
   const sitting = { ...hand1, entry: { ...hand1.entry, result: { ...hand1.entry.result, participants: [...hand1.entry.result.participants, { participantId: 'late', seat: 4, stack: 1_000, sittingOut: false }] } } };
-  const [row] = tableHistoryHands([sitting], { ...reader, participantId: 'late', names: new Map([['me', 'Mia']]) });
+  const [row] = tableHistoryHands([sitting], { ...viewer, participantId: 'late', names: new Map([['me', 'Mia']]) });
   expect(row!.viewerDealtIn).toBe(false);
-  expect(row!.dealtIn.map(player => [player.participantId, player.name])).toEqual([['me', 'Mia'], ['opp', ''], ['bot', '']]);
+  expect(row!.dealtIn.map(participant => [participant.participantId, participant.name])).toEqual([['me', 'Mia'], ['opp', ''], ['bot', '']]);
 });
 
 test("a Hand's replay carries the engine's steps unchanged, the list row, and everyone seated at any step in seat order at their first step, each a Bot or not", () => {
@@ -80,13 +80,13 @@ test("a Hand's replay carries the engine's steps unchanged, the list row, and ev
   const replay: ObservableHandReplay = {
     handId: 'hand-1', configuration: { seatCount: 3, smallBlind: 5, bigBlind: 10, ante: 0, minimumBuyIn: 400, defaultBuyIn: 1_000, maximumBuyIn: 2_000, allowSeatChanges: false },
     steps: [
-      step([player('bot', 3), player('me', 1), { participantId: 'watcher', seat: null, stack: 0, sittingOut: true }]),
+      step([participant('bot', 3), participant('me', 1), { participantId: 'watcher', seat: null, stack: 0, sittingOut: true }]),
       // `opp` sits down later at seat 2, and `me` moves to seat 3 after `bot` leaves: each keeps the seat of their first step.
-      step([player('me', 3), player('opp', 2)], 'result'),
+      step([participant('me', 3), participant('opp', 2)], 'result'),
     ],
   };
-  const [hand] = tableHistoryHands([hand1], reader);
-  const replayed = tableHandReplay(replay, hand!, reader);
+  const [hand] = tableHistoryHands([hand1], viewer);
+  const replayed = tableHandReplay(replay, hand!, viewer);
   expect(replayed).toEqual({
     ...replay, tableSessionId: 'table-a', mode: 'practice', viewerParticipantId: 'me',
     // The row it carries says who was dealt in, and nothing of how the Hand ended.
@@ -98,11 +98,11 @@ test("a Hand's replay carries the engine's steps unchanged, the list row, and ev
 });
 
 test("a Hand's replay holds how the Hand ended on its result step alone, a showdown's revealed cards included", () => {
-  const [, second] = tableHistoryHands([hand1, hand2], reader);
-  const decisionStep: ReplayStep = { kind: 'decision', state: state({ handId: 'hand-2', participants: [player('me', 1, { holeCards: mine }), player('opp', 2)] }), transition: {} };
-  const streetStep: ReplayStep = { kind: 'street', state: state({ handId: 'hand-2', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [player('me', 1, { holeCards: mine }), player('opp', 2)] }), transition: {} };
+  const [, second] = tableHistoryHands([hand1, hand2], viewer);
+  const decisionStep: ReplayStep = { kind: 'decision', state: state({ handId: 'hand-2', participants: [participant('me', 1, { holeCards: mine }), participant('opp', 2)] }), transition: {} };
+  const streetStep: ReplayStep = { kind: 'street', state: state({ handId: 'hand-2', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('me', 1, { holeCards: mine }), participant('opp', 2)] }), transition: {} };
   const resultStep: ReplayStep = { kind: 'result', state: hand2.entry.result, transition: {} };
-  const replayed = tableHandReplay({ handId: 'hand-2', configuration: {} as ObservableHandReplay['configuration'], steps: [decisionStep, streetStep, resultStep] }, second!, reader);
+  const replayed = tableHandReplay({ handId: 'hand-2', configuration: {} as ObservableHandReplay['configuration'], steps: [decisionStep, streetStep, resultStep] }, second!, viewer);
   expect(replayed.steps.map(step => 'result' in step)).toEqual([false, false, true]);
   expect(replayed.steps[2]!.result).toEqual({
     board: ['2c', '7h', 'Jd', 'Qs', '3h'], showdown: true, payouts: [{ participantId: 'opp', amount: 25 }],
@@ -113,8 +113,8 @@ test("a Hand's replay holds how the Hand ended on its result step alone, a showd
   for (const spoiler of ['Qs', '3h', '9c', '9d', 'payouts', 'showdown']) expect(before).not.toContain(spoiler);
 });
 
-test("the reader's own decisions are theirs alone, in decision order, with the facts the filters read from each recorded state", () => {
-  const decisions = ownDecisions([hand1, hand2], reader);
+test("the viewer's own decisions are theirs alone, in decision order, with the facts the filters read from each recorded state", () => {
+  const decisions = ownDecisions([hand1, hand2], viewer);
   expect(decisions.map(listed => listed.decisionId)).toEqual(['hand-1/decision-1', 'hand-1/decision-5', 'hand-2/decision-3']);
   expect(decisions[0]).toEqual({
     tableSessionId: 'table-a', mode: 'practice', seatCount: 3, stakes: { smallBlind: 5, bigBlind: 10, ante: 0 },
@@ -125,12 +125,12 @@ test("the reader's own decisions are theirs alone, in decision order, with the f
   expect(decisions[1]).toMatchObject({ street: 'flop', position: 'BTN', pot: 65, potBigBlinds: 6.5, board: ['2c', '7h', 'Jd'] });
   expect(decisions[2]).toMatchObject({ handNumber: 2, street: 'preflop', position: 'BB', pot: 25, potBigBlinds: 2.5 });
   expect(decisions[2]).not.toHaveProperty('completedAt');
-  // A reader who made no decision has none, and nobody else's decision is ever listed as theirs.
-  expect(ownDecisions([hand1, hand2], { ...reader, participantId: 'watcher' })).toEqual([]);
-  expect(ownDecisions([hand1, hand2], { ...reader, participantId: 'opp' }).map(listed => listed.decisionId)).toEqual(['hand-1/decision-2', 'hand-2/decision-1']);
+  // A viewer who made no decision has none, and nobody else's decision is ever listed as theirs.
+  expect(ownDecisions([hand1, hand2], { ...viewer, participantId: 'watcher' })).toEqual([]);
+  expect(ownDecisions([hand1, hand2], { ...viewer, participantId: 'opp' }).map(listed => listed.decisionId)).toEqual(['hand-1/decision-2', 'hand-2/decision-1']);
 });
 
-test("a table-scoped Score Summary covers the reader's own decisions in one Hand, or in every completed Hand of the Table Session", () => {
+test("a table-scoped Score Summary covers the viewer's own decisions in one Hand, or in every completed Hand of the Table Session", () => {
   const inProgress: ObservableHistoryEntry = { handId: 'hand-3', description: 'Hand 3', decisions: [decision('hand-3/decision-1', 'me', { type: 'fold' }, state({ handId: 'hand-3', street: 'preflop' }))] };
   const history = [hand1.entry, hand2.entry, inProgress];
   expect(ownDecisionIds(history, 'me', { scope: 'table-session' })).toEqual(['hand-1/decision-1', 'hand-1/decision-5', 'hand-2/decision-3']);
@@ -184,8 +184,8 @@ test('each restriction narrows a decision on its own recorded facts, and a date 
   expect(matchesHistoryFilter({ street: ['flop'], decisionScore: { min: 0.99 }, actionRankScore: { max: 0 } }, facts())).toBe(true);
 });
 
-test("filtering the reader's own decisions keeps those every non-score restriction admits, in order", () => {
-  const decisions = ownDecisions([hand1, hand2], reader);
+test("filtering the viewer's own decisions keeps those every non-score restriction admits, in order", () => {
+  const decisions = ownDecisions([hand1, hand2], viewer);
   expect(filteredDecisions(decisions, { street: ['preflop'] }).map(decision => decision.decisionId)).toEqual(['hand-1/decision-1', 'hand-2/decision-3']);
   expect(filteredDecisions(decisions, { position: ['BB'] }).map(decision => decision.decisionId)).toEqual(['hand-2/decision-3']);
   expect(filteredDecisions(decisions, { completed: { min: 0 } }).map(decision => decision.decisionId)).toEqual(['hand-1/decision-1', 'hand-1/decision-5']);

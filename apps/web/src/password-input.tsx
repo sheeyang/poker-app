@@ -11,7 +11,7 @@ type PasswordFieldProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | '
 /**
  * A Table Password field: its label, the input, hidden as it is typed, with a Show control inside its right edge, and
  * an optional note under it. The password is case-sensitive and usually read out or pasted from a message, so the
- * Guest can check what they typed. The label names only the input, never the control. The value lives only in its
+ * User can check what they typed. The label names only the input, never the control. The value lives only in its
  * form's memory; nothing here reaches browser storage.
  */
 export const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(function PasswordField({ id, label, note, className, ...input }, ref) {

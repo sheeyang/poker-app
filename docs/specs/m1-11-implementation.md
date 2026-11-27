@@ -2,7 +2,7 @@
 
 The Playground receives complete participant-safe committed views over an
 authorized WebSocket subscription. The server authenticates the opaque local
-cookie, checks Table Ownership, and derives the bound human Participant itself.
+cookie, checks Table Ownership, and derives the bound player itself.
 It constructs a fresh participant facade over the promoted committed CashGame
 for every initial or subsequent projection. Controller bindings and both durable
 revisions belong to the wire envelope, outside the Observable Game View.

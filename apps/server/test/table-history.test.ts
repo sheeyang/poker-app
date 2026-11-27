@@ -34,12 +34,12 @@ async function guest(name?: string) {
 }
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
-type Table = { id: string; owner: string; human: string; bot: string };
+type Table = { id: string; owner: string; player: string; bot: string };
 async function create(cookie: string, contents: object): Promise<Table> {
   const response = await post('/api/table-sessions', cookie, { requestId: randomUUID(), bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }], ...contents });
   expect(response.status).toBe(201);
   const created = await response.json();
-  return { id: created.tableSessionId, owner: cookie, human: created.bindings[0].participantId, bot: created.bindings[1].participantId };
+  return { id: created.tableSessionId, owner: cookie, player: created.bindings[0].participantId, bot: created.bindings[1].participantId };
 }
 const read = async (t: Table, cookie = t.owner): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, cookie)).json();
 const history = (t: Table, cookie = t.owner) => get('/api/table-sessions/' + t.id + '/history', cookie);
@@ -49,28 +49,28 @@ async function command(t: Table, cookie: string, kind: string, contents: object 
   expect(response.status).toBe(200);
 }
 const botAct = async (t: Table, action: ConcreteAction) => expect(await controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId: t.bot, action })).toMatchObject({ ok: true });
-/** A Practice Table with the human on the button and the Bot in the big blind. */
+/** A Practice Table with the player on the button and the Bot in the big blind. */
 async function practice(): Promise<Table> {
   const t = await create(await guest('Ann'), {});
-  await command(t, t.owner, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, t.owner, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, t.owner, 'seat-participant', { participantId: t.bot, seat: 4 });
   return t;
 }
-/** Deals and plays the Hand: the human calls, then both check down to a showdown. */
+/** Deals and plays the Hand: the player calls, then both check down to a showdown. */
 async function showdown(t: Table) {
   clock.settle(); await command(t, t.owner, 'start-hand'); clock.settle();
-  await command(t, t.owner, 'act', { participantId: t.human, action: { type: 'call' } }); clock.settle();
+  await command(t, t.owner, 'act', { participantId: t.player, action: { type: 'call' } }); clock.settle();
   await botAct(t, { type: 'check' }); clock.settle();
   for (let street = 0; street < 3; street++) {
     await botAct(t, { type: 'check' }); clock.settle();
-    await command(t, t.owner, 'act', { participantId: t.human, action: { type: 'check' } }); clock.settle();
+    await command(t, t.owner, 'act', { participantId: t.player, action: { type: 'check' } }); clock.settle();
   }
 }
 /** Deals and plays the Hand: the first to act folds. */
 async function folded(t: Table) {
   clock.settle(); await command(t, t.owner, 'start-hand'); clock.settle();
   const actor = (await read(t)).view.state.actorId!;
-  if (actor === t.human) await command(t, t.owner, 'act', { participantId: t.human, action: { type: 'fold' } });
+  if (actor === t.player) await command(t, t.owner, 'act', { participantId: t.player, action: { type: 'fold' } });
   else await botAct(t, { type: 'fold' });
 }
 
@@ -88,15 +88,15 @@ test('a Participant reads every completed Hand of a Practice Table with its numb
   expect(one.completedAt).toBeGreaterThanOrEqual(first);
   expect(one.completedAt).toBeLessThanOrEqual(afterFirst);
   expect(two.completedAt).toBeGreaterThanOrEqual(one.completedAt!);
-  // Hand 1 went to a showdown: both players are dealt in, their cards revealed, the board complete.
-  expect(one).toMatchObject({ viewerDealtIn: true, showdown: true, dealtIn: [{ participantId: t.human, name: 'Ann', holeCards: [expect.any(String), expect.any(String)] }, { participantId: t.bot, name: 'Rex', holeCards: [expect.any(String), expect.any(String)] }] });
+  // Hand 1 went to a showdown: both Participants are dealt in, their cards revealed, the board complete.
+  expect(one).toMatchObject({ viewerDealtIn: true, showdown: true, dealtIn: [{ participantId: t.player, name: 'Ann', holeCards: [expect.any(String), expect.any(String)] }, { participantId: t.bot, name: 'Rex', holeCards: [expect.any(String), expect.any(String)] }] });
   expect(one.board).toHaveLength(5);
   expect(one.payouts.reduce((total, payout) => total + payout.amount, 0)).toBe(40);
   // Hand 2 ended with a Fold: the viewer sees only their own cards, and no board was dealt.
   const view = await read(t);
   expect(two).toMatchObject({ viewerDealtIn: true, showdown: false, board: [] });
-  expect(two.dealtIn.map(player => [player.participantId, !!player.holeCards])).toEqual([[t.human, true], [t.bot, false]]);
-  expect(two.dealtIn[0]!.holeCards).toEqual(view.view.history[1]!.result!.participants.find(p => p.participantId === t.human)!.holeCards);
+  expect(two.dealtIn.map(participant => [participant.participantId, !!participant.holeCards])).toEqual([[t.player, true], [t.bot, false]]);
+  expect(two.dealtIn[0]!.holeCards).toEqual(view.view.history[1]!.result!.participants.find(p => p.participantId === t.player)!.holeCards);
   expect(JSON.stringify(await listed(t))).not.toMatch(/"(?:seed|deck|burns|commands|userId|ownerUserId)"\s*:/);
 });
 
@@ -115,11 +115,11 @@ test('Hands completed before completion times were recorded carry none, and Hand
   expect(hands[1]!.completedAt).toBe(clock.now());
 });
 
-test('at an Online Table every Participant reads the same table-wide Hand numbers, a late joiner included, and a Guest who was never a Participant is refused', async () => {
+test('at an Online Table every Participant reads the same table-wide Hand numbers, a late joiner included, and a User who was never a Participant is refused', async () => {
   const ann = await guest('Ann');
   const t = await create(ann, { mode: 'online', configuration: { seatCount: 3, smallBlind: 10, bigBlind: 20, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000 } });
   await command(t, ann, 'seat-participant', { participantId: t.bot, seat: 1 });
-  await command(t, ann, 'seat-participant', { participantId: t.human, seat: 2, buyIn: 300 });
+  await command(t, ann, 'seat-participant', { participantId: t.player, seat: 2, buyIn: 300 });
   await connectLive(base, ann, t.id);
   clock.advanceTo((await announcedCountdown(() => read(t))).endsAt);
   await expect.poll(async () => (await read(t)).view.state.handId).toBe('hand-1');
@@ -135,8 +135,8 @@ test('at an Online Table every Participant reads the same table-wide Hand number
   // Ben joined after the Hand: he reads it, was not dealt in, and sees nobody's cards.
   expect(late.hands).toMatchObject([{ handId: 'hand-1', handNumber: 1, completedAt: completed, viewerDealtIn: false }]);
   expect(late.viewerParticipantId).toBe(joined.participantId);
-  expect(late.hands.some(hand => hand.dealtIn.some(player => player.holeCards))).toBe(false);
-  // A Guest who never joined learns nothing, not even that the table exists; nor does a stranger to the service.
+  expect(late.hands.some(hand => hand.dealtIn.some(participant => participant.holeCards))).toBe(false);
+  // A User who never joined learns nothing, not even that the table exists; nor does a stranger to the service.
   const cy = await guest('Cy');
   for (const response of [await history(t, cy), await get('/api/table-sessions/' + randomUUID() + '/history', cy), await get('/api/table-sessions/nonsense/history', cy)]) {
     expect(response.status).toBe(404);

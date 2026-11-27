@@ -92,7 +92,7 @@ By default no
 reverse proxy is trusted and every client's address is the connection's own; behind
 one, set `TRUSTED_PROXIES` to its address (comma-separated addresses or CIDR ranges)
 and only a connection from it may supply `X-Forwarded-For`. The production stack
-sets this to Caddy's fixed address (`deploy/compose.yaml`). A Guest also cannot
+sets this to Caddy's fixed address (`deploy/compose.yaml`). A User also cannot
 create a table while they own 10 tables that each have a seated human; stand up or
 leave a table to free a place.
 
@@ -147,7 +147,7 @@ time, so Presentation Phases, Action Windows, Action Deadlines and an Online
 Table's Next-Hand Countdowns run at their real pace. Type `restart` in its
 terminal (or `POST /restart` to `POKER_BROWSER_CONTROL_PORT`, if set) to restart
 the server on the same schema and port; every human then counts as disconnected
-until their Trainer reconnects. For two Guests, open the
+until their Trainer reconnects. For two Users, open the
 Trainer in two isolated browser profiles. Pair it with the `live-transport.ts`
 relay to drop, hold or replay frames mid-schedule. Use three PowerShell terminals:
 

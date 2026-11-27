@@ -10,7 +10,7 @@ import { InstantClock } from './fixtures/clock.js';
 import { nameGuest } from './fixtures/guest.js';
 
 // A table's Score Summaries on the user channel (ADR-0026, ADR-0041): while one is pending its count travels as
-// `progress` of the `summary` resource, at most once a second per Guest, and its completion or failure is a notice that
+// `progress` of the `summary` resource, at most once a second per User, and its completion or failure is a notice that
 // has the client read it again over HTTP. Every Presentation Phase ends at once; only the spacing of `progress`
 // messages waits for the clock, which the tests move.
 const clock = new InstantClock();
@@ -57,11 +57,11 @@ async function fixture() {
     await nameGuest(base, cookie, name);
     return cookie;
   }
-  /** A heads-up Practice Table of the Guest's, the Guest on the button and the Bot in the big blind. */
+  /** A heads-up Practice Table of the User's, the User on the button and the Bot in the big blind. */
   async function practice(cookie: string) {
     const created = await (await post('/table-sessions', cookie, { requestId: randomUUID(), bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] })).json();
-    const t = { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
-    await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+    const t = { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
     await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
     return t;
   }
@@ -71,15 +71,15 @@ async function fixture() {
     const response = await post('/table-sessions/' + t.id + '/' + kind, t.cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, ...contents });
     expect(response.status).toBe(200);
   }
-  const humanAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.human, action });
+  const playerAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.player, action });
   const botAct = async (t: Table, action: ConcreteAction) => expect(await controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId: t.bot, action })).toMatchObject({ ok: true });
-  /** A Hand checked down: the Guest calls preflop and checks the flop, turn and river, four decisions scoring 1. */
+  /** A Hand checked down: the User calls preflop and checks the flop, turn and river, four decisions scoring 1. */
   async function checkDown(t: Table) {
     await command(t, 'start-hand');
     for (let state = (await read(t)).view.state; state.status === 'active-hand'; state = (await read(t)).view.state) {
-      if (state.actorId === t.human) { await humanAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
-      const bot = state.participants.find(participant => participant.participantId === t.bot)!, human = state.participants.find(participant => participant.participantId === t.human)!;
-      await botAct(t, { type: (bot.wager ?? 0) < (human.wager ?? 0) ? 'call' : 'check' });
+      if (state.actorId === t.player) { await playerAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
+      const bot = state.participants.find(participant => participant.participantId === t.bot)!, player = state.participants.find(participant => participant.participantId === t.player)!;
+      await botAct(t, { type: (bot.wager ?? 0) < (player.wager ?? 0) ? 'call' : 'check' });
     }
   }
   const configure = async (cookie: string, referenceStrategy: StrategyDescriptor) => expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy } }) })).status).toBe(200);
@@ -108,7 +108,7 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 let f: Fixture;
 beforeAll(async () => { f = await fixture(); fixtures.push(f); });
 
-/** A Guest with a Practice Table of four decisions, scoring 1, each needing a new analysis under their Reference Strategy. */
+/** A User with a Practice Table of four decisions, scoring 1, each needing a new analysis under their Reference Strategy. */
 async function fourDecisions(name = 'Ann') {
   const cookie = await f.guest(name);
   const table = await f.practice(cookie);
@@ -117,7 +117,7 @@ async function fourDecisions(name = 'Ann') {
   await f.configure(cookie, reference);
   return table;
 }
-/** One of the Guest's live connections, and what it has received on their user channel. */
+/** One of the User's live connections, and what it has received on their user channel. */
 async function listen(cookie: string) {
   const socket = new WebSocket(f.base.replace('http:', 'ws:') + '/api/live', { headers: { cookie } });
   sockets.push(socket);
@@ -151,7 +151,7 @@ test("a table's summaries report succeeded and total in every response, and a su
   expect(none).toMatchObject({ status: 'empty', progress: { succeeded: 0, total: 0 } });
 });
 
-test('a Guest hears at most one progress message a second for their table summaries, each with the latest count of every pending one, rising as analyses finish', async () => {
+test('a User hears at most one progress message a second for their table summaries, each with the latest count of every pending one, rising as analyses finish', async () => {
   const t = await fourDecisions();
   const tab = await listen(t.cookie);
   f.hold();
@@ -243,14 +243,14 @@ test('a failed table summary publishes its failure, and its Retry follows progre
   expect(await f.summary(t, failing.requestId)).toMatchObject({ status: 'complete', progress: { succeeded: 4, total: 4 } });
 });
 
-test("a Guest's connections hear progress and notices of their own table summaries only, never another Guest's", async () => {
+test("a User's connections hear progress and notices of their own table summaries only, never another User's", async () => {
   const ann = await fourDecisions('Ann'), ben = await fourDecisions('Ben');
   const annTabs = [await listen(ann.cookie), await listen(ann.cookie)], benTab = await listen(ben.cookie);
   f.hold();
   const asked: Record<'ann' | 'ben', string[]> = { ann: [], ben: [] };
   try {
     for (const [who, t] of [['ann', ann], ['ben', ben]] as const) asked[who].push((await f.session(t)).requestId, (await f.hand(t)).requestId, (await f.history(t, compared)).requestId);
-    // Both Guests' analyses finish a few at a time, each second's worth told together.
+    // Both Users' analyses finish a few at a time, each second's worth told together.
     for (let round = 0; round < 4; round++) {
       await f.answerOne();
       await f.answerOne();
@@ -266,7 +266,7 @@ test("a Guest's connections hear progress and notices of their own table summari
   }
   expect(benTab.progress().length).toBeGreaterThan(0);
   expect([...heard(benTab)].sort()).toEqual([...asked.ben].sort());
-  // Every connection of a Guest hears the same, and a connection opened later is told nothing stored.
+  // Every connection of a User hears the same, and a connection opened later is told nothing stored.
   expect(annTabs[1]!.progress()).toEqual(annTabs[0]!.progress());
   expect(annTabs[1]!.notices()).toEqual(annTabs[0]!.notices());
   const late = await listen(ann.cookie);

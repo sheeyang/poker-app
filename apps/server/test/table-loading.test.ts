@@ -48,14 +48,14 @@ async function guest(name = 'You') {
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 
-type Table = { id: string; cookie: string; human: string; bot: string };
+type Table = { id: string; cookie: string; player: string; bot: string };
 /** A heads-up Practice Table against one Bot. Creating it does not load it. */
 async function practiceTable(actionTimeLimitSeconds: ActionTimeLimitSeconds | null = null): Promise<Table> {
   const cookie = await guest();
   const response = await post('/api/table-sessions', cookie, { requestId: randomUUID(), options: { actionTimeLimitSeconds }, bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] });
   expect(response.status).toBe(201);
   const created = await response.json();
-  return { id: created.tableSessionId, cookie, human: created.bindings[0].participantId, bot: created.bindings[1].participantId };
+  return { id: created.tableSessionId, cookie, player: created.bindings[0].participantId, bot: created.bindings[1].participantId };
 }
 const read = async (t: Table): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, t.cookie)).json();
 /** The stored table, read without loading it. */
@@ -65,10 +65,10 @@ async function command(t: Table, kind: string, fields: object = {}) {
   expect(response.status).toBe(200);
   return response.json();
 }
-/** A Hand in progress at a heads-up Practice Table: the human, in seat 1, acts first. */
+/** A Hand in progress at a heads-up Practice Table: the player, in seat 1, acts first. */
 async function handInProgress(actionTimeLimitSeconds: ActionTimeLimitSeconds | null) {
   const t = await practiceTable(actionTimeLimitSeconds);
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
   await command(t, 'start-hand');
   return t;
@@ -165,7 +165,7 @@ test('a request within that minute keeps the table loaded for another minute fro
 
 test('a request that fails still releases the table, which unloads a minute later', async () => {
   const t = await practiceTable();
-  const refused = await post('/api/table-sessions/' + t.id + '/seat-participant', t.cookie, { requestId: randomUUID(), expectedPokerRevision: 7, participantId: t.human, seat: 1 });
+  const refused = await post('/api/table-sessions/' + t.id + '/seat-participant', t.cookie, { requestId: randomUUID(), expectedPokerRevision: 7, participantId: t.player, seat: 1 });
   expect(refused.status).toBe(409);
   expect(loaded(t.id)).toBe(true);
   clock.advance(minute);
@@ -177,7 +177,7 @@ test('a request from anyone not at a table never loads it; a join to an Online T
   const stranger = await guest('Stranger');
   const at = (path: string) => '/api/table-sessions/' + t.id + path;
   expect((await get(at(''), stranger)).status).toBe(404);
-  expect((await post(at('/seat-participant'), stranger, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: t.human, seat: 1 })).status).toBe(404);
+  expect((await post(at('/seat-participant'), stranger, { requestId: randomUUID(), expectedPokerRevision: 0, participantId: t.player, seat: 1 })).status).toBe(404);
   expect((await post(at('/analysis'), stranger, { decisionId: 'hand-1/decision-1' })).status).toBe(404);
   expect((await post(at('/session-summaries'), stranger, {})).status).toBe(404);
   expect(await subscription(stranger, t.id)).toMatchObject({ status: 'rejected', code: 'not-found' });
@@ -203,12 +203,12 @@ test('a request from anyone not at a table never loads it; a join to an Online T
   expect(loaded(online)).toBe(true);
 });
 
-test('an untimed Practice Hand holds nothing while it waits for its human: the table unloads, and reloads mid-Hand as it was', async () => {
+test('an untimed Practice Hand holds nothing while it waits for its player: the table unloads, and reloads mid-Hand as it was', async () => {
   const t = await handInProgress(null);
   // Its Action Window opens as the deal is presented; after that nothing is scheduled.
   clock.advance(presentedFor('deal')); await roundTrip();
   const waiting = await read(t);
-  expect(waiting.view.state).toMatchObject({ status: 'active-hand', actorId: t.human });
+  expect(waiting.view.state).toMatchObject({ status: 'active-hand', actorId: t.player });
   clock.advance(minute);
   await expect.poll(() => loaded(t.id)).toBe(false);
   expect(await read(t)).toEqual({ ...waiting, serverTime: clock.now() });
@@ -223,21 +223,21 @@ test('scheduled work holds a table with nobody connected: a timed Practice Hand 
   expect(loaded(t.id)).toBe(true);
   clock.advanceTo(waiting.schedule.actionWindow!.deadlineAt! + 1);
   await expect.poll(async () => (await stored(t)).pokerRevision).toBe(waiting.pokerRevision + 1);
-  expect((await stored(t)).pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: t.human, action: { type: 'fold' } });
+  expect((await stored(t)).pokerRecord.commands.at(-1)).toEqual({ type: 'act', participantId: t.player, action: { type: 'fold' } });
   // Once the payout has been shown nothing more is scheduled, and the table unloads a minute later.
   clock.advance(presentedFor('payout')); await roundTrip();
   clock.advance(minute);
   await expect.poll(() => loaded(t.id)).toBe(false);
 });
 
-test('After-Hand Requests at an untimed Practice Table hold nothing: only its human advances the Hand, so the table unloads and they wait in its record', async () => {
+test('After-Hand Requests at an untimed Practice Table hold nothing: only its player advances the Hand, so the table unloads and they wait in its record', async () => {
   const t = await handInProgress(null);
   clock.advance(presentedFor('deal')); await roundTrip();
-  expect(await command(t, 'stand-up-participant', { participantId: t.human })).toMatchObject({ ok: true, afterHand: true });
+  expect(await command(t, 'stand-up-participant', { participantId: t.player })).toMatchObject({ ok: true, afterHand: true });
   clock.advance(minute);
   await expect.poll(() => loaded(t.id)).toBe(false);
   expect((await stored(t)).pendingChanges).toHaveLength(1);
-  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
   // The payout is shown, then the Stand Up is applied, and nothing holds the table any longer.
   clock.advance(presentedFor('payout'));
   await expect.poll(async () => (await stored(t)).pendingChanges).toEqual([]);
@@ -248,10 +248,10 @@ test('After-Hand Requests at an untimed Practice Table hold nothing: only its hu
 
 test('after a restart, an idle table is not loaded, and loads when its owner opens it', async () => {
   const t = await practiceTable();
-  await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+  await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
   await server.close(); await startServer();
   expect(loaded(t.id)).toBe(false);
-  expect((await read(t)).view.state.participants.find(p => p.participantId === t.human)).toMatchObject({ seat: 1 });
+  expect((await read(t)).view.state.participants.find(p => p.participantId === t.player)).toMatchObject({ seat: 1 });
   expect(loaded(t.id)).toBe(true);
 });
 
@@ -261,13 +261,13 @@ test('automatic analysis results that arrive after the last subscriber leaves do
   const live = await connectLive(base, t.cookie, t.id);
   clock.advance(presentedFor('deal')); await roundTrip();
   const started = evaluationsStarted;
-  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
   await expect.poll(() => evaluationsStarted).toBeGreaterThan(started);
   // The payout is shown; after it nothing is scheduled.
   clock.advance(presentedFor('payout')); await roundTrip();
   await unsubscribe(live, t.id);
   clock.advance(minute / 2); await roundTrip();
-  // The results arrive, and are delivered to the loaded table's human, without restarting its minute.
+  // The results arrive, and are delivered to the loaded table's player, without restarting its minute.
   release();
   await expect.poll(() => live.messages.filter(message => message.type === 'analysis-update' && message.status === 'complete').length).toBe(2);
   expect(await storedScores(t)).toBe(1);
@@ -280,7 +280,7 @@ test('automatic analysis results that arrive after the table has unloaded are ke
   const t = await handInProgress(null);
   clock.advance(presentedFor('deal')); await roundTrip();
   const started = evaluationsStarted;
-  await command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+  await command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
   await expect.poll(() => evaluationsStarted).toBeGreaterThan(started);
   clock.advance(presentedFor('payout')); await roundTrip();
   clock.advance(minute);

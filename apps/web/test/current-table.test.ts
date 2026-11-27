@@ -25,17 +25,17 @@ function table(change: { seat?: number | null; owner?: string; pending?: AfterHa
 
 describe('the Current Table among saved tables', () => {
   const saved = (entries: Partial<SavedTable>[]) => entries.map((entry, i) => ({ tableSessionId: `t${i}`, mode: 'online', ...entry }) as SavedTable);
-  it('is the one Online Table the Guest has not left', () => {
+  it('is the one Online Table the User has not left', () => {
     expect(currentTableId(saved([{ mode: 'practice' }, { left: true }, { tableSessionId: id }]))).toBe(id);
   });
-  it('is none while the Guest is only at Practice Tables, has left every Online Table, or the list is not read yet', () => {
+  it('is none while the User is only at Practice Tables, has left every Online Table, or the list is not read yet', () => {
     expect(currentTableId(saved([{ mode: 'practice' }, { left: true }]))).toBeUndefined();
     expect(currentTableId(undefined)).toBeUndefined();
   });
   it('is never a Closed Table, whose memberships the closing ended', () => {
     expect(currentTableId(saved([{ tableSessionId: id, left: true, closed: true }]))).toBeUndefined();
   });
-  it('is gone as soon as the server says the Guest’s Leave Table or Removal took effect', () => {
+  it('is gone as soon as the server says the User’s Leave Table or Removal took effect', () => {
     const list = { tables: saved([{ tableSessionId: id }, { mode: 'practice' }]) };
     const ended = withMembershipEnded(list, id);
     expect(currentTableId(ended?.tables)).toBeUndefined();

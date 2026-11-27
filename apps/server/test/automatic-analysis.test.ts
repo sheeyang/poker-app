@@ -54,14 +54,14 @@ async function fixture(options: Partial<ServerOptions> = {}) {
     const identity = await fetch(base + '/api/identity'); const cookie = identity.headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie);
     const response = await post(cookie, '/table-sessions', { requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] });
     expect(response.status).toBe(201); const created = await response.json();
-    return { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    return { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
   }
   type Table = Awaited<ReturnType<typeof table>>;
   const read = async (t: Table): Promise<ObservableTableSession> => (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json();
   const submit = (t: Table, kind: string, body: unknown) => post(t.cookie, '/table-sessions/' + t.id + '/' + kind, body);
   const configure = (t: Table, trainerConfiguration: TrainerConfiguration) => fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie: t.cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration }) });
   async function command(t: Table, kind: string, body: object = {}) { const before = await read(t); const response = await submit(t, kind, { requestId: randomUUID(), expectedPokerRevision: before.pokerRevision, ...body }); expect(response.status).toBe(200); return response.json(); }
-  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.human, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
+  async function decision() { const t = await table(); await command(t, 'seat-participant', { participantId: t.player, seat: 1 }); await command(t, 'seat-participant', { participantId: t.bot, seat: 2 }); await command(t, 'start-hand'); return t; }
   const request = async (t: Table, decisionId = 'hand-1/decision-1'): Promise<DecisionAnalysis> => (await submit(t, 'analysis', { decisionId })).json();
   const result = async (t: Table, requestId: string): Promise<DecisionAnalysis> => (await fetch(base + '/api/table-sessions/' + t.id + '/analysis/' + requestId, { headers: { cookie: t.cookie } })).json();
   async function stop() { const closing = server.close(); await expect.poll(() => [...held].every(evaluation => evaluation.signal?.aborted)).toBe(true); for (const evaluation of held) evaluation.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] }); await closing; }
@@ -73,7 +73,7 @@ async function fixture(options: Partial<ServerOptions> = {}) {
   };
 }
 
-test('accepted human play starts analysis with Live Analysis off and no browser connection, without awaiting its result', async () => {
+test('accepted player play starts analysis with Live Analysis off and no browser connection, without awaiting its result', async () => {
   const f = await fixture();
   try {
     const t = await f.decision();
@@ -81,7 +81,7 @@ test('accepted human play starts analysis with Live Analysis off and no browser 
     expect(before.trainerConfiguration.liveAnalysis).toBe(true);
     expect((await f.configure(t, { ...before.trainerConfiguration, liveAnalysis: false })).status).toBe(200);
     expect(f.evaluations).toHaveLength(0);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     expect(await f.read(t)).toMatchObject({ pokerRevision: 4, sessionRevision: 4, view: { state: { status: 'completed-hand' } } });
     await expect.poll(() => f.evaluations.length).toBe(1);
     const pending = await f.request(t);
@@ -97,7 +97,7 @@ test('live recovery starts one accepted analysis after proving COMMIT without a 
   const f = await fixture();
   try {
     const t = await f.decision();
-    const body = { requestId: 'unknown-human', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } };
+    const body = { requestId: 'unknown-player', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } };
     f.hold(body.requestId);
     expect((await f.submit(t, 'act', body)).status).toBe(503);
     expect(await f.read(t)).toMatchObject({ pokerRevision: 3, runtimeStatus: { phase: 'recovering' } });
@@ -120,28 +120,28 @@ test('interactive matches share queued automatic work without promoting its orig
   try {
     const blocker = await f.decision(); const automatic = await f.decision(); const interactive = await f.decision();
     await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(1);
-    await f.command(automatic, 'act', { participantId: automatic.human, action: { type: 'fold' } });
+    await f.command(automatic, 'act', { participantId: automatic.player, action: { type: 'fold' } });
     const pending = await f.request(automatic); expect(await f.request(automatic)).toEqual(pending);
     await f.request(interactive);
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(2);
-    expect(f.evaluations[1]!.view.state.actorId).toBe(interactive.human);
+    expect(f.evaluations[1]!.view.state.actorId).toBe(interactive.player);
     f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(3);
-    expect(f.evaluations[2]!.view.state.actorId).toBe(automatic.human);
+    expect(f.evaluations[2]!.view.state.actorId).toBe(automatic.player);
     f.evaluations[2]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await f.result(automatic, pending.requestId)).status).toBe('complete');
     expect(f.evaluations).toHaveLength(3);
   } finally { await f.close(); }
 });
 
-test('held or failed automatic analysis leaves accepted human play and admitted Bot progression independent', async () => {
+test('held or failed automatic analysis leaves accepted player play and admitted Bot progression independent', async () => {
   const f = await fixture({ automaticBots: true, jobRunnerOptions: { concurrency: 2, timeoutMs: 10000 } });
   try {
     const t = await f.decision();
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'call' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'call' } });
     await expect.poll(() => f.evaluations.length).toBe(2);
-    expect(f.evaluations.map(evaluation => evaluation.view.state.actorId)).toEqual([t.bot, t.human]);
+    expect(f.evaluations.map(evaluation => evaluation.view.state.actorId)).toEqual([t.bot, t.player]);
     const pending = await f.request(t);
     f.evaluations[0]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await f.read(t)).pokerRevision).toBe(5);
@@ -155,13 +155,13 @@ test('held or failed automatic analysis leaves accepted human play and admitted 
 
 test('no automatic target exists before durable commit or for rejected submissions, and matching acknowledgements do not resubmit it', async () => {
   const entered = Promise.withResolvers<void>(); const release = Promise.withResolvers<void>();
-  const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => { if (context.requestId === 'held-human') { entered.resolve(); await release.promise; } } } });
+  const f = await fixture({ mutationTransactionFaults: { beforeCommit: async context => { if (context.requestId === 'held-player') { entered.resolve(); await release.promise; } } } });
   try {
     const t = await f.decision();
     expect((await f.submit(t, 'act', { requestId: 'wrong-controller', expectedPokerRevision: 3, participantId: t.bot, action: { type: 'fold' } })).status).toBe(403);
-    expect((await f.submit(t, 'act', { requestId: 'illegal-check', expectedPokerRevision: 3, participantId: t.human, action: { type: 'check' } })).status).toBe(400);
-    expect((await f.submit(t, 'act', { requestId: 'stale', expectedPokerRevision: 2, participantId: t.human, action: { type: 'fold' } })).status).toBe(409);
-    const body = { requestId: 'held-human', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } };
+    expect((await f.submit(t, 'act', { requestId: 'illegal-check', expectedPokerRevision: 3, participantId: t.player, action: { type: 'check' } })).status).toBe(400);
+    expect((await f.submit(t, 'act', { requestId: 'stale', expectedPokerRevision: 2, participantId: t.player, action: { type: 'fold' } })).status).toBe(409);
+    const body = { requestId: 'held-player', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } };
     const response = f.submit(t, 'act', body); await entered.promise;
     expect(await f.read(t)).toMatchObject({ pokerRevision: 3, sessionRevision: 3 });
     expect(f.evaluations).toHaveLength(0);
@@ -176,13 +176,13 @@ test('confirmed noncommit discards the unaccepted target and permits analysis on
   const f = await fixture();
   try {
     const t = await f.decision();
-    const body = { requestId: 'aborted-human', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } };
+    const body = { requestId: 'aborted-player', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } };
     f.hold(body.requestId); expect((await f.submit(t, 'act', body)).status).toBe(503);
     await f.resolve('ROLLBACK');
     expect(await (await f.submit(t, 'act', body)).json()).toMatchObject({ rejection: { code: 'commit-not-applied' } });
     expect(await f.read(t)).toMatchObject({ pokerRevision: 3, sessionRevision: 3 });
     expect(f.evaluations).toHaveLength(0);
-    expect((await f.submit(t, 'act', { ...body, requestId: 'new-human-attempt' })).status).toBe(200);
+    expect((await f.submit(t, 'act', { ...body, requestId: 'new-player-attempt' })).status).toBe(200);
     await expect.poll(() => f.evaluations.length).toBe(1);
   } finally { await f.close(); }
 });
@@ -191,7 +191,7 @@ test('restart restores an uncertain accepted action without creating a durable a
   const f = await fixture();
   try {
     const t = await f.decision();
-    const body = { requestId: 'restart-human', expectedPokerRevision: 3, participantId: t.human, action: { type: 'fold' } };
+    const body = { requestId: 'restart-player', expectedPokerRevision: 3, participantId: t.player, action: { type: 'fold' } };
     f.hold(body.requestId); expect((await f.submit(t, 'act', body)).status).toBe(503);
     await f.restart(); await f.resolve('COMMIT');
     await expect.poll(async () => (await f.read(t)).runtimeStatus?.phase).toBe('idle');
@@ -208,7 +208,7 @@ test('automatic capacity failure is readable rather than phantom pending and can
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 0, timeoutMs: 10000 } });
   try {
     const blocker = await f.decision(); await f.request(blocker); await expect.poll(() => f.evaluations.length).toBe(1);
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     await expect.poll(async () => (await f.request(t)).status).toBe('error');
     const failure = await f.request(t);
     expect(failure).toMatchObject({ status: 'error', scoredDecision: { acceptedAction: { type: 'fold' } }, error: { code: 'capacity' } });
@@ -221,7 +221,7 @@ test('automatic capacity failure is readable rather than phantom pending and can
 test('automatic score calculation keeps priority 2 behind later interactive evaluation after its dependency succeeds', async () => {
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 8, timeoutMs: 10000 } });
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     await expect.poll(() => f.evaluations.length).toBe(1); const pending = await f.request(t);
     const blocker = await f.decision(); const interactive = await f.decision();
     await f.request(blocker);
@@ -231,7 +231,7 @@ test('automatic score calculation keeps priority 2 behind later interactive eval
     await f.request(interactive);
     f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(3);
-    expect(f.evaluations[2]!.view.state.actorId).toBe(interactive.human);
+    expect(f.evaluations[2]!.view.state.actorId).toBe(interactive.player);
     expect(await f.result(t, pending.requestId)).toMatchObject({ status: 'pending' });
     f.evaluations[2]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(async () => (await f.result(t, pending.requestId)).status).toBe('complete');
@@ -241,7 +241,7 @@ test('automatic score calculation keeps priority 2 behind later interactive eval
 test('explicit Retry preserves automatic dependency priority, accepted action, original reference and seeds after preferences change', async () => {
   const f = await fixture({ jobRunnerOptions: { concurrency: 1, maximumQueued: 8, timeoutMs: 10000 } });
   try {
-    const t = await f.decision(); await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    const t = await f.decision(); await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     await expect.poll(() => f.evaluations.length).toBe(1); const original = f.evaluations[0]!;
     const pending = await f.request(t); original.result.resolve({ choices: [{ action: { type: 'fold' }, probability: .2 }] });
     await expect.poll(async () => (await f.result(t, pending.requestId)).status).toBe('error');
@@ -253,7 +253,7 @@ test('explicit Retry preserves automatic dependency priority, accepted action, o
     const interactive = await f.decision(); await f.request(interactive);
     f.evaluations[1]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(3);
-    expect(f.evaluations[2]!.view.state.actorId).toBe(interactive.human);
+    expect(f.evaluations[2]!.view.state.actorId).toBe(interactive.player);
     f.evaluations[2]!.result.resolve({ choices: [{ action: { type: 'fold' }, probability: 1 }] });
     await expect.poll(() => f.evaluations.length).toBe(4);
     expect(f.evaluations[3]).toMatchObject({ view: original.view, seed: original.seed, descriptor: original.descriptor });
@@ -270,7 +270,7 @@ test('an automatic accepted score shares a running Live Analysis evaluation and 
     expect((await f.configure(t, { referenceStrategy: baselinePlayingStrategy, liveAnalysis: true })).status).toBe(200);
     const live: DecisionAnalysis = await (await f.submit(t, 'analysis', { decisionId: 'hand-1/decision-1', live: true })).json();
     await expect.poll(() => f.evaluations.length).toBe(1);
-    await f.command(t, 'act', { participantId: t.human, action: { type: 'fold' } });
+    await f.command(t, 'act', { participantId: t.player, action: { type: 'fold' } });
     const automatic = await f.request(t);
     expect(automatic).toMatchObject({ status: 'pending', evaluationRequestId: live.requestId, scoredDecision: { acceptedAction: { type: 'fold' } } });
     expect(f.evaluations).toHaveLength(1);

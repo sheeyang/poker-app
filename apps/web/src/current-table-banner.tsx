@@ -9,9 +9,9 @@ import { currentTableBanner } from './current-table.js';
 import type { Command } from './session.js';
 
 /**
- * The live strip under the header: the Guest's Current Table, on every page but its own. The shell's live
+ * The live strip under the header: the User's Current Table, on every page but its own. The shell's live
  * subscription to that table keeps its read current, so the strip changes as the table does, and goes once the
- * Guest's Leave Table or Removal takes effect.
+ * User's Leave Table or Removal takes effect.
  */
 export function CurrentTableBanner({ tableSessionId, command }: { tableSessionId: string; command: Command }) {
   const pathname = useRouterState({ select: state => state.location.pathname });

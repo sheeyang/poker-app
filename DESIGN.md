@@ -179,7 +179,7 @@ Use compact control groups and consistent gaps from the spacing scale. Distingui
 
 The shell has a maximum width. The active table fills the viewport below the app header and stays fixed while the analysis sidebar scrolls independently. On narrow screens, analysis fills the workspace instead of sitting beside the table, forms stack, shell padding shrinks and action buttons become shallower horizontal groups. The supported minimum width is 320px. Practice setup and saved-table browsing use normal page scrolling.
 
-On phones the table takes the remaining viewport height with a felt inset, and board cards, hole cards and seats shrink to fit. Larger tables use smaller seats and cards still. Active-hand controls respect safe-area padding. Short viewports put the three action buttons on one row and move the human's cards beside their seat to keep the board clear.
+On phones the table takes the remaining viewport height with a felt inset, and board cards, hole cards and seats shrink to fit. Larger tables use smaller seats and cards still. Active-hand controls respect safe-area padding. Short viewports put the three action buttons on one row and move the viewer's cards beside their seat to keep the board clear.
 
 ## Elevation & Depth
 
@@ -198,7 +198,7 @@ Use compact rounded rectangles: tags and small cards, card stock, fields, contro
 - **Choice surfaces:** table format and stack presets are labeled radio surfaces with muted captions. The selected choice takes a brass border and a warmer green fill. The primary Start control is full width and taller than ordinary buttons.
 - **Navigation:** plain-text controls with muted inactive labels. The selected destination uses brass text and a brass bottom rule. Small screens keep labels and drop icons.
 - **Tags:** small green status labels with soft sage text. The accepted-action marker uses a warm accent and identifies the player's action without grading it.
-- **Containers and seats:** bordered green surfaces with modest padding. The acting seat receives a brass border and an explicit caption; the human seat uses a distinct green tone. Folded cards are subdued without hiding the seat's identity. States such as disconnected or sitting out use a dashed border or a text label as well as dimming, so they never rest on colour alone.
+- **Containers and seats:** bordered green surfaces with modest padding. The acting seat receives a brass border and an explicit caption; the viewer's seat uses a distinct green tone. Folded cards are subdued without hiding the seat's identity. States such as disconnected or sitting out use a dashed border or a text label as well as dimming, so they never rest on colour alone.
 - **Popover menus:** compact raised-green popovers open beside their trigger and keep brass focus, text labels and muted reasons for unavailable actions.
 - **Notes and notices:** a pending after-hand change appears as a small olive note. Recovery notices use warm brown surfaces with pale text and explicit controls.
 - **Playing cards:** ivory stock, dark or red suits, small corners and a short shadow. Face-down cards use a green back with pale inset linework. Compact variants drop the mirrored lower index but keep the upper rank and central suit, so suits stay recognisable at small sizes.

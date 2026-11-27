@@ -36,19 +36,19 @@ async function revertToPreM4Schema() {
   }
   await administration.query('RESET search_path');
 }
-/** A Practice Table exactly as version 1 stored it: one owner-human, a table-level Trainer configuration. */
+/** A Practice Table exactly as version 1 stored it: one player, its owner, and a table-level Trainer configuration. */
 async function legacyTable({ trainerConfiguration = true } = {}) {
   const token = randomBytes(32).toString('base64url');
-  const userId = randomUUID(), tableSessionId = randomUUID(), human = randomUUID(), bot = randomUUID();
+  const userId = randomUUID(), tableSessionId = randomUUID(), player = randomUUID(), bot = randomUUID();
   const created = CashGame.create({ ...defaultConfiguration, seed: 'legacy-'.padEnd(64, '0') });
   if (!created.ok) throw new Error('Legacy fixture configuration is invalid.');
   const game = created.game;
-  for (const result of [game.seatParticipant(human, 1), game.seatParticipant(bot, 2), game.startHand(), game.act(human, { type: 'fold' })]) if (!result.ok) throw new Error(result.rejection.code);
+  for (const result of [game.seatParticipant(player, 1), game.seatParticipant(bot, 2), game.startHand(), game.act(player, { type: 'fold' })]) if (!result.ok) throw new Error(result.rejection.code);
   const aggregate = {
     schemaVersion: 1, tableSessionId, ownerUserId: userId,
     pokerRecord: { ...game.toRecord(), schemaVersion: 1 },
     bindings: [
-      { participantId: human, name: 'You', controller: { kind: 'human' }, userId },
+      { participantId: player, name: 'You', controller: { kind: 'human' }, userId },
       { participantId: bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy }, assignmentId: randomUUID() },
     ],
     ...(trainerConfiguration ? { trainerConfiguration: { referenceStrategy: highestProbabilityPlayingStrategy, liveAnalysis: true } } : {}),
@@ -56,14 +56,14 @@ async function legacyTable({ trainerConfiguration = true } = {}) {
   };
   await administration.query(`INSERT INTO "${schema}".local_users (id, token_hash) VALUES ($1, $2)`, [userId, createHash('sha256').update(token).digest('hex')]);
   await administration.query(`INSERT INTO "${schema}".table_sessions (id, owner_user_id, aggregate) VALUES ($1, $2, $3)`, [tableSessionId, userId, aggregate]);
-  return { id: tableSessionId, cookie: 'poker_local=' + token, human, bot };
+  return { id: tableSessionId, cookie: 'poker_local=' + token, player, bot };
 }
 type Table = Awaited<ReturnType<typeof legacyTable>>;
 const get = (path: string, cookie: string) => fetch(base + path, { headers: { cookie } });
 const post = (path: string, cookie: string, body: unknown) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify(body) });
 const read = async (t: Table): Promise<ObservableTableSession> => (await get('/api/table-sessions/' + t.id, t.cookie)).json();
 
-test('a version-1 table loads as a Practice Table whose human keeps their analysis, and whose table-level Trainer configuration gives way to their Guest\'s', async () => {
+test('a version-1 table loads as a Practice Table whose player keeps their analysis, and whose table-level Trainer configuration gives way to their User\'s', async () => {
   await revertToPreM4Schema();
   const t = await legacyTable();
   await start();
@@ -71,8 +71,8 @@ test('a version-1 table loads as a Practice Table whose human keeps their analys
   expect(upgraded).toMatchObject({
     tableSessionId: t.id, mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, pokerRevision: 4, sessionRevision: 5,
     trainerConfiguration: defaultTrainerConfiguration,
-    bindings: [{ participantId: t.human, name: 'You', controller: { kind: 'human' } }, { participantId: t.bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
-    view: { state: { status: 'completed-hand', handId: 'hand-1', participants: [{ participantId: t.human, stack: 990 }, { participantId: t.bot, stack: 1010 }] } },
+    bindings: [{ participantId: t.player, name: 'You', controller: { kind: 'human' } }, { participantId: t.bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
+    view: { state: { status: 'completed-hand', handId: 'hand-1', participants: [{ participantId: t.player, stack: 990 }, { participantId: t.bot, stack: 1010 }] } },
   });
   expect(upgraded).not.toHaveProperty('joinToken');
   expect(upgraded.view.history[0]!.decisions[0]!.state.participants[0]!.holeCards).toHaveLength(2);
@@ -83,7 +83,7 @@ test('a version-1 table loads as a Practice Table whose human keeps their analys
   expect((await get('/api/table-sessions/' + t.id, stranger)).status).toBe(404);
 
   const requested = await (await post('/api/table-sessions/' + t.id + '/analysis', t.cookie, { decisionId: 'hand-1/decision-1' })).json();
-  expect(requested).toMatchObject({ ok: true, participantId: t.human, referenceStrategy: defaultTrainerConfiguration.referenceStrategy });
+  expect(requested).toMatchObject({ ok: true, participantId: t.player, referenceStrategy: defaultTrainerConfiguration.referenceStrategy });
   const analysis = () => get('/api/table-sessions/' + t.id + '/analysis/' + requested.requestId, t.cookie);
   await expect.poll(async () => (await (await analysis()).json()).status, { timeout: 10000 }).toBe('complete');
   const completed = await (await analysis()).json();
@@ -123,7 +123,7 @@ test('a version-1 table loads as a Practice Table whose human keeps their analys
   // It starts the server twelve times, each start migrating the schema: far longer than one request on a loaded machine.
 }, 60_000);
 
-test('a version-1 table without its Trainer configuration still loads: the Guest\'s configuration applies either way', async () => {
+test('a version-1 table without its Trainer configuration still loads: the User\'s configuration applies either way', async () => {
   await stop();
   const t = await legacyTable({ trainerConfiguration: false });
   await start();

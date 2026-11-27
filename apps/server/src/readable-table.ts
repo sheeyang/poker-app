@@ -1,6 +1,6 @@
 import type { Stakes } from '@poker/contracts';
 import type { CashGame } from '@poker/engine';
-import type { CompletedHand, HistoryReader } from '@poker/research';
+import type { CompletedHand, HistoryViewer } from '@poker/research';
 import { isBot, type PersistedTableSession } from './aggregate.js';
 import { recordedConfiguration } from './projection.js';
 
@@ -10,23 +10,23 @@ import { recordedConfiguration } from './projection.js';
  */
 export interface ReadableTable { readonly participantId: string; readonly aggregate: PersistedTableSession; readonly game: CashGame }
 
-/** The table's format as its history and saved-tables list show it: seat count and stakes, as recorded. */
-export function tableFormat(aggregate: PersistedTableSession): { readonly seatCount: number; readonly stakes: Stakes } {
+/** The table's seat count and stakes, as recorded: what its history and saved-tables list show of its size and blinds. */
+export function seatsAndStakes(aggregate: PersistedTableSession): { readonly seatCount: number; readonly stakes: Stakes } {
   const { seatCount, smallBlind, bigBlind, ante } = recordedConfiguration(aggregate.pokerRecord);
   return { seatCount, stakes: { smallBlind, bigBlind, ante } };
 }
 
 /**
  * The participant-safe facts Research reads the table's history with: its public facts, the names of everyone who has
- * had a place there and which of them are Bots (a removed Bot's binding stays), and the reader.
+ * had a place there and which of them are Bots (a removed Bot's binding stays), and the viewer.
  */
-export function historyReader({ aggregate, participantId }: ReadableTable): HistoryReader {
+export function historyViewer({ aggregate, participantId }: ReadableTable): HistoryViewer {
   const names = new Map<string, string>(), bots = new Set<string>();
   for (const binding of aggregate.bindings) {
     if (!names.has(binding.participantId)) names.set(binding.participantId, binding.name);
     if (isBot(binding)) bots.add(binding.participantId);
   }
-  return { tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, participantId, ...tableFormat(aggregate), names, bots };
+  return { tableSessionId: aggregate.tableSessionId, mode: aggregate.mode, participantId, ...seatsAndStakes(aggregate), names, bots };
 }
 
 /** Every completed Hand of the table in the Participant's Observable Session History, oldest first. */

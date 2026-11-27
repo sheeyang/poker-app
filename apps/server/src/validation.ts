@@ -5,7 +5,7 @@ const object = (value: unknown): value is Record<string, unknown> => !!value && 
 /** The key by which two Participant names at one table are the same name, ignoring case. */
 export const nameKey = (name: string) => name.normalize('NFC').toLowerCase();
 /**
- * Every Participant's name, a Guest's display name or a Bot's: trimmed, 1-20 characters of letters, digits, spaces
+ * Every Participant's name, a User's display name or a Bot's: trimmed, 1-20 characters of letters, digits, spaces
  * and basic punctuation. Control, format and invisible characters are not letters, so no name can look like another.
  * `undefined` when the value is no such name.
  */
@@ -66,7 +66,7 @@ export function validateCreationRequest(request: CreateTableSessionRequest, supp
   if (request.bots !== undefined) {
     if (!Array.isArray(request.bots)) return reject('bots', 'Supply a list of configured Bots.');
     const seatCount = request.configuration?.seatCount ?? defaultConfiguration.seatCount;
-    if (request.bots.length > seatCount - 1) return reject('bots', 'Reserve one Participant for the human and at most one Bot per remaining seat.');
+    if (request.bots.length > seatCount - 1) return reject('bots', 'Reserve one Participant for the player and at most one Bot per remaining seat.');
     for (const bot of request.bots) {
       if (!object(bot) || Object.keys(bot).some(key => !['name', 'playingStrategy'].includes(key)) || participantName(bot.name) === undefined)
         return reject('bots', 'Each Bot requires a name and a Playing Strategy. ' + participantNameRules);

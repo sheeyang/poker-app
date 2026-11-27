@@ -8,7 +8,7 @@ describe('the join request', () => {
   });
 });
 
-describe('what a refused join tells the Guest, and where', () => {
+describe('what a refused join tells the User, and where', () => {
   it('puts a wrong or missing password on the password field, naming the owner to ask', () => {
     expect(joinProblem({ code: 'wrong-table-password', message: 'server words' }, 'Sam')).toEqual({ field: 'tablePassword', message: 'That password isn’t right. Check it with Sam and try again.' });
     expect(joinProblem({ code: 'table-password-required', message: 'server words' }, 'Sam')).toEqual({ field: 'tablePassword', message: 'Enter the Table Password. Sam can tell you what it is.' });

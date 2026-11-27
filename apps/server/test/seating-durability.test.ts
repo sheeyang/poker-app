@@ -35,10 +35,10 @@ async function table() {
     body: JSON.stringify({ requestId: randomUUID(), bots: [{ name: 'Bot', playingStrategy: baselinePlayingStrategy }] }),
   });
   const result = await response.json();
-  return { id: result.tableSessionId as string, cookie, human: result.bindings[0].participantId as string, bot: result.bindings[1].participantId as string };
+  return { id: result.tableSessionId as string, cookie, player: result.bindings[0].participantId as string, bot: result.bindings[1].participantId as string };
 }
 type Table = Awaited<ReturnType<typeof table>>;
-const submit = (t: Table, requestId: string, participantId = t.human, seat = 1, expectedPokerRevision = 0) => fetch(base + '/api/table-sessions/' + t.id + '/seat-participant', {
+const submit = (t: Table, requestId: string, participantId = t.player, seat = 1, expectedPokerRevision = 0) => fetch(base + '/api/table-sessions/' + t.id + '/seat-participant', {
   method: 'POST', headers: { 'content-type': 'application/json', cookie: t.cookie }, body: JSON.stringify({ requestId, participantId, seat, expectedPokerRevision }),
 });
 const read = async (t: Table) => (await (await fetch(base + '/api/table-sessions/' + t.id, { headers: { cookie: t.cookie } })).json());
@@ -63,7 +63,7 @@ test('held COMMIT withholds the working view, same-session mutations remain FIFO
   expect((await held).status).toBe(200);
   expect((await queued!).status).toBe(200);
   expect(await read(first)).toMatchObject({ pokerRevision: 2, sessionRevision: 2, view: { state: { participants: [
-    { participantId: first.human, seat: 1, stack: 1000 }, { participantId: first.bot, seat: 2, stack: 1000 },
+    { participantId: first.player, seat: 1, stack: 1000 }, { participantId: first.bot, seat: 2, stack: 1000 },
   ] } } });
 });
 
@@ -94,7 +94,7 @@ test('lost COMMIT confirmation recovers its original outcome live and after rest
   await server.close();
   server = await createServer({ journalConnectionTimeoutMs: 10_000, clock, automaticBots: false, databaseUrl, schema });
   base = await server.listen({ host: '127.0.0.1', port: 0 });
-  expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: t.human, seat: 1, stack: 1000 }] } } });
+  expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1, view: { state: { participants: [{ participantId: t.player, seat: 1, stack: 1000 }] } } });
   expect(await (await submit(t, 'ambiguous')).json()).toEqual({ ok: true, tableSessionId: t.id, pokerRevision: 1, sessionRevision: 1 });
   expect(await read(t)).toMatchObject({ pokerRevision: 1, sessionRevision: 1 });
 });

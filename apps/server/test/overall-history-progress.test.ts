@@ -10,7 +10,7 @@ import { InstantClock } from './fixtures/clock.js';
 import { nameGuest } from './fixtures/guest.js';
 
 // Overall History on the user channel (ADR-0026, ADR-0041): a pending request's count travels as `progress`, at most
-// once a second per Guest, and each summary and score-filtered list publishes its completion or failure. Every
+// once a second per User, and each summary and score-filtered list publishes its completion or failure. Every
 // Presentation Phase ends at once; only the spacing of `progress` messages waits for the clock, which the tests move.
 const clock = new InstantClock();
 const databaseUrl = process.env.TEST_DATABASE_URL;
@@ -57,11 +57,11 @@ async function fixture() {
     await nameGuest(base, cookie, name);
     return cookie;
   }
-  /** A heads-up Practice Table of the Guest's, the Guest on the button and the Bot in the big blind. */
+  /** A heads-up Practice Table of the User's, the User on the button and the Bot in the big blind. */
   async function practice(cookie: string) {
     const created = await (await post('/table-sessions', cookie, { requestId: randomUUID(), bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] })).json();
-    const t = { id: created.tableSessionId as string, cookie, human: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
-    await command(t, 'seat-participant', { participantId: t.human, seat: 1 });
+    const t = { id: created.tableSessionId as string, cookie, player: created.bindings[0].participantId as string, bot: created.bindings[1].participantId as string };
+    await command(t, 'seat-participant', { participantId: t.player, seat: 1 });
     await command(t, 'seat-participant', { participantId: t.bot, seat: 4 });
     return t;
   }
@@ -71,21 +71,21 @@ async function fixture() {
     const response = await post('/table-sessions/' + t.id + '/' + kind, t.cookie, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, ...contents });
     expect(response.status).toBe(200);
   }
-  const humanAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.human, action });
+  const playerAct = (t: Table, action: ConcreteAction) => command(t, 'act', { participantId: t.player, action });
   const botAct = async (t: Table, action: ConcreteAction) => expect(await controller.submitAction(t.id, { requestId: randomUUID(), expectedPokerRevision: (await read(t)).pokerRevision, participantId: t.bot, action })).toMatchObject({ ok: true });
-  /** A Hand checked down: the Guest calls preflop and checks the flop, turn and river, four decisions scoring 1. */
+  /** A Hand checked down: the User calls preflop and checks the flop, turn and river, four decisions scoring 1. */
   async function checkDown(t: Table) {
     await command(t, 'start-hand');
     for (let state = (await read(t)).view.state; state.status === 'active-hand'; state = (await read(t)).view.state) {
-      if (state.actorId === t.human) { await humanAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
-      const bot = state.participants.find(participant => participant.participantId === t.bot)!, human = state.participants.find(participant => participant.participantId === t.human)!;
-      await botAct(t, { type: (bot.wager ?? 0) < (human.wager ?? 0) ? 'call' : 'check' });
+      if (state.actorId === t.player) { await playerAct(t, { type: state.legalActions.some(action => action.type === 'check') ? 'check' : 'call' }); continue; }
+      const bot = state.participants.find(participant => participant.participantId === t.bot)!, player = state.participants.find(participant => participant.participantId === t.player)!;
+      await botAct(t, { type: (bot.wager ?? 0) < (player.wager ?? 0) ? 'call' : 'check' });
     }
   }
-  /** A Hand the Guest folds preflop: one decision, scoring 0. */
+  /** A Hand the User folds preflop: one decision, scoring 0. */
   async function foldPreflop(t: Table) {
     await command(t, 'start-hand');
-    await humanAct(t, { type: 'fold' });
+    await playerAct(t, { type: 'fold' });
   }
   const configure = async (cookie: string, referenceStrategy: StrategyDescriptor) => expect((await fetch(base + '/api/trainer-configuration', { method: 'PUT', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ requestId: randomUUID(), trainerConfiguration: { ...defaultTrainerConfiguration, referenceStrategy } }) })).status).toBe(200);
   async function summarize(cookie: string, filter: HistoryFilter = {}, breakdown?: HistoryBreakdown): Promise<OverallHistorySummary> {
@@ -120,7 +120,7 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 let f: Fixture;
 beforeAll(async () => { f = await fixture(); fixtures.push(f); });
 
-/** A Guest with five decisions at two Practice Tables (four scoring 1, a fold scoring 0), each needing a new analysis. */
+/** A User with five decisions at two Practice Tables (four scoring 1, a fold scoring 0), each needing a new analysis. */
 async function fiveDecisions(name = 'Ann') {
   const cookie = await f.guest(name);
   const first = await f.practice(cookie), second = await f.practice(cookie);
@@ -130,7 +130,7 @@ async function fiveDecisions(name = 'Ann') {
   await f.configure(cookie, highestProbabilityPlayingStrategy);
   return cookie;
 }
-/** One of the Guest's live connections, and what it has received on their user channel. */
+/** One of the User's live connections, and what it has received on their user channel. */
 async function listen(cookie: string) {
   const socket = new WebSocket(f.base.replace('http:', 'ws:') + '/api/live', { headers: { cookie } });
   sockets.push(socket);
@@ -150,7 +150,7 @@ const pause = (ms = 60) => new Promise(resolve => setTimeout(resolve, ms));
 /** A progress message's counts, by request. */
 const counts = (message: ProgressUpdate) => Object.fromEntries(message.progress.map(entry => [entry.requestId, [entry.resource, entry.succeeded, entry.total]]));
 
-test('a Guest hears at most one progress message a second, each with the latest count of every pending request, rising as analyses finish', async () => {
+test('a User hears at most one progress message a second, each with the latest count of every pending request, rising as analyses finish', async () => {
   const cookie = await fiveDecisions();
   const tab = await listen(cookie);
   f.hold();
@@ -265,7 +265,7 @@ test('every summary of a request, a bucket\'s included, and every score-filtered
   expect(await f.scored(cookie, failingList.requestId)).toMatchObject({ status: 'complete', total: 1 });
 });
 
-test("a Guest's connections receive progress and notices for their own requests only, never another Guest's", async () => {
+test("a User's connections receive progress and notices for their own requests only, never another User's", async () => {
   const ann = await fiveDecisions('Ann'), ben = await fiveDecisions('Ben');
   const annTabs = [await listen(ann), await listen(ann)], benTab = await listen(ben);
   f.hold();
@@ -274,7 +274,7 @@ test("a Guest's connections receive progress and notices for their own requests 
     for (const [who, cookie] of [['ann', ann], ['ben', ben]] as const) {
       asked[who].push((await f.summarize(cookie)).requestId, (await f.summarize(cookie, {}, 'action')).requestId, (await f.ask(cookie, { decisionScore: { min: 0.5 } })).requestId);
     }
-    // Both Guests' analyses finish a few at a time, each second's worth told together.
+    // Both Users' analyses finish a few at a time, each second's worth told together.
     for (let round = 0; round < 4; round++) {
       await f.answerOne();
       await f.answerOne();
@@ -290,7 +290,7 @@ test("a Guest's connections receive progress and notices for their own requests 
   }
   expect(benTab.progress().length).toBeGreaterThan(0);
   expect([...heard(benTab)].sort()).toEqual([...asked.ben].sort());
-  // Every connection of a Guest hears the same.
+  // Every connection of a User hears the same.
   expect(annTabs[1]!.progress()).toEqual(annTabs[0]!.progress());
   expect(annTabs[1]!.notices()).toEqual(annTabs[0]!.notices());
   // A connection opened later is told nothing stored: only that its channel is ready.
