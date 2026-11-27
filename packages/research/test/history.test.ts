@@ -16,7 +16,7 @@ const state = (extra: Partial<ObservableCashGameState>): ObservableCashGameState
   ({ status: 'active-hand', buttonSeat: 1, participants: [], board: [], pots: [], actorId: null, legalActions: [], ...extra });
 const decision = (decisionId: string, participantId: string, action: ConcreteAction, at: ObservableCashGameState): ObservableHistoryEntry['decisions'][number] =>
   ({ decisionId, state: { ...at, actorId: participantId, decisionId }, action: { participantId, action } });
-const mine = ['As', 'Kd'] as const;
+const viewerHoleCards = ['As', 'Kd'] as const;
 
 /** Hand 1, completed at 1,000: `viewer` on the button raises, `opp` folds, `bot` calls; on the flop `bot` checks, `viewer` bets and `bot` folds. */
 const hand1: CompletedHand = {
@@ -24,14 +24,14 @@ const hand1: CompletedHand = {
   entry: {
     handId: 'hand-1', description: 'Hand 1',
     decisions: [
-      decision('hand-1/decision-1', 'viewer', { type: 'raise', raiseTo: 30 }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('viewer', 1, { holeCards: mine }), participant('opp', 2, { contribution: 5, wager: 5 }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
-      decision('hand-1/decision-2', 'opp', { type: 'fold' }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('viewer', 1, { holeCards: mine, contribution: 30, wager: 30 }), participant('opp', 2, { contribution: 5, wager: 5 }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
-      decision('hand-1/decision-3', 'bot', { type: 'call' }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('viewer', 1, { holeCards: mine, contribution: 30, wager: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
-      decision('hand-1/decision-4', 'bot', { type: 'check' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: mine, contribution: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
-      decision('hand-1/decision-5', 'viewer', { type: 'bet', betTo: 40 }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: mine, contribution: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
-      decision('hand-1/decision-6', 'bot', { type: 'fold' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: mine, contribution: 70, wager: 40 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
+      decision('hand-1/decision-1', 'viewer', { type: 'raise', raiseTo: 30 }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('viewer', 1, { holeCards: viewerHoleCards }), participant('opp', 2, { contribution: 5, wager: 5 }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
+      decision('hand-1/decision-2', 'opp', { type: 'fold' }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 30, wager: 30 }), participant('opp', 2, { contribution: 5, wager: 5 }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
+      decision('hand-1/decision-3', 'bot', { type: 'call' }, state({ handId: 'hand-1', street: 'preflop', participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 30, wager: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 10, wager: 10 })] })),
+      decision('hand-1/decision-4', 'bot', { type: 'check' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
+      decision('hand-1/decision-5', 'viewer', { type: 'bet', betTo: 40 }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 30 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
+      decision('hand-1/decision-6', 'bot', { type: 'fold' }, state({ handId: 'hand-1', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 70, wager: 40 }), participant('opp', 2, { contribution: 5, folded: true }), participant('bot', 3, { contribution: 30 })] })),
     ],
-    result: state({ status: 'completed-hand', handId: 'hand-1', board: ['2c', '7h', 'Jd'], participants: [participant('bot', 3, { folded: true, contribution: 30 }), participant('viewer', 1, { holeCards: mine, contribution: 70 }), participant('opp', 2, { folded: true, contribution: 5 })], payouts: [{ participantId: 'viewer', amount: 105 }] }),
+    result: state({ status: 'completed-hand', handId: 'hand-1', board: ['2c', '7h', 'Jd'], participants: [participant('bot', 3, { folded: true, contribution: 30 }), participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 70 }), participant('opp', 2, { folded: true, contribution: 5 })], payouts: [{ participantId: 'viewer', amount: 105 }] }),
   },
 };
 /** Hand 2, completed before completion times were recorded: the button moves to `opp`; `viewer` in the big blind checks to a showdown that reveals `opp`'s cards. */
@@ -40,11 +40,11 @@ const hand2: CompletedHand = {
   entry: {
     handId: 'hand-2', description: 'Hand 2',
     decisions: [
-      decision('hand-2/decision-1', 'opp', { type: 'call' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('viewer', 1, { holeCards: mine, contribution: 10, wager: 10 }), participant('opp', 2), participant('bot', 3, { contribution: 5, wager: 5 })] })),
-      decision('hand-2/decision-2', 'bot', { type: 'fold' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('viewer', 1, { holeCards: mine, contribution: 10, wager: 10 }), participant('opp', 2, { contribution: 10, wager: 10 }), participant('bot', 3, { contribution: 5, wager: 5 })] })),
-      decision('hand-2/decision-3', 'viewer', { type: 'check' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('viewer', 1, { holeCards: mine, contribution: 10, wager: 10 }), participant('opp', 2, { contribution: 10, wager: 10 }), participant('bot', 3, { contribution: 5, folded: true })] })),
+      decision('hand-2/decision-1', 'opp', { type: 'call' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 10, wager: 10 }), participant('opp', 2), participant('bot', 3, { contribution: 5, wager: 5 })] })),
+      decision('hand-2/decision-2', 'bot', { type: 'fold' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 10, wager: 10 }), participant('opp', 2, { contribution: 10, wager: 10 }), participant('bot', 3, { contribution: 5, wager: 5 })] })),
+      decision('hand-2/decision-3', 'viewer', { type: 'check' }, state({ handId: 'hand-2', buttonSeat: 2, street: 'preflop', participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 10, wager: 10 }), participant('opp', 2, { contribution: 10, wager: 10 }), participant('bot', 3, { contribution: 5, folded: true })] })),
     ],
-    result: state({ status: 'completed-hand', handId: 'hand-2', buttonSeat: 2, board: ['2c', '7h', 'Jd', 'Qs', '3h'], participants: [participant('viewer', 1, { holeCards: mine, contribution: 10 }), participant('opp', 2, { holeCards: ['9c', '9d'], contribution: 10 }), participant('bot', 3, { folded: true, contribution: 5 })], payouts: [{ participantId: 'opp', amount: 25 }] }),
+    result: state({ status: 'completed-hand', handId: 'hand-2', buttonSeat: 2, board: ['2c', '7h', 'Jd', 'Qs', '3h'], participants: [participant('viewer', 1, { holeCards: viewerHoleCards, contribution: 10 }), participant('opp', 2, { holeCards: ['9c', '9d'], contribution: 10 }), participant('bot', 3, { folded: true, contribution: 5 })], payouts: [{ participantId: 'opp', amount: 25 }] }),
   },
 };
 const viewer: HistoryViewer = {
@@ -99,8 +99,8 @@ test("a Hand's replay carries the engine's steps unchanged, the list row, and ev
 
 test("a Hand's replay holds how the Hand ended on its result step alone, a showdown's revealed cards included", () => {
   const [, second] = tableHistoryHands([hand1, hand2], viewer);
-  const decisionStep: ReplayStep = { kind: 'decision', state: state({ handId: 'hand-2', participants: [participant('viewer', 1, { holeCards: mine }), participant('opp', 2)] }), transition: {} };
-  const streetStep: ReplayStep = { kind: 'street', state: state({ handId: 'hand-2', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: mine }), participant('opp', 2)] }), transition: {} };
+  const decisionStep: ReplayStep = { kind: 'decision', state: state({ handId: 'hand-2', participants: [participant('viewer', 1, { holeCards: viewerHoleCards }), participant('opp', 2)] }), transition: {} };
+  const streetStep: ReplayStep = { kind: 'street', state: state({ handId: 'hand-2', street: 'flop', board: ['2c', '7h', 'Jd'], participants: [participant('viewer', 1, { holeCards: viewerHoleCards }), participant('opp', 2)] }), transition: {} };
   const resultStep: ReplayStep = { kind: 'result', state: hand2.entry.result, transition: {} };
   const replayed = tableHandReplay({ handId: 'hand-2', configuration: {} as ObservableHandReplay['configuration'], steps: [decisionStep, streetStep, resultStep] }, second!, viewer);
   expect(replayed.steps.map(step => 'result' in step)).toEqual([false, false, true]);
