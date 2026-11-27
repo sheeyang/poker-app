@@ -120,8 +120,8 @@ All table paths below start with `/api/table-sessions`:
 | `POST` to the base path | There is no per-User table cap, so a User may own any number of tables; 429 `rate-limited` when the address is over its limit (see [Public hosting safeguards](#public-hosting-safeguards)). Requires `requestId`; accepts optional `mode` (`practice`, the default, or `online`, fixed for the table's life), observable `configuration` overrides, `options` (`actionTimeLimitSeconds` of 15, 30 or 60, and `allowLiveAnalysis`), `bots`, each with `name` and `playingStrategy`, and an Online Table's `tablePassword` (see [Table Password](#table-password)). An Online Table defaults to a 30 second limit and always has one; a Practice Table defaults to none (`null`). Both default to Live Analysis allowed. Creates the table and returns its Table Session ID and safe Participant bindings, without seats. At an Online Table the owner joins unseated, and every Participant name, Bots included, must differ ignoring case (`name-taken`). A table's limit is enforced through Action Deadlines (see [Play timing](#play-timing)). |
 | `GET` to the base path | Returns `{ tables: [{ tableSessionId, mode, left?, closed?, openedAt?, seatCount?, stakes? }] }`: every table the User has a membership at, including those they left. A table the User has left carries `left: true`, and a [Closed Table](#closed-tables) `closed: true` as well. `openedAt` is when the User last opened the table (see above), absent until they have. Each table's size and blinds come with it, so a table the User has left still shows them: `seatCount` and `stakes` (`smallBlind`, `bigBlind`, `ante`). They are omitted only while the stored table cannot be read. The list is built from stored rows and never loads a table, so it says nothing of play: how a Hand stands and the User's stack come only from the Current Table. |
 | `GET /:id` | Returns the committed participant-safe view for the User's own Participant: `mode`, `options`, `viewerParticipantId` and `ownerParticipantId`, application-owned revisions, safe bindings, and the viewing User's current `trainerConfiguration`, beside the table's Allow Live Analysis in `options`. At an Online Table `inspection.adminMode` is always `false`. |
-| `GET /:id/history` | Table History: `{ tableSessionId, viewerParticipantId, mode, seatCount, stakes, left?, closed?, hands }`, every completed Hand oldest first, each with its table-wide `handNumber`, `completedAt` (absent for Hands completed before completion times were recorded), `dealtIn` with names, `viewerDealtIn`, the final `board`, `showdown` and `payouts`. Cards show only where they are the reader's own or a showdown revealed them. Any User who has ever been a Participant at the table reads it, after leaving and at a Closed Table (see [Table History](#table-history)); anyone else gets 404 `not-found`. Reading never loads the table. |
-| `GET /:id/history/:handId` | One completed Hand's Replay Steps ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)), under the same access as the list: `{ tableSessionId, mode, viewerParticipantId, handId, hand, configuration, participants, steps }`. `hand` is the Hand's list row and `participants` names everyone seated in it, and says whether each is a Bot; every step's actor is one of them. Each step is `{ kind, state, transition, viewerDecisionId? }`: `kind` is `decision` (the table as that decision opened, any actor's, with legal actions only for the reader's own), `street` (after each street reveal, every all-in runout street included) or `result`. `state` shows only the reader's own hole cards before the result; a showdown's reveals appear at the result only. `transition` is what the step presents: the decision taken at the step before (`acted`), and the `deal`, `street`, `showdown` and `payout` in the shapes of Presentation Phase inputs. `viewerDecisionId` marks the reader's own decisions. A Hand that is not complete, or not at the table, is 404 `hand-not-found`. Reading never loads the table. |
+| `GET /:id/history` | Table History: `{ tableSessionId, viewerParticipantId, mode, seatCount, stakes, left?, closed?, hands }`, every completed Hand oldest first, each with its table-wide `handNumber`, `completedAt` (absent for Hands completed before completion times were recorded), `dealtIn` with names, `viewerDealtIn`, the final `board`, `showdown` and `payouts`. Cards show only where they are the viewer's own or a showdown revealed them. Any User who has ever been a Participant at the table reads it, after leaving and at a Closed Table (see [Table History](#table-history)); anyone else gets 404 `not-found`. Reading never loads the table. |
+| `GET /:id/history/:handId` | One completed Hand's Replay Steps ([ADR-0041](adr/0041-add-table-history-replay-and-overall-history.md)), under the same access as the list: `{ tableSessionId, mode, viewerParticipantId, handId, hand, configuration, participants, steps }`. `hand` is the Hand's list row and `participants` names everyone seated in it, and says whether each is a Bot; every step's actor is one of them. Each step is `{ kind, state, transition, viewerDecisionId? }`: `kind` is `decision` (the table as that decision opened, any actor's, with legal actions only for the viewer's own), `street` (after each street reveal, every all-in runout street included) or `result`. `state` shows only the viewer's own hole cards before the result; a showdown's reveals appear at the result only. `transition` is what the step presents: the decision taken at the step before (`acted`), and the `deal`, `street`, `showdown` and `payout` in the shapes of Presentation Phase inputs. `viewerDecisionId` marks the viewer's own decisions. A Hand that is not complete, or not at the table, is 404 `hand-not-found`. Reading never loads the table. |
 | `POST /:id/seat-participant` | Requires `requestId`, `expectedPokerRevision`, a bound `participantId`, and a one-based `seat`; optional `buyIn` defaults to the configured amount. Buy-in limits are inclusive. |
 | `POST /:id/set-sitting-out`, `/stand-up-participant`, `/leave-table` | `/leave-table` is refused with 403 `unavailable-at-practice-tables` at a Practice Table, which its player never leaves; Stand Up and Sitting Out work there. Each requires `requestId`, `expectedPokerRevision` and a `participantId` (and `sittingOut` for the first). A player may name only their own Participant. Between Hands they apply at once. During a Hand they are recorded to apply after it and answer `{ ok, ..., afterHand: true }`, see [After-Hand requests](#after-hand-requests). `leave-table` stands the Participant up first if seated, then ends their membership: a place is freed, and the table stays in their saved list, marked `left`. When the Table Owner's Leave Table takes effect, ownership passes or the table closes in the same transition, see [Ownership](#ownership). Naming a Bot is 400 `participant-not-player`. A response without `afterHand` means the change has been applied. |
 | `POST /:id/move-participant`, `/top-up-to` | Between Hands only: 400 `active-hand` during a Hand, and until the Settle after its payout ends. They are never deferred. |
@@ -139,7 +139,7 @@ All table paths below start with `/api/table-sessions`:
 ## Authorization
 
 Every table route and live subscription is authorized through the requesting
-User's own player, as its Human Controller. The User must be bound to
+User's own player, as its Controller. The User must be bound to
 a joined Participant of that table, and must not have left or been removed. Every
 view is projected for that Participant. Any other User receives the same 404
 `not-found` as for a table that does not exist. Two requests are checked before
@@ -182,7 +182,7 @@ echoes what was applied:
 
 Each decision carries the table (`tableSessionId`, `mode`, `seatCount`, `stakes`), the Hand (`handId`, `handNumber`,
 `completedAt?`), `decisionId`, the facts the filters read (`street`, `position`, `action`, `pot`, `potBigBlinds`) and the
-reader's own `holeCards` and the `board` as it was. A listed decision opens at `step=decision-N` of its Hand's Replay.
+viewer's own `holeCards` and the `board` as it was. A listed decision opens at `step=decision-N` of its Hand's Replay.
 Position is derived in Research from the dealt-in Participants and the button; the browser receives the label.
 
 #### Overall History Score Summaries
@@ -237,18 +237,20 @@ accepted at a Closed Table too.
 
 Analysis Results, scores and summaries belong to the Participant whose decisions
 they analyze. Each one uses the Reference Strategy its User had when it was requested, and only
-that Participant's Human Controller can capture, read or retry it or receive its
+that player's User can capture, read or retry it or receive its
 `analysis-update`. Its inputs are the Participant's own observable view at the
 original decision (`getView({ at })`), so later streets, showdown reveals and later
 Hands never reach it. Responses carry no game view, cards, deck or master seed, only
 the derived evaluation and selection seeds that reproduce them.
 
-The Persisted Table Session is version 3. It records the table `mode`, and each
+The Persisted Table Session is version 4. It records the table `mode`, and each
 player binding's User and `membership` (`joined` or `left`), the table `options`, and the
 `pendingChanges` (after-Hand requests, empty by default). It holds no Trainer Configuration.
-Version-2 records, whose player bindings each kept one, and version-1 records, which kept one
+A player's controller kind is `'player'`, beside `'bot'`; versions 1 to 3 wrote it `'human'`, and
+each loads with it renamed. Version-2 records, whose player bindings each kept one, and version-1 records, which kept one
 for the table, load with it discarded, so their Users use their own; version 1 loads as a
-Practice Table. Both are rewritten at their next commit. Each version names one
+Practice Table. All three are rewritten at their next commit. Any SQL on the stored controller kind must accept both
+values. Each version names one
 format: a row that lacks part of its version's format fails restoration (503 `record-restoration-failed`)
 rather than receiving defaults ([ADR-0032](adr/0032-extend-table-sessions-for-shared-online-play.md)
 on ADR-0014). The
@@ -517,7 +519,7 @@ mode. None of this gives the owner any control over, or sight of, another player
 
 ### Ownership
 
-When the Table Owner of an Online Table leaves ([ADR-0034](adr/0034-pass-online-table-ownership-to-the-earliest-joined-human.md)),
+When the Table Owner of an Online Table leaves ([ADR-0034](adr/0034-pass-online-table-ownership-to-the-earliest-joined-player.md)),
 ownership passes in the same committed transition as their Leave Table, which is the after-Hand transition when
 they leave during a Hand. It passes to the player still at the table who joined earliest, watchers
 included, ordered by each Participant's latest `join-table` command in the poker record (a User who left and
@@ -677,7 +679,7 @@ canonical JSON:
 | Poker mutation (`add-bot` and `remove-bot` included) | `poker-mutation-v1:` | `{ source, kind, contents }` | Table Session and `requestId` |
 | Controller, Trainer configuration or table options mutation | `controller-mutation-v2:` | `{ userId, kind, contents }`, where `userId` is the requesting User | Table Session and `requestId` |
 
-For poker mutations, `source` is `human`, `bot`, or `server` for the scheduler's
+For poker mutations, `source` is `player`, `bot`, or `server` for the scheduler's
 own Timeout Actions (a player's, and an Online Bot's after its retry failed). `kind` is the command name;
 `contents` is the complete request body excluding `requestId`. Expected revisions
 and omitted versus explicit `buyIn` therefore affect the fingerprint.

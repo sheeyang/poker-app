@@ -8,7 +8,7 @@ import type { ReplayPlayback } from './table-choreography.js';
 const ignore = () => {};
 
 /**
- * The felt of a replay at step `index`, moving there with M5's motion (replay-motion.ts). `move` says how the reader went
+ * The felt of a replay at step `index`, moving there with M5's motion (replay-motion.ts). `move` says how the viewer went
  * to `index`: one step on or back plays that step's motion forward or reversed, and anything else renders at once.
  *
  * Motion starts from where things rested at the step it leaves: the earlier step, forward or back. When the felt last

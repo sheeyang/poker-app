@@ -8,7 +8,7 @@ status: accepted
 
 ## Decisions
 
-- **One public history per table.** Every Participant, human or Bot, sees the same public history of every Hand, whenever they joined. Only their own hole cards differ.
+- **One public history per table.** Every Participant, player or Bot, sees the same public history of every Hand, whenever they joined. Only their own hole cards differ.
 - **Policies read it too.** A Bot that joins late, and every Reference Strategy evaluation, gets the whole session's history, which is the same history the Trainer shows.
 - **Someone who joins mid-Hand** sees that Hand's earlier public actions.
 - **Nothing hidden becomes visible.** Unrevealed hole cards, burn cards and deck order stay hidden in every Hand. A showdown reveal is public in the Hand where it happened, and never exposes facts from earlier points in that Hand.

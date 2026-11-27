@@ -2,7 +2,7 @@
 
 ## What to build
 
-The human enters an exact total street commitment for a Bet or Raise, sees its current legal bounds, and completes a Hand using ordinary no-limit wagering. CashGame determines legality and all resulting chip/betting transitions; the client formats and submits intentions rather than calculating its own poker rules.
+The player enters an exact total street commitment for a Bet or Raise, sees its current legal bounds, and completes a Hand using ordinary no-limit wagering. CashGame determines legality and all resulting chip/betting transitions; the client formats and submits intentions rather than calculating its own poker rules.
 
 M1 scope; apply accepted ADRs 0009, 0012, 0017, 0025. This is a vertical slice of the playable foundation, not an invitation to implement later Trainer, product UX, replay tooling, Solver, or simulation milestones.
 

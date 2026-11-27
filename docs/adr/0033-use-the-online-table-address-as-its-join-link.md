@@ -4,7 +4,7 @@ Giving every table its own URL raised the question of what a friend sees when so
 
 ## Decisions
 
-- **Who needs the Table Password.** Anyone not currently at the table, including a User who left or was removed, and a former Table Owner, since ownership passes on when the owner leaves ([ADR-0034](0034-pass-online-table-ownership-to-the-earliest-joined-human.md)). Otherwise a stranger who joined through a leaked link and then left could return after the owner added a password.
+- **Who needs the Table Password.** Anyone not currently at the table, including a User who left or was removed, and a former Table Owner, since ownership passes on when the owner leaves ([ADR-0034](0034-pass-online-table-ownership-to-the-earliest-joined-player.md)). Otherwise a stranger who joined through a leaked link and then left could return after the owner added a password.
 - **Removal no longer bars a User.** It is a Leave Table imposed by the Table Owner, and the User may join again like anyone else, keeping the same Participant. Nothing records that a User was removed. Barring can be added later if it proves necessary.
 - **The password is stored hashed.** People reuse passwords, so a database leak should not expose them. An owner who forgets it sets a new one.
 

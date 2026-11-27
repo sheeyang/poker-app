@@ -38,7 +38,7 @@ export function HistoryLink({ mode, tableSessionId, handId, step, className, lab
     : <Link className={className} aria-label={label} to="/practice/$tableSessionId/history" params={{ tableSessionId }} search={search}>{children}</Link>;
 }
 
-/** Whether the reader was dealt into a Hand: they may not have been at the table for one they were not. */
+/** Whether the viewer was dealt into a Hand: they may not have been at the table for one they were not. */
 function DealtInTag({ dealtIn }: { dealtIn: boolean }) {
   return <span className={`history-tag${dealtIn ? ' is-dealt-in' : ''}`}>{dealtIn ? 'You were dealt in' : 'Not dealt in'}</span>;
 }
@@ -98,7 +98,7 @@ function StrategyColumn({ replay, target, reference, hub, step, onRemove }: { re
 }
 
 /**
- * The analysis of the reader's own decision at the step on show (Counterfactual Comparison): their Reference Strategy
+ * The analysis of the viewer's own decision at the step on show (Counterfactual Comparison): their Reference Strategy
  * first, then up to 3 more Strategies they add, each on the same frozen inputs. The action they took is shown once, above
  * them all. It sits under the step dock, so stepping never moves the felt or the controls. Only numbers: nothing here
  * calls a decision good or bad, and adding a Strategy never changes the Trainer Configuration.
@@ -137,7 +137,7 @@ function ReplayAnalysis({ replay, analysis, step, compared, onCompare }: { repla
  * One completed Hand, replayed one Replay Step at a time on the table's own felt. Back and Next (and the arrow keys) play
  * the step's motion, forward or reversed; a jump to a street or a decision, or a new address, draws its step at once. The address
  * holds the Hand and the step, so a reload reopens both. Under the felt, the step dock: what the step shows and what led
- * to it, Back and Next, a jump to each street the Hand reached, and to the reader's next decision. On a phone the dock
+ * to it, Back and Next, a jump to each street the Hand reached, and to the viewer's next decision. On a phone the dock
  * stays at the bottom of the screen while the felt is in view, so the cards and the controls are seen together.
  */
 function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: TableMode; tableSessionId: string; handId: string; step: string | undefined; compare: string | undefined }) {
@@ -150,7 +150,7 @@ function HandReplay({ mode, tableSessionId, handId, step, compare }: { mode: Tab
   // The Strategies compared beside the Reference Strategy live in the address, so a reload reproduces the comparison.
   const compared = useMemo(() => comparedStrategies(compare), [compare]);
   const controls = replay && replayControls(replay, index);
-  // How the reader asked for the step the address goes to next: Back and Next step, anything else jumps.
+  // How the viewer asked for the step the address goes to next: Back and Next step, anything else jumps.
   const intent = useRef<{ readonly to: string; readonly how: ReplayMove }>(undefined);
   const go = (key: string | undefined, how: ReplayMove = 'jump') => {
     if (!key) return;

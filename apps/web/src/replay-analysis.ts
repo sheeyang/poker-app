@@ -20,7 +20,7 @@ function createLiveHub() {
 type LiveHub = ReturnType<typeof createLiveHub>;
 
 /**
- * The analyses of the reader's own decision at the Replay Step on show: under their User's current Reference Strategy,
+ * The analyses of the viewer's own decision at the Replay Step on show: under their User's current Reference Strategy,
  * and under each Strategy compared beside it (Counterfactual Comparison). The Reference Strategy always comes first. They are
  * asked for from Table History so the server schedules them as `history-analysis`. A matching cached result comes back
  * at once; otherwise it is read again when the User's live connection says it changed. The compared Strategies come
@@ -35,7 +35,7 @@ export function useReplayComparison(replay: TableHandReplay | undefined, index: 
   // The replay and the configuration keep their identity between reads, so the targets change only with the step or the Strategies.
   const targets = useMemo(() => replay && reference ? comparisonTargets(replay, index, reference, compared) : [], [replay, index, reference, compared]);
   return {
-    /** The decision on show is the reader's own: analysis belongs here. */
+    /** The decision on show is the viewer's own: analysis belongs here. */
     offered: !!replay?.steps[index]?.viewerDecisionId,
     /** The User's current Reference Strategy, once read. */
     reference,

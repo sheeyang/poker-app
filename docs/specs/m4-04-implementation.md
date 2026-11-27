@@ -9,9 +9,9 @@ The only new test seam is the `clock` server option. Timing tests in `apps/serve
 On 2 November 2026, using the [schedule browser fixture](../local-development.md#schedule-browser-fixture) behind the live-transport relay, a heads-up Practice Table in an isolated Chrome profile showed:
 
 - After the deal, the action controls were disabled during the 1.5 s deal phase and enabled at its end.
-- The live frames for three revisions (human Call, flop dealt, Bot's flop Check) and the follow-up read were held well past the flop phase. On release, newest first, the client went straight from preflop to the flop with the human to act, without replaying the elapsed phase. The older frames did not move it back.
+- The live frames for three revisions (player Call, flop dealt, Bot's flop Check) and the follow-up read were held well past the flop phase. On release, newest first, the client went straight from preflop to the flop with the player to act, without replaying the elapsed phase. The older frames did not move it back.
 - A replayed old revision was ignored, and the client matched a fresh server read.
-- With the turn-deal revision dropped and the follow-up read held, the client never saw the turn's phase. It synchronized from the next revision, with the turn shown and the human to act.
-- With live frames held, the flop view arrived over HTTP about 0.8 s before the human's window opened. The controls enabled 34 ms after the window's server time, not 1 s after receipt. Released frames changed nothing.
+- With the turn-deal revision dropped and the follow-up read held, the client never saw the turn's phase. It synchronized from the next revision, with the turn shown and the player to act.
+- With live frames held, the flop view arrived over HTTP about 0.8 s before the player's window opened. The controls enabled 34 ms after the window's server time, not 1 s after receipt. Released frames changed nothing.
 - Server-side, each Bot acted 20–30 ms after its window opened.
 - The Simple Heuristic Bot folded to every all-in, so no runout was shown in the browser. The server test and the pure web test cover runouts.

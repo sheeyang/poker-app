@@ -64,7 +64,7 @@ provenance. Restoration replays ConcreteActions without historical evaluations.
 
 Startup enumerates committed sessions and resumes only current Bot decisions,
 even without a browser. Corrupt-record restoration is isolated per session so
-other sessions and the server can start. Human decisions remain pending and
+other sessions and the server can start. Player decisions remain pending and
 settlement never starts another Hand. Close invalidates current Bot slots and
 prevents late callbacks from changing actions/status; pending accepted mutations
 drain before persistence closes.
@@ -109,7 +109,7 @@ and can change it later. The default is Uniform Choice + Probability Selector;
 Highest Probability Selector is available. Current failures show explicit retry
 and Strategy recovery controls. Pending controller attempts retain their request
 identity and distinguish definitive rejection from unconfirmed infrastructure
-outcomes. Legal human action controls are independent of controller computation.
+outcomes. Legal player action controls are independent of controller computation.
 
 The incumbent React engineering interface, palette and native controls were
 preserved. Intent/Impeccable context was loaded once; the craft floor was applied
@@ -120,7 +120,7 @@ server/Playground builds, and authoritative-package browser boundary checks.
 The real PostgreSQL/HTTP/WebSocket fixtures cover safe frozen inputs, all explicit
 Strategy failure stages, seeded public fixtures, retry/assignment/configuration
 races, trusted poker supersession, timeout capacity, restart without historical
-reevaluation, owner authorization/idempotency, human responsiveness, close, recovery
+reevaluation, owner authorization/idempotency, player responsiveness, close, recovery
 precedence, and provenance held invisible until confirmed real COMMIT. The full
 suite's short-timeout fixture was made deterministic by answering its fresh
 backend request immediately; the old timed-out work remains charged until its

@@ -18,14 +18,14 @@ winner or draws later streets.
 
 The server's internal `TableSessionControllerCommands.submitAction` capability
 is captured through `onControllerCommandsReady`. It accepts only a bound Bot
-and enters the exact human mutation FIFO, revision validation, transaction,
+and enters the exact player mutation FIFO, revision validation, transaction,
 postcommit promotion, and definitive retry path. The normal HTTP action path
-retains its bound-human authorization and returns 403 for Bot impersonation.
-Request fingerprints distinguish human and trusted controller authority, so a
+retains its bound-player authorization and returns 403 for Bot impersonation.
+Request fingerprints distinguish player and trusted controller authority, so a
 browser cannot recover a successful Bot acknowledgement by reusing its request.
 This is fixture orchestration for M1-05; automatic Strategy jobs remain M1-12.
 
-The Playground renders Check, Call, and Fold only from its human legal actions.
+The Playground renders Check, Call, and Fold only from its player legal actions.
 It displays Call's chip commitment, street wagers, safe board cards, public
 showdown holdings, payouts, returns, and final stacks. Complete views govern
 progression independently of presentation events.
@@ -41,15 +41,15 @@ Validation on 7 October 2026 before integration:
 - Exported ranking fixtures cover all nine categories, every category's
   kickers, ace-low wheel, no king/ace wraparound, no suit tiebreak, zero/one/two
   hole cards, two trips, three pairs, invalid cards, and immutable ranks.
-- Real HTTP/PostgreSQL fixtures cover human Call/Check and trusted Bot
+- Real HTTP/PostgreSQL fixtures cover player Call/Check and trusted Bot
   Check/Call, hidden-card serialization, shared FIFO and revision checks,
   binding restrictions, source-separated retries, commit-gated showdown,
   confirmed rollback and exact retry, and restoration after server restart.
 - Named Chrome session `poker-m1-05` used isolated ports 3005/5175 and the
-  captured trusted capability through the actual server. The human clicked
+  captured trusted capability through the actual server. The player clicked
   Call and three Checks, reaching revisions 11/11. Board was
   `9s 6s 3s 2h 8c`, hole cards were `Kc 8d` and `7d Ks`, the 40-chip pot went
-  to the human, and stacks finished 1020/980. Bot cards stayed hidden before
+  to the player, and stacks finished 1020/980. Bot cards stayed hidden before
   showdown. Desktop 1280px and emulated mobile 390px captures were inspected;
   mobile document width equaled its viewport. Console messages were limited
   to Vite connection and the React DevTools notice. Isolated processes stopped.

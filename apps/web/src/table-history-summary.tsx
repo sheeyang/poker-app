@@ -5,7 +5,7 @@ import { followedTableSummary } from './table-history.js';
 import { useFollowedRequest } from './use-followed-request.js';
 
 /**
- * A Score Summary of the reader's own decisions across the table's completed Hands, under one Strategy (the User's
+ * A Score Summary of the viewer's own decisions across the table's completed Hands, under one Strategy (the User's
  * Reference Strategy when none is named). While it is Analyzing its count follows the User's `progress` messages, and its
  * completion or failure notice reads it again; nothing reads it on a timer. Retry runs only the failed analyses again. A
  * new completed Hand asks again, since the summary is frozen when it is asked for.
@@ -39,8 +39,8 @@ function SummaryColumn({ tableSessionId, completedHands, asked, strategy, refere
 }
 
 /**
- * The table's Score Summary in Table History (ADR-0041): your decisions across its completed Hands, asked for explicitly,
- * under your Reference Strategy and, side by side, up to 3 more the address names. The comparison is the address's
+ * The table's Score Summary in Table History (ADR-0041): the viewer's decisions across its completed Hands, asked for explicitly,
+ * under their Reference Strategy and, side by side, up to 3 more the address names. The comparison is the address's
  * `compare`, the same one the replay compares at a decision, and never changes the Trainer Configuration.
  */
 export function TableHistorySummaryPanel({ tableSessionId, completedHands, compared, onCompare, asked, onAsk }: { tableSessionId: string; completedHands: number | undefined; compared: readonly StrategyDescriptor[]; onCompare: (next: readonly StrategyDescriptor[]) => void; asked: boolean; onAsk: () => void }) {

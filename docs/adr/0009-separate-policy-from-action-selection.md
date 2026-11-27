@@ -6,7 +6,7 @@ M1 uses a UniformChoicePolicy baseline with equal probabilities across all legal
 
 ## Concrete choices and execution
 
-Developers implement Policies and ActionSelectors; users select complete Strategies containing one configured instance of each. Every Bot has an independently selected Playing Strategy, and the human selects a Reference Strategy of the same type independently of the Bots. Policies may be heuristic, rule-based, EV-based, solver-derived, exploitative, adaptive, machine-learning-based, or stochastic; all changes to strategic preference belong in the Policy.
+Developers implement Policies and ActionSelectors; users select complete Strategies containing one configured instance of each. Every Bot has an independently selected Playing Strategy, and the player selects a Reference Strategy of the same type independently of the Bots. Policies may be heuristic, rule-based, EV-based, solver-derived, exploitative, adaptive, machine-learning-based, or stochastic; all changes to strategic preference belong in the Policy.
 
 ```typescript
 type ConcreteAction =

@@ -42,7 +42,7 @@ requested completed Hand even when that record also contains a later active Hand
 
 The completed-Hand selector and explicit Reveal Hidden Information action sit
 beside existing engineering controls. The result labels its Hand and displays
-holdings, deal information and payout facts separately from current play. Human
+holdings, deal information and payout facts separately from current play. Player
 legal actions remain available while a reveal is pending.
 
 Capability activation uses only metadata from the current live socket. It is
@@ -63,7 +63,7 @@ visibility. Real Fastify HTTP/WebSocket, the shared JobRunner and isolated Postg
 cover owner authorization, unauthenticated/non-owner rejection, direct active-Hand
 rejection, missing/unsupported requests, fold-win and showdown reconstruction, burn
 positions, safe normal payloads, master-seed omission, unchanged record/revisions,
-Admin Mode disabled after restart, Bot-only selection, shared capacity, human
+Admin Mode disabled after restart, Bot-only selection, shared capacity, player
 responsiveness during queued work, and historical results after subsequent play.
 
 The real browser fixture uses server 3014, relay 4014, Vite 5184 and its own PostgreSQL
@@ -71,7 +71,7 @@ schema. Ordinary UI controls created a two-seat Highest Probability Bot table,
 seated both Participants, started Hand 1 and accepted Raise-to 40. Its 5/5 settlement
 revealed both holdings, a 20-chip return and a 40-chip payout, while the current
 table still hid the folded Bot's cards. Hand 1 remained scoped while Hand 2 was
-active at 7/7. Holding its reveal response left the human Fold enabled; Hand 2
+active at 7/7. Holding its reveal response left the player Fold enabled; Hand 2
 settled at 8/8 before the Hand 1 result arrived successfully.
 
 Restarting Admin Mode off at unchanged 8/8 revisions removed the control and result;

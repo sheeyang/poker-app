@@ -6,7 +6,7 @@ import type { AcceptTableJobResult } from './mutations.js';
 import type { ProgressChannel } from './progress.js';
 import { pendingRequest } from './pending-request.js';
 import { progressOf, type Entry, type SharedAnalysisCoordinator } from './shared-analyses.js';
-/** `participantId` keys the summary: only that Participant's Human Controller reads or retries it. */
+/** `participantId` keys the summary: only that player's User reads or retries it. */
 interface FrozenSummaryMetadata {
   readonly participantId: string; readonly tableSessionId: string;
   readonly capturedPokerRevision: number; readonly referenceStrategy: StrategyDescriptor; readonly decisionIds: readonly string[];

@@ -3,7 +3,7 @@
 M1-03 adds the first explicit playable Hand to the engine, durable server, and
 Playground. Start Hand freezes eligible membership and seats before forced bets,
 uses versioned deterministic dealing, and creates engine-owned Hand/Decision
-identities. A human Fold settles all matched chips, returns unmatched excess,
+identities. A player Fold settles all matched chips, returns unmatched excess,
 and leaves the winning Bot's cards private. Completed Hands await another
 explicit Start Hand command.
 
@@ -22,14 +22,14 @@ Validation on 7 October 2026:
   immutable views/facts/events, physical opponent-card omission, full replay,
   independent forks, wrong actors, active setup/readiness rejection, and atomic
   controlled defects after dealing or settlement.
-- Real HTTP/PostgreSQL tests establish owner-only Start Hand, human-controller
-  action binding, 403 for Bot impersonation, wrong human turns, active setup
+- Real HTTP/PostgreSQL tests establish owner-only Start Hand, player-controller
+  action binding, 403 for Bot impersonation, wrong player turns, active setup
   rejection, revisions advancing once per successful command, matching retry
   outcomes, commit-before-visible behavior/FIFO, confirmed rollback, and complete
   played-Hand restoration after server restart.
 - Isolated Chrome session `poker-m1-03` exercised the actual Playground form:
-  configure one Bot, create an owned session, seat human/Bot in seats 1/2, Start
-  Hand, and Fold. At revisions 3/3 the human saw `6s 4c`, the Bot showed two
+  configure one Bot, create an owned session, seat player/Bot in seats 1/2, Start
+  Hand, and Fold. At revisions 3/3 the player saw `6s 4c`, the Bot showed two
   hidden cards, pot was 30, and actor was You. At 4/4 the Hand completed with
   stacks 990/1010, matched pot 20, return 10, and the Bot still hidden. Start Hand
   was enabled for explicit continuation. Chrome console contained only Vite
@@ -62,6 +62,6 @@ server FIFO in M1-12 and must retain its own result-validity checks.
 `createTableSessionMutations().submit(id, owner, kind, request)` is the single
 durable path for seating, Start Hand, and act. Engine arguments and accepted
 commands contain no request metadata or server revisions. HTTP Start Hand is an
-owner operation; HTTP act additionally requires the acting Participant's human
+owner operation; HTTP act additionally requires the acting Participant's player
 controller binding to the authenticated user. WebSocket publication in M1-11
 extends this same postcommit promotion boundary.

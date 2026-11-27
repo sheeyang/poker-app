@@ -9,7 +9,7 @@ import { chips } from './table-model.js';
  * The table's motion (ADR-0038). The Hand is dealt from the deck: cards leave it one at a time in dealing order,
  * chips slide to the betting line and are swept to the pot, folded hands are mucked, and the pot is pushed to the
  * winner. Seats settle in place; chips added to a stack come in from the table's edge, and a refill that comes with a
- * deal lands before it. When you change seats the ring of seats dissolves into its new places. Motion only presents what the
+ * deal lands before it. When the viewer changes seats the ring of seats dissolves into its new places. Motion only presents what the
  * view already says, from the server time of the moment it shows; it never waits for, or holds back, play. Its
  * timings are the shared presentation timing's (ADR-0039).
  */
@@ -96,10 +96,10 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       const held = new Map<string, number>();
       for (const c of beats.cards) held.set(c.participantId, (held.get(c.participantId) ?? 0) + 1);
       for (const c of beats.cards) {
-        const yours = c.participantId === cue.viewerId, dest = q(ctx, S.card(c.participantId, c.card));
-        fly(ctx, yours ? 'back' : 'small-back', at(ctx, S.deck), box(ctx, dest), { ...spanned(c), spin: [-40, tilt(c.card, held.get(c.participantId)!)] });
+        const viewersCard = c.participantId === cue.viewerId, dest = q(ctx, S.card(c.participantId, c.card));
+        fly(ctx, viewersCard ? 'back' : 'small-back', at(ctx, S.deck), box(ctx, dest), { ...spanned(c), spin: [-40, tilt(c.card, held.get(c.participantId)!)] });
         reveal(ctx, dest, { delay: c.appearsAt, elapsed: el, duration: 1 });
-        if (yours) flipUp(ctx, dest, spanned(c.turn));
+        if (viewersCard) flipUp(ctx, dest, spanned(c.turn));
       }
       break;
     }
@@ -177,11 +177,11 @@ function perform(cue: Cue, ctx: MotionContext, el: number) {
       break;
     case 'turn': {
       // Every seat is in a new place: the ring dissolves into it while the felt, board and pot stay, and a label at the
-      // bottom says where you are now.
+      // bottom says where the viewer is now.
       for (const [key, was] of ctx.last) if (key.startsWith('[data-table-seat=')) stay(ctx, 'clone', was.box, [{ opacity: 1 }, { opacity: 0 }], { duration: T.seatChangeFade, elapsed: el, easing: 'linear', html: was.html });
       for (const node of Array.from(ctx.stage.querySelectorAll('[data-table-seat]'))) play(ctx, node, [{ opacity: 0, scale: '.97' }, { opacity: 1, scale: '1' }], { duration: T.seatChangeArrives, delay: T.seatChangeArrivesAt, elapsed: el });
-      const you = at(ctx, S.seat(cue.seat));
-      if (you) stay(ctx, 'label', { ...you, y: you.y - you.h / 2 - 16 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px 0px', offset: .15 }, { opacity: 1, translate: '0px 0px', offset: .8 }, { opacity: 0, translate: '0px -6px' }], { duration: T.seatChangeLabel, delay: T.seatChangeArrivesAt, elapsed: el, text: `You’re in seat ${cue.seat}` });
+      const viewer = at(ctx, S.seat(cue.seat));
+      if (viewer) stay(ctx, 'label', { ...viewer, y: viewer.y - viewer.h / 2 - 16 }, [{ opacity: 0, translate: '0px 6px' }, { opacity: 1, translate: '0px 0px', offset: .15 }, { opacity: 1, translate: '0px 0px', offset: .8 }, { opacity: 0, translate: '0px -6px' }], { duration: T.seatChangeLabel, delay: T.seatChangeArrivesAt, elapsed: el, text: `You’re in seat ${cue.seat}` });
       break;
     }
     case 'status':

@@ -31,7 +31,7 @@ before a Table Session exists. Matching identity and ownership are checked again
 for every retry; conflicting contents cannot reuse a pending or aborted ID.
 
 Confirmed ambiguous abort retains a durable `commit-not-applied` tombstone and
-does not execute the old attempt. A deliberate human new ID can continue; Bots
+does not execute the old attempt. A deliberate player new ID can continue; Bots
 receive fresh evaluation identities and re-evaluate the current confirmed
 decision. Old work cannot enter the mutation path. Ordinary known failure before
 terminal COMMIT retains explicit same-ID retry with no definitive outcome.
@@ -99,30 +99,30 @@ The ticket-owned fixture used server 3015, Vite 5185 and schema
 real persistence terminal timing/lifecycle; ordinary UI controls provide all
 creation, seating, poker and management intentions.
 
-The browser created three seats with a human and two Uniform Choice/Highest
+The browser created three seats with a player and two Uniform Choice/Highest
 Probability Bots, default stack 1000 and maximum 2000. It seated all three and
-explicitly started Hand 1 at 4/4. Human Raise-to 53 was legal (40–1000) and entered
+explicitly started Hand 1 at 4/4. Player Raise-to 53 was legal (40–1000) and entered
 a held real transaction. The last confirmed Hand stayed at 4/4, pot 30 and the
-human's current cards/actions; only Check attempt outcome remained enabled.
+player's current cards/actions; only Check attempt outcome remained enabled.
 The server restarted while that SQL transaction was still in progress. HTTP
 Refresh view plus explicit Disconnect/Reconnect live updates retained recovering
 4/4 state. Actual COMMIT and an explicit outcome check returned the original
 acknowledgement while the latest complete view had advanced through both Bot folds
-to 7/7: 50-chip pot/payout, 33-chip uncalled return, human stack 1030.
+to 7/7: 50-chip pot/payout, 33-chip uncalled return, player stack 1030.
 
 A Bot top-up from 990 to 1100 then entered another real unresolved transaction.
 Actual ROLLBACK preserved 7/7 and 990 chips. Checking that attempt displayed confirmed
 noncommit and Start a new attempt. Deliberate new submission succeeded. Sit out,
 Return to play and Set next button completed through normal management. Authorized
-inspection revealed only completed Hand 1, including its 53-chip human commitment,
+inspection revealed only completed Hand 1, including its 53-chip player commitment,
 folded Bot holdings, 33-chip return and 50-chip payout. Hand 2 was explicitly started
-and completed by legal human/Bot folds at 14/14. Hand 1 inspection stayed scoped,
+and completed by legal player/Bot folds at 14/14. Hand 1 inspection stayed scoped,
 while current normal views retained hidden folded Bot cards. A further ordinary
 server restart and reload retained confirmed 14/14 with no pending attempt.
 
-A second UI-created two-seat table used min/default/max buy-in 1/20/1000. Human
+A second UI-created two-seat table used min/default/max buy-in 1/20/1000. Player
 Call 10 against the all-in big blind completed a five-card river showdown
-`3s As 8s 7c Tc`, paying 40 to the human and leaving the Bot at zero. The browser
+`3s As 8s 7c Tc`, paying 40 to the player and leaving the Bot at zero. The browser
 rebought that actual zero stack to 20, explicitly selected the next button, started
 Hand 2 and submitted legal Fold; it settled at 8/8 with a 20-chip payout and
 10-chip uncalled return. No production seed input or prebuilt engine state was used.

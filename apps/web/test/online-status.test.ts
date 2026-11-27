@@ -8,7 +8,7 @@ function table(participants: ObservableParticipant[], connected: string[], sched
     tableSessionId: 't', mode, options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true }, viewerParticipantId: 'you', ownerParticipantId: 'ann',
     pokerRevision: 1, sessionRevision: 1, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     schedule, serverTime: 0, pendingChanges: [], ...(mode === 'online' ? { connectedParticipantIds: connected } : {}),
-    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'human' } }, { participantId: 'you', name: 'You', controller: { kind: 'human' } }, { participantId: 'rex', name: 'Rex', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
+    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'player' } }, { participantId: 'you', name: 'You', controller: { kind: 'player' } }, { participantId: 'rex', name: 'Rex', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { configuration: defaultConfiguration, history: [], state: { status: 'between-hands', buttonSeat: 1, board: [], pots: [], actorId: null, legalActions: [], participants } },
   };
 }

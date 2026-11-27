@@ -33,14 +33,14 @@ Each ticket is a complete, independently verifiable behavior through the existin
    - **What it delivers:** Retry only failed analysis with frozen inputs/seeds, reuse active/successful work, and prevent delayed attempts or responses from overwriting current state.
    - [Full issue draft](../../.scratch/m2-tickets/issues/05-retry-failed-analysis.md)
 
-6. **Score current and historical accepted human decisions** — [#22](https://github.com/sheeyang/poker-app/issues/22)
+6. **Score current and historical accepted player decisions** — [#22](https://github.com/sheeyang/poker-app/issues/22)
    - **Blocked by:** [#20](https://github.com/sheeyang/poker-app/issues/20).
    - **What it delivers:** Fetch reproducible Decision Score and Action Rank Score for accepted decisions, reuse pre-action evaluations, and analyze authorized historical decisions without a live table subscription.
    - [Full issue draft](../../.scratch/m2-tickets/issues/06-score-accepted-decisions.md)
 
 7. **Run Live Analysis and automatic post-action analysis** — [#23](https://github.com/sheeyang/poker-app/issues/23)
    - **Blocked by:** [#21](https://github.com/sheeyang/poker-app/issues/21) and [#22](https://github.com/sheeyang/poker-app/issues/22).
-   - **What it delivers:** The persisted toggle drives optional current-decision evaluation; every accepted human action requests scored analysis at priority 2 without delaying gameplay, with matching work reused at its fixed priority.
+   - **What it delivers:** The persisted toggle drives optional current-decision evaluation; every accepted player action requests scored analysis at priority 2 without delaying gameplay, with matching work reused at its fixed priority.
    - [Full issue draft](../../.scratch/m2-tickets/issues/07-run-live-and-post-action-analysis.md)
 
 8. **Request complete Hand Score Summaries** — [#24](https://github.com/sheeyang/poker-app/issues/24)
@@ -69,7 +69,7 @@ Each ticket is a complete, independently verifiable behavior through the existin
 - Each slice carries its own checks and Playground demonstration. Keep typecheck, tests, build, and package-boundary validation green as slices land; no separate testing/hardening ticket defers core correctness to the end.
 - HTTP carries get-or-start, Retry, results, and averages; user-channel WebSocket messages notify completion/failure with Table Session/request/attempt identity after state is readable. Initial readiness, reconnect, and relevant notifications reconcile through HTTP without polling.
 - Persist successful derived results and reproducibility metadata; jobs/failures may be transient. There is no durable analysis obligation, guaranteed background completion, recovery sweep, promotion, preemption, reserved Bot capacity, or starvation-prevention rule.
-- Deliver numerical baseline Strategy behavior through the Playground without advice or good/bad judgments. M3 owns product presentation and request timing; M6 owns overall-history summaries and general replay/comparison tools. No stronger Strategies, Bot distribution retention, or human-action reference assignments are added.
+- Deliver numerical baseline Strategy behavior through the Playground without advice or good/bad judgments. M3 owns product presentation and request timing; M6 owns overall-history summaries and general replay/comparison tools. No stronger Strategies, Bot distribution retention, or player-action reference assignments are added.
 
 ## Coverage
 

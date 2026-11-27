@@ -1,10 +1,10 @@
 # M2 #20 implementation evidence
 
-This slice explicitly evaluates the current human decision against the committed Reference Strategy. It does not automatically trigger Live Analysis, calculate accepted-action scores, or offer failed-work Retry; those belong to the dependent tickets.
+This slice explicitly evaluates the current player decision against the committed Reference Strategy. It does not automatically trigger Live Analysis, calculate accepted-action scores, or offer failed-work Retry; those belong to the dependent tickets.
 
 ## HTTP and retention
 
-- `POST /api/table-sessions/:id/analysis` accepts only `{ decisionId }`. It captures an authorized committed human decision and complete reference descriptor. Missing work is admitted at priority 1; matching active/successful/failed work is reused. A capacity error returns HTTP 503 with a readable `status: error` resource, never an unadmitted pending job.
+- `POST /api/table-sessions/:id/analysis` accepts only `{ decisionId }`. It captures an authorized committed player decision and complete reference descriptor. Missing work is admitted at priority 1; matching active/successful/failed work is reused. A capacity error returns HTTP 503 with a readable `status: error` resource, never an unadmitted pending job.
 - `GET /api/table-sessions/:id/analysis/:requestId` reads an exact authorized request. It never starts or retries computation. A transient request absent after restart returns 404; the browser can get-or-start the still-current matching target again.
 - Request and execution-attempt identities are separate. The identity retains table/participant/Hand/decision, complete Policy and selector descriptors/configurations, safe-input fingerprint, effective independent seeds, and engine/random/evaluation versions. No master seed or authoritative object enters Policy input or browser results.
 - Successful normalized distributions and selected actions persist separately in `analysis_evaluations`. They are readable before owner-scoped completion notification. Execution/persistence failures become safe readable transient errors before notification. They never advance poker/session revisions or submit an action.

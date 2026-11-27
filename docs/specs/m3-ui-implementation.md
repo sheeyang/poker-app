@@ -55,7 +55,7 @@ Start practice seats the full lineup and explicitly deals its first Hand from on
 player gesture. Saved tables use observable game metadata rather than IDs. A
 visible completed-Hand recap leads into street-specific review with safe cards;
 manual selections remain pinned as subsequent Hands advance. Reference settings
-are available from the analysis panel’s settings control. Rebuy & deal identifies and restores empty human/Bot
+are available from the analysis panel’s settings control. Rebuy & deal identifies and restores empty player/Bot
 stacks while preserving intentionally removed or sitting-out opponents. Advanced
 table administration stays outside the normal play loop.
 
@@ -70,7 +70,7 @@ Revision verification:
   stays pinned with its original cards and action.
 - At 390×844, active betting controls occupy y=520–744 and the document has no
   horizontal overflow. Opening review focuses the panel at y=12; closing it returns
-  to play. Nine-Participant seating also completes from Start practice.
+  to play. Full ring seating also completes from Start practice.
 - Desktop and mobile lobby, active play, completed Hand and contextual review
   captures are stored under `.impeccable/review/` as local development evidence.
 - One mechanical scan exited 0 with advisory design-system documentation drift

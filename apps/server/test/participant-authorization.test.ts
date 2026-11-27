@@ -172,7 +172,7 @@ test('each player acts, manages and studies only through their own Participant, 
   expect(seen).toMatchObject({ mode: 'online', trainerConfiguration: defaultTrainerConfiguration, viewerParticipantId: other, view: { history: [{ handId: 'hand-1', result: { status: 'completed-hand' } }] } });
   expect(JSON.stringify(seen.view.history)).not.toContain('holeCards');
   expect(seen.view.state.participants).toEqual(expect.arrayContaining([{ participantId: owner.player, seat: 1, stack: 990, sittingOut: false }, { participantId: owner.bot, seat: 2, stack: 1010, sittingOut: false }]));
-  expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'human' } });
+  expect(seen.bindings).toContainEqual({ participantId: other, name: 'Ben', controller: { kind: 'player' } });
   for (const cookie of [leftCookie, removedCookie]) {
     expect((await get('/api/table-sessions/' + owner.id, cookie)).status).toBe(404);
     // The table stays in their saved list, as one they have left, whether they left or were removed.

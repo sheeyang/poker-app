@@ -71,7 +71,7 @@ test('a version-1 table loads as a Practice Table whose player keeps their analy
   expect(upgraded).toMatchObject({
     tableSessionId: t.id, mode: 'practice', options: { actionTimeLimitSeconds: null, allowLiveAnalysis: true }, pokerRevision: 4, sessionRevision: 5,
     trainerConfiguration: defaultTrainerConfiguration,
-    bindings: [{ participantId: t.player, name: 'You', controller: { kind: 'human' } }, { participantId: t.bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
+    bindings: [{ participantId: t.player, name: 'You', controller: { kind: 'player' } }, { participantId: t.bot, name: 'Bot', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }],
     view: { state: { status: 'completed-hand', handId: 'hand-1', participants: [{ participantId: t.player, stack: 990 }, { participantId: t.bot, stack: 1010 }] } },
   });
   expect(upgraded).not.toHaveProperty('joinToken');
@@ -105,9 +105,9 @@ test('a version-1 table loads as a Practice Table whose player keeps their analy
   await start();
   expect(await read(t)).toEqual(resumed);
   expect(await (await get('/api/table-sessions', t.cookie)).json()).toMatchObject({ tables: [{ tableSessionId: t.id, mode: 'practice' }] });
-  // Version 3 names one format: a version-3 row without a part of it is not guessed at, but fails restoration.
+  // Version 4 names one format: a version-4 row without a part of it is not guessed at, but fails restoration.
   const intact = (await administration.query(`SELECT aggregate FROM "${schema}".table_sessions WHERE id = $1`, [t.id])).rows[0].aggregate;
-  expect(intact.schemaVersion).toBe(3);
+  expect(intact.schemaVersion).toBe(4);
   expect(JSON.stringify(intact)).not.toContain('trainerConfiguration');
   for (const part of ['options', 'schedule', 'pendingChanges', 'mode']) {
     await stop();
@@ -174,4 +174,31 @@ test('a database written before table loading and closing upgrades in place, wit
   await stop();
   await start();
   expect((await administration.query(`SELECT last_committed_at FROM "${schema}".table_sessions WHERE id = $1`, [id])).rows[0].last_committed_at).toBe(row.last_committed_at);
+});
+
+/** The aggregate of a table as stored, and the same row rewritten as version 3 stored it: a player's controller kind was `'human'`. */
+const storedAggregate = async (id: string) => (await administration.query(`SELECT aggregate FROM "${schema}".table_sessions WHERE id = $1`, [id])).rows[0].aggregate;
+const controllerKinds = (aggregate: { bindings: { controller: { kind: string } }[] }) => aggregate.bindings.map(binding => binding.controller.kind);
+
+test('a fresh table is stored as version 4 with a player kind, and a table stored as version 3 with a human kind loads as version 4 with a player kind', async () => {
+  await stop();
+  await start();
+  const guest = async (name: string) => { const cookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!; await nameGuest(base, cookie, name); return cookie; };
+  const ann = await guest('Ann'), ben = await guest('Ben');
+  const id = (await (await post('/api/table-sessions', ann, { requestId: randomUUID(), mode: 'online' })).json()).tableSessionId as string;
+  const fresh = await storedAggregate(id);
+  expect(fresh.schemaVersion).toBe(4);
+  expect(controllerKinds(fresh)).toEqual(['player']);
+
+  await stop();
+  const asVersion3 = { ...fresh, schemaVersion: 3, bindings: fresh.bindings.map((binding: { controller: { kind: string } }) => ({ ...binding, controller: { kind: 'human' } })) };
+  await administration.query(`UPDATE "${schema}".table_sessions SET aggregate = $2 WHERE id = $1`, [id, asVersion3]);
+  await start();
+  const loaded = await read({ id, cookie: ann } as Table);
+  expect(loaded.bindings).toEqual([{ participantId: fresh.bindings[0].participantId, name: 'Ann', controller: { kind: 'player' } }]);
+  // The row is rewritten in the current version at the table's next commit.
+  expect((await post('/api/table-sessions/' + id + '/join-table', ben, { requestId: randomUUID() })).status).toBe(200);
+  const rewritten = await storedAggregate(id);
+  expect(rewritten.schemaVersion).toBe(4);
+  expect(controllerKinds(rewritten)).toEqual(['player', 'player']);
 });

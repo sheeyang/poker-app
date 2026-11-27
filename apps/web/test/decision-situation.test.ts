@@ -6,7 +6,7 @@ import { AnalysisPanel } from '../src/analysis-panel.js';
 import { DecisionSituation } from '../src/decision-situation.js';
 
 const bindings: ObservableTableSession['bindings'] = [
-  { participantId: 'you', name: 'You', controller: { kind: 'human' } },
+  { participantId: 'you', name: 'You', controller: { kind: 'player' } },
   { participantId: 'bot', name: 'Bot 1', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } },
 ];
 const unrequestedSummary = { handId: 'hand-1' } as ComponentProps<typeof AnalysisPanel>['summary'];

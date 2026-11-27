@@ -8,7 +8,7 @@ function table(viewer: 'ann' | 'ben', ownerSuccession?: OwnerSuccession, owner: 
     tableSessionId: 't', mode: 'online', options: { actionTimeLimitSeconds: 30, allowLiveAnalysis: true }, viewerParticipantId: viewer, ownerParticipantId: owner,
     pokerRevision: 1, sessionRevision: 1, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     schedule: { phases: [], actionWindow: null }, serverTime: 0, pendingChanges: [],
-    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'human' } }, { participantId: 'ben', name: 'Ben', controller: { kind: 'human' } }, { participantId: 'rex', name: 'Rex', controller: { kind: 'bot', playingStrategy: { policy: { id: 'p', version: 'v1', configuration: {} }, selector: { id: 's', version: 'v1', configuration: {} } } } }],
+    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'player' } }, { participantId: 'ben', name: 'Ben', controller: { kind: 'player' } }, { participantId: 'rex', name: 'Rex', controller: { kind: 'bot', playingStrategy: { policy: { id: 'p', version: 'v1', configuration: {} }, selector: { id: 's', version: 'v1', configuration: {} } } } }],
     ...(ownerSuccession ? { ownerSuccession } : {}),
     view: { configuration: defaultConfiguration, history: [], state: { status: 'between-hands', buttonSeat: 1, board: [], pots: [], actorId: null, legalActions: [],
       participants: [{ participantId: 'ann', seat: 1, stack: 1000, sittingOut: false }, { participantId: 'ben', seat: null, stack: 0, sittingOut: false }, { participantId: 'rex', seat: 2, stack: 1000, sittingOut: false }] } },

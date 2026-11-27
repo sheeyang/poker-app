@@ -7,6 +7,8 @@ import { onlineTableCapacity, type ApplicationRejection } from '@poker/contracts
 export const reject = (code: string, message: string): ApplicationRejection => ({ ok: false, rejection: { code, message } });
 export const requestIdConflict = () => reject('request-id-conflict', 'This requestId was already used for different mutation contents.');
 export const notFound = () => reject('not-found', 'This Table Session is unavailable to this local identity.');
+/** A mutation without a usable `requestId`: 400. Every route that requires one answers with this one body. */
+export const invalidRequestId = () => reject('invalid-request-id', 'Supply a requestId from 1 to 128 characters.');
 /** A request without an established local identity: the Trainer establishes one when it opens. */
 export const unauthenticated = () => reject('unauthenticated', 'Open the Trainer to establish your local identity.');
 /**

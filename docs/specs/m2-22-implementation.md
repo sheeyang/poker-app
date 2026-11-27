@@ -1,6 +1,6 @@
 # M2 #22 implementation evidence
 
-The existing analysis operation now accepts an owner's accepted human Decision ID as well as an unaccepted current decision. Historical Policy inputs come from `ParticipantCashGame.getView({ at: { decisionId } })`; the accepted action comes from committed participant-safe history. Later showdown, Admin inspection, management, and subsequent Hands cannot widen those original inputs. Observed Bot decisions are rejected as human score targets.
+The existing analysis operation now accepts an owner's accepted player Decision ID as well as an unaccepted current decision. Historical Policy inputs come from `ParticipantCashGame.getView({ at: { decisionId } })`; the accepted action comes from committed participant-safe history. Later showdown, Admin inspection, management, and subsequent Hands cannot widen those original inputs. Observed Bot decisions are rejected as player score targets.
 
 ## Numerical interpretation and retention
 
@@ -12,11 +12,11 @@ The existing analysis operation now accepts an owner's accepted human Decision I
 - A scored request reuses successful or in-flight matching evaluation work. Missing score calculation uses the same bounded JobRunner after its dependency completes. Concurrent consumers share one score request; completion is persisted and HTTP-readable before its authorized notification. No table subscription is needed.
 - Failures remain readable without restarting on ordinary reads. Explicit Retry preserves the scored request and frozen inputs, changes its attempt ID, retries failed evaluation dependencies only, and reuses successful/active dependencies. Score persistence failure does not erase a successful evaluation. Dependency-load and capacity failures are explicit errors rather than pending jobs that were not admitted.
 - Shutdown releases waiting dependency observers and discards old-lifecycle results. Transient failures/work are not recovered as durable obligations; requested historical targets reuse successful stored data or schedule missing work after restart.
-- No poker commands, revisions, accepted human Reference Strategy assignments, or Bot Policy-distribution retention were added.
+- No poker commands, revisions, accepted player Reference Strategy assignments, or Bot Policy-distribution retention were added.
 
 ## Playground and browser verification
 
-The Decision picker lists accepted human decisions from observable history while preserving the existing current-decision control. The result labels the accepted human action, Decision Score, Action Rank Score, Reference Strategy identity, selected concrete action, exact Policy distribution, and aggregate Action Probabilities separately. Legal play remains independent. Request/attempt/connection guards from #20/#21 remain in place, and target identity distinguishes evaluation-only from accepted-action analysis.
+The Decision picker lists accepted player decisions from observable history while preserving the existing current-decision control. The result labels the accepted player action, Decision Score, Action Rank Score, Reference Strategy identity, selected concrete action, exact Policy distribution, and aggregate Action Probabilities separately. Legal play remains independent. Request/attempt/connection guards from #20/#21 remain in place, and target identity distinguishes evaluation-only from accepted-action analysis.
 
 The real Chrome driver `scripts/smoke-scoring-browser.js` passed seven cases with real HTTP, shared WebSocket and PostgreSQL: evaluation output without premature scores, reuse after acceptance, notification-triggered HTTP without polling, historical inspection during later play, changed-reference isolation from delayed HTTP, successful scored reuse after restart, and explicit scored Retry without an implicit restart. The inherited twelve-case evaluation driver and six-case real two-tab Retry driver also passed on this branch.
 

@@ -13,7 +13,7 @@ export function comparisonOrder(reference: StrategyDescriptor, compared: readonl
   return [reference, ...others.slice(0, maximumComparedStrategies)];
 }
 
-/** The supported Strategies the reader can still add: not the Reference Strategy, not already compared, and none once 3 are. */
+/** The supported Strategies the viewer can still add: not the Reference Strategy, not already compared, and none once 3 are. */
 export function addableStrategies(reference: StrategyDescriptor, compared: readonly StrategyDescriptor[]): StrategyDescriptor[] {
   const shown = comparisonOrder(reference, compared);
   return shown.length > maximumComparedStrategies ? [] : supportedStrategies.filter(strategy => !shown.some(other => strategyToken(other) === strategyToken(strategy)));
@@ -24,7 +24,7 @@ export interface ComparisonTarget extends ReplayAnalysisTarget { readonly strate
 
 /**
  * One analysis target per compared Strategy at the Replay Step at `index`, the Reference Strategy first. It is only at the
- * reader's own decisions: none at anyone else's, in a Hand they only watched, or between decisions. A Strategy's target
+ * viewer's own decisions: none at anyone else's, in a Hand they only watched, or between decisions. A Strategy's target
  * is the same whichever others are shown, so adding or removing one leaves the rest where they were.
  */
 export function comparisonTargets(replay: TableHandReplay, index: number, reference: StrategyDescriptor, compared: readonly StrategyDescriptor[]): ComparisonTarget[] {

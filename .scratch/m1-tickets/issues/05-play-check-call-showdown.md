@@ -2,14 +2,14 @@
 
 ## What to build
 
-A human facing the current decision can Check or Call when legal. Accepted actions progress the same CashGame through every betting street and, when more than one live hand remains, reveal and settle a showdown. The Playground's complete views show the current board, actor, contributions, and final stacks without requiring dealer commands.
+A player facing the current decision can Check or Call when legal. Accepted actions progress the same CashGame through every betting street and, when more than one live hand remains, reveal and settle a showdown. The Playground's complete views show the current board, actor, contributions, and final stacks without requiring dealer commands.
 
 M1 scope; apply accepted ADRs 0011, 0012, 0015, 0017, 0021, 0025. This is a vertical slice of the playable foundation, not an invitation to implement later Trainer, product UX, replay tooling, Solver, or simulation milestones.
 
 ## Acceptance criteria
 
 - [ ] Check is legal only when nothing is owed, and Call commits the owed amount or remaining stack when smaller. Folded/all-in Participants receive no betting turns. Heads-up postflop action begins with the non-button.
-- [ ] Use one legality calculation for observable actions and act validation. The Playground only submits the human's normal ConcreteAction through the authenticated revisioned queue; trusted acceptance fixtures may drive the other controller without introducing a user-facing impersonation feature.
+- [ ] Use one legality calculation for observable actions and act validation. The Playground only submits the player's normal ConcreteAction through the authenticated revisioned queue; trusted acceptance fixtures may drive the other controller without introducing a user-facing impersonation feature.
 - [ ] Round closure requires every remaining Participant able to act to satisfy action/matching requirements. A successful act atomically performs street-wager reset, burn, board deal, next actor, required reveal, payout, and completion as applicable.
 - [ ] Burn one and deal three for flop, burn one/deal one for turn, and burn one/deal one for river from the same authoritative deck; do not burn/deal after an earlier fold completion. Burn identities remain hidden in views and presentation events.
 - [ ] At river showdown reveal all remaining live hands automatically. Rank the strongest five-card hand from seven cards with zero, one, or two hole cards; compare complete category/kicker ranks, including the ace-low wheel, no K-A-2-3-4 wraparound, and no suit tiebreak.

@@ -5,7 +5,7 @@ import { ownerRequired, reject, unavailableOnline } from './rejections.js';
 /** The poker mutations a table accepts: each is one accepted transition of its CashGame (`mutations.ts` `accept`). */
 export type PokerMutationKind = 'seat-participant' | 'start-hand' | 'act' | 'stand-up-participant' | 'move-participant' | 'set-sitting-out' | 'top-up-to' | 'set-button' | 'leave-table' | 'remove-participant' | 'add-bot' | 'remove-bot';
 
-const notYours = () => reject('not-your-participant', 'Only its own Human Controller can act for or manage this Participant.');
+const notYours = () => reject('not-your-participant', "Only the player's User can act for or manage this Participant.");
 
 /**
  * Who may ask for what, decided before request idempotency, so a remembered outcome is only ever replayed to

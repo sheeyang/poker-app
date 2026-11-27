@@ -41,7 +41,7 @@ test('an owned empty Table Session persists and reopens with the same binding af
   expect(create.status).toBe(201);
   const created = await create.json();
   expect(created.ok).toBe(true);
-  expect(created.bindings).toEqual([{ participantId: expect.any(String), name: 'You', controller: { kind: 'human' } }]);
+  expect(created.bindings).toEqual([{ participantId: expect.any(String), name: 'You', controller: { kind: 'player' } }]);
   tableSessionId = created.tableSessionId;
   const read = await fetch(base + '/api/table-sessions/' + tableSessionId, { headers: { cookie } });
   expect(read.status).toBe(200);

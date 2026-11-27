@@ -9,7 +9,7 @@ import { presentBindings } from './owner-controls.js';
 
 /** Whether a player is connected to the table now; `undefined` for a Bot, and at a Practice Table. */
 export function connectionOf(table: ObservableTableSession, participantId: string): 'connected' | 'disconnected' | undefined {
-  if (table.mode !== 'online' || table.bindings.find(binding => binding.participantId === participantId)?.controller.kind !== 'human') return undefined;
+  if (table.mode !== 'online' || table.bindings.find(binding => binding.participantId === participantId)?.controller.kind !== 'player') return undefined;
   return table.connectedParticipantIds?.includes(participantId) ? 'connected' : 'disconnected';
 }
 
@@ -43,14 +43,14 @@ export type WaitingReason =
 
 export function waitingReason(table: ObservableTableSession): WaitingReason | undefined {
   if (table.mode !== 'online' || canDeal(table)) return undefined;
-  const you = table.view.state.participants.find(p => p.participantId === table.viewerParticipantId);
-  if (you?.seat == null) return { kind: 'take-seat' };
+  const viewer = table.view.state.participants.find(p => p.participantId === table.viewerParticipantId);
+  if (viewer?.seat == null) return { kind: 'take-seat' };
   // Without chips, returning from sitting out changes nothing: the rebuy comes first.
-  if (you.stack === 0) return { kind: 'no-chips' };
-  if (you.sittingOut) return { kind: 'sitting-out' };
+  if (viewer.stack === 0) return { kind: 'no-chips' };
+  if (viewer.sittingOut) return { kind: 'sitting-out' };
   const facts = eligibilityFacts(table);
   const present = presentBindings(table);
-  const named = (matches: (p: typeof facts[number]) => boolean) => facts.filter(p => p.seat !== null && p.stack > 0 && p.participantId !== you.participantId && matches(p))
+  const named = (matches: (p: typeof facts[number]) => boolean) => facts.filter(p => p.seat !== null && p.stack > 0 && p.participantId !== viewer.participantId && matches(p))
     .flatMap(p => present.find(b => b.participantId === p.participantId)?.name ?? []);
   return {
     kind: 'participants', needed: Math.max(1, 2 - facts.filter(isEligibleParticipant).length),
@@ -63,7 +63,7 @@ export function waitingReason(table: ObservableTableSession): WaitingReason | un
 export function watchingNames(table: ObservableTableSession): string[] {
   if (table.mode !== 'online') return [];
   const seated = new Set(table.view.state.participants.filter(p => p.seat !== null).map(p => p.participantId));
-  return presentBindings(table).filter(b => b.controller.kind === 'human' && b.participantId !== table.viewerParticipantId && !seated.has(b.participantId)).map(b => b.name);
+  return presentBindings(table).filter(b => b.controller.kind === 'player' && b.participantId !== table.viewerParticipantId && !seated.has(b.participantId)).map(b => b.name);
 }
 
 export type NextHandStatus = { readonly kind: 'countdown'; readonly seconds: number } | { readonly kind: 'soon' } | { readonly kind: 'waiting'; readonly reason: WaitingReason } | undefined;

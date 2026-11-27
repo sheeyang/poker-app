@@ -8,7 +8,7 @@ import { hasDeparted } from './owner-controls.js';
  * what it will refuse.
  */
 export function canRemove(table: ObservableTableSession, binding: ParticipantBinding): boolean {
-  return table.viewerParticipantId === table.ownerParticipantId && binding.controller.kind === 'human'
+  return table.viewerParticipantId === table.ownerParticipantId && binding.controller.kind === 'player'
     && binding.participantId !== table.ownerParticipantId && !hasDeparted(table, binding.participantId) && afterHandRequestOf(table, binding.participantId) !== 'remove';
 }
 

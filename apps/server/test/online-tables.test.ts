@@ -48,7 +48,7 @@ const refusal = async (response: Response) => ({ status: response.status, code: 
 test('an Online Table is created with its fixed mode and options, the owner joined and unseated, and no secret of its own: its address is its Join Link', async () => {
   const cookie = await guest('Ann');
   const table = await online(cookie, { configuration: { seatCount: 4, smallBlind: 5, bigBlind: 10, ante: 1, minimumBuyIn: 200, defaultBuyIn: 500, maximumBuyIn: 1000, allowSeatChanges: false }, options: { actionTimeLimitSeconds: 15, allowLiveAnalysis: false }, bots: [{ name: 'Rex', playingStrategy: baselinePlayingStrategy }] });
-  expect(table.bindings).toEqual([{ participantId: expect.any(String), name: 'Ann', controller: { kind: 'human' } }, { participantId: expect.any(String), name: 'Rex', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }]);
+  expect(table.bindings).toEqual([{ participantId: expect.any(String), name: 'Ann', controller: { kind: 'player' } }, { participantId: expect.any(String), name: 'Rex', controller: { kind: 'bot', playingStrategy: baselinePlayingStrategy } }]);
   const view = await read(table);
   expect(view).toMatchObject({
     mode: 'online', viewerParticipantId: table.ownerParticipant, ownerParticipantId: table.ownerParticipant, options: { actionTimeLimitSeconds: 15, allowLiveAnalysis: false },
@@ -104,8 +104,8 @@ test('a User opens a table’s Join Link, joins as an unseated Participant under
   // The User sees the public table from their own Participant, with no Seat.
   const seen = await read(table, ben);
   expect(seen).toMatchObject({ mode: 'online', viewerParticipantId: outcome.participantId, ownerParticipantId: table.ownerParticipant, view: { state: { status: 'between-hands', participants: expect.arrayContaining([{ participantId: outcome.participantId, seat: null, stack: 0, sittingOut: false }]) } } });
-  expect(seen.bindings).toContainEqual({ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } });
-  expect(await read(table)).toMatchObject({ bindings: expect.arrayContaining([{ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'human' } }]) });
+  expect(seen.bindings).toContainEqual({ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'player' } });
+  expect(await read(table)).toMatchObject({ bindings: expect.arrayContaining([{ participantId: outcome.participantId, name: 'Ben', controller: { kind: 'player' } }]) });
   expect((await read(table)).pokerRevision).toBe(before.pokerRevision + 1);
   expect((await (await get('/api/table-sessions', ben)).json()).tables).toMatchObject([{ tableSessionId: table.id, mode: 'online' }]);
   // Retrying the request, or joining again, returns the User's existing Participant without another commit.

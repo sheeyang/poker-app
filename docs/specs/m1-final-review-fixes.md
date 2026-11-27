@@ -7,15 +7,15 @@ Strategy/ranking, real HTTP/WebSocket with isolated PostgreSQL, and browser flow
 
 ## Corrected behavior
 
-Bot actor capture previously read the owner's human view first. An unseated or
-departed human correctly has no current Hand/actor in that view, which stalled a
+Bot actor capture previously read the owner's player view first. An unseated or
+departed player correctly has no current Hand/actor in that view, which stalled a
 valid Bot-only Hand. Capture now searches bound Bot views for the Bot whose
 Participant ID matches its current actor, and supplies only that Bot's complete
 immutable participant-safe view to Strategy compatibility and evaluation. Its
 decision identity, revision, assignment, input fingerprint and seed guards remain
 in the existing orchestration path.
 
-Hand presentation events previously ignored frozen observer membership. A Human
+Hand presentation events previously ignored frozen observer membership. A Player
 who left before two Bots' forced all-in Hand received their revealed holdings and
 board despite an empty normal view/history. Every authoritative Hand event now
 carries its originating Hand ID; management events keep their existing shape.
@@ -40,9 +40,9 @@ interface review. No visual redesign was introduced.
 
 ## TDD and verification
 
-The absent-Human Bot-only HTTP/PostgreSQL regression was RED with no completed
+The absent-Player Bot-only HTTP/PostgreSQL regression was RED with no completed
 Hand before the actor fix, then GREEN with one completed Hand at 4/4. Additional
-real regressions cover a sitting-out Human, leaving between Hands, and startup
+real regressions cover a sitting-out Player, leaving between Hands, and startup
 resumption of a Bot-only decision with only the actual Bot's own cards/actions in
 Strategy input.
 
@@ -63,7 +63,7 @@ key-reordering, rules, replay, recovery and information-boundary checks pass.
 
 The existing real recovery fixture used server 3025, Vite 5195 and isolated schema
 `browser_recovery_6ed316790b8b4239b0f53c0bcf8af983`. Native Playground controls created
-Table Session `2766e75c-e7e4-4feb-a03c-5466781ef384`, seated a human and two Uniform
+Table Session `2766e75c-e7e4-4feb-a03c-5466781ef384`, seated a player and two Uniform
 Choice/Highest Probability Bots, explicitly started Hand 1, submitted legal
 Raise-to 53, and selected Reveal Hidden Information after the automatic Bot folds.
 The committed result was 7/7, a 50-chip pot/payout and 33-chip uncalled return;

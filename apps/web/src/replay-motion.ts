@@ -4,17 +4,17 @@ import { stepFelt } from './replay.js';
 import { planMotion, sceneOf, type Cue } from './table-motion.js';
 
 /**
- * Replay motion (ADR-0041), as pure model: what the felt draws, and the motion it plays, as the reader steps through a
+ * Replay motion (ADR-0041), as pure model: what the felt draws, and the motion it plays, as the viewer steps through a
  * Hand. A replay has no server time to follow, so motion is timed by the client from the moment of each step input.
  * Motion only presents a step: what the step shows is the step's own table, whatever motion is playing.
  */
 
-/** How the reader went to a step: one step on with Next or Back (or the arrow keys), or a jump (a street, a decision, an address). */
+/** How the viewer went to a step: one step on with Next or Back (or the arrow keys), or a jump (a street, a decision, an address). */
 export type ReplayMove = 'step' | 'jump';
 
 /** The felt of a replay, as it draws and moves. */
 export interface ReplayFelt {
-  /** The step the reader is at: where the felt rests once its motion is over. */
+  /** The step the viewer is at: where the felt rests once its motion is over. */
   readonly step: number;
   /** The step the felt draws now, and what it draws there. */
   readonly drawn: number;
@@ -61,8 +61,8 @@ function stepMotion(replay: TableHandReplay, index: number, at: number): { reado
 }
 
 /**
- * The reader goes to step `to`, `how`, at client time `now`. One step on plays that step's motion; one step back plays
- * the same motion in reverse; a jump renders at once. Motion still playing is over: the move starts from the reader's
+ * The viewer goes to step `to`, `how`, at client time `now`. One step on plays that step's motion; one step back plays
+ * the same motion in reverse; a jump renders at once. Motion still playing is over: the move starts from the viewer's
  * step, where that motion ends.
  */
 export function moveReplay(replay: TableHandReplay, felt: ReplayFelt, to: number, how: ReplayMove, now: number): ReplayFelt {
@@ -75,7 +75,7 @@ export function moveReplay(replay: TableHandReplay, felt: ReplayFelt, to: number
 }
 
 /**
- * `felt` once the motion of step input `input` is over: resting on the reader's step. A motion that a later input
+ * `felt` once the motion of step input `input` is over: resting on the viewer's step. A motion that a later input
  * snapped settles nothing.
  */
 export function settleReplay(replay: TableHandReplay, felt: ReplayFelt, input: number): ReplayFelt {

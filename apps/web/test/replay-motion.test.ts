@@ -4,12 +4,12 @@ import { moveReplay, openReplay, settleReplay } from '../src/replay-motion.js';
 
 // One all-in Hand as the server replays it for "you": you raise to 40, Rex calls all-in, and the board runs out to a showdown.
 const board: Readonly<Record<Street, readonly string[]>> = { preflop: [], flop: ['As', 'Kd', '7c'], turn: ['As', 'Kd', '7c', '2h'], river: ['As', 'Kd', '7c', '2h', '9s'] };
-function state(street: Street, change: Partial<ObservableCashGameState> = {}, you: Partial<ObservableParticipantState> = {}, rex: Partial<ObservableParticipantState> = {}): ObservableCashGameState {
+function state(street: Street, change: Partial<ObservableCashGameState> = {}, viewer: Partial<ObservableParticipantState> = {}, rex: Partial<ObservableParticipantState> = {}): ObservableCashGameState {
   return {
     status: 'active-hand', buttonSeat: 1, board: [...board[street]], pots: [], actorId: null, decisionId: null, legalActions: [], handId: 'hand-3', street,
     smallBlindParticipantId: 'you', bigBlindParticipantId: 'rex',
     participants: [
-      { participantId: 'you', seat: 1, stack: 960, sittingOut: false, inHand: true, folded: false, allIn: false, contribution: 40, wager: 0, cardCount: 2, holeCards: ['Ah', 'Qs'], ...you },
+      { participantId: 'you', seat: 1, stack: 960, sittingOut: false, inHand: true, folded: false, allIn: false, contribution: 40, wager: 0, cardCount: 2, holeCards: ['Ah', 'Qs'], ...viewer },
       { participantId: 'rex', seat: 4, stack: 0, sittingOut: false, inHand: true, folded: false, allIn: true, contribution: 40, wager: 0, cardCount: 2, ...rex },
     ],
     ...change,

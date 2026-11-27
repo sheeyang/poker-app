@@ -16,7 +16,7 @@ M1 is complete only when the minimal playable vertical slice includes all of the
 - Fastify with PostgreSQL/Drizzle persistence, local identity and Table Ownership, per-Table Session mutation queues, poker and session revisions, idempotency, and complete restoration.
 - Safe HTTP/WebSocket contracts carrying complete participant views and participant-safe presentation events.
 - The server-managed JobRunner boundary and one simple baseline Bot Strategy, with failures producing no implicit poker actions.
-- A functional React Playground for choosing human and Bot seats, seating participants, explicitly starting Hands, submitting legal Fold/Check/Call/Bet/Raise actions, and between-Hand top-ups/rebuys.
+- A functional React Playground for choosing player and Bot seats, seating participants, explicitly starting Hands, submitting legal Fold/Check/Call/Bet/Raise actions, and between-Hand top-ups/rebuys.
 - Tests covering betting and reopening edge cases, all-ins, main/side/split pots and payouts, chip conservation, participant and historical visibility, deterministic replay/restoration, and atomic rejection. Durable mutation tests cover commit-before-publish behavior, duplicate and stale requests, persistence failure, unknown-commit recovery, and restoration after restart.
 
 Animations and polished product UX are not M1 completion requirements. The Playground remains available throughout every milestone; new capabilities are exercised and validated there before their separate product UI and UX are planned and implemented.
@@ -27,6 +27,6 @@ The full Trainer must animate cards being dealt and cards being burned. Private 
 
 ## M11 Bot-vs-Bot simulation and benchmarking
 
-Simulation supports games in which every participating controller is a Bot with an independently configured Strategy; a human does not need to play. An explicitly started simulation run automatically starts successive Hands, unlike normal Table Sessions where the next Hand always requires an explicit Start Hand operation.
+Simulation supports games in which every participating controller is a Bot with an independently configured Strategy; a player does not need to play. An explicitly started simulation run automatically starts successive Hands, unlike normal Table Sessions where the next Hand always requires an explicit Start Hand operation.
 
 Mass simulation supports configured runs of thousands or millions of Hands to compare long-term performance between Strategies under declared game and Strategy configurations. Bot-vs-Bot play and benchmark capabilities are exposed through the Playground and Research Lab. Correctness and reproducibility come first; this scope does not establish a minimum throughput target or require non-trivial performance optimization before the functionality works.

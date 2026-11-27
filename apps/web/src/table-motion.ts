@@ -46,7 +46,7 @@ export type Cue = { readonly at: number } & (
   | { readonly kind: 'deal'; readonly beats: DealBeats; readonly viewerId: string; readonly fromButton: number | null }
   /** Chips go in: to the betting line, or, when the bet closed the street, straight into the pot. */
   | { readonly kind: 'bet'; readonly participantId: string; readonly toPot: boolean }
-  /** A fold: an opponent's cards are mucked; your own stay, dimmed. */
+  /** A fold: an opponent's cards are mucked; the viewer's own stay, dimmed. */
   | { readonly kind: 'fold'; readonly participantId: string; readonly muck: boolean; readonly cards: number }
   | { readonly kind: 'check'; readonly participantId: string }
   /** The betting line is swept into the pot, when no street reveal or showdown presents the sweep (a Hand won by folds). */

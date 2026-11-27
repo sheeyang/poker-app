@@ -26,7 +26,7 @@ the explicit participant-safe projections.
 
 ## Acceptance evidence
 
-- Owner authorization, human Bot impersonation rejection, duplicate Strategy
+- Owner authorization, player Bot impersonation rejection, duplicate Strategy
   success, conflicting request contents and expected-session-revision rejection
   remain covered by the existing real-server lifecycle fixtures.
 - The new rollback fixture establishes RED before the new failure code/message,

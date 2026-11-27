@@ -12,7 +12,7 @@ import { executeStrategy } from './strategy-execution.js';
 import type { AcceptTableJobResult } from './mutations.js';
 import { createHistoryAnalysisScheduler, type HistoryAnalysisScheduler } from './history-analysis.js';
 
-/** Frozen analysis inputs. `identity.participantId` keys the result: only that Participant's Human Controller reads or retries it. */
+/** Frozen analysis inputs. `identity.participantId` keys the result: only that player's User reads or retries it. */
 export interface FrozenEvaluationInput { readonly identity: EvaluationIdentity; readonly view: ObservableGameView; readonly acceptedAction?: ConcreteAction }
 export type AnalysisPurpose = Extract<JobPurpose, 'live-analysis' | 'interactive-analysis' | 'automatic-analysis' | 'summary-analysis' | 'history-analysis'>;
 /**

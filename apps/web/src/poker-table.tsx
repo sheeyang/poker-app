@@ -66,7 +66,7 @@ export function PokerTable({ felt, serverNow, actorWindowOpen, countdown, nextHa
       // At an Online Table everyone sees who is connected; a disconnected player stays in the Hand until they are sat out.
       const offline = !!named?.disconnected;
       const hasActions = !replay && !!participant && !!actionable?.(participant.participantId);
-      // An opponent's folded hand is mucked; your own stays, dimmed.
+      // An opponent's folded hand is mucked; the viewer's own stays, dimmed.
       const cardsShown = !!participant?.cardCount && !(participant.folded && !isViewer);
       // The acting seat's brass edge is the clock while an Action Deadline runs.
       const timed = actor && actionWindow?.deadlineAt !== undefined && actionWindow.participantId === participant.participantId ? actionWindow : undefined;

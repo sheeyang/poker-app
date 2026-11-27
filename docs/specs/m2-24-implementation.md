@@ -1,10 +1,10 @@
 # M2 #24 - Hand Score Summaries
 
-The Playground can explicitly request a Hand Score Summary over accepted human decisions, inspect captured revision/count/reference, and Retry a failed frozen request. Hand completion is not required. Research supplies both arithmetic means only after every member succeeds; empty sets have no numeric score, errors outrank pending, and neither missing nor failed members become zero or a partial average.
+The Playground can explicitly request a Hand Score Summary over accepted player decisions, inspect captured revision/count/reference, and Retry a failed frozen request. Hand completion is not required. Research supplies both arithmetic means only after every member succeeds; empty sets have no numeric score, errors outrank pending, and neither missing nor failed members become zero or a partial average.
 
 ## Committed snapshot and shared execution
 
-`captureHandSummary` runs once under the existing Table Session queue. It freezes accepted human Decision IDs in history order, captured poker revision, one complete selected Reference Strategy, and each original participant-safe input using the same synchronous `captureEvaluation` helper as #23. Later accepted actions and configuration changes cannot change that request.
+`captureHandSummary` runs once under the existing Table Session queue. It freezes accepted player Decision IDs in history order, captured poker revision, one complete selected Reference Strategy, and each original participant-safe input using the same synchronous `captureEvaluation` helper as #23. Later accepted actions and configuration changes cannot change that request.
 
 One server-lifetime summary coordinator shares the existing analysis module and JobRunner across all owners and requests. Batch size and the global outstanding bound are both 2; aggregate Research jobs use that same budget. Missing member jobs use `summary-analysis` priority 2. Matching cache entries and active jobs retain their first submitted purpose, including interactive/live/automatic work.
 

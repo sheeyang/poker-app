@@ -1,6 +1,6 @@
 # M2 #25 — Table Session Score Summaries
 
-The Playground explicitly requests a Table Session Score Summary across accepted human decisions in every Hand. Each request freezes membership, one complete Reference Strategy, original participant-safe inputs and captured poker revision under the existing Table Session queue. Later play and settings changes require another explicit snapshot; no session-ending command is introduced.
+The Playground explicitly requests a Table Session Score Summary across accepted player decisions in every Hand. Each request freezes membership, one complete Reference Strategy, original participant-safe inputs and captured poker revision under the existing Table Session queue. Later play and settings changes require another explicit snapshot; no session-ending command is introduced.
 
 ## Shared summary pipeline
 
@@ -20,7 +20,7 @@ The existing neutral engineering layout and labels were extended without new sty
 
 ## Independent numerical example
 
-The real multi-Hand fixture uses a passive Bot and a controlled external Reference Strategy. Legal human actions are Fold in Hand A; Check preflop, Check flop and Fold turn in Hand B. Independent member scores are:
+The real multi-Hand fixture uses a passive Bot and a controlled external Reference Strategy. Legal player actions are Fold in Hand A; Check preflop, Check flop and Fold turn in Hand B. Independent member scores are:
 
 | Scope/member | Decision Score | Action Rank Score |
 | --- | ---: | ---: |

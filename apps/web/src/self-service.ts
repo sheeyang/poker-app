@@ -40,16 +40,16 @@ export const outranksPending = (table: ObservableTableSession, participantId: st
 export const betweenHandsOnly = (available: boolean, handOpen: boolean): Availability => available && !handOpen ? 'now' : 'unavailable';
 
 export function selfService(table: ObservableTableSession, handOpen: boolean): SelfService {
-  const me = table.view.state.participants.find(participant => participant.participantId === table.viewerParticipantId);
-  const seated = me?.seat != null;
+  const viewer = table.view.state.participants.find(participant => participant.participantId === table.viewerParticipantId);
+  const seated = viewer?.seat != null;
   const pending = afterHandRequestOf(table, table.viewerParticipantId);
   const asks = (kind: AfterHandRequestKind) => outranksPending(table, table.viewerParticipantId, kind);
   const waits = (available: boolean): Availability => !available ? 'unavailable' : handOpen ? 'after-hand' : 'now';
   const betweenHands = (available: boolean) => betweenHandsOnly(available, handOpen);
   return {
     pending,
-    sitOut: waits(seated && !me.sittingOut && asks('sit-out')),
-    resume: betweenHands(seated && me.sittingOut),
+    sitOut: waits(seated && !viewer.sittingOut && asks('sit-out')),
+    resume: betweenHands(seated && viewer.sittingOut),
     standUp: waits(seated && asks('stand-up')),
     // Someone without a Seat has nothing at stake, so they leave at once even mid-Hand.
     // A Practice Table is never left.

@@ -9,7 +9,7 @@ function table(viewer: 'ann' | 'ben', extra: Partial<ObservableTableSession> = {
     tableSessionId: 't', mode, options: { actionTimeLimitSeconds: mode === 'online' ? 30 : null, allowLiveAnalysis: true }, viewerParticipantId: viewer, ownerParticipantId: 'ann',
     pokerRevision: 1, sessionRevision: 1, trainerConfiguration: defaultTrainerConfiguration, inspection: { adminMode: false, completedHands: [] },
     schedule: { phases: [], actionWindow: null }, serverTime: 0, pendingChanges: [],
-    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'human' } }, { participantId: 'ben', name: 'Ben', controller: { kind: 'human' } },
+    bindings: [{ participantId: 'ann', name: 'Ann', controller: { kind: 'player' } }, { participantId: 'ben', name: 'Ben', controller: { kind: 'player' } },
       { participantId: 'rex', name: 'Bot 1', controller: { kind: 'bot', playingStrategy: strategy } }, { participantId: 'sol', name: 'Sol', controller: { kind: 'bot', playingStrategy: strategy } }],
     view: { configuration: { ...defaultConfiguration, seatCount: 4 }, history: [], state: { status: 'between-hands', buttonSeat: 1, board: [], pots: [], actorId: null, legalActions: [],
       participants: [{ participantId: 'ann', seat: 1, stack: 1000, sittingOut: false }, { participantId: 'rex', seat: 3, stack: 1000, sittingOut: false }, { participantId: 'ben', seat: null, stack: 0, sittingOut: false }, { participantId: 'sol', seat: null, stack: 0, sittingOut: false }] } },
@@ -73,7 +73,7 @@ describe('adding a Bot', () => {
   it('suggests the next free "Bot N" name, ignoring case and counting departed Bots', () => {
     expect(nextBotName(table('ann'))).toBe('Bot 2');
     const crowded = table('ann');
-    expect(nextBotName({ ...crowded, bindings: [...crowded.bindings, { participantId: 'x', name: 'BOT 2', controller: { kind: 'human' } }] })).toBe('Bot 3');
+    expect(nextBotName({ ...crowded, bindings: [...crowded.bindings, { participantId: 'x', name: 'BOT 2', controller: { kind: 'player' } }] })).toBe('Bot 3');
   });
 });
 
