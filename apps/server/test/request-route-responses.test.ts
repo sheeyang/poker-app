@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { canonical } from '../src/canonical.js';
 import { createServer } from '../src/server.js';
 import { nameGuest } from './fixtures/guest.js';
 
@@ -50,4 +51,17 @@ test('a retry for a request ID that is not UUID-shaped is 404 before its body is
     const refused = await answer(await send('POST', path, cookie, { anything: 'at all' }));
     expect({ path, status: refused.status, code: refused.rejection?.code }).toEqual({ path, status: 404, code: 'not-found' });
   }
+});
+
+test('a player’s accepted mutation is remembered under a fingerprint whose source is "player"', async () => {
+  const cookie = (await fetch(base + '/api/identity')).headers.get('set-cookie')!.split(';')[0]!;
+  await nameGuest(base, cookie, 'Bea');
+  const id = (await (await send('POST', '/api/table-sessions', cookie, { requestId: randomUUID(), mode: 'online' })).json()).tableSessionId as string;
+  const view = await (await send('GET', '/api/table-sessions/' + id, cookie)).json();
+  const requestId = randomUUID();
+  const contents = { expectedPokerRevision: view.pokerRevision, participantId: view.viewerParticipantId, seat: 1 };
+  expect((await send('POST', `/api/table-sessions/${id}/seat-participant`, cookie, { requestId, ...contents })).status).toBe(200);
+  const { rows } = await administration.query(`SELECT fingerprint FROM "${schema}".processed_requests WHERE table_session_id = $1 AND request_id = $2`, [id, requestId]);
+  const expected = createHash('sha256').update('poker-mutation-v1:' + canonical({ source: 'player', kind: 'seat-participant', contents })).digest('hex');
+  expect(rows).toEqual([{ fingerprint: expected }]);
 });
